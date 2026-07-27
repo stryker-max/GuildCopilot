@@ -67,6 +67,11 @@ local GUILD_DEFAULTS = {
     workshop = {
         crafters = {},
     },
+    memberCare = {
+        inactivityDays = 60,
+        protectedRanksConfigured = false,
+        protectedRanks = {},
+    },
     roster = {
         rankFilterConfigured = false,
         activeRaiderRanks = {},

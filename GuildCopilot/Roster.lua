@@ -244,6 +244,122 @@ function GC.Roster:SetAllGuildProfileRanksActive(active)
     return true
 end
 
+local function InitializeDefaultProtectedRanks()
+    local settings = GC.DB:GetGuild().memberCare
+    if settings.protectedRanksConfigured then
+        return settings
+    end
+    for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
+        settings.protectedRanks[tostring(rank.index)] = rank.index <= 1
+    end
+    settings.protectedRanksConfigured = true
+    return settings
+end
+
+local function MemberCareSettingsChanged()
+    GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
+    GC:FireCallback("MEMBERCARE_UPDATED")
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
+end
+
+function GC.Roster:IsMemberCareRankProtected(rankIndex)
+    local settings = GC.DB:GetGuild().memberCare
+    if not settings.protectedRanksConfigured then
+        return tonumber(rankIndex) ~= nil and tonumber(rankIndex) <= 1
+    end
+    return settings.protectedRanks[tostring(rankIndex)] == true
+end
+
+function GC.Roster:SetMemberCareRankProtected(rankIndex, protected)
+    if not self:CanEditGuildProfile() then
+        return false
+    end
+    local settings = InitializeDefaultProtectedRanks()
+    settings.protectedRanks[tostring(rankIndex)] = protected == true
+    MemberCareSettingsChanged()
+    return true
+end
+
+function GC.Roster:SetMemberCareInactivityDays(days)
+    if not self:CanEditGuildProfile() then
+        return false
+    end
+    days = math.max(7, math.min(365, tonumber(days) or 60))
+    GC.DB:GetGuild().memberCare.inactivityDays = math.floor(days)
+    MemberCareSettingsChanged()
+    return true
+end
+
+function GC.Roster:GetGuildAbsences()
+    local absences = {}
+    local today = GC.Util.TodayISO()
+    for _, member in ipairs(self.members) do
+        local profile = self:GetProfile(member.name)
+        local state = profile and GC.Profile:GetAbsenceState(profile, today) or "NONE"
+        if state == "ACTIVE" or state == "UPCOMING" then
+            absences[#absences + 1] = {
+                member = member,
+                profile = profile,
+                absence = profile.absence,
+                state = state,
+            }
+        end
+    end
+    table.sort(absences, function(left, right)
+        if left.state ~= right.state then
+            return left.state == "ACTIVE"
+        end
+        if left.absence.from ~= right.absence.from then
+            return left.absence.from < right.absence.from
+        end
+        return tostring(left.member.name) < tostring(right.member.name)
+    end)
+    return absences
+end
+
+function GC.Roster:GetMemberCareCandidates()
+    local settings = GC.DB:GetGuild().memberCare
+    local thresholdDays = tonumber(settings.inactivityDays) or 60
+    local today = GC.Util.TodayISO()
+    local candidates = {}
+    for _, member in ipairs(self.members) do
+        local offlineDays = member.lastOnlineHours and math.floor(member.lastOnlineHours / 24)
+        local profile = self:GetProfile(member.name)
+        local isAlt = profile and profile.mainStatus == "ALT"
+        local absenceState = profile and GC.Profile:GetAbsenceState(profile, today) or "NONE"
+        local rankProtected = self:IsMemberCareRankProtected(member.rankIndex)
+        if not member.online
+            and offlineDays
+            and offlineDays >= thresholdDays
+            and not isAlt
+            and absenceState ~= "ACTIVE"
+            and not rankProtected then
+            local knownMain = profile and profile.confirmed and profile.mainStatus == "MAIN"
+            local reasons = {
+                offlineDays .. " Tage offline",
+                knownMain and "Main bestätigt" or "Main/Twink prüfen",
+                "nicht abgemeldet",
+            }
+            candidates[#candidates + 1] = {
+                member = member,
+                profile = profile,
+                offlineDays = offlineDays,
+                status = knownMain and "VORSCHLAG" or "PRÜFEN",
+                reason = table.concat(reasons, "  •  "),
+            }
+        end
+    end
+    table.sort(candidates, function(left, right)
+        if left.offlineDays ~= right.offlineDays then
+            return left.offlineDays > right.offlineDays
+        end
+        return tostring(left.member.name) < tostring(right.member.name)
+    end)
+    return candidates
+end
+
 function GC.Roster:IsGuildMember(name)
     return self.membersByName[GC.Util.NormalizeName(name)] ~= nil
 end

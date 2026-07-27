@@ -274,6 +274,10 @@ function time()
     return 1000
 end
 
+function date()
+    return "2026-07-27"
+end
+
 C_Timer = {
     After = function(_, callback)
         callback()
@@ -337,6 +341,9 @@ assert(optionsCategory == addon.UI.optionsPanel, "Guild Copilot wurde nicht in d
 assert(optionsCategory.scripts.OnShow == nil, "Addon-Option darf das Hauptfenster nicht automatisch öffnen")
 optionsCategory.openButton.scripts.OnClick()
 assert(addon.UI.frame.shown == true, "Options-Button öffnet das Guild-Copilot-Fenster nicht")
+addon.UI.frame.scripts.OnKeyDown(addon.UI.frame, "ESCAPE")
+assert(addon.UI.frame.shown == false, "Escape schließt das Guild-Copilot-Fenster nicht")
+addon.UI.frame:Show()
 assert(addon.UI.minimapButton ~= nil, "Minimap-Symbol wurde nicht erstellt")
 assert(addon.UI.minimapButton.shown == true, "Minimap-Symbol ist trotz aktiver Einstellung verborgen")
 addon.UI.pages.SETTINGS.minimapToggle:SetChecked(false)
@@ -391,6 +398,26 @@ assert(addon.Workshop:IsFavorite("E27926") == true, "Rezeptfavorit wurde nicht g
 addon.UI.pages.WORKSHOP.workshopFavorites.scripts.OnClick()
 addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
 assert(addon.UI.pages.WORKSHOP.workshopRows[1].shown == true, "Favoritenfilter zeigt das gespeicherte Rezept nicht")
+
+assert(addon.Util.IsValidISODate("2026-02-28") == true, "Gültiges Abmeldedatum wurde abgelehnt")
+assert(addon.Util.IsValidISODate("2026-02-30") == false, "Ungültiges Abmeldedatum wurde akzeptiert")
+local absenceSaved = addon.Profile:SetAbsence("2026-07-26", "2026-08-03", "Urlaub")
+assert(absenceSaved == true, "Eigene Abmeldung wurde nicht gespeichert")
+assert(addon.Profile:GetAbsenceState() == "ACTIVE", "Aktive Abmeldung wurde nicht erkannt")
+local absenceProfileMessage = addon.Sync:BuildProfileMessage()
+assert(absenceProfileMessage:find("2026%-07%-26"), "Abmeldung fehlt in der Profilsynchronisierung")
+assert(#absenceProfileMessage <= 255, "Profilnachricht mit Abmeldung überschreitet das Addon-Limit")
+assert(#addon.Roster:GetGuildAbsences() == 1, "Aktive Gildenabmeldung wird nicht aufgelistet")
+local healerMember = addon.Roster:GetMember("Heiler-Realm")
+healerMember.lastOnlineHours = 100 * 24
+local careCandidates = addon.Roster:GetMemberCareCandidates()
+assert(#careCandidates == 1, "Inaktives Mitglied wurde nicht zur Prüfung vorgeschlagen")
+assert(careCandidates[1].status == "PRÜFEN", "Unbekannter Main/Twink-Status wurde nicht vorsichtig markiert")
+assert(addon.Roster:SetMemberCareRankProtected(5, true) == true, "Rangschutz konnte nicht gesetzt werden")
+assert(#addon.Roster:GetMemberCareCandidates() == 0, "Geschützter Rang erscheint noch als Pflegevorschlag")
+assert(addon.Roster:SetMemberCareRankProtected(5, false) == true, "Rangschutz konnte nicht aufgehoben werden")
+addon.Profile:ClearAbsence()
+assert(addon.Profile:GetAbsenceState() == "NONE", "Abmeldung wurde nicht gelöscht")
 
 addon.Profile:Confirm("HUNTER:2", "HUNTER:3", "MAIN", true)
 assert(addon.Profile:Get().secondarySpecKey == "HUNTER:3", "Dual-Spec wurde nicht gespeichert")

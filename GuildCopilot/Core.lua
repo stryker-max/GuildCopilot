@@ -141,6 +141,56 @@ function GC.Util.Now()
     return time and time() or 0
 end
 
+function GC.Util.TodayISO()
+    return date and date("%Y-%m-%d") or "1970-01-01"
+end
+
+function GC.Util.IsValidISODate(value)
+    local year, month, day = tostring(value or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    if not year or year < 2000 or year > 2099 or not month or month < 1 or month > 12 or not day then
+        return false
+    end
+    local daysPerMonth = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+    if month == 2 and (year % 400 == 0 or (year % 4 == 0 and year % 100 ~= 0)) then
+        daysPerMonth[2] = 29
+    end
+    return day >= 1 and day <= daysPerMonth[month]
+end
+
+local function ISODateOrdinal(value)
+    if not GC.Util.IsValidISODate(value) then
+        return nil
+    end
+    local year, month, day = value:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    local monthOffsets = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 }
+    local leapDays = math.floor((year - 1) / 4) - math.floor((year - 1) / 100)
+        + math.floor((year - 1) / 400)
+    local ordinal = ((year - 1) * 365) + leapDays + monthOffsets[month] + day
+    if month > 2 and (year % 400 == 0 or (year % 4 == 0 and year % 100 ~= 0)) then
+        ordinal = ordinal + 1
+    end
+    return ordinal
+end
+
+function GC.Util.DaysBetweenISO(left, right)
+    local leftOrdinal = ISODateOrdinal(left)
+    local rightOrdinal = ISODateOrdinal(right)
+    if not leftOrdinal or not rightOrdinal then
+        return nil
+    end
+    return rightOrdinal - leftOrdinal
+end
+
+function GC.Util.IsDateInRange(value, rangeFrom, rangeTo)
+    return GC.Util.IsValidISODate(value)
+        and GC.Util.IsValidISODate(rangeFrom)
+        and GC.Util.IsValidISODate(rangeTo)
+        and value >= rangeFrom
+        and value <= rangeTo
+end
+
 function GC:GetPlayerFullName()
     local name, realm = UnitFullName and UnitFullName("player")
     if not name then

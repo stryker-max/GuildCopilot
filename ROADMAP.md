@@ -65,6 +65,18 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - Minimap-Symbol in den Einstellungen ein- und ausschaltbar;
 - Erfolgssounds verwenden TBC-kompatible numerische Fallbacks, wenn ein moderner `SOUNDKIT`-Eintrag fehlt.
 
+## 0.4.4 – Abmeldungen und Mitgliederpflege
+
+- persönliche Abmeldung mit Von-/Bis-Datum und optionalem Grund;
+- Abmeldungen werden über das Addon-Profil innerhalb der Gilde synchronisiert;
+- aktive und geplante Abmeldungen in einer gemeinsamen Übersicht;
+- gildenweite, nur durch berechtigte Ränge änderbare Inaktivitätsgrenze;
+- geschützte Gildenränge, die nie als Pflegevorschlag erscheinen;
+- Pflegevorschläge schließen Twinks und aktiv Abgemeldete aus;
+- unbekannter Main/Twink-Status wird als **Prüfen** gekennzeichnet;
+- keine automatische Entfernung und derzeit bewusst kein direkter Kick-Knopf;
+- Minimap-Symbol in den Blizzard-Rahmen eingepasst, Unicode-Favoritensterne durch echte WoW-Symboltexturen ersetzt und Escape-Schließen zusätzlich abgesichert.
+
 ## 0.5 – Raid Monitor
 
 ### Addon-Erkennung
@@ -106,6 +118,8 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 Die Guides von [wowtbc.gg](https://wowtbc.gg/) führen spec-spezifische Consumables und Alternativen auf. Diese Trennung eignet sich als Grundlage für die Stufen **Optimal** und **Solide**, muss aber pro Phase und Spec gepflegt werden.
 
 ## 0.7 – Mitgliederpflege
+
+Grundlage seit 0.4.4 umgesetzt: Abmeldungen, Inaktivitätsgrenze, Rangschutz und vorsichtige Prüfvorschläge. Für dieses Ausbaustadium verbleiben:
 
 - frei wählbare Inaktivitätsgrenze, zum Beispiel 30, 60 oder 90 Tage;
 - letzte Onlinezeit aus dem Gildenroster;

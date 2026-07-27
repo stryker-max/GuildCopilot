@@ -87,10 +87,65 @@ function GC.Profile:Get()
     profile.professionAuto = profile.professionAuto ~= false
     profile.workshop = profile.workshop or { professions = {} }
     profile.workshop.professions = profile.workshop.professions or {}
+    profile.absence = profile.absence or {
+        from = "",
+        to = "",
+        reason = "",
+    }
     if profile.secondarySpecKey == profile.raidSpecKey then
         profile.secondarySpecKey = nil
     end
     return profile
+end
+
+function GC.Profile:GetAbsenceState(profile, today)
+    profile = profile or self:Get()
+    local absence = profile.absence or {}
+    local rangeFrom = absence.from or ""
+    local rangeTo = absence.to or ""
+    if not GC.Util.IsValidISODate(rangeFrom) or not GC.Util.IsValidISODate(rangeTo) then
+        return "NONE"
+    end
+    today = today or GC.Util.TodayISO()
+    if today < rangeFrom then
+        return "UPCOMING"
+    elseif today > rangeTo then
+        return "EXPIRED"
+    end
+    return "ACTIVE"
+end
+
+function GC.Profile:SetAbsence(rangeFrom, rangeTo, reason)
+    rangeFrom = GC.Util.Trim(rangeFrom)
+    rangeTo = GC.Util.Trim(rangeTo)
+    reason = GC.Util.Trim(reason):gsub("[|%%\r\n]", " ")
+    if not GC.Util.IsValidISODate(rangeFrom) or not GC.Util.IsValidISODate(rangeTo) then
+        return false, "Bitte beide Daten als JJJJ-MM-TT eingeben."
+    end
+    if rangeFrom > rangeTo then
+        return false, "Das Bis-Datum darf nicht vor dem Von-Datum liegen."
+    end
+    local profile = self:Get()
+    profile.absence = {
+        from = rangeFrom,
+        to = rangeTo,
+        reason = reason:sub(1, 80),
+    }
+    profile.updatedAt = GC.Util.Now()
+    GC:FireCallback("PROFILE_UPDATED", profile, true)
+    return true, "Abmeldung gespeichert und mit der Gilde synchronisiert."
+end
+
+function GC.Profile:ClearAbsence()
+    local profile = self:Get()
+    profile.absence = {
+        from = "",
+        to = "",
+        reason = "",
+    }
+    profile.updatedAt = GC.Util.Now()
+    GC:FireCallback("PROFILE_UPDATED", profile, true)
+    return true
 end
 
 function GC.Profile:RefreshProfessions(profile)

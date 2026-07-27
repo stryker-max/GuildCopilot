@@ -2,8 +2,8 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.4.3",
-    SCHEMA_VERSION = 5,
+    VERSION = "0.4.4",
+    SCHEMA_VERSION = 6,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
     MAX_CHAT_BYTES = 255,

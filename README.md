@@ -1,4 +1,4 @@
-# Guild Copilot 0.4.3
+# Guild Copilot 0.4.4
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -30,6 +30,9 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - die Standardtexte für **Danke**, **Gildeninfos** und **Discord** lassen sich mit Platzhaltern gildenweit pflegen;
 - Interessenten lassen sich über ein **×** direkt neben ihrem Eintrag entfernen oder nach einem Bestätigungsklick vollständig aus dem Postfach löschen;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Alt-Status und Berufen;
+- Mitgliederpflege mit eigener Abmeldung von/bis samt optionalem Grund, aktiven Gildenabmeldungen und nach Inaktivität sortierten Prüfvorschlägen;
+- frei wählbare Inaktivitätsgrenze und geschützte Gildenränge; Twinks und aktiv Abgemeldete werden aus den Vorschlägen ausgeschlossen;
+- unsichere Main/Twink-Fälle werden ausdrücklich als **Prüfen** statt als Entfernungsvorschlag gekennzeichnet; es gibt keine automatischen Gildenausschlüsse;
 - zwei manuell wählbare Berufe oder automatische Übernahme aus dem WoW-Berufsfenster, synchronisiert mit anderen Addon-Nutzern;
 - Gildenwerkstatt mit automatischem Rezeptscan beim Öffnen des Berufsfensters, einschließlich der separaten TBC-Verzauberkunst-Schnittstelle;
 - gedrosselte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern;
@@ -39,6 +42,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - Gildenprofil, Editor-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
 - Aufruf über `/gcp`, den Button im Blizzard-Gildenfenster, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**;
 - eigene statische Addon-Optionsseite mit Schriftlogo, Slash-Befehl und ausdrücklichem Öffnen-Button; sie öffnet kein zweites Fenster mehr automatisch und blockiert dadurch nicht die Escape-Taste;
+- zusätzliche direkte Escape-Behandlung für Hauptfenster und Textfelder;
 - eigenes Guild-Copilot-Logo im Fenstertitel und in den Addon-Metadaten;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
 - Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen.
@@ -55,6 +59,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 6. Unter **Einstellungen** festlegen, welche Gildenränge als aktive Raider erscheinen und welche Ränge das Gildenprofil bearbeiten dürfen.
 7. Optional unter **Warcraft Logs** die Gildenseite speichern und einen Companion-Export importieren.
 8. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
+9. Unter **Mitgliederpflege** Abmeldungen eintragen und – mit passendem Gildenrang – Inaktivitätsgrenze sowie geschützte Ränge festlegen.
 
 ## Wichtige WoW-Grenzen
 

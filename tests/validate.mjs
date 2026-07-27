@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.4.3",
+  "## Version: 0.4.4",
 ];
 
 for (const entry of requiredMetadata) {
@@ -116,6 +116,13 @@ const requiredImplementations = [
   ["Minimap-Button", /GuildCopilotMinimapButton/],
   ["statische Addon-Optionsseite", /Guild Copilot öffnen/],
   ["TBC-kompatibler Sound-Fallback", /soundID = 3081/],
+  ["Mitgliederpflege", /BuildMemberCarePage/],
+  ["Abmeldung von bis", /SetAbsence/],
+  ["Abmeldung in Profilsynchronisierung", /absence\.from/],
+  ["Inaktivitätsvorschläge", /GetMemberCareCandidates/],
+  ["geschützte Ränge", /SetMemberCareRankProtected/],
+  ["explizite Escape-Behandlung", /key == "ESCAPE"/],
+  ["echtes Favoritensymbol", /SetRaidMarkerIcon\(page\.workshopFavorites\.favoriteIcon, 1\)/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
@@ -133,6 +140,10 @@ const settingsPosition = uiSource.indexOf('{ key = "SETTINGS"');
 const statisticsPosition = uiSource.indexOf('{ key = "STATISTICS"');
 if (settingsPosition < statisticsPosition) {
   throw new Error("Einstellungen stehen nicht als letzter Navigationspunkt.");
+}
+
+if (uiSource.includes("☆") || uiSource.includes("★")) {
+  throw new Error("Nicht unterstützte Unicode-Sterne werden noch als Favoritensymbole verwendet.");
 }
 
 console.log(`OK: ${luaFiles.length} Lua-Dateien und die TOC-Struktur wurden geprüft.`);

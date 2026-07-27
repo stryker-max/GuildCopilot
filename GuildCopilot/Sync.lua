@@ -56,6 +56,7 @@ function GC.Sync:BuildProfileMessage()
     local professions = profile.professions or {}
     local profession1 = professions[1] or {}
     local profession2 = professions[2] or {}
+    local absence = profile.absence or {}
     local fields = {
         "P",
         tostring(GC.Constants.SCHEMA_VERSION),
@@ -72,6 +73,9 @@ function GC.Sync:BuildProfileMessage()
         profession2.name or "",
         profession2.skillLevel and (profession2.skillLevel .. "/" .. (profession2.maxSkillLevel or 0)) or "",
         tostring(profile.updatedAt or GC.Util.Now()),
+        absence.from or "",
+        absence.to or "",
+        absence.reason or "",
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -99,6 +103,7 @@ function GC.Sync:BuildGuildProfileMessages()
     local profile = guildData.profile
     local permissions = guildData.profilePermissions
     local templates = guildData.replyTemplates
+    local memberCare = guildData.memberCare
     local fields = {
         "GP",
         tostring(profile.updatedAt or 0),
@@ -113,6 +118,9 @@ function GC.Sync:BuildGuildProfileMessages()
         templates.THANKS or "",
         templates.INFO or "",
         templates.DISCORD or "",
+        tostring(memberCare.inactivityDays or 60),
+        BoolField(memberCare.protectedRanksConfigured),
+        table.concat(SortedEnabledRanks(memberCare.protectedRanks), ","),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -233,6 +241,12 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     guildData.replyTemplates.THANKS = fields[11] or ""
     guildData.replyTemplates.INFO = fields[12] or ""
     guildData.replyTemplates.DISCORD = fields[13] or ""
+    guildData.memberCare.inactivityDays = math.max(7, math.min(365, tonumber(fields[14]) or 60))
+    guildData.memberCare.protectedRanksConfigured = fields[15] == "1"
+    guildData.memberCare.protectedRanks = {}
+    for rankIndex in tostring(fields[16] or ""):gmatch("[^,]+") do
+        guildData.memberCare.protectedRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
+    end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")
 end
@@ -301,6 +315,19 @@ function GC.Sync:ReceiveProfile(fields, sender)
         updatedAt = tonumber(fields[updatedAtIndex]) or GC.Util.Now(),
         receivedAt = GC.Util.Now(),
     }
+    if schemaVersion >= 6 then
+        profile.absence = {
+            from = fields[updatedAtIndex + 1] or "",
+            to = fields[updatedAtIndex + 2] or "",
+            reason = fields[updatedAtIndex + 3] or "",
+        }
+    else
+        profile.absence = {
+            from = "",
+            to = "",
+            reason = "",
+        }
+    end
     local key = GC.Util.NormalizeName(sender)
     local shortKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))
     local profiles = GC.DB:GetGuild().remoteProfiles
@@ -333,7 +360,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     local schemaVersion = tonumber(fields[2])
     if fields[1] == "P"
         and (schemaVersion == 2 or schemaVersion == 3 or schemaVersion == 4
-            or schemaVersion == GC.Constants.SCHEMA_VERSION) then
+            or schemaVersion == 5 or schemaVersion == GC.Constants.SCHEMA_VERSION) then
         self:ReceiveProfile(fields, sender)
     elseif fields[1] == "W" and schemaVersion == GC.Constants.SCHEMA_VERSION and GC.Workshop then
         GC.Workshop:ReceiveSync(fields, sender)
