@@ -92,7 +92,8 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - der höchste Gildenrang behält immer Zugriff auf gildenweite Einstellungen;
 - der eigene Rang kann nicht mehr selbst aus der Bearbeiterliste entfernt werden;
 - einen Bearbeiter-Rang darf nur ein tatsächlich höherer Gildenrang abwählen;
-- einmalige, über echte Blizzard-Offiziersrechte abgesicherte Wiederherstellung für bereits mit v0.4.5 entstandene Lockouts.
+- einmalige, über echte Blizzard-Offiziersrechte abgesicherte Wiederherstellung für bereits mit v0.4.5 entstandene Lockouts;
+- die Wiederherstellung wird pro Gilde verbucht, damit ein Lockout in einer Gilde die Reparatur in einer anderen nicht verbraucht.
 
 ## 0.5 – Raid Monitor
 

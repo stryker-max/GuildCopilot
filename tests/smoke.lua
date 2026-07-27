@@ -1,4 +1,9 @@
 local Dummy = {}
+-- WoW-Widgetmethoden beginnen mit einem Großbuchstaben, vom Addon gesetzte
+-- Datenfelder (scripts, choiceIcon, label, ...) mit einem Kleinbuchstaben.
+-- Nur Methoden dürfen ersatzweise als Funktion zurückkommen; unbelegte
+-- Datenfelder müssen wie in WoW nil bleiben, damit Prüfungen der Form
+-- "if widget.choiceIcon then" nicht fälschlich zutreffen.
 Dummy.__index = function(self, key)
     if key == "GetText" then
         return function(frame)
@@ -52,6 +57,9 @@ Dummy.__index = function(self, key)
         return function()
             return setmetatable({}, Dummy)
         end
+    end
+    if type(key) ~= "string" or not key:match("^%u") then
+        return nil
     end
     return function()
     end
@@ -533,7 +541,7 @@ assert(selfRemovalAllowed == false and selfRemovalReason == "OWN_RANK",
 local profilePermissions = addon.DB:GetGuild().profilePermissions
 profilePermissions.configured = true
 profilePermissions.editorRanks = { ["0"] = true }
-addon.DB:GetSettings().editorRecoveryAvailable = true
+addon.DB:GetGuild().editorRecoveryAvailable = true
 assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == false,
     "Simulierter Editor-Lockout wurde nicht hergestellt")
 assert(addon.Roster:CanUseEditorRecovery(1) == true,
@@ -541,8 +549,10 @@ assert(addon.Roster:CanUseEditorRecovery(1) == true,
 local recovered, recoveryReason = addon.Roster:SetGuildProfileRankActive(1, true)
 assert(recovered == true and recoveryReason == "RECOVERED",
     "Eigener Offiziersrang konnte nach dem Lockout nicht wiederhergestellt werden")
-assert(addon.DB:GetSettings().editorRecoveryAvailable == false,
+assert(addon.DB:GetGuild().editorRecoveryAvailable == false,
     "Einmalige Wiederherstellung blieb nach Verwendung aktiv")
+assert(addon.DB:GetSettings().editorRecoveryAvailable == nil,
+    "Die Wiederherstellung wird noch kontoweit statt pro Gilde verbucht")
 assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == true,
     "Wiederhergestellter Rang besitzt keine Einstellungsrechte")
 local topRemovalAllowed, topRemovalReason = addon.Roster:SetGuildProfileRankActive(0, false)
@@ -569,5 +579,15 @@ assert(addon.Chat:RemoveLead(1) == true, "Einzelner Interessent konnte nicht gel
 assert(#addon.DB:GetGuild().inbox == 1, "Einzellöschung hat nicht genau einen Interessenten entfernt")
 assert(addon.Chat:ClearInbox() == true, "Postfach konnte nicht vollständig geleert werden")
 assert(#addon.DB:GetGuild().inbox == 0, "Postfach enthält nach dem Leeren noch Interessenten")
+
+GuildCopilotDB.settings.editorRecoveryAvailable = false
+GuildCopilotDB.guilds["Altgilde@Realm"] = {}
+addon.DB:Initialize()
+assert(GuildCopilotDB.guilds["Altgilde@Realm"].editorRecoveryAvailable == false,
+    "Bereits verbrauchte Wiederherstellung wurde bei der Migration nicht übernommen")
+assert(GuildCopilotDB.settings.editorRecoveryAvailable == nil,
+    "Das alte kontoweite Wiederherstellungsfeld wurde nicht entfernt")
+assert(addon.DB:GetGuild().editorRecoveryAvailable == false,
+    "Die eigene Gilde hat ihre verbrauchte Wiederherstellung verloren")
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

@@ -12,7 +12,6 @@ local DEFAULTS = {
             angle = 225,
         },
         workshopFavorites = {},
-        editorRecoveryAvailable = true,
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         channels = {
@@ -27,6 +26,7 @@ local DEFAULTS = {
 }
 
 local GUILD_DEFAULTS = {
+    editorRecoveryAvailable = true,
     profile = {
         description = "",
         raidTimes = "",
@@ -97,6 +97,16 @@ function GC.DB:Initialize()
         GuildCopilotDB.settings.channels.GENERAL = false
         GuildCopilotDB.settings.postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN
         GuildCopilotDB.settings.lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN
+    end
+
+    local legacyEditorRecovery = GuildCopilotDB.settings.editorRecoveryAvailable
+    if legacyEditorRecovery ~= nil then
+        for _, guildData in pairs(GuildCopilotDB.guilds or {}) do
+            if guildData.editorRecoveryAvailable == nil then
+                guildData.editorRecoveryAvailable = legacyEditorRecovery
+            end
+        end
+        GuildCopilotDB.settings.editorRecoveryAvailable = nil
     end
 
     if previousSchema < 3 then

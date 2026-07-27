@@ -227,7 +227,7 @@ end
 function GC.Roster:CanUseEditorRecovery(rankIndex)
     local member = self:GetMember(GC:GetPlayerFullName())
     local ownRankIndex = member and tonumber(member.rankIndex)
-    return GC.DB:GetSettings().editorRecoveryAvailable == true
+    return GC.DB:GetGuild().editorRecoveryAvailable == true
         and ownRankIndex ~= nil
         and (ownRankIndex <= 1 or HasBlizzardOfficerAuthority())
         and ownRankIndex == tonumber(rankIndex)
@@ -263,7 +263,7 @@ function GC.Roster:SetGuildProfileRankActive(rankIndex, active)
     if active and self:CanUseEditorRecovery(rankIndex) then
         local recoveryPermissions = InitializeDefaultEditorRanks()
         recoveryPermissions.editorRanks[tostring(rankIndex)] = true
-        GC.DB:GetSettings().editorRecoveryAvailable = false
+        GC.DB:GetGuild().editorRecoveryAvailable = false
         GuildProfilePermissionsChanged()
         return true, "RECOVERED"
     end
