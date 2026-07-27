@@ -28,10 +28,9 @@ Guild Copilot soll ein modularer Gildenassistent werden. Rekrutierung bleibt ein
 - durchsuchbar machen, wer in der Gilde welchen Gegenstand herstellen kann;
 - Reagenzien und benötigte Mengen direkt am Rezept anzeigen;
 - Datenquelle und letzten Aktualisierungszeitpunkt sichtbar machen;
-- Materialien aus Taschen oder Gildenbank nur anzeigen, soweit die WoW-API sie dem Spieler zugänglich macht;
 - Rezeptdaten kompakt und nur bei Änderungen innerhalb der Gilde synchronisieren.
 
-Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Künftige Ergänzung sind Taschen-/Gildenbankbestände.
+Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Damit ist 0.4.0 abgeschlossen.
 
 Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Copilot-Vorschläge bis zum Posting, ein Filter für die als aktive Raider sichtbaren Gildenränge sowie gezielte Whisper-Erkennung und Löschfunktionen im Bewerber-Postfach.
 
