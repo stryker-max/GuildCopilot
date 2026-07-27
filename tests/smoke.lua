@@ -84,7 +84,9 @@ local optionsCategory
 function InterfaceOptions_AddCategory(panel)
     optionsCategory = panel
 end
-DEFAULT_CHAT_FRAME = { AddMessage = function()
+chatMessages = {}
+DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
+    chatMessages[#chatMessages + 1] = tostring(message)
 end }
 
 function CreateFrame(_, name)
@@ -752,6 +754,28 @@ assert(statisticsPage.participantRows[1].name.value == "Tester",
     "Die Auswertung zeigt den falschen Spieler")
 assert(statisticsPage.participantRows[4].shown == false,
     "Es werden mehr Teilnehmerzeilen angezeigt als vorhanden")
+
+-- Rückmeldungen gehören ins Fenster, nicht in den Chat.
+local chatCountBefore = #chatMessages
+statisticsPage.sessionButton.scripts.OnClick()
+assert(statisticsPage.actionStatus.value:find("gestartet", 1, true),
+    "Der Sitzungsstart wird nicht in der Oberfläche gemeldet")
+currentTime = currentTime + 60
+statisticsPage.sessionButton.scripts.OnClick()
+assert(statisticsPage.actionStatus.value:find("ausgewertet", 1, true),
+    "Das Sitzungsende wird nicht in der Oberfläche gemeldet")
+assert(#chatMessages == chatCountBefore,
+    "Die Raidauswertung hat in den Chat geschrieben")
+
+-- Auch eine abgelehnte Aktion meldet sich nur im Fenster.
+raidRoster = {}
+addon.DB:GetGuild().memberCare.accessRanks = {}
+chatCountBefore = #chatMessages
+statisticsPage.sessionButton.scripts.OnClick()
+assert(statisticsPage.actionStatus.value:find("Nur Raidleiter", 1, true),
+    "Die Ablehnung wird nicht in der Oberfläche gemeldet")
+assert(#chatMessages == chatCountBefore,
+    "Eine abgelehnte Raidaktion hat in den Chat geschrieben")
 
 assert(addon.Sync:GetAddonUserStats().known == 1,
     "Ohne Handshake wird mehr als der eigene Client als Addon-Nutzer gezählt")

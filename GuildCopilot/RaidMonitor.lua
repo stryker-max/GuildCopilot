@@ -155,8 +155,7 @@ function GC.RaidMonitor:BeginSession()
     local sessionID = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
     local session = self:StartSession(sessionID, GC:GetPlayerFullName(), GC.Util.Now(), nil)
     GC.Sync:AnnounceSessionStart(session)
-    GC:Print("Raidsitzung gestartet. Anwesenheit und Auswertung laufen mit.")
-    return true, "Raidsitzung gestartet."
+    return true, "Raidsitzung gestartet. Anwesenheit und Auswertung laufen mit."
 end
 
 function GC.RaidMonitor:EndSession()
@@ -172,8 +171,9 @@ function GC.RaidMonitor:EndSession()
         GC.Sync:AnnounceSessionEnd(summary)
         GC.Sync:DistributeSummary(summary, "RAID")
     end
-    GC:Print("Raidsitzung beendet und ausgewertet.")
-    return true, "Raidsitzung beendet."
+    local participantCount = summary and #summary.participants or 0
+    return true, "Raidsitzung beendet. " .. participantCount
+        .. " Teilnehmer ausgewertet – die Auswertung steht unten in der Liste."
 end
 
 -- Beendet die Sitzung, verdichtet sie zur Zusammenfassung und verwirft die

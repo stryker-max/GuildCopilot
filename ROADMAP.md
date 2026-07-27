@@ -114,6 +114,8 @@ Umgesetzt: `V`-Handshake mit Version, Schemaversion und gemeldeten Fähigkeiten,
 
 Umgesetzt: Sitzungen mit ausdrücklichem Start und Ende, Anwesenheitszeit, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände nach Spell-ID. Es entsteht kein Rohdatenspeicher – der Combat Log wird laufend verdichtet, gespeichert wird nur die Zusammenfassung.
 
+Die gesamte Auswertung wird im Addonfenster angezeigt – Sitzungsliste, Teilnehmertabelle und Rückmeldungen. In den Chat schreibt die Raidauswertung nichts; die Übertragung nutzt den unsichtbaren Addon-Datenkanal.
+
 Steuern und auswerten dürfen Raidleiter, Assistenten und die für die Mitgliederpflege freigegebenen Gildenränge. Die fertige Auswertung geht über den Raidkanal an alle berechtigten Teilnehmer; Offiziere außerhalb des Raids fragen sie an und bekommen sie per Flüsterkanal, damit nichts über den offenen Gildenkanal läuft.
 
 Offen und bewusst noch nicht umgesetzt:

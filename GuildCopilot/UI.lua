@@ -2665,10 +2665,20 @@ function GC.UI:BuildStatisticsPage()
         "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge. Es werden nur Zusammenfassungen gespeichert, keine Rohdaten.")
 
     local controlCard = CreateCard(page)
-    controlCard:SetSize(776, 74)
+    controlCard:SetSize(776, 96)
     controlCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
     page.sessionStatus = CreateLabel(controlCard, "", { width = 470, height = 46, vertical = "TOP" })
     page.sessionStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -14)
+
+    -- Rückmeldungen bleiben im Fenster; in den Chat geht aus der
+    -- Raidauswertung bewusst nichts.
+    page.actionStatus = CreateLabel(controlCard, "", { width = 560, height = 26, vertical = "TOP" })
+    page.actionStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -64)
+
+    function page:SetActionStatus(message, ok)
+        self.actionStatus:SetText(message or "")
+        SetTextColor(self.actionStatus, ok == false and THEME.danger or THEME.success)
+    end
 
     page.sessionButton = CreateButton(controlCard, "Sitzung starten", 150, 30, function()
         local monitor = GC.RaidMonitor
@@ -2678,34 +2688,30 @@ function GC.UI:BuildStatisticsPage()
         else
             ok, message = monitor:BeginSession()
         end
-        if not ok and message then
-            GC:Print(message)
-        end
+        page:SetActionStatus(message, ok)
         GC.UI:RefreshStatistics()
     end, "PRIMARY")
     page.sessionButton:SetPoint("TOPRIGHT", controlCard, "TOPRIGHT", -18, -14)
 
     page.requestButton = CreateButton(controlCard, "Auswertung anfordern", 150, 30, function()
         local ok, message = GC.RaidMonitor:RequestSummaries()
-        if message then
-            GC:Print(message)
-        end
+        page:SetActionStatus(message, ok)
     end)
     page.requestButton:SetPoint("TOPRIGHT", page.sessionButton, "BOTTOMRIGHT", 0, -4)
 
     local listCard = CreateCard(page, "Sitzungen")
-    listCard:SetSize(238, 380)
-    listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -150)
+    listCard:SetSize(238, 358)
+    listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
     page.sessionRows = {}
     for index = 1, 12 do
-        local row = CreateButton(listCard, "", 206, 26, function()
+        local row = CreateButton(listCard, "", 206, 23, function()
             local summary = GC.RaidMonitor:GetSummaries()[index]
             if summary then
                 GC.RaidMonitor.selectedSessionID = summary.id
                 GC.UI:RefreshStatistics()
             end
         end)
-        row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -50 - ((index - 1) * 28))
+        row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -50 - ((index - 1) * 25))
         row.label:SetJustifyH("LEFT")
         row.label:ClearAllPoints()
         row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
@@ -2716,8 +2722,8 @@ function GC.UI:BuildStatisticsPage()
     page.sessionEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
 
     local detailCard = CreateCard(page, "Teilnehmer")
-    detailCard:SetSize(526, 380)
-    detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -150)
+    detailCard:SetSize(526, 358)
+    detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
     page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 380, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
 
