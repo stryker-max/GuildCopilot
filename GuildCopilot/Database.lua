@@ -12,6 +12,7 @@ local DEFAULTS = {
             angle = 225,
         },
         workshopFavorites = {},
+        editorRecoveryAvailable = true,
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         channels = {

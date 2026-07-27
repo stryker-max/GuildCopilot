@@ -758,10 +758,22 @@ function GC.UI:BuildSettingsPage()
         382,
         "Nur diese Ränge dürfen Profil, Regeln, Rangfreigaben und Vorlagen ändern.",
         function(rankIndex, checked)
-            if not GC.Roster:SetGuildProfileRankActive(rankIndex, checked) then
-                page.settingsStatus:SetText("Mindestens ein berechtigter Rang muss erhalten bleiben.")
+            local success, reason = GC.Roster:SetGuildProfileRankActive(rankIndex, checked)
+            if not success then
+                if reason == "OWN_RANK" then
+                    page.settingsStatus:SetText("Den eigenen Rang kannst du nicht abwählen.")
+                elseif reason == "HIGHER_RANK_REQUIRED" then
+                    page.settingsStatus:SetText("Diesen Rang darf nur ein höherer Gildenrang abwählen.")
+                elseif reason == "LAST_EDITOR" then
+                    page.settingsStatus:SetText("Mindestens ein berechtigter Rang muss erhalten bleiben.")
+                else
+                    page.settingsStatus:SetText("Dein Gildenrang darf diese Berechtigung nicht ändern.")
+                end
                 SetTextColor(page.settingsStatus, THEME.danger)
                 GC.UI:RefreshSettings()
+            elseif reason == "RECOVERED" then
+                page.settingsStatus:SetText("Dein eigener Rang wurde einmalig wieder freigeschaltet.")
+                SetTextColor(page.settingsStatus, THEME.success)
             end
         end
     )
@@ -907,11 +919,14 @@ function GC.UI:RefreshSettings()
             memberCareAccessToggle.rankIndex = rank.index
             memberCareAccessToggle.text:SetText(rank.name)
             SetToggle(memberCareAccessToggle, GC.Roster:IsMemberCareAccessRank(rank.index))
-            if canEditGuildProfile then
+            if canEditGuildProfile or GC.Roster:CanUseEditorRecovery(rank.index) then
                 editorToggle:Enable()
-                memberCareAccessToggle:Enable()
             else
                 editorToggle:Disable()
+            end
+            if canEditGuildProfile then
+                memberCareAccessToggle:Enable()
+            else
                 memberCareAccessToggle:Disable()
             end
         else

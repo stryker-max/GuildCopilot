@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.4.5",
+  "## Version: 0.4.6",
 ];
 
 for (const entry of requiredMetadata) {
@@ -128,6 +128,9 @@ const requiredImplementations = [
   ["Mitgliederpflege-Rangfreigabe", /SetMemberCareAccessRank/],
   ["sichere Werkstatt-Drosselung", /SYNC_INTERVAL = 0\.65/],
   ["Wiederholung fehlgeschlagener Werkstattpakete", /MAX_SEND_RETRIES/],
+  ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],
+  ["Einmalige Editor-Lockout-Reparatur", /CanUseEditorRecovery/],
+  ["Blizzard-Offiziersprüfung für Lockout-Reparatur", /HasBlizzardOfficerAuthority/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

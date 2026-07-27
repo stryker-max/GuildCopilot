@@ -527,6 +527,27 @@ assert(editedReply == "{rt2} Eigener Text {rt2}", "Editierter Antworttext wurde 
 
 assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == true, "Offiziersrang darf das Gildenprofil nicht bearbeiten")
 assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false, "Nicht freigegebener Rang darf das Gildenprofil bearbeiten")
+local selfRemovalAllowed, selfRemovalReason = addon.Roster:SetGuildProfileRankActive(1, false)
+assert(selfRemovalAllowed == false and selfRemovalReason == "OWN_RANK",
+    "Der eigene Editor-Rang konnte abgewählt werden")
+local profilePermissions = addon.DB:GetGuild().profilePermissions
+profilePermissions.configured = true
+profilePermissions.editorRanks = { ["0"] = true }
+addon.DB:GetSettings().editorRecoveryAvailable = true
+assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == false,
+    "Simulierter Editor-Lockout wurde nicht hergestellt")
+assert(addon.Roster:CanUseEditorRecovery(1) == true,
+    "Einmalige Wiederherstellung des eigenen Offiziersrangs ist nicht verfügbar")
+local recovered, recoveryReason = addon.Roster:SetGuildProfileRankActive(1, true)
+assert(recovered == true and recoveryReason == "RECOVERED",
+    "Eigener Offiziersrang konnte nach dem Lockout nicht wiederhergestellt werden")
+assert(addon.DB:GetSettings().editorRecoveryAvailable == false,
+    "Einmalige Wiederherstellung blieb nach Verwendung aktiv")
+assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == true,
+    "Wiederhergestellter Rang besitzt keine Einstellungsrechte")
+local topRemovalAllowed, topRemovalReason = addon.Roster:SetGuildProfileRankActive(0, false)
+assert(topRemovalAllowed == false and topRemovalReason == "HIGHER_RANK_REQUIRED",
+    "Ein niedrigerer Rang konnte den höchsten Gildenrang abwählen")
 assert(addon.Roster:CanAccessMemberCare("Tester-Realm") == true, "Offiziersrang sieht die Mitgliederpflege nicht")
 assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == false, "Nicht freigegebener Rang sieht die Mitgliederpflege")
 assert(addon.Roster:SetMemberCareAccessRank(5, true) == true, "Mitgliederpflege-Rang konnte nicht freigegeben werden")

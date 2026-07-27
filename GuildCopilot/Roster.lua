@@ -187,6 +187,9 @@ function GC.Roster:SetAllRanksActive(active)
 end
 
 function GC.Roster:IsGuildProfileEditorRank(rankIndex)
+    if tonumber(rankIndex) == 0 then
+        return true
+    end
     local permissions = GC.DB:GetGuild().profilePermissions
     if not permissions.configured then
         return tonumber(rankIndex) ~= nil and tonumber(rankIndex) <= 1
@@ -201,6 +204,34 @@ end
 
 function GC.Roster:CanEditGuildSettings(playerName)
     return self:CanEditGuildProfile(playerName)
+end
+
+local function HasBlizzardOfficerAuthority()
+    local checks = {
+        IsGuildLeader,
+        CanEditOfficerNote,
+        CanGuildPromote,
+        CanGuildRemove,
+    }
+    for _, check in ipairs(checks) do
+        if type(check) == "function" then
+            local success, allowed = pcall(check)
+            if success and allowed == true then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function GC.Roster:CanUseEditorRecovery(rankIndex)
+    local member = self:GetMember(GC:GetPlayerFullName())
+    local ownRankIndex = member and tonumber(member.rankIndex)
+    return GC.DB:GetSettings().editorRecoveryAvailable == true
+        and ownRankIndex ~= nil
+        and (ownRankIndex <= 1 or HasBlizzardOfficerAuthority())
+        and ownRankIndex == tonumber(rankIndex)
+        and not self:IsGuildProfileEditorRank(ownRankIndex)
 end
 
 local function InitializeDefaultEditorRanks()
@@ -225,8 +256,26 @@ local function GuildProfilePermissionsChanged()
 end
 
 function GC.Roster:SetGuildProfileRankActive(rankIndex, active)
+    rankIndex = tonumber(rankIndex)
+    local member = self:GetMember(GC:GetPlayerFullName())
+    local ownRankIndex = member and tonumber(member.rankIndex)
+
+    if active and self:CanUseEditorRecovery(rankIndex) then
+        local recoveryPermissions = InitializeDefaultEditorRanks()
+        recoveryPermissions.editorRanks[tostring(rankIndex)] = true
+        GC.DB:GetSettings().editorRecoveryAvailable = false
+        GuildProfilePermissionsChanged()
+        return true, "RECOVERED"
+    end
+
     if not self:CanEditGuildProfile() then
-        return false
+        return false, "NO_PERMISSION"
+    end
+    if not active and ownRankIndex == rankIndex then
+        return false, "OWN_RANK"
+    end
+    if not active and (rankIndex == 0 or ownRankIndex == nil or ownRankIndex >= rankIndex) then
+        return false, "HIGHER_RANK_REQUIRED"
     end
     local permissions = InitializeDefaultEditorRanks()
     if not active then
@@ -238,12 +287,12 @@ function GC.Roster:SetGuildProfileRankActive(rankIndex, active)
             end
         end
         if not otherEditorExists then
-            return false
+            return false, "LAST_EDITOR"
         end
     end
     permissions.editorRanks[tostring(rankIndex)] = active == true
     GuildProfilePermissionsChanged()
-    return true
+    return true, "UPDATED"
 end
 
 function GC.Roster:SetAllGuildProfileRanksActive(active)

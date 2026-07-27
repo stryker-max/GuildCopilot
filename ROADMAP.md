@@ -87,6 +87,13 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - Werkstattpakete deutlich gedrosselt, bei Sendefehlern wiederholt und nicht mehr still verworfen;
 - sichtbarer Status für laufende, fehlgeschlagene und empfangene Rezeptübertragungen.
 
+## 0.4.6 – Lockout-Schutz für Gildenrechte
+
+- der höchste Gildenrang behält immer Zugriff auf gildenweite Einstellungen;
+- der eigene Rang kann nicht mehr selbst aus der Bearbeiterliste entfernt werden;
+- einen Bearbeiter-Rang darf nur ein tatsächlich höherer Gildenrang abwählen;
+- einmalige, über echte Blizzard-Offiziersrechte abgesicherte Wiederherstellung für bereits mit v0.4.5 entstandene Lockouts.
+
 ## 0.5 – Raid Monitor
 
 ### Addon-Erkennung
