@@ -36,6 +36,44 @@ local function SortedEnabledRanks(values)
     return ranks
 end
 
+-- Entscheidungen als "name:status:datum", getrennt durch Komma. Das Feld hängt
+-- am Ende der Gildenprofil-Nutzlast, damit ältere Clients es schlicht
+-- ignorieren; fehlt es beim Empfang, bleiben die eigenen Einträge stehen.
+local function EncodeMemberCareDecisions(decisions)
+    local records = {}
+    for _, decision in pairs(decisions or {}) do
+        local name = GC.Util.Trim(decision.name):gsub("[,:|]", "")
+        if name ~= "" and GC.MemberCareDecisions[decision.status] then
+            records[#records + 1] = table.concat({
+                name,
+                decision.status,
+                decision.until_ or "",
+            }, ":")
+        end
+    end
+    table.sort(records)
+    while #records > GC.MemberCareMaxDecisions do
+        table.remove(records)
+    end
+    return table.concat(records, ",")
+end
+
+local function DecodeMemberCareDecisions(payload)
+    local decisions = {}
+    for record in tostring(payload or ""):gmatch("[^,]+") do
+        local name, status, untilDate = record:match("^([^:]+):([^:]+):?([^:]*)$")
+        if name and GC.MemberCareDecisions[status] then
+            decisions[GC.Util.NormalizeName(name)] = {
+                name = name,
+                status = status,
+                until_ = untilDate or "",
+                at = GC.Util.Now(),
+            }
+        end
+    end
+    return decisions
+end
+
 function GC.Sync:RegisterPrefix()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         self.registered = C_ChatInfo.RegisterAddonMessagePrefix(GC.Constants.COMM_PREFIX) == true
@@ -153,6 +191,7 @@ function GC.Sync:BuildGuildProfileMessages()
         table.concat(SortedEnabledRanks(memberCare.accessRanks), ","),
         BoolField(roster.rankFilterConfigured),
         table.concat(SortedEnabledRanks(roster.activeRaiderRanks), ","),
+        EncodeMemberCareDecisions(memberCare.decisions),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -297,6 +336,11 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     guildData.roster.activeRaiderRanks = {}
     for rankIndex in tostring(fields[20] or ""):gmatch("[^,]+") do
         guildData.roster.activeRaiderRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
+    end
+    -- Ältere Absender senden das Feld nicht; dann bleiben die eigenen
+    -- Entscheidungen unangetastet statt gelöscht zu werden.
+    if fields[21] ~= nil then
+        guildData.memberCare.decisions = DecodeMemberCareDecisions(fields[21])
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")

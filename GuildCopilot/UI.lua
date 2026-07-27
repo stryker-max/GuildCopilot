@@ -133,6 +133,15 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     return button
 end
 
+local function SetButtonEnabled(button, enabled)
+    if enabled then
+        button:Enable()
+    else
+        button:Disable()
+    end
+    button.label:SetAlpha(enabled and 1 or 0.45)
+end
+
 local function CreateToggle(parent, text, onClick)
     local toggle = CreateFrame("CheckButton", nil, parent)
     toggle:SetSize(22, 22)
@@ -1419,7 +1428,7 @@ function GC.UI:BuildMemberCarePage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(832)
+    content:SetHeight(1100)
     scroll:SetScrollChild(content)
     page.memberCareScroll = scroll
 
@@ -1501,16 +1510,108 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(suggestionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 27)
         row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -81 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 150 })
+        row.name = CreateLabel(row, "", { width = 116 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.status = CreateLabel(row, "", { width = 88 })
-        row.status:SetPoint("LEFT", row, "LEFT", 165, 0)
-        row.reason = CreateLabel(row, "", { muted = true, width = 445 })
-        row.reason:SetPoint("LEFT", row, "LEFT", 260, 0)
+        row.status = CreateLabel(row, "", { width = 76 })
+        row.status:SetPoint("LEFT", row, "LEFT", 129, 0)
+        row.reason = CreateLabel(row, "", { muted = true, width = 196 })
+        row.reason:SetPoint("LEFT", row, "LEFT", 209, 0)
+
+        local function DecideRow(status)
+            if not row.playerName then
+                return
+            end
+            local ok, message = GC.Roster:SetMemberCareDecision(row.playerName, status)
+            page:SetMemberCareStatus(message, ok)
+            GC.UI:RefreshMemberCare()
+        end
+
+        row.ignoreButton = CreateButton(row, "Ausnahme", 74, 21, function()
+            DecideRow("IGNORED")
+        end)
+        row.ignoreButton:SetPoint("LEFT", row, "LEFT", 409, 0)
+        row.postponeButton = CreateButton(row, "Später", 60, 21, function()
+            DecideRow("POSTPONED")
+        end)
+        row.postponeButton:SetPoint("LEFT", row, "LEFT", 487, 0)
+        row.doneButton = CreateButton(row, "Erledigt", 66, 21, function()
+            DecideRow("DONE")
+        end)
+        row.doneButton:SetPoint("LEFT", row, "LEFT", 551, 0)
+
+        -- Entfernen verlangt einen zweiten, ausdrücklichen Klick auf derselben
+        -- Zeile. Der erste Klick bewaffnet nur und beschriftet um.
+        row.removeButton = CreateButton(row, "Entfernen", 84, 21, function()
+            if not row.playerName then
+                return
+            end
+            if not row.removeArmed then
+                local allowed, reason = GC.Roster:CanRemoveMember(row.playerName)
+                if not allowed then
+                    page:SetMemberCareStatus(reason, false)
+                    return
+                end
+                row.removeArmed = true
+                row.removeButton:SetText("Sicher?")
+                page:SetMemberCareStatus("Noch einmal klicken, um "
+                    .. GC.Util.PlayerShortName(row.playerName) .. " endgültig zu entfernen.", false)
+                return
+            end
+            row.removeArmed = false
+            local ok, message = GC.Roster:RemoveMember(row.playerName)
+            page:SetMemberCareStatus(message, ok)
+            GC.UI:RefreshMemberCare()
+        end)
+        row.removeButton:SetPoint("LEFT", row, "LEFT", 621, 0)
         page.memberCareSuggestionRows[index] = row
     end
     page.memberCareSuggestionNotice = CreateLabel(suggestionsCard, "", { muted = true, width = 716 })
     page.memberCareSuggestionNotice:SetPoint("BOTTOMLEFT", suggestionsCard, "BOTTOMLEFT", 18, 10)
+
+    local decisionsCard = CreateCard(content, "Ausnahmen und Entscheidungen")
+    decisionsCard:SetSize(752, 246)
+    decisionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -844)
+    page.memberCareDecisionsTitle = decisionsCard.title
+    local decisionsHelp = CreateLabel(decisionsCard,
+        "Diese Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten.",
+        { muted = true, width = 716, height = 18, vertical = "TOP" })
+    decisionsHelp:SetPoint("TOPLEFT", decisionsCard, "TOPLEFT", 18, -46)
+
+    page.memberCareStatus = CreateLabel(decisionsCard, "", { width = 716, height = 18, vertical = "TOP" })
+    page.memberCareStatus:SetPoint("TOPLEFT", decisionsCard, "TOPLEFT", 18, -66)
+
+    function page:SetMemberCareStatus(message, ok)
+        message = GC.Util.Trim(message)
+        self.memberCareStatus:SetText(message)
+        SetTextColor(self.memberCareStatus, ok == false and THEME.danger or THEME.success)
+        if message ~= "" then
+            GC:Print(message)
+        end
+    end
+
+    page.memberCareDecisionRows = {}
+    for index = 1, 5 do
+        local row = CreatePanel(decisionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
+        row:SetSize(716, 26)
+        row:SetPoint("TOPLEFT", decisionsCard, "TOPLEFT", 18, -90 - ((index - 1) * 29))
+        row.name = CreateLabel(row, "", { width = 150 })
+        row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
+        row.status = CreateLabel(row, "", { width = 130 })
+        row.status:SetPoint("LEFT", row, "LEFT", 165, 0)
+        row.detail = CreateLabel(row, "", { muted = true, width = 300 })
+        row.detail:SetPoint("LEFT", row, "LEFT", 301, 0)
+        row.restoreButton = CreateButton(row, "Zurückholen", 96, 21, function()
+            if row.playerName then
+                local ok, message = GC.Roster:ClearMemberCareDecision(row.playerName)
+                page:SetMemberCareStatus(message, ok)
+                GC.UI:RefreshMemberCare()
+            end
+        end)
+        row.restoreButton:SetPoint("RIGHT", row, "RIGHT", -9, 0)
+        page.memberCareDecisionRows[index] = row
+    end
+    page.memberCareDecisionNotice = CreateLabel(decisionsCard, "", { muted = true, width = 716 })
+    page.memberCareDecisionNotice:SetPoint("BOTTOMLEFT", decisionsCard, "BOTTOMLEFT", 18, 10)
 end
 
 function GC.UI:RefreshMemberCare()
@@ -1581,13 +1682,52 @@ function GC.UI:RefreshMemberCare()
         local candidate = candidates[index]
         row:SetShown(candidate ~= nil)
         if candidate then
+            row.playerName = candidate.member.name
+            row.removeArmed = false
+            row.removeButton:SetText("Entfernen")
             row.name:SetText(GC.Util.PlayerShortName(candidate.member.name))
             row.name:SetTextColor(ClassColor(candidate.member.classFile))
             row.status:SetText(candidate.status)
             SetTextColor(row.status, candidate.status == "VORSCHLAG" and THEME.danger or THEME.warning)
             row.reason:SetText(candidate.reason)
+
+            local canDecide = GC.Roster:CanAccessMemberCare()
+            SetButtonEnabled(row.ignoreButton, canDecide)
+            SetButtonEnabled(row.postponeButton, canDecide)
+            SetButtonEnabled(row.doneButton, canDecide)
+            SetButtonEnabled(row.removeButton, GC.Roster:CanRemoveMember(candidate.member.name) == true)
+        else
+            row.playerName = nil
         end
     end
+
+    local decisions = GC.Roster:GetMemberCareDecisions()
+    page.memberCareDecisionsTitle:SetText("Ausnahmen und Entscheidungen  •  " .. #decisions)
+    for index, row in ipairs(page.memberCareDecisionRows) do
+        local decision = decisions[index]
+        row:SetShown(decision ~= nil)
+        if decision then
+            row.playerName = decision.name
+            local definition = GC.MemberCareDecisions[decision.status]
+            row.name:SetText(decision.name)
+            row.status:SetText(definition and definition.label or decision.status)
+            SetTextColor(row.status, decision.status == "IGNORED" and THEME.warning or THEME.muted)
+            local detail = definition and definition.help or ""
+            if decision.status == "POSTPONED" and decision.until_ ~= "" then
+                detail = "Wieder ab " .. decision.until_ .. "."
+            end
+            if decision.by and decision.by ~= "" then
+                detail = detail .. "  •  " .. decision.by
+            end
+            row.detail:SetText(detail)
+            SetButtonEnabled(row.restoreButton, GC.Roster:CanAccessMemberCare())
+        else
+            row.playerName = nil
+        end
+    end
+    page.memberCareDecisionNotice:SetText(#decisions == 0
+        and "Keine Ausnahmen hinterlegt. Vorschläge lassen sich als Ausnahme, später oder erledigt ablegen."
+        or "")
     if #candidates == 0 then
         page.memberCareSuggestionNotice:SetText("Keine Mitglieder erfüllen die aktuellen Prüfregeln.")
     elseif #candidates > #page.memberCareSuggestionRows then
@@ -2640,15 +2780,6 @@ local function FormatDuration(seconds)
         return hours .. "h " .. minutes .. "m"
     end
     return minutes .. "m"
-end
-
-local function SetButtonEnabled(button, enabled)
-    if enabled then
-        button:Enable()
-    else
-        button:Disable()
-    end
-    button.label:SetAlpha(enabled and 1 or 0.45)
 end
 
 local function FormatSessionDate(summary)

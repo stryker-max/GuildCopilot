@@ -77,6 +77,7 @@ local GUILD_DEFAULTS = {
         protectedRanks = {},
         accessRanksConfigured = false,
         accessRanks = {},
+        decisions = {},
     },
     roster = {
         rankFilterConfigured = false,

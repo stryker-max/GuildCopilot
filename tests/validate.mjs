@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.5.0",
+  "## Version: 0.6.0",
 ];
 
 for (const entry of requiredMetadata) {
@@ -146,6 +146,11 @@ const requiredImplementations = [
   ["versionierter Regelsatz", /GC\.EnchantRuleSet/],
   ["unbewertete Verzauberungen bleiben unbekannt", /UNKNOWN/],
   ["kein Gesamtscore im Gear Audit", /keine Gesamtnote/],
+  ["Ausnahmen und zurückgestellte Vorschläge", /SetMemberCareDecision/],
+  ["manuelle Ausnahmeliste", /GetMemberCareDecisions/],
+  ["Ausschluss nur mit Berechtigungsprüfung", /function GC\.Roster:CanRemoveMember/],
+  ["echte Blizzard-Prüfung vor dem Ausschluss", /HasBlizzardRemovePermission/],
+  ["zweite Bestätigung vor dem Ausschluss", /removeArmed/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

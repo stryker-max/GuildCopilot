@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.5.0",
+    VERSION = "0.6.0",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -172,6 +172,17 @@ GC.EnchantRuleSet = {
     source = "",
     rules = {},
 }
+
+-- Entscheidungen zu Pflegevorschlägen. Sie werden gildenweit synchronisiert,
+-- damit nicht mehrere Offiziere denselben Fall doppelt bearbeiten.
+GC.MemberCareDecisions = {
+    IGNORED = { key = "IGNORED", label = "Ausnahme", help = "Erscheint nie wieder als Vorschlag." },
+    POSTPONED = { key = "POSTPONED", label = "Zurückgestellt", help = "Erscheint erst nach dem Datum wieder." },
+    DONE = { key = "DONE", label = "Erledigt", help = "Fall wurde bearbeitet." },
+}
+
+GC.MemberCarePostponeDays = 30
+GC.MemberCareMaxDecisions = 40
 
 GC.ClassOrder = {
     "WARRIOR",

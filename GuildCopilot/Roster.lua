@@ -409,6 +409,156 @@ function GC.Roster:SetMemberCareInactivityDays(days)
     return true
 end
 
+-- === Entscheidungen zu Pflegevorschlägen ====================================
+
+local function DecisionKey(name)
+    return GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+end
+
+function GC.Roster:GetMemberCareDecision(name, today)
+    local key = DecisionKey(name)
+    if key == "" then
+        return nil
+    end
+    local decision = GC.DB:GetGuild().memberCare.decisions[key]
+    if not decision then
+        return nil
+    end
+    if decision.status == "POSTPONED" then
+        today = today or GC.Util.TodayISO()
+        if not GC.Util.IsValidISODate(decision.until_) or today > decision.until_ then
+            return nil
+        end
+    end
+    return decision
+end
+
+function GC.Roster:SetMemberCareDecision(name, status, untilDate)
+    if not self:CanAccessMemberCare() then
+        return false, "Für deinen Gildenrang ist die Mitgliederpflege nicht freigeschaltet."
+    end
+    if not GC.MemberCareDecisions[status] then
+        return false, "Unbekannte Entscheidung."
+    end
+    local key = DecisionKey(name)
+    if key == "" then
+        return false, "Kein Spieler ausgewählt."
+    end
+
+    local decisions = GC.DB:GetGuild().memberCare.decisions
+    local existingCount = 0
+    for _ in pairs(decisions) do
+        existingCount = existingCount + 1
+    end
+    if not decisions[key] and existingCount >= GC.MemberCareMaxDecisions then
+        return false, "Die Liste ist voll. Bitte zuerst alte Einträge zurückholen."
+    end
+
+    if status == "POSTPONED" and not GC.Util.IsValidISODate(untilDate) then
+        untilDate = GC.Util.AddDaysISO(GC.MemberCarePostponeDays)
+    end
+    decisions[key] = {
+        name = GC.Util.PlayerShortName(name),
+        status = status,
+        until_ = status == "POSTPONED" and untilDate or "",
+        by = GC.Util.PlayerShortName(GC:GetPlayerFullName()),
+        at = GC.Util.Now(),
+    }
+    MemberCareSettingsChanged()
+    return true, GC.MemberCareDecisions[status].label .. " für " .. decisions[key].name .. " gespeichert."
+end
+
+function GC.Roster:ClearMemberCareDecision(name)
+    if not self:CanAccessMemberCare() then
+        return false, "Für deinen Gildenrang ist die Mitgliederpflege nicht freigeschaltet."
+    end
+    local key = DecisionKey(name)
+    local decisions = GC.DB:GetGuild().memberCare.decisions
+    if not decisions[key] then
+        return false, "Für diesen Spieler ist nichts hinterlegt."
+    end
+    decisions[key] = nil
+    MemberCareSettingsChanged()
+    return true, "Eintrag zurückgeholt."
+end
+
+function GC.Roster:GetMemberCareDecisions()
+    local entries = {}
+    for _, decision in pairs(GC.DB:GetGuild().memberCare.decisions) do
+        entries[#entries + 1] = decision
+    end
+    table.sort(entries, function(left, right)
+        if left.status ~= right.status then
+            return left.status < right.status
+        end
+        return tostring(left.name) < tostring(right.name)
+    end)
+    return entries
+end
+
+-- === Einzelner Gildenausschluss =============================================
+--
+-- Bewusst ohne jede Automatik: nur ein Spieler, nur mit echter
+-- Blizzard-Berechtigung, nur gegen einen niedrigeren Rang und nur nach einer
+-- ausdrücklichen zweiten Bestätigung in der Oberfläche.
+
+local function HasBlizzardRemovePermission()
+    if type(CanGuildRemove) ~= "function" then
+        return false
+    end
+    local success, allowed = pcall(CanGuildRemove)
+    return success and allowed == true
+end
+
+function GC.Roster:CanRemoveMember(name)
+    if not self:CanAccessMemberCare() then
+        return false, "Für deinen Gildenrang ist die Mitgliederpflege nicht freigeschaltet."
+    end
+    if not HasBlizzardRemovePermission() then
+        return false, "WoW erlaubt deinem Gildenrang kein Entfernen."
+    end
+
+    local target = self:GetMember(name)
+    if not target then
+        return false, "Der Spieler steht nicht im Gildenroster."
+    end
+    local ownName = GC:GetPlayerFullName()
+    if DecisionKey(target.name) == DecisionKey(ownName) then
+        return false, "Du kannst dich nicht selbst entfernen."
+    end
+
+    local own = self:GetMember(ownName)
+    local ownRankIndex = own and tonumber(own.rankIndex)
+    local targetRankIndex = tonumber(target.rankIndex)
+    if ownRankIndex == nil or targetRankIndex == nil or targetRankIndex <= ownRankIndex then
+        return false, "Nur ein höherer Gildenrang darf diesen Spieler entfernen."
+    end
+    if self:IsMemberCareRankProtected(targetRankIndex) then
+        return false, "Dieser Gildenrang ist ausdrücklich geschützt."
+    end
+    return true, "Entfernen ist möglich."
+end
+
+function GC.Roster:RemoveMember(name)
+    local allowed, reason = self:CanRemoveMember(name)
+    if not allowed then
+        return false, reason
+    end
+
+    local target = self:GetMember(name)
+    if type(GuildUninvite) ~= "function" then
+        return false, "Diese WoW-Version bietet kein Entfernen über Addons."
+    end
+    local success = pcall(GuildUninvite, target.name)
+    if not success then
+        return false, "WoW hat das Entfernen abgelehnt."
+    end
+
+    self:SetMemberCareDecision(target.name, "DONE")
+    self:Request()
+    return true, GC.Util.PlayerShortName(target.name) .. " wurde aus der Gilde entfernt."
+end
+
 function GC.Roster:GetGuildAbsences()
     local absences = {}
     local today = GC.Util.TodayISO()
@@ -447,12 +597,14 @@ function GC.Roster:GetMemberCareCandidates()
         local isAlt = profile and profile.mainStatus == "ALT"
         local absenceState = profile and GC.Profile:GetAbsenceState(profile, today) or "NONE"
         local rankProtected = self:IsMemberCareRankProtected(member.rankIndex)
+        local decided = self:GetMemberCareDecision(member.name, today) ~= nil
         if not member.online
             and offlineDays
             and offlineDays >= thresholdDays
             and not isAlt
             and absenceState ~= "ACTIVE"
-            and not rankProtected then
+            and not rankProtected
+            and not decided then
             local knownMain = profile and profile.confirmed and profile.mainStatus == "MAIN"
             local reasons = {
                 offlineDays .. " Tage offline",

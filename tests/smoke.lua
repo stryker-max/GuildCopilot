@@ -351,6 +351,16 @@ end
 function NotifyInspect()
 end
 
+canRemoveFromGuild = true
+function CanGuildRemove()
+    return canRemoveFromGuild
+end
+
+uninvitedPlayers = {}
+function GuildUninvite(name)
+    uninvitedPlayers[#uninvitedPlayers + 1] = name
+end
+
 function ClearInspectPlayer()
 end
 
@@ -527,7 +537,7 @@ local absenceProfileMessage = addon.Sync:BuildProfileMessage()
 assert(absenceProfileMessage:find("2026%-07%-26"), "Abmeldung fehlt in der Profilsynchronisierung")
 assert(#absenceProfileMessage <= 255, "Profilnachricht mit Abmeldung überschreitet das Addon-Limit")
 assert(#addon.Roster:GetGuildAbsences() == 1, "Aktive Gildenabmeldung wird nicht aufgelistet")
-local healerMember = addon.Roster:GetMember("Heiler-Realm")
+healerMember = addon.Roster:GetMember("Heiler-Realm")
 healerMember.lastOnlineHours = 100 * 24
 local careCandidates = addon.Roster:GetMemberCareCandidates()
 assert(#careCandidates == 1, "Inaktives Mitglied wurde nicht zur Prüfung vorgeschlagen")
@@ -846,7 +856,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.5.0", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.6.0", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -890,6 +900,109 @@ currentTime = currentTime + 60
 local sentBeforeReply = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
 assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
+
+-- === Mitgliederpflege: Entscheidungen und Ausschluss ========================
+addon.DB:GetGuild().memberCare.decisions = {}
+addon.DB:GetGuild().memberCare.accessRanksConfigured = true
+addon.DB:GetGuild().memberCare.accessRanks = { ["1"] = true, ["5"] = true }
+healerMember = addon.Roster:GetMember("Heiler-Realm")
+healerMember.lastOnlineHours = 100 * 24
+assert(addon.Roster:CanAccessMemberCare() == true, "Der Testcharakter darf die Mitgliederpflege nicht")
+assert(#addon.Roster:GetMemberCareCandidates() == 1, "Der Pflegevorschlag fehlt für den Test")
+
+local postponed, postponeMessage = addon.Roster:SetMemberCareDecision("Heiler-Realm", "POSTPONED")
+assert(postponed == true, postponeMessage or "Der Vorschlag ließ sich nicht zurückstellen")
+assert(#addon.Roster:GetMemberCareCandidates() == 0, "Ein zurückgestellter Vorschlag erscheint weiter")
+assert(addon.Roster:GetMemberCareDecision("Heiler").status == "POSTPONED",
+    "Die Entscheidung wurde nicht gespeichert")
+
+-- Nach Ablauf des Datums taucht der Fall wieder auf.
+addon.DB:GetGuild().memberCare.decisions[addon.Util.NormalizeName("Heiler")].until_ = "2020-01-01"
+assert(#addon.Roster:GetMemberCareCandidates() == 1,
+    "Ein abgelaufenes Zurückstellen blendet den Vorschlag weiter aus")
+
+assert(addon.Roster:SetMemberCareDecision("Heiler-Realm", "IGNORED") == true,
+    "Die Ausnahme ließ sich nicht setzen")
+assert(#addon.Roster:GetMemberCareCandidates() == 0, "Eine Ausnahme blendet den Vorschlag nicht aus")
+assert(#addon.Roster:GetMemberCareDecisions() == 1, "Die Ausnahmeliste ist leer")
+assert(addon.Roster:ClearMemberCareDecision("Heiler") == true, "Der Eintrag ließ sich nicht zurückholen")
+assert(#addon.Roster:GetMemberCareCandidates() == 1, "Nach dem Zurückholen fehlt der Vorschlag")
+
+-- Entscheidungen werden gildenweit synchronisiert, ohne alte Absender zu
+-- ueberschreiben.
+addon.Roster:SetMemberCareDecision("Heiler-Realm", "IGNORED")
+local careMessages = addon.Sync:BuildGuildProfileMessages()
+local carePayload = ""
+for _, careMessage in ipairs(careMessages) do
+    assert(#careMessage <= 255, "Ein Gildenprofil-Paket mit Entscheidungen ist zu lang")
+    carePayload = carePayload .. careMessage:match("^G|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+assert(carePayload:find("Heiler:IGNORED", 1, true), "Die Entscheidung fehlt in der Synchronisierung")
+
+local careFields = addon.Util.SplitFields(carePayload)
+assert(careFields[21] ~= nil, "Das Entscheidungsfeld fehlt in der Nutzlast")
+addon.DB:GetGuild().memberCare.decisions = {}
+addon.DB:GetGuild().profile.updatedAt = 0
+addon.Sync:ReceiveGuildProfileChunk(careMessages[1], "Tester-Realm")
+if #careMessages > 1 then
+    for index = 2, #careMessages do
+        addon.Sync:ReceiveGuildProfileChunk(careMessages[index], "Tester-Realm")
+    end
+end
+assert(addon.Roster:GetMemberCareDecision("Heiler") ~= nil,
+    "Die empfangene Entscheidung wurde nicht übernommen")
+
+-- Ein älterer Absender kennt das Entscheidungsfeld nicht. Sein Paket darf die
+-- vorhandenen Einträge nicht löschen.
+local legacyPayload = table.concat({
+    "GP", "9999999999", "", "", "", "", "", "",
+    "1", "0,1",
+    "", "", "",
+    "60", "1", "0,1",
+    "1", "1,5",
+    "1", "0,1,5",
+}, "|")
+assert(#addon.Util.SplitFields(legacyPayload) == 20, "Das Alt-Paket hat die falsche Feldzahl")
+addon.Sync:ReceiveGuildProfileChunk("G|7|legacy1|1|1|" .. legacyPayload, "Tester-Realm")
+assert(addon.Roster:GetMemberCareDecision("Heiler") ~= nil,
+    "Ein Paket ohne Entscheidungsfeld hat die Einträge gelöscht")
+
+-- Ausschluss: jede einzelne Sperre muss halten.
+canRemoveFromGuild = false
+local blockedByBlizzard, blockedReason = addon.Roster:CanRemoveMember("Heiler-Realm")
+assert(blockedByBlizzard == false and blockedReason:find("WoW erlaubt", 1, true),
+    "Ohne echte WoW-Berechtigung wurde das Entfernen erlaubt")
+
+canRemoveFromGuild = true
+local selfRemoval, selfReason = addon.Roster:CanRemoveMember("Tester-Realm")
+assert(selfRemoval == false and selfReason:find("selbst", 1, true),
+    "Der eigene Charakter ließ sich entfernen")
+
+assert(addon.Roster:SetMemberCareRankProtected(5, true) == true, "Rangschutz ließ sich nicht setzen")
+local protectedRemoval, protectedReason = addon.Roster:CanRemoveMember("Heiler-Realm")
+assert(protectedRemoval == false and protectedReason:find("geschützt", 1, true),
+    "Ein geschützter Rang ließ sich entfernen")
+addon.Roster:SetMemberCareRankProtected(5, false)
+
+local allowedRemoval = addon.Roster:CanRemoveMember("Heiler-Realm")
+assert(allowedRemoval == true, "Ein zulässiger Ausschluss wurde abgelehnt")
+local removed, removeMessage = addon.Roster:RemoveMember("Heiler-Realm")
+assert(removed == true, removeMessage or "Der Ausschluss schlug fehl")
+assert(uninvitedPlayers[1] == "Heiler-Realm", "Es wurde der falsche Spieler entfernt")
+assert(#uninvitedPlayers == 1, "Es wurde mehr als ein Spieler entfernt")
+assert(addon.Roster:GetMemberCareDecision("Heiler").status == "DONE",
+    "Der Ausschluss wurde nicht als erledigt vermerkt")
+
+-- Ein Rang ohne Mitgliederpflege darf gar nichts davon.
+addon.DB:GetGuild().memberCare.accessRanks = { ["9"] = true }
+addon.DB:GetGuild().memberCare.accessRanksConfigured = true
+assert(addon.Roster:SetMemberCareDecision("Heiler-Realm", "IGNORED") == false,
+    "Ein unberechtigter Rang konnte eine Ausnahme setzen")
+assert(addon.Roster:CanRemoveMember("Heiler-Realm") == false,
+    "Ein unberechtigter Rang durfte entfernen")
+addon.DB:GetGuild().memberCare.accessRanks = { ["1"] = true, ["5"] = true }
+addon.DB:GetGuild().memberCare.decisions = {}
+healerMember.lastOnlineHours = 0
 
 -- === Gear Audit ============================================================
 local ENCHANTED_HEAD = "|cffa335ee|Hitem:1000:2564:0:0:0:0:0:0:70|h[Kopf]|h|r"

@@ -145,6 +145,17 @@ function GC.Util.TodayISO()
     return date and date("%Y-%m-%d") or "1970-01-01"
 end
 
+function GC.Util.AddDaysISO(days)
+    days = tonumber(days) or 0
+    if date and time then
+        local ok, value = pcall(date, "%Y-%m-%d", time() + (days * 24 * 60 * 60))
+        if ok and type(value) == "string" and value:match("^%d%d%d%d%-%d%d%-%d%d$") then
+            return value
+        end
+    end
+    return GC.Util.TodayISO()
+end
+
 function GC.Util.IsValidISODate(value)
     local year, month, day = tostring(value or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     year, month, day = tonumber(year), tonumber(month), tonumber(day)
