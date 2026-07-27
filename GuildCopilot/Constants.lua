@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.4.2",
+    VERSION = "0.4.3",
     SCHEMA_VERSION = 5,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -42,11 +42,11 @@ GC.ProfessionIcons = {
 }
 
 GC.SuccessSoundOptions = {
-    { key = "READY_CHECK", name = "Bereitschaftscheck" },
-    { key = "UI_GROUP_FINDER_RECEIVE_APPLICATION", name = "Gruppensuche" },
-    { key = "RAID_WARNING", name = "Raidwarnung" },
-    { key = "IG_QUEST_LIST_COMPLETE", name = "Quest abgeschlossen" },
-    { key = "MAP_PING", name = "Karten-Ping" },
+    { key = "READY_CHECK", name = "Bereitschaftscheck", soundID = 8960 },
+    { key = "GROUP_FINDER", name = "Gruppensuche", soundID = 3081 },
+    { key = "RAID_WARNING", name = "Raidwarnung", soundID = 8959 },
+    { key = "IG_QUEST_LIST_COMPLETE", name = "Quest abgeschlossen", soundID = 619 },
+    { key = "MAP_PING", name = "Karten-Ping", soundID = 3175 },
 }
 
 GC.ClassOrder = {

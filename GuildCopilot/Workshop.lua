@@ -562,7 +562,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
     end
 end
 
-function GC.Workshop:GetCatalog(query, professionFilter)
+function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
     local catalog = {}
     AddCrafterToCatalog(catalog, GC:GetPlayerFullName(), self:GetOwnData().professions)
     for _, crafter in pairs(GC.DB:GetGuild().workshop.crafters or {}) do
@@ -571,12 +571,14 @@ function GC.Workshop:GetCatalog(query, professionFilter)
 
     query = NormalizeKey(query)
     professionFilter = NormalizeKey(professionFilter)
+    local favorites = GC.DB:GetSettings().workshopFavorites or {}
     local entries = {}
     for _, entry in pairs(catalog) do
         table.sort(entry.crafters)
         local searchable = NormalizeKey(entry.name .. " " .. entry.profession .. " " .. table.concat(entry.crafters, " "))
         local professionMatches = professionFilter == "" or NormalizeKey(entry.profession) == professionFilter
-        if professionMatches and (query == "" or searchable:find(query, 1, true)) then
+        local favoriteMatches = not favoritesOnly or favorites[entry.key] == true
+        if professionMatches and favoriteMatches and (query == "" or searchable:find(query, 1, true)) then
             entries[#entries + 1] = entry
         end
     end
@@ -587,6 +589,26 @@ function GC.Workshop:GetCatalog(query, professionFilter)
         return left.name < right.name
     end)
     return entries
+end
+
+function GC.Workshop:IsFavorite(recipeKey)
+    if not recipeKey or recipeKey == "" then
+        return false
+    end
+    return GC.DB:GetSettings().workshopFavorites[recipeKey] == true
+end
+
+function GC.Workshop:SetFavorite(recipeKey, favorite)
+    if not recipeKey or recipeKey == "" then
+        return false
+    end
+    local favorites = GC.DB:GetSettings().workshopFavorites
+    if favorite then
+        favorites[recipeKey] = true
+    else
+        favorites[recipeKey] = nil
+    end
+    return true
 end
 
 function GC.Workshop:GetMissingOwnProfessions()

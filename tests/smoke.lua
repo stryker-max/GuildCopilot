@@ -59,6 +59,16 @@ end
 
 UIParent = setmetatable({}, Dummy)
 GuildFrame = setmetatable({}, Dummy)
+Minimap = setmetatable({}, Dummy)
+function Minimap:GetCenter()
+    return 0, 0
+end
+function Minimap:GetEffectiveScale()
+    return 1
+end
+function GetCursorPosition()
+    return 0, 0
+end
 UISpecialFrames = {}
 SlashCmdList = {}
 SOUNDKIT = { READY_CHECK = 8960 }
@@ -255,7 +265,9 @@ function GetChannelList()
     return 1, "Allgemein", false, 2, "Handel", false, 4, "SucheNachGruppe", false, 5, "Gildenrekrutierung", false
 end
 
-function PlaySound()
+local playedSoundID
+function PlaySound(soundID)
+    playedSoundID = soundID
 end
 
 function time()
@@ -322,8 +334,18 @@ addon.Roster:SetAllRanksActive(true)
 assert(#addon.Roster:GetActiveRaiders(25) == 2, "Alle Gildenränge wurden nicht wieder aktiviert")
 assert(addon.UI.frame ~= nil, "Hauptfenster wurde nicht erstellt")
 assert(optionsCategory == addon.UI.optionsPanel, "Guild Copilot wurde nicht in den Addon-Optionen registriert")
-optionsCategory.scripts.OnShow()
-assert(addon.UI.frame.shown == true, "Addon-Option öffnet das Guild-Copilot-Fenster nicht")
+assert(optionsCategory.scripts.OnShow == nil, "Addon-Option darf das Hauptfenster nicht automatisch öffnen")
+optionsCategory.openButton.scripts.OnClick()
+assert(addon.UI.frame.shown == true, "Options-Button öffnet das Guild-Copilot-Fenster nicht")
+assert(addon.UI.minimapButton ~= nil, "Minimap-Symbol wurde nicht erstellt")
+assert(addon.UI.minimapButton.shown == true, "Minimap-Symbol ist trotz aktiver Einstellung verborgen")
+addon.UI.pages.SETTINGS.minimapToggle:SetChecked(false)
+addon.UI.pages.SETTINGS.minimapToggle.scripts.OnClick(addon.UI.pages.SETTINGS.minimapToggle)
+assert(addon.DB:GetSettings().minimap.hidden == true, "Minimap-Einstellung wurde nicht gespeichert")
+assert(addon.UI.minimapButton.shown == false, "Minimap-Symbol wurde nicht ausgeblendet")
+addon.UI.pages.SETTINGS.minimapToggle:SetChecked(true)
+addon.UI.pages.SETTINGS.minimapToggle.scripts.OnClick(addon.UI.pages.SETTINGS.minimapToggle)
+assert(addon.UI.minimapButton.shown == true, "Minimap-Symbol wurde nicht wieder eingeblendet")
 local warriorHeader = addon.UI.pages.RECRUITMENT.classRows.WARRIOR.header
 warriorHeader.scripts.OnClick()
 assert(addon.UI.pages.RECRUITMENT.expandedClass == "WARRIOR", "Klassenkarte wurde nicht geöffnet")
@@ -361,6 +383,14 @@ assert(ownWorkshop.professions.verzauberkunst ~= nil, "Verzauberkunst fehlt in d
 assert(ownWorkshop.professions.verzauberkunst.recipes.E27926 ~= nil, "Verzauberungsrezept wurde nicht gespeichert")
 assert(#addon.Workshop:GetCatalog("", "Verzauberkunst") == 1, "Berufsfilter findet Verzauberkunst nicht")
 assert(addon.ProfessionIcons["Verzauberkunst"] ~= nil, "Berufssymbol für Verzauberkunst fehlt")
+assert(addon.UI.pages.WORKSHOP.workshopRows[1].shown == false, "Werkstatt zeigt ohne Suchumfang den gesamten Katalog")
+addon.UI.pages.WORKSHOP.workshopSearch:SetText("Ring - Heilkraft")
+assert(addon.UI.pages.WORKSHOP.workshopRows[1].shown == true, "Gezielte Werkstattsuche zeigt keinen Treffer")
+addon.UI.pages.WORKSHOP.workshopFavorite.scripts.OnClick()
+assert(addon.Workshop:IsFavorite("E27926") == true, "Rezeptfavorit wurde nicht gespeichert")
+addon.UI.pages.WORKSHOP.workshopFavorites.scripts.OnClick()
+addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
+assert(addon.UI.pages.WORKSHOP.workshopRows[1].shown == true, "Favoritenfilter zeigt das gespeicherte Rezept nicht")
 
 addon.Profile:Confirm("HUNTER:2", "HUNTER:3", "MAIN", true)
 assert(addon.Profile:Get().secondarySpecKey == "HUNTER:3", "Dual-Spec wurde nicht gespeichert")
@@ -461,8 +491,9 @@ assert(#guildProfileMessages > 0, "Gildenprofil-Synchronisierung wurde nicht erz
 for _, guildProfileMessage in ipairs(guildProfileMessages) do
     assert(#guildProfileMessage <= 255, "Gildenprofil-Nachricht überschreitet das Addon-Limit")
 end
-addon.DB:GetSettings().successSoundKey = "RAID_WARNING"
+addon.DB:GetSettings().successSoundKey = "GROUP_FINDER"
 assert(addon.Chat:PlaySuccessSound() == true, "Ausgewählter Erfolgssound konnte nicht abgespielt werden")
+assert(playedSoundID == 3081, "Gruppensuche-Sound verwendet keinen TBC-kompatiblen Fallback")
 
 addon.Chat:CaptureLead("Suche Gilde für TBC-Raids", "Interessent-Realm", "Player-4", "SucheNachGruppe")
 assert(#addon.DB:GetGuild().inbox == 2, "Chat-Trigger wurde nicht im Postfach gespeichert")

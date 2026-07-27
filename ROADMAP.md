@@ -55,6 +55,16 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - separate Fußzeile für die Seitennavigation, damit keine Rezeptzeile mehr überdeckt wird;
 - Quellcode und Dokumentation für das GitHub-Repository vorbereitet.
 
+## 0.4.3 – Werkstatt-Fokus und schneller Zugriff
+
+- Gildenwerkstatt als gezielte Suche statt ungefilterter Rezeptflut;
+- Suche über Rezept- oder Spielernamen, Berufsfilter und lokale Rezeptfavoriten;
+- statische Blizzard-Addon-Optionsseite mit Schriftlogo, `/gcp` und ausdrücklichem Öffnen-Button;
+- automatisches Öffnen aus der Optionsseite entfernt, damit **Escape** zuverlässig funktioniert;
+- verschiebbares Minimap-Symbol: Linksklick öffnet/schließt Guild Copilot, Rechtsklick öffnet die Einstellungen;
+- Minimap-Symbol in den Einstellungen ein- und ausschaltbar;
+- Erfolgssounds verwenden TBC-kompatible numerische Fallbacks, wenn ein moderner `SOUNDKIT`-Eintrag fehlt.
+
 ## 0.5 – Raid Monitor
 
 ### Addon-Erkennung

@@ -671,7 +671,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(708)
+    content:SetHeight(748)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -725,8 +725,8 @@ function GC.UI:BuildSettingsPage()
         end
     )
 
-    local notificationCard = CreateCard(content, "Postfach & Erfolgssound")
-    notificationCard:SetSize(752, 150)
+    local notificationCard = CreateCard(content, "Benachrichtigungen & Zugriff")
+    notificationCard:SetSize(752, 190)
     notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -252)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
@@ -762,9 +762,16 @@ function GC.UI:BuildSettingsPage()
     page.watchChannelToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -105)
     page.watchChannelToggle.text:SetWidth(310)
 
+    page.minimapToggle = CreateToggle(notificationCard, "Minimap-Symbol anzeigen", function(checked)
+        GC.DB:GetSettings().minimap.hidden = not checked
+        GC.UI:RefreshMinimapButton()
+    end)
+    page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
+    page.minimapToggle.text:SetWidth(260)
+
     local templateCard = CreateCard(content, "Standardtexte im Postfach")
     templateCard:SetSize(752, 294)
-    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -414)
+    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -454)
     local templateHelp = CreateLabel(templateCard,
         "Die Vorlagen sind vorausgefüllt und frei änderbar. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
         { muted = true, width = 716, height = 30, vertical = "TOP" })
@@ -838,6 +845,7 @@ function GC.UI:RefreshSettings()
     SetToggle(page.successSoundToggle, settings.successSound)
     SetToggle(page.captureDuringSearchToggle, settings.captureOnlyDuringSearch)
     SetToggle(page.watchChannelToggle, settings.watchRecruitmentTriggers)
+    SetToggle(page.minimapToggle, not settings.minimap.hidden)
     local selectedSoundName = GC.SuccessSoundOptions[1].name
     for _, sound in ipairs(GC.SuccessSoundOptions) do
         if sound.key == settings.successSoundKey then
@@ -1228,7 +1236,7 @@ function GC.UI:BuildWorkshopPage()
     end
     professionFilters[#professionFilters + 1] = "Kochkunst"
     professionFilters[#professionFilters + 1] = "Erste Hilfe"
-    page.workshopProfession = CreateChoiceDropdown(searchCard, 190, professionFilters, function()
+    page.workshopProfession = CreateChoiceDropdown(searchCard, 176, professionFilters, function()
         page.workshopPage = 1
         page.selectedWorkshopRecipe = nil
         GC.UI:RefreshWorkshop()
@@ -1238,7 +1246,7 @@ function GC.UI:BuildWorkshopPage()
     page.workshopProfession:SetPoint("TOPLEFT", searchCard, "TOPLEFT", 14, -14)
     page.workshopProfession:SetValue("")
 
-    page.workshopSearch = CreateEdit(searchCard, 300, 34)
+    page.workshopSearch = CreateEdit(searchCard, 238, 34)
     page.workshopSearch.container:SetPoint("LEFT", page.workshopProfession, "RIGHT", 8, 0)
     page.workshopSearch:SetScript("OnTextChanged", function()
         page.workshopPage = 1
@@ -1246,7 +1254,7 @@ function GC.UI:BuildWorkshopPage()
     end)
     local searchHint = CreateLabel(page.workshopSearch.container, "Rezept oder Spieler suchen", {
         muted = true,
-        width = 260,
+        width = 205,
     })
     searchHint:SetPoint("LEFT", page.workshopSearch.container, "LEFT", 10, 0)
     page.workshopSearch:SetScript("OnEditFocusGained", function()
@@ -1256,7 +1264,15 @@ function GC.UI:BuildWorkshopPage()
         searchHint:SetShown(edit:GetText() == "")
     end)
 
-    page.workshopRequest = CreateButton(searchCard, "Gildendaten anfragen", 230, 34, function()
+    page.workshopFavorites = CreateButton(searchCard, "☆ Favoriten", 134, 34, function()
+        page.workshopFavoritesOnly = not page.workshopFavoritesOnly
+        page.workshopPage = 1
+        page.selectedWorkshopRecipe = nil
+        GC.UI:RefreshWorkshop()
+    end)
+    page.workshopFavorites:SetPoint("LEFT", page.workshopSearch.container, "RIGHT", 8, 0)
+
+    page.workshopRequest = CreateButton(searchCard, "Daten anfragen", 176, 34, function()
         local success, message = GC.Workshop:RequestGuildData()
         page.workshopStatus:SetText(message or "")
         SetTextColor(page.workshopStatus, success and THEME.success or THEME.danger)
@@ -1312,6 +1328,14 @@ function GC.UI:BuildWorkshopPage()
         vertical = "TOP",
     })
     page.workshopRecipeTitle:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -49)
+    page.workshopFavorite = CreateButton(detailCard, "☆", 34, 30, function()
+        local recipeKey = page.selectedWorkshopRecipe
+        if recipeKey then
+            GC.Workshop:SetFavorite(recipeKey, not GC.Workshop:IsFavorite(recipeKey))
+            GC.UI:RefreshWorkshop()
+        end
+    end)
+    page.workshopFavorite:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -12)
     local detailBody = CreatePanel(detailCard, THEME.input)
     detailBody:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -98)
     detailBody:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -18, 16)
@@ -1342,16 +1366,31 @@ function GC.UI:RefreshWorkshop()
     page.metricCards.CRAFTERS.value:SetText(summary.crafters)
     page.metricCards.PROFESSIONS.value:SetText(summary.professions)
 
-    local query = page.workshopSearch:GetText()
+    local query = GC.Util.Trim(page.workshopSearch:GetText())
     local professionFilter = page.workshopProfession.value or ""
-    local entries = GC.Workshop:GetCatalog(query, professionFilter)
-    page.workshopListTitle:SetText(professionFilter ~= ""
-        and ("Rezepte  •  " .. professionFilter)
-        or "Gefundene Rezepte")
+    local hasScope = query ~= "" or professionFilter ~= "" or page.workshopFavoritesOnly
+    local entries = hasScope
+        and GC.Workshop:GetCatalog(query, professionFilter, page.workshopFavoritesOnly)
+        or {}
+    page.workshopFavorites:SetActive(page.workshopFavoritesOnly == true)
+    page.workshopFavorites:SetText(page.workshopFavoritesOnly and "★ Favoriten" or "☆ Favoriten")
+    if page.workshopFavoritesOnly then
+        page.workshopListTitle:SetText("Favorisierte Rezepte")
+    elseif professionFilter ~= "" then
+        page.workshopListTitle:SetText("Rezepte  •  " .. professionFilter)
+    elseif query ~= "" then
+        page.workshopListTitle:SetText("Suchergebnisse")
+    else
+        page.workshopListTitle:SetText("Gezielte Rezeptsuche")
+    end
     local pageSize = #page.workshopRows
     local pageCount = math.max(1, math.ceil(#entries / pageSize))
     page.workshopPage = math.max(1, math.min(page.workshopPage or 1, pageCount))
     page.workshopPageLabel:SetText("Seite " .. page.workshopPage .. "/" .. pageCount)
+    local showPagination = hasScope and #entries > pageSize
+    page.workshopPrevious:SetShown(showPagination)
+    page.workshopPageLabel:SetShown(showPagination)
+    page.workshopNext:SetShown(showPagination)
     if page.workshopPage <= 1 then
         page.workshopPrevious:Disable()
     else
@@ -1361,20 +1400,6 @@ function GC.UI:RefreshWorkshop()
         page.workshopNext:Disable()
     else
         page.workshopNext:Enable()
-    end
-
-    page.workshopVisibleRecipes = {}
-    local startIndex = ((page.workshopPage - 1) * pageSize) + 1
-    for rowIndex, row in ipairs(page.workshopRows) do
-        local recipe = entries[startIndex + rowIndex - 1]
-        page.workshopVisibleRecipes[rowIndex] = recipe
-        row:SetShown(recipe ~= nil)
-        if recipe then
-            row:SetText(recipe.name)
-            row.professionIcon:SetTexture(GC.ProfessionIcons[recipe.profession] or GC.ProfessionIcons[""])
-            row.meta:SetText(#recipe.crafters .. "  •  " .. recipe.profession)
-            row:SetActive(page.selectedWorkshopRecipe == recipe.key)
-        end
     end
 
     local selected
@@ -1389,16 +1414,45 @@ function GC.UI:RefreshWorkshop()
         page.selectedWorkshopRecipe = selected.key
     end
 
+    page.workshopVisibleRecipes = {}
+    local startIndex = ((page.workshopPage - 1) * pageSize) + 1
+    for rowIndex, row in ipairs(page.workshopRows) do
+        local recipe = entries[startIndex + rowIndex - 1]
+        page.workshopVisibleRecipes[rowIndex] = recipe
+        row:SetShown(recipe ~= nil)
+        if recipe then
+            row:SetText((GC.Workshop:IsFavorite(recipe.key) and "★ " or "") .. recipe.name)
+            row.professionIcon:SetTexture(GC.ProfessionIcons[recipe.profession] or GC.ProfessionIcons[""])
+            row.meta:SetText(#recipe.crafters .. "  •  " .. recipe.profession)
+            row:SetActive(page.selectedWorkshopRecipe == recipe.key)
+        end
+    end
+
     if not selected then
-        page.workshopRecipeTitle:SetText(query ~= "" and "Keine Treffer" or "Noch keine Rezepte")
-        if professionFilter ~= "" then
-            page.workshopDetails:SetText("Für " .. professionFilter
-                .. " wurden noch keine passenden Rezepte erfasst. Öffne das Berufsfenster oder frage Gildendaten an.")
+        page.workshopFavorite:Hide()
+        if not hasScope then
+            page.workshopRecipeTitle:SetText("Wonach suchst du?")
+            page.workshopDetails:SetText(
+                "Gib einen Rezept- oder Spielernamen ein, wähle einen Beruf oder öffne deine Favoriten.\n\n"
+                .. "So bleibt die Werkstatt auch mit tausenden bekannten Rezepten übersichtlich.")
+        elseif page.workshopFavoritesOnly then
+            page.workshopRecipeTitle:SetText("Keine Favoriten gefunden")
+            page.workshopDetails:SetText(
+                "Markiere häufig benötigte Rezepte mit dem Stern in den Rezeptdetails.")
         else
-            page.workshopDetails:SetText("Öffne ein Berufsfenster oder frage die Daten anderer Online-Gildenmitglieder an.")
+            page.workshopRecipeTitle:SetText("Keine Treffer")
+            if professionFilter ~= "" then
+                page.workshopDetails:SetText("Für " .. professionFilter
+                    .. " wurden noch keine passenden Rezepte erfasst. Öffne das Berufsfenster oder frage Gildendaten an.")
+            else
+                page.workshopDetails:SetText("Prüfe den Suchbegriff oder frage aktuelle Gildendaten an.")
+            end
         end
         page.workshopDetailContent:SetHeight(220)
     else
+        page.workshopFavorite:Show()
+        page.workshopFavorite:SetText(GC.Workshop:IsFavorite(selected.key) and "★" or "☆")
+        page.workshopFavorite:SetActive(GC.Workshop:IsFavorite(selected.key))
         page.workshopRecipeTitle:SetText(selected.name)
         local lines = {
             "|cff91a3b8Beruf|r\n" .. selected.profession,
@@ -2227,6 +2281,114 @@ function GC.UI:AddGuildWindowButton()
     self.guildButton = button
 end
 
+local function MinimapAngle(y, x)
+    if math.atan2 then
+        return math.atan2(y, x)
+    elseif x > 0 then
+        return math.atan(y / x)
+    elseif x < 0 and y >= 0 then
+        return math.atan(y / x) + math.pi
+    elseif x < 0 then
+        return math.atan(y / x) - math.pi
+    elseif y > 0 then
+        return math.pi / 2
+    elseif y < 0 then
+        return -math.pi / 2
+    end
+    return 0
+end
+
+function GC.UI:PositionMinimapButton()
+    local button = self.minimapButton
+    if not button or not Minimap then
+        return
+    end
+    local settings = GC.DB:GetSettings().minimap
+    local angle = math.rad(tonumber(settings.angle) or 225)
+    button:ClearAllPoints()
+    button:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * 78, math.sin(angle) * 78)
+end
+
+function GC.UI:RefreshMinimapButton()
+    if not self.minimapButton then
+        return
+    end
+    self:PositionMinimapButton()
+    self.minimapButton:SetShown(not GC.DB:GetSettings().minimap.hidden)
+end
+
+function GC.UI:AddMinimapButton()
+    if self.minimapButton or not Minimap then
+        return
+    end
+
+    local button = CreateFrame("Button", "GuildCopilotMinimapButton", Minimap)
+    button:SetSize(32, 32)
+    button:SetFrameStrata("MEDIUM")
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:RegisterForDrag("LeftButton")
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(22, 22)
+    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+    icon:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotLogo")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.icon = icon
+
+    local border = button:CreateTexture(nil, "OVERLAY")
+    border:SetSize(52, 52)
+    border:SetPoint("CENTER", button, "CENTER", 0, 0)
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    button.border = border
+    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+    button:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton == "RightButton" then
+            GC.UI:CreateMainFrame()
+            GC.UI.frame:Show()
+            GC.UI:ShowPage("SETTINGS")
+        else
+            GC.UI:Toggle()
+        end
+    end)
+    button:SetScript("OnEnter", function(self)
+        if not GameTooltip then
+            return
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("Guild Copilot")
+        GameTooltip:AddLine("Linksklick: öffnen/schließen", 1, 1, 1)
+        GameTooltip:AddLine("Rechtsklick: Einstellungen", 1, 1, 1)
+        GameTooltip:AddLine("Ziehen: Position ändern", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+    button:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function()
+            local minimapX, minimapY = Minimap:GetCenter()
+            local scale = Minimap:GetEffectiveScale() or 1
+            local cursorX, cursorY = GetCursorPosition()
+            if not minimapX or not minimapY or not cursorX or not cursorY then
+                return
+            end
+            cursorX = cursorX / scale
+            cursorY = cursorY / scale
+            GC.DB:GetSettings().minimap.angle = math.deg(MinimapAngle(cursorY - minimapY, cursorX - minimapX))
+            GC.UI:PositionMinimapButton()
+        end)
+    end)
+    button:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+
+    self.minimapButton = button
+    self:RefreshMinimapButton()
+end
+
 function GC.UI:RegisterInterfaceOptions()
     if self.optionsPanel then
         return
@@ -2234,24 +2396,37 @@ function GC.UI:RegisterInterfaceOptions()
 
     local panel = CreateFrame("Frame")
     panel.name = "Guild Copilot"
-    local registrationComplete = false
-    panel:SetScript("OnShow", function()
-        if not registrationComplete or panel.openingCopilot then
-            return
+
+    local wordmark = panel:CreateTexture(nil, "ARTWORK")
+    wordmark:SetSize(300, 300)
+    wordmark:SetPoint("TOP", panel, "TOP", 0, -22)
+    wordmark:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotWordmark")
+    panel.wordmark = wordmark
+
+    local commandLabel = CreateLabel(panel, "Chat-Befehl", {
+        muted = true,
+        align = "CENTER",
+        width = 300,
+    })
+    commandLabel:SetPoint("TOP", wordmark, "BOTTOM", 0, -8)
+    local command = CreateLabel(panel, "/gcp", {
+        title = true,
+        align = "CENTER",
+        width = 300,
+    })
+    command:SetPoint("TOP", commandLabel, "BOTTOM", 0, -8)
+
+    panel.openButton = CreateButton(panel, "Guild Copilot öffnen", 220, 40, function()
+        if InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() then
+            InterfaceOptionsFrame:Hide()
+        elseif SettingsPanel and SettingsPanel:IsShown() then
+            SettingsPanel:Hide()
         end
-        panel.openingCopilot = true
-        C_Timer.After(0, function()
-            if InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() then
-                InterfaceOptionsFrame:Hide()
-            elseif SettingsPanel and SettingsPanel:IsShown() then
-                SettingsPanel:Hide()
-            end
-            GC.UI:CreateMainFrame()
-            GC.UI.frame:Show()
-            GC.UI:ShowPage("OVERVIEW")
-            panel.openingCopilot = false
-        end)
-    end)
+        GC.UI:CreateMainFrame()
+        GC.UI.frame:Show()
+        GC.UI:ShowPage("OVERVIEW")
+    end, "PRIMARY")
+    panel.openButton:SetPoint("TOP", command, "BOTTOM", 0, -24)
 
     if InterfaceOptions_AddCategory then
         InterfaceOptions_AddCategory(panel)
@@ -2263,7 +2438,6 @@ function GC.UI:RegisterInterfaceOptions()
         return
     end
 
-    registrationComplete = true
     self.optionsPanel = panel
 end
 
@@ -2282,6 +2456,7 @@ end)
 GC:RegisterCallback("PLAYER_LOGIN", GC.UI, function(self)
     self:CreateMainFrame()
     self:AddGuildWindowButton()
+    self:AddMinimapButton()
     self:RegisterInterfaceOptions()
 end)
 

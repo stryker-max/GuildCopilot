@@ -5,12 +5,13 @@ const root = path.resolve("GuildCopilot");
 const tocPath = path.join(root, "GuildCopilot.toc");
 const toc = fs.readFileSync(tocPath, "utf8");
 const logoPath = path.join(root, "Media", "GuildCopilotLogo.tga");
+const wordmarkPath = path.join(root, "Media", "GuildCopilotWordmark.tga");
 
 const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.4.2",
+  "## Version: 0.4.3",
 ];
 
 for (const entry of requiredMetadata) {
@@ -28,6 +29,17 @@ const logoHeight = logo.readUInt16LE(14);
 const logoDepth = logo.readUInt8(16);
 if (logoWidth !== 256 || logoHeight !== 256 || logoDepth !== 32) {
   throw new Error(`Unerwartetes TGA-Format: ${logoWidth}x${logoHeight}, ${logoDepth} Bit`);
+}
+
+if (!fs.existsSync(wordmarkPath)) {
+  throw new Error("Das Schriftlogo für die Addon-Optionen fehlt.");
+}
+const wordmark = fs.readFileSync(wordmarkPath);
+const wordmarkWidth = wordmark.readUInt16LE(12);
+const wordmarkHeight = wordmark.readUInt16LE(14);
+const wordmarkDepth = wordmark.readUInt8(16);
+if (wordmarkWidth !== 512 || wordmarkHeight !== 512 || wordmarkDepth !== 32) {
+  throw new Error(`Unerwartetes Schriftlogo-TGA: ${wordmarkWidth}x${wordmarkHeight}, ${wordmarkDepth} Bit`);
 }
 
 const luaFiles = toc
@@ -98,6 +110,12 @@ const requiredImplementations = [
   ["Eintrag in den Blizzard-Addon-Optionen", /InterfaceOptions_AddCategory/],
   ["eigenes Addon-Logo", /GuildCopilotLogo/],
   ["Berufssymbole", /ProfessionIcons/],
+  ["suchbasierte Werkstatt", /Gezielte Rezeptsuche/],
+  ["Rezeptfavoriten", /workshopFavorites/],
+  ["Minimap-Schalter", /Minimap-Symbol anzeigen/],
+  ["Minimap-Button", /GuildCopilotMinimapButton/],
+  ["statische Addon-Optionsseite", /Guild Copilot öffnen/],
+  ["TBC-kompatibler Sound-Fallback", /soundID = 3081/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

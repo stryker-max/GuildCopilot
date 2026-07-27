@@ -7,6 +7,11 @@ local DEFAULTS = {
         successSoundKey = "READY_CHECK",
         captureOnlyDuringSearch = true,
         watchRecruitmentTriggers = true,
+        minimap = {
+            hidden = false,
+            angle = 225,
+        },
+        workshopFavorites = {},
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         channels = {
@@ -73,6 +78,9 @@ GC.DB = {}
 function GC.DB:Initialize()
     local previousSchema = type(GuildCopilotDB) == "table" and tonumber(GuildCopilotDB.schemaVersion) or 0
     GuildCopilotDB = GC.Util.MergeDefaults(GuildCopilotDB, DEFAULTS)
+    if GuildCopilotDB.settings.successSoundKey == "UI_GROUP_FINDER_RECEIVE_APPLICATION" then
+        GuildCopilotDB.settings.successSoundKey = "GROUP_FINDER"
+    end
 
     if previousSchema < 2 then
         GuildCopilotDB.settings.channels.RECRUITMENT = true

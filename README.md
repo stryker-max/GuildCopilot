@@ -1,4 +1,4 @@
-# Guild Copilot 0.4.2
+# Guild Copilot 0.4.3
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -33,10 +33,12 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - zwei manuell wählbare Berufe oder automatische Übernahme aus dem WoW-Berufsfenster, synchronisiert mit anderen Addon-Nutzern;
 - Gildenwerkstatt mit automatischem Rezeptscan beim Öffnen des Berufsfensters, einschließlich der separaten TBC-Verzauberkunst-Schnittstelle;
 - gedrosselte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern;
-- allgemeine Suche plus bebilderter Berufsfilter und Berufssymbole in der Rezeptliste;
-- Einstellungsseite für aktive Raider-Ränge, berechtigte Gildenprofil-Editoren, Postfach-Erkennung und Erfolgssound;
+- suchbasierte Gildenwerkstatt: Statt hunderte Rezepte ungefiltert zu laden, werden Ergebnisse erst nach Suchbegriff, Berufsauswahl oder über gespeicherte Favoriten angezeigt;
+- bebilderter Berufsfilter, Berufssymbole in der Rezeptliste und lokale Rezeptfavoriten;
+- Einstellungsseite für aktive Raider-Ränge, berechtigte Gildenprofil-Editoren, Postfach-Erkennung, TBC-kompatible Erfolgssounds und das Minimap-Symbol;
 - Gildenprofil, Editor-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
-- Aufruf über `/gcp`, den Button im Blizzard-Gildenfenster oder **Optionen → AddOns → Guild Copilot**;
+- Aufruf über `/gcp`, den Button im Blizzard-Gildenfenster, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**;
+- eigene statische Addon-Optionsseite mit Schriftlogo, Slash-Befehl und ausdrücklichem Öffnen-Button; sie öffnet kein zweites Fenster mehr automatisch und blockiert dadurch nicht die Escape-Taste;
 - eigenes Guild-Copilot-Logo im Fenstertitel und in den Addon-Metadaten;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
 - Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen.
@@ -52,7 +54,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 5. Unter **Profile & Berufe** das eigene Raidprofil mit **Bestätigen** speichern.
 6. Unter **Einstellungen** festlegen, welche Gildenränge als aktive Raider erscheinen und welche Ränge das Gildenprofil bearbeiten dürfen.
 7. Optional unter **Warcraft Logs** die Gildenseite speichern und einen Companion-Export importieren.
-8. Unter **Gildenwerkstatt** die Daten anderer Online-Mitglieder anfragen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
+8. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
 
 ## Wichtige WoW-Grenzen
 

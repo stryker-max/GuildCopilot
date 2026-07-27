@@ -9,7 +9,17 @@ GC.Chat = {
 function GC.Chat:PlaySuccessSound()
     local settings = GC.DB:GetSettings()
     local soundKey = settings.successSoundKey or "READY_CHECK"
-    local soundID = SOUNDKIT and (SOUNDKIT[soundKey] or SOUNDKIT.READY_CHECK) or 8960
+    local selectedOption
+    for _, option in ipairs(GC.SuccessSoundOptions or {}) do
+        if option.key == soundKey then
+            selectedOption = option
+            break
+        end
+    end
+    selectedOption = selectedOption or (GC.SuccessSoundOptions and GC.SuccessSoundOptions[1])
+    local soundID = selectedOption
+        and ((SOUNDKIT and SOUNDKIT[selectedOption.key]) or selectedOption.soundID)
+        or ((SOUNDKIT and SOUNDKIT.READY_CHECK) or 8960)
     if PlaySound and soundID then
         PlaySound(soundID, "Master")
         return true
