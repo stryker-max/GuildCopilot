@@ -1,0 +1,372 @@
+local _, GC = ...
+
+GC.Chat = {
+    sessionActive = false,
+    sessionStartedAt = 0,
+    heardSenders = {},
+}
+
+function GC.Chat:PlaySuccessSound()
+    local settings = GC.DB:GetSettings()
+    local soundKey = settings.successSoundKey or "READY_CHECK"
+    local soundID = SOUNDKIT and (SOUNDKIT[soundKey] or SOUNDKIT.READY_CHECK) or 8960
+    if PlaySound and soundID then
+        PlaySound(soundID, "Master")
+        return true
+    end
+    return false
+end
+
+local RECRUITMENT_TRIGGERS = {
+    "suche eine gilde",
+    "suche gilde",
+    "gilde gesucht",
+    "gildensuche",
+    "lf guild",
+    "looking for a guild",
+    "looking for guild",
+}
+
+local WHISPER_RECRUITMENT_TRIGGERS = {
+    "interesse",
+    "interessiert",
+    "gilde",
+    "guild",
+    "bewerb",
+    "rekrut",
+    "raidplatz",
+    "raid platz",
+    "mehr info",
+    "mehr infos",
+    "discord",
+    "sucht ihr",
+    "mitmachen",
+    "anschließen",
+    "anschliessen",
+}
+
+local function NormalizeChannelName(name)
+    name = tostring(name or ""):lower()
+    name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    name = name:gsub("[%s%-%._]", "")
+    name = name:gsub("%d+", "")
+    return name
+end
+
+local function SameLead(leftName, leftGUID, rightName, rightGUID)
+    if leftGUID and leftGUID ~= "" and rightGUID and rightGUID ~= "" then
+        return leftGUID == rightGUID
+    end
+    if GC.Util.NormalizeName(leftName) == GC.Util.NormalizeName(rightName) then
+        return true
+    end
+    local leftShort = GC.Util.NormalizeName(GC.Util.PlayerShortName(leftName))
+    local rightShort = GC.Util.NormalizeName(GC.Util.PlayerShortName(rightName))
+    return leftShort == rightShort
+        and (not tostring(leftName or ""):find("-", 1, true)
+            or not tostring(rightName or ""):find("-", 1, true))
+end
+
+function GC.Chat:MergeDuplicateLeads()
+    local inbox = GC.DB:GetGuild().inbox
+    local index = 1
+    while index <= #inbox do
+        local lead = inbox[index]
+        local compareIndex = index + 1
+        while compareIndex <= #inbox do
+            local duplicate = inbox[compareIndex]
+            if SameLead(lead.name, lead.guid, duplicate.name, duplicate.guid) then
+                for _, message in ipairs(duplicate.messages or {}) do
+                    lead.messages[#lead.messages + 1] = message
+                end
+                table.sort(lead.messages, function(left, right)
+                    return (left.receivedAt or 0) < (right.receivedAt or 0)
+                end)
+                while #lead.messages > 20 do
+                    table.remove(lead.messages, 1)
+                end
+                if not tostring(lead.name or ""):find("-", 1, true)
+                    and tostring(duplicate.name or ""):find("-", 1, true) then
+                    lead.name = duplicate.name
+                end
+                lead.guid = lead.guid or duplicate.guid
+                lead.firstSeenAt = math.min(lead.firstSeenAt or math.huge, duplicate.firstSeenAt or math.huge)
+                lead.lastSeenAt = math.max(lead.lastSeenAt or 0, duplicate.lastSeenAt or 0)
+                lead.unread = lead.unread or duplicate.unread
+                table.remove(inbox, compareIndex)
+            else
+                compareIndex = compareIndex + 1
+            end
+        end
+        index = index + 1
+    end
+end
+
+function GC.Chat:FindChannel(kind)
+    local definition = GC.ChannelKinds[kind]
+    if not definition or not GetChannelList then
+        return nil
+    end
+
+    local channels = { GetChannelList() }
+    for index = 1, #channels, 3 do
+        local channelID = channels[index]
+        local channelName = channels[index + 1]
+        local disabled = channels[index + 2]
+        if channelID and channelID > 0 and channelName and not disabled then
+            local normalizedName = NormalizeChannelName(channelName)
+            for _, alias in ipairs(definition.aliases) do
+                local normalizedAlias = NormalizeChannelName(alias)
+                if normalizedName == normalizedAlias or normalizedName:find(normalizedAlias, 1, true) then
+                    return channelID, channelName
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function GC.Chat:GetRemainingCooldown(kind)
+    local lastPost = GC.DB:GetGuild().lastPosts[kind] or 0
+    local settings = GC.DB:GetSettings()
+    local cooldown = tonumber(settings.postCooldown) or GC.Constants.DEFAULT_POST_COOLDOWN
+    if kind == "LFG" then
+        cooldown = math.max(cooldown, tonumber(settings.lfgCooldown) or GC.Constants.DEFAULT_LFG_COOLDOWN)
+    end
+    return math.max(0, (lastPost + cooldown) - GC.Util.Now())
+end
+
+function GC.Chat:SendChat(text, chatType, language, channelID, target)
+    if C_ChatInfo and C_ChatInfo.SendChatMessage then
+        C_ChatInfo.SendChatMessage(text, chatType, language, channelID or target)
+        return true
+    elseif SendChatMessage then
+        SendChatMessage(text, chatType, language, channelID or target)
+        return true
+    end
+    return false
+end
+
+function GC.Chat:StartSearch(text)
+    text = GC.Util.SafeChatText(text)
+    if text == "" then
+        return false, "Bitte zuerst einen Werbetext eingeben."
+    end
+
+    local settings = GC.DB:GetSettings()
+    local guildData = GC.DB:GetGuild()
+    if guildData.recruitment.confirmedText ~= text then
+        return false, "Bitte den aktuellen Werbetext zuerst bestätigen."
+    end
+    local posted = {}
+    local skipped = {}
+
+    for _, kind in ipairs({ "RECRUITMENT", "LFG", "TRADE", "GENERAL" }) do
+        if settings.channels[kind] then
+            if self:GetRemainingCooldown(kind) > 0 then
+                skipped[#skipped + 1] = GC.ChannelKinds[kind].label .. " (Cooldown)"
+            else
+                local channelID = self:FindChannel(kind)
+                if channelID then
+                    if self:SendChat(text, "CHANNEL", nil, channelID) then
+                        guildData.lastPosts[kind] = GC.Util.Now()
+                        posted[#posted + 1] = GC.ChannelKinds[kind].label
+                    end
+                else
+                    skipped[#skipped + 1] = GC.ChannelKinds[kind].label .. " (nicht beigetreten)"
+                end
+            end
+        end
+    end
+
+    if #posted > 0 then
+        self.sessionActive = true
+        self.sessionStartedAt = GC.Util.Now()
+        self.heardSenders = {}
+        table.insert(guildData.postHistory, 1, {
+            postedAt = GC.Util.Now(),
+            text = text,
+            channels = table.concat(posted, ", "),
+        })
+        while #guildData.postHistory > 50 do
+            table.remove(guildData.postHistory)
+        end
+    end
+
+    GC:FireCallback("CHAT_STATUS", posted, skipped)
+    if #posted == 0 then
+        return false, #skipped > 0 and table.concat(skipped, ", ") or "Keine Kanäle ausgewählt."
+    end
+    return true, "Gepostet in: " .. table.concat(posted, ", ")
+end
+
+function GC.Chat:CaptureLead(message, sender, guid, source)
+    local settings = GC.DB:GetSettings()
+    if GC.Util.Trim(sender) == ""
+        or GC.Util.NormalizeName(sender) == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
+        return
+    end
+    if GC.Roster:IsGuildMember(sender) then
+        return
+    end
+
+    self:MergeDuplicateLeads()
+    local inbox = GC.DB:GetGuild().inbox
+    local normalizedSender = GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))
+    local lead
+    for _, existing in ipairs(inbox) do
+        if SameLead(existing.name, existing.guid, sender, guid) then
+            lead = existing
+            break
+        end
+    end
+
+    if not lead then
+        lead = {
+            name = sender,
+            guid = guid,
+            firstSeenAt = GC.Util.Now(),
+            messages = {},
+            source = source,
+        }
+        table.insert(inbox, 1, lead)
+    end
+    lead.lastSeenAt = GC.Util.Now()
+    lead.unread = true
+    lead.source = source or lead.source
+    table.insert(lead.messages, {
+        receivedAt = GC.Util.Now(),
+        text = message,
+        source = source,
+    })
+    while #lead.messages > 20 do
+        table.remove(lead.messages, 1)
+    end
+
+    if settings.successSound and not self.heardSenders[normalizedSender] then
+        self.heardSenders[normalizedSender] = true
+        self:PlaySuccessSound()
+    end
+    GC:FireCallback("INBOX_UPDATED", lead)
+end
+
+function GC.Chat:CaptureWhisper(message, sender, guid)
+    local settings = GC.DB:GetSettings()
+    if settings.captureOnlyDuringSearch and not self.sessionActive then
+        return
+    end
+    local knownLead = false
+    for _, lead in ipairs(GC.DB:GetGuild().inbox) do
+        if SameLead(lead.name, lead.guid, sender, guid) then
+            knownLead = true
+            break
+        end
+    end
+    local normalizedMessage = tostring(message or ""):lower()
+    local recruitmentSignal = false
+    for _, trigger in ipairs(WHISPER_RECRUITMENT_TRIGGERS) do
+        if normalizedMessage:find(trigger, 1, true) then
+            recruitmentSignal = true
+            break
+        end
+    end
+    if not knownLead and not recruitmentSignal then
+        return
+    end
+    self:CaptureLead(message, sender, guid, "WHISPER")
+end
+
+function GC.Chat:IsRecruitmentSignal(message)
+    local normalized = tostring(message or ""):lower()
+    for _, trigger in ipairs(RECRUITMENT_TRIGGERS) do
+        if normalized:find(trigger, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function GC.Chat:SendReply(playerName, text)
+    text = GC.Util.SafeChatText(text)
+    if GC.Util.Trim(playerName) == "" or text == "" then
+        return false
+    end
+    local sent = self:SendChat(text, "WHISPER", nil, nil, playerName)
+    if sent then
+        for _, lead in ipairs(GC.DB:GetGuild().inbox) do
+            if SameLead(lead.name, lead.guid, playerName) then
+                lead.unread = false
+                lead.lastReplyAt = GC.Util.Now()
+                break
+            end
+        end
+        GC:FireCallback("INBOX_UPDATED")
+    end
+    return sent
+end
+
+function GC.Chat:Invite(playerName)
+    if C_GuildInfo and C_GuildInfo.Invite then
+        C_GuildInfo.Invite(playerName)
+        return true
+    elseif GuildInvite then
+        GuildInvite(playerName)
+        return true
+    end
+    return false
+end
+
+function GC.Chat:RemoveLead(index)
+    local inbox = GC.DB:GetGuild().inbox
+    index = tonumber(index)
+    if not index or not inbox[index] then
+        return false
+    end
+    table.remove(inbox, index)
+    GC:FireCallback("INBOX_UPDATED")
+    return true
+end
+
+function GC.Chat:ClearInbox()
+    local inbox = GC.DB:GetGuild().inbox
+    if #inbox == 0 then
+        return false
+    end
+    for index = #inbox, 1, -1 do
+        table.remove(inbox, index)
+    end
+    self.heardSenders = {}
+    GC:FireCallback("INBOX_UPDATED")
+    return true
+end
+
+local chatEvents = CreateFrame("Frame")
+chatEvents:RegisterEvent("CHAT_MSG_WHISPER")
+chatEvents:RegisterEvent("CHAT_MSG_CHANNEL")
+chatEvents:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
+chatEvents:SetScript("OnEvent", function(_, event, ...)
+    if event == "CHAT_MSG_WHISPER" then
+        local message, sender, _, _, _, _, _, _, _, _, _, guid = ...
+        GC.Chat:CaptureWhisper(message, sender, guid)
+    elseif event == "CHAT_MSG_CHANNEL" then
+        local message, sender, _, _, _, _, _, _, channelName, _, _, guid = ...
+        if GC.DB:GetSettings().watchRecruitmentTriggers and GC.Chat:IsRecruitmentSignal(message) then
+            GC.Chat:CaptureLead(message, sender, guid, channelName or "CHANNEL")
+        end
+    elseif event == "CHAT_MSG_CHANNEL_NOTICE" then
+        local noticeType, _, _, _, _, _, _, channelIndex, channelName = ...
+        local lfgChannelID = GC.Chat:FindChannel("LFG")
+        if noticeType == "THROTTLED" and lfgChannelID then
+            if tonumber(channelIndex) == tonumber(lfgChannelID)
+                or NormalizeChannelName(channelName):find("suchenachgruppe", 1, true)
+                or NormalizeChannelName(channelName):find("lookingforgroup", 1, true) then
+                GC.DB:GetGuild().lastPosts.LFG = GC.Util.Now()
+                GC:FireCallback("CHAT_STATUS", {}, { "SucheNachGruppe (Server-Cooldown)" })
+            end
+        end
+    end
+end)
+
+GC:RegisterCallback("PLAYER_LOGIN", GC.Chat, function(self)
+    self:MergeDuplicateLeads()
+end)

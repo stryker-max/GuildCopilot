@@ -1,0 +1,19 @@
+## Interface: 20506
+## Title: Guild Copilot
+## Notes: Gildenassistent für Rekrutierung, Roster und Berufe in Burning Crusade Classic Anniversary.
+## Author: Guild Copilot Team
+## Version: 0.4.2
+## SavedVariables: GuildCopilotDB
+## IconTexture: Interface\AddOns\GuildCopilot\Media\GuildCopilotLogo
+
+Constants.lua
+Core.lua
+Database.lua
+Profile.lua
+WarcraftLogs.lua
+Roster.lua
+Workshop.lua
+Sync.lua
+Recruitment.lua
+Chat.lua
+UI.lua
