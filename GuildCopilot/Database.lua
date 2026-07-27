@@ -71,6 +71,8 @@ local GUILD_DEFAULTS = {
         inactivityDays = 60,
         protectedRanksConfigured = false,
         protectedRanks = {},
+        accessRanksConfigured = false,
+        accessRanks = {},
     },
     roster = {
         rankFilterConfigured = false,

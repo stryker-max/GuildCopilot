@@ -285,11 +285,19 @@ C_Timer = {
 }
 
 local sentChat = {}
+local sentAddon = {}
+local addonSendFailures = 0
 C_ChatInfo = {
     RegisterAddonMessagePrefix = function()
         return true
     end,
-    SendAddonMessage = function()
+    SendAddonMessage = function(prefix, message, distribution)
+        if addonSendFailures > 0 then
+            addonSendFailures = addonSendFailures - 1
+            return false
+        end
+        sentAddon[#sentAddon + 1] = { prefix, message, distribution }
+        return true
     end,
     SendChatMessage = function(message, chatType, language, target)
         sentChat[#sentChat + 1] = { message, chatType, language, target }
@@ -372,6 +380,12 @@ for _, workshopMessage in ipairs(workshopMessages) do
     addon.Workshop:ReceiveSync(addon.Util.SplitFields(workshopMessage), "Crafter-Realm")
 end
 assert(addon.DB:GetGuild().workshop.crafters["crafter-realm"] ~= nil, "Remote-Crafter wurde nicht gespeichert")
+addonSendFailures = 1
+local sentBeforeRetry = #sentAddon
+addon.Workshop:QueueProfessionSync(ownWorkshop.professions.schneiderei)
+assert(#sentAddon > sentBeforeRetry, "Werkstattpaket wurde nach einem Sendefehler nicht wiederholt")
+assert(#addon.Workshop.syncQueue == 0, "Werkstatt-Warteschlange wurde nach erfolgreicher Wiederholung nicht geleert")
+assert(addon.Workshop.syncStats.failed == 0, "Ein einmalig fehlgeschlagenes Paket wurde endgültig verworfen")
 local workshopCatalog = addon.Workshop:GetCatalog("Mondstoff")
 assert(#workshopCatalog >= 1, "Werkstattsuche findet das Rezept nicht")
 assert(#workshopCatalog[1].crafters == 2, "Lokaler und synchronisierter Crafter wurden nicht zusammengeführt")
@@ -513,6 +527,10 @@ assert(editedReply == "{rt2} Eigener Text {rt2}", "Editierter Antworttext wurde 
 
 assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == true, "Offiziersrang darf das Gildenprofil nicht bearbeiten")
 assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false, "Nicht freigegebener Rang darf das Gildenprofil bearbeiten")
+assert(addon.Roster:CanAccessMemberCare("Tester-Realm") == true, "Offiziersrang sieht die Mitgliederpflege nicht")
+assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == false, "Nicht freigegebener Rang sieht die Mitgliederpflege")
+assert(addon.Roster:SetMemberCareAccessRank(5, true) == true, "Mitgliederpflege-Rang konnte nicht freigegeben werden")
+assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == true, "Gildenweite Mitgliederpflege-Freigabe greift nicht")
 local guildProfileMessages = addon.Sync:BuildGuildProfileMessages()
 assert(#guildProfileMessages > 0, "Gildenprofil-Synchronisierung wurde nicht erzeugt")
 for _, guildProfileMessage in ipairs(guildProfileMessages) do

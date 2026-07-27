@@ -147,6 +147,9 @@ function GC.Roster:IsRankActive(rankIndex)
 end
 
 function GC.Roster:SetRankActive(rankIndex, active)
+    if not self:CanEditGuildSettings() then
+        return false
+    end
     local settings = GC.DB:GetGuild().roster
     if not settings.rankFilterConfigured then
         for _, rank in ipairs(self:GetRankDefinitions()) do
@@ -156,9 +159,17 @@ function GC.Roster:SetRankActive(rankIndex, active)
     settings.rankFilterConfigured = true
     settings.activeRaiderRanks[tostring(rankIndex)] = active == true
     GC:FireCallback("ROSTER_FILTER_UPDATED")
+    GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
+    return true
 end
 
 function GC.Roster:SetAllRanksActive(active)
+    if not self:CanEditGuildSettings() then
+        return false
+    end
     local settings = GC.DB:GetGuild().roster
     settings.rankFilterConfigured = true
     settings.activeRaiderRanks = {}
@@ -168,6 +179,11 @@ function GC.Roster:SetAllRanksActive(active)
         end
     end
     GC:FireCallback("ROSTER_FILTER_UPDATED")
+    GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
+    return true
 end
 
 function GC.Roster:IsGuildProfileEditorRank(rankIndex)
@@ -181,6 +197,10 @@ end
 function GC.Roster:CanEditGuildProfile(playerName)
     local member = self:GetMember(playerName or GC:GetPlayerFullName())
     return member ~= nil and self:IsGuildProfileEditorRank(member.rankIndex)
+end
+
+function GC.Roster:CanEditGuildSettings(playerName)
+    return self:CanEditGuildProfile(playerName)
 end
 
 local function InitializeDefaultEditorRanks()
@@ -256,6 +276,18 @@ local function InitializeDefaultProtectedRanks()
     return settings
 end
 
+local function InitializeDefaultMemberCareAccessRanks()
+    local settings = GC.DB:GetGuild().memberCare
+    if settings.accessRanksConfigured then
+        return settings
+    end
+    for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
+        settings.accessRanks[tostring(rank.index)] = rank.index <= 1
+    end
+    settings.accessRanksConfigured = true
+    return settings
+end
+
 local function MemberCareSettingsChanged()
     GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
     GC:FireCallback("MEMBERCARE_UPDATED")
@@ -270,6 +302,42 @@ function GC.Roster:IsMemberCareRankProtected(rankIndex)
         return tonumber(rankIndex) ~= nil and tonumber(rankIndex) <= 1
     end
     return settings.protectedRanks[tostring(rankIndex)] == true
+end
+
+function GC.Roster:IsMemberCareAccessRank(rankIndex)
+    local settings = GC.DB:GetGuild().memberCare
+    if not settings.accessRanksConfigured then
+        return tonumber(rankIndex) ~= nil and tonumber(rankIndex) <= 1
+    end
+    return settings.accessRanks[tostring(rankIndex)] == true
+end
+
+function GC.Roster:CanAccessMemberCare(playerName)
+    local member = self:GetMember(playerName or GC:GetPlayerFullName())
+    return member ~= nil and self:IsMemberCareAccessRank(member.rankIndex)
+end
+
+function GC.Roster:SetMemberCareAccessRank(rankIndex, active)
+    if not self:CanEditGuildSettings() then
+        return false
+    end
+    local settings = InitializeDefaultMemberCareAccessRanks()
+    if not active then
+        local otherAccessRankExists = false
+        for storedRankIndex, enabled in pairs(settings.accessRanks) do
+            if enabled and tostring(storedRankIndex) ~= tostring(rankIndex) then
+                otherAccessRankExists = true
+                break
+            end
+        end
+        if not otherAccessRankExists then
+            return false
+        end
+    end
+    settings.accessRanks[tostring(rankIndex)] = active == true
+    MemberCareSettingsChanged()
+    GC:FireCallback("SETTINGS_UPDATED")
+    return true
 end
 
 function GC.Roster:SetMemberCareRankProtected(rankIndex, protected)

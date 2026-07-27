@@ -3,7 +3,7 @@ local _, GC = ...
 GC.UI = {
     pages = {},
     tabs = {},
-    activePage = "OVERVIEW",
+    activePage = "ROSTER",
     selectedLead = 1,
 }
 
@@ -28,13 +28,13 @@ local THEME = {
 }
 
 local TAB_DEFINITIONS = {
+    { key = "ROSTER", section = "COPILOT", label = "Profil", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "OVERVIEW", section = "COPILOT", label = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Note_01" },
     { key = "GUILD", section = "REKRUTIERUNG", label = "Gildenprofil", icon = "Interface\\Icons\\INV_Misc_TabardPVP_01" },
     { key = "SUGGESTIONS", section = "REKRUTIERUNG", label = "Vorschläge", icon = "Interface\\Icons\\INV_Misc_Note_05" },
     { key = "RECRUITMENT", section = "REKRUTIERUNG", label = "Klassen & Specs", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "POST", section = "REKRUTIERUNG", label = "Werbung posten", icon = "Interface\\Icons\\INV_Letter_15" },
     { key = "INBOX", section = "REKRUTIERUNG", label = "Postfach", icon = "Interface\\Icons\\INV_Letter_05" },
-    { key = "ROSTER", section = "ROSTER", label = "Profile & Berufe", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "MEMBERCARE", section = "ROSTER", label = "Mitgliederpflege", icon = "Interface\\Icons\\INV_Misc_Note_06" },
     { key = "WORKSHOP", section = "ROSTER", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
     { key = "WCL", section = "ROSTER", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
@@ -507,6 +507,10 @@ function GC.UI:CreateMainFrame()
 end
 
 function GC.UI:ShowPage(pageKey)
+    if pageKey == "MEMBERCARE" and not GC.Roster:CanAccessMemberCare() then
+        pageKey = "ROSTER"
+        GC:Print("Mitgliederpflege ist für deinen Gildenrang nicht freigeschaltet.")
+    end
     self.activePage = pageKey
     for key, page in pairs(self.pages) do
         page:SetShown(key == pageKey)
@@ -515,6 +519,18 @@ function GC.UI:ShowPage(pageKey)
         tab:SetActive(tab.key == pageKey)
     end
     self:Refresh()
+end
+
+function GC.UI:RefreshNavigationAccess()
+    local canAccessMemberCare = GC.Roster:CanAccessMemberCare()
+    for _, tab in ipairs(self.tabs) do
+        if tab.key == "MEMBERCARE" then
+            tab:SetShown(canAccessMemberCare)
+        end
+    end
+    if self.activePage == "MEMBERCARE" and not canAccessMemberCare then
+        self:ShowPage("ROSTER")
+    end
 end
 
 function GC.UI:Toggle()
@@ -696,7 +712,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(748)
+    content:SetHeight(940)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -738,9 +754,9 @@ function GC.UI:BuildSettingsPage()
         end
     )
     page.editorRankCard, page.editorRankToggles = BuildRankCard(
-        "Gildenprofil bearbeiten",
+        "Gildenweite Einstellungen bearbeiten",
         382,
-        "Nur diese Ränge dürfen Profil und Antwortvorlagen ändern.",
+        "Nur diese Ränge dürfen Profil, Regeln, Rangfreigaben und Vorlagen ändern.",
         function(rankIndex, checked)
             if not GC.Roster:SetGuildProfileRankActive(rankIndex, checked) then
                 page.settingsStatus:SetText("Mindestens ein berechtigter Rang muss erhalten bleiben.")
@@ -750,9 +766,35 @@ function GC.UI:BuildSettingsPage()
         end
     )
 
+    local accessCard = CreateCard(content, "Mitgliederpflege öffnen")
+    accessCard:SetSize(752, 180)
+    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -252)
+    local accessHelp = CreateLabel(accessCard,
+        "Nur diese Ränge sehen die Mitgliederpflege. Die Freigabe wird gildenweit synchronisiert.",
+        { muted = true, width = 716, height = 28, vertical = "TOP" })
+    accessHelp:SetPoint("TOPLEFT", accessCard, "TOPLEFT", 18, -47)
+    page.memberCareAccessToggles = {}
+    for index = 1, 10 do
+        local toggle
+        toggle = CreateToggle(accessCard, "", function(checked)
+            if toggle.rankIndex ~= nil
+                and not GC.Roster:SetMemberCareAccessRank(toggle.rankIndex, checked) then
+                page.settingsStatus:SetText("Mindestens ein Rang muss Zugriff auf die Mitgliederpflege behalten.")
+                SetTextColor(page.settingsStatus, THEME.danger)
+                GC.UI:RefreshSettings()
+            end
+        end)
+        local column = (index - 1) % 5
+        local row = math.floor((index - 1) / 5)
+        toggle:SetPoint("TOPLEFT", accessCard, "TOPLEFT", 18 + (column * 145), -85 - (row * 31))
+        toggle.text:SetWidth(112)
+        toggle.text:SetJustifyH("LEFT")
+        page.memberCareAccessToggles[index] = toggle
+    end
+
     local notificationCard = CreateCard(content, "Benachrichtigungen & Zugriff")
     notificationCard:SetSize(752, 190)
-    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -252)
+    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -444)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
     end)
@@ -796,7 +838,7 @@ function GC.UI:BuildSettingsPage()
 
     local templateCard = CreateCard(content, "Standardtexte im Postfach")
     templateCard:SetSize(752, 294)
-    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -454)
+    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -646)
     local templateHelp = CreateLabel(templateCard,
         "Die Vorlagen sind vorausgefüllt und frei änderbar. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
         { muted = true, width = 716, height = 30, vertical = "TOP" })
@@ -846,23 +888,36 @@ function GC.UI:RefreshSettings()
         local rank = ranks[index]
         local activeToggle = page.activeRankToggles[index]
         local editorToggle = page.editorRankToggles[index]
+        local memberCareAccessToggle = page.memberCareAccessToggles[index]
         activeToggle:SetShown(rank ~= nil)
         editorToggle:SetShown(rank ~= nil)
+        memberCareAccessToggle:SetShown(rank ~= nil)
         if rank then
             activeToggle.rankIndex = rank.index
             activeToggle.text:SetText(rank.name)
             SetToggle(activeToggle, GC.Roster:IsRankActive(rank.index))
+            if canEditGuildProfile then
+                activeToggle:Enable()
+            else
+                activeToggle:Disable()
+            end
             editorToggle.rankIndex = rank.index
             editorToggle.text:SetText(rank.name)
             SetToggle(editorToggle, GC.Roster:IsGuildProfileEditorRank(rank.index))
+            memberCareAccessToggle.rankIndex = rank.index
+            memberCareAccessToggle.text:SetText(rank.name)
+            SetToggle(memberCareAccessToggle, GC.Roster:IsMemberCareAccessRank(rank.index))
             if canEditGuildProfile then
                 editorToggle:Enable()
+                memberCareAccessToggle:Enable()
             else
                 editorToggle:Disable()
+                memberCareAccessToggle:Disable()
             end
         else
             activeToggle.rankIndex = nil
             editorToggle.rankIndex = nil
+            memberCareAccessToggle.rankIndex = nil
         end
     end
 
@@ -899,7 +954,7 @@ function GC.UI:RefreshSettings()
         end
     else
         page.saveTemplates:Disable()
-        page.settingsStatus:SetText("Profilrechte und Standardtexte sind für deinen Rang schreibgeschützt.")
+        page.settingsStatus:SetText("Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar.")
         SetTextColor(page.settingsStatus, THEME.warning)
     end
     page.settingsScroll:UpdateModernThumb()
@@ -907,28 +962,21 @@ end
 
 function GC.UI:BuildRosterPage()
     local page = self.pages.ROSTER
-    CreatePageTitle(page, "Roster", "Dein synchronisiertes Raidprofil und die Datenbasis für die Gildenübersicht.")
+    CreatePageTitle(page, "Dein Profil",
+        "Raidprofil, Berufe und Abmeldung an einem Ort – diese Angaben werden mit Guild-Copilot-Nutzern in deiner Gilde synchronisiert.")
 
-    page.metricCards = {}
-    local metrics = {
-        { key = "MEMBERS", label = "MITGLIEDER" },
-        { key = "ONLINE", label = "ONLINE" },
-        { key = "PROFILES", label = "BEKANNTE SPECS" },
-    }
-    for index, metric in ipairs(metrics) do
-        local card = CreateCard(page)
-        card:SetSize(247, 76)
-        card:SetPoint("TOPLEFT", page, "TOPLEFT", (index - 1) * 260, -66)
-        card.value = CreateLabel(card, "0", { title = true })
-        card.value:SetPoint("TOPLEFT", card, "TOPLEFT", 16, -13)
-        card.caption = CreateLabel(card, metric.label, { muted = true })
-        card.caption:SetPoint("TOPLEFT", card.value, "BOTTOMLEFT", 0, -5)
-        page.metricCards[metric.key] = card
-    end
+    local scroll = CreateModernScrollFrame(page)
+    scroll:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -58)
+    scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetWidth(752)
+    content:SetHeight(606)
+    scroll:SetScrollChild(content)
+    page.profileScroll = scroll
 
-    local profileCard = CreateCard(page, "Dein Raidprofil")
+    local profileCard = CreateCard(content, "Dein Raidprofil")
     profileCard:SetSize(374, 408)
-    profileCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -158)
+    profileCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     page.profileCard = profileCard
 
     page.detectedText = CreateLabel(profileCard, "", { muted = true, width = 338, height = 36, vertical = "TOP" })
@@ -1004,9 +1052,9 @@ function GC.UI:BuildRosterPage()
     end, "PRIMARY")
     confirm:SetPoint("BOTTOMLEFT", profileCard, "BOTTOMLEFT", 18, 18)
 
-    local professions = CreateCard(page, "Deine Berufe")
+    local professions = CreateCard(content, "Deine Berufe")
     professions:SetSize(388, 408)
-    professions:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -158)
+    professions:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
     local professionHelp = CreateLabel(professions,
         "Wähle zwei Berufe manuell oder übernimm sie direkt aus deinem WoW-Berufsfenster. Die Angaben werden im Gildenroster synchronisiert.",
         { muted = true, width = 352, height = 64, vertical = "TOP" })
@@ -1033,6 +1081,55 @@ function GC.UI:BuildRosterPage()
         GC.UI:ShowPage("WORKSHOP")
     end)
     workshopButton:SetPoint("BOTTOMLEFT", professions, "BOTTOMLEFT", 18, 18)
+
+    local absenceCard = CreateCard(content, "Deine Abmeldung")
+    absenceCard:SetSize(752, 180)
+    absenceCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -420)
+    local absenceHelp = CreateLabel(absenceCard,
+        "Trage hier direkt ein, wann du nicht verfügbar bist. Mitgliederpflege und Roster berücksichtigen den Zeitraum automatisch.",
+        { muted = true, width = 716 })
+    absenceHelp:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -46)
+
+    local absenceFields = {
+        { key = "FROM", label = "Von  •  JJJJ-MM-TT", x = 18, width = 142 },
+        { key = "TO", label = "Bis  •  JJJJ-MM-TT", x = 170, width = 142 },
+        { key = "REASON", label = "Grund (optional)", x = 322, width = 412 },
+    }
+    page.absenceEdits = {}
+    for _, field in ipairs(absenceFields) do
+        local label = CreateLabel(absenceCard, field.label, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = field.width,
+        })
+        label:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", field.x, -72)
+        local edit = CreateEdit(absenceCard, field.width, 34)
+        edit.container:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", field.x, -91)
+        edit:SetMaxLetters(field.key == "REASON" and 80 or 10)
+        page.absenceEdits[field.key] = edit
+    end
+    page.saveAbsence = CreateButton(absenceCard, "Abmelden", 130, 32, function()
+        local success, message = GC.Profile:SetAbsence(
+            page.absenceEdits.FROM:GetText(),
+            page.absenceEdits.TO:GetText(),
+            page.absenceEdits.REASON:GetText()
+        )
+        page.absenceStatus:SetText(message or "")
+        SetTextColor(page.absenceStatus, success and THEME.success or THEME.danger)
+        if success then
+            GC.UI:RefreshRoster()
+        end
+    end, "PRIMARY")
+    page.saveAbsence:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -135)
+    page.clearAbsence = CreateButton(absenceCard, "Abmeldung löschen", 160, 32, function()
+        GC.Profile:ClearAbsence()
+        page.absenceStatus:SetText("Abmeldung gelöscht und mit der Gilde synchronisiert.")
+        SetTextColor(page.absenceStatus, THEME.success)
+        GC.UI:RefreshRoster()
+    end)
+    page.clearAbsence:SetPoint("LEFT", page.saveAbsence, "RIGHT", 8, 0)
+    page.absenceStatus = CreateLabel(absenceCard, "", { width = 402, height = 32 })
+    page.absenceStatus:SetPoint("LEFT", page.clearAbsence, "RIGHT", 12, 0)
 end
 
 function GC.UI:RefreshRoster()
@@ -1040,11 +1137,6 @@ function GC.UI:RefreshRoster()
     if not page then
         return
     end
-
-    local summary = GC.Roster:GetSummary()
-    page.metricCards.MEMBERS.value:SetText(summary.total)
-    page.metricCards.ONLINE.value:SetText(summary.online)
-    page.metricCards.PROFILES.value:SetText(summary.knownProfiles)
 
     local profile = GC.Profile:Get()
     local detected = GC.SpecByKey[profile.detectedSpecKey or ""]
@@ -1093,6 +1185,35 @@ function GC.UI:RefreshRoster()
         and "Automatische Synchronisierung aktiv."
         or "Manuell gewählt. Mit dem Button wieder aus WoW übernehmen.")
 
+    local absence = profile.absence or {}
+    if not page.absenceEdits.FROM:HasFocus() then
+        page.absenceEdits.FROM:SetText(absence.from or "")
+    end
+    if not page.absenceEdits.TO:HasFocus() then
+        page.absenceEdits.TO:SetText(absence.to or "")
+    end
+    if not page.absenceEdits.REASON:HasFocus() then
+        page.absenceEdits.REASON:SetText(absence.reason or "")
+    end
+    local absenceState = GC.Profile:GetAbsenceState(profile)
+    if absenceState == "ACTIVE" then
+        page.absenceStatus:SetText("Aktiv bis " .. absence.to .. ".")
+        SetTextColor(page.absenceStatus, THEME.success)
+        page.clearAbsence:Enable()
+    elseif absenceState == "UPCOMING" then
+        page.absenceStatus:SetText("Geplant ab " .. absence.from .. ".")
+        SetTextColor(page.absenceStatus, THEME.warning)
+        page.clearAbsence:Enable()
+    elseif absenceState == "EXPIRED" then
+        page.absenceStatus:SetText("Abmeldung abgelaufen – neu eintragen oder löschen.")
+        SetTextColor(page.absenceStatus, THEME.muted)
+        page.clearAbsence:Enable()
+    else
+        page.absenceStatus:SetText("Keine Abmeldung eingetragen.")
+        SetTextColor(page.absenceStatus, THEME.muted)
+        page.clearAbsence:Disable()
+    end
+    page.profileScroll:UpdateModernThumb()
 end
 
 local function MissingGuildProfileFields()
@@ -1240,65 +1361,15 @@ function GC.UI:BuildMemberCarePage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1024)
+    content:SetHeight(832)
     scroll:SetScrollChild(content)
     page.memberCareScroll = scroll
 
-    local absenceCard = CreateCard(content, "Meine Abmeldung")
-    absenceCard:SetSize(752, 180)
-    absenceCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-    local absenceHelp = CreateLabel(absenceCard,
-        "Deine Abmeldung wird mit anderen Guild-Copilot-Nutzern in der Gilde synchronisiert.",
-        { muted = true, width = 716 })
-    absenceHelp:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -46)
-
-    local absenceFields = {
-        { key = "FROM", label = "Von  •  JJJJ-MM-TT", x = 18, width = 142 },
-        { key = "TO", label = "Bis  •  JJJJ-MM-TT", x = 170, width = 142 },
-        { key = "REASON", label = "Grund (optional)", x = 322, width = 412 },
-    }
-    page.absenceEdits = {}
-    for _, field in ipairs(absenceFields) do
-        local label = CreateLabel(absenceCard, field.label, {
-            muted = true,
-            font = "GameFontNormalSmall",
-            width = field.width,
-        })
-        label:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", field.x, -72)
-        local edit = CreateEdit(absenceCard, field.width, 34)
-        edit.container:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", field.x, -91)
-        edit:SetMaxLetters(field.key == "REASON" and 80 or 10)
-        page.absenceEdits[field.key] = edit
-    end
-
-    page.saveAbsence = CreateButton(absenceCard, "Abmelden", 130, 32, function()
-        local success, message = GC.Profile:SetAbsence(
-            page.absenceEdits.FROM:GetText(),
-            page.absenceEdits.TO:GetText(),
-            page.absenceEdits.REASON:GetText()
-        )
-        page.absenceStatus:SetText(message or "")
-        SetTextColor(page.absenceStatus, success and THEME.success or THEME.danger)
-        if success then
-            GC.UI:RefreshMemberCare()
-        end
-    end, "PRIMARY")
-    page.saveAbsence:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -135)
-    page.clearAbsence = CreateButton(absenceCard, "Abmeldung löschen", 160, 32, function()
-        GC.Profile:ClearAbsence()
-        page.absenceStatus:SetText("Abmeldung gelöscht und mit der Gilde synchronisiert.")
-        SetTextColor(page.absenceStatus, THEME.success)
-        GC.UI:RefreshMemberCare()
-    end)
-    page.clearAbsence:SetPoint("LEFT", page.saveAbsence, "RIGHT", 8, 0)
-    page.absenceStatus = CreateLabel(absenceCard, "", { width = 402, height = 32 })
-    page.absenceStatus:SetPoint("LEFT", page.clearAbsence, "RIGHT", 12, 0)
-
     local rulesCard = CreateCard(content, "Prüfregeln")
     rulesCard:SetSize(752, 230)
-    rulesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -192)
+    rulesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     local rulesHelp = CreateLabel(rulesCard,
-        "Nur berechtigte Gildenprofil-Ränge ändern diese gildenweiten Regeln. Geschützte Ränge erscheinen nie als Vorschlag.",
+        "Nur berechtigte Einstellungs-Ränge ändern diese gildenweiten Regeln. Geschützte Ränge erscheinen nie als Vorschlag.",
         { muted = true, width = 716, height = 30, vertical = "TOP" })
     rulesHelp:SetPoint("TOPLEFT", rulesCard, "TOPLEFT", 18, -46)
 
@@ -1339,7 +1410,7 @@ function GC.UI:BuildMemberCarePage()
 
     local absencesCard = CreateCard(content, "Aktuelle Abmeldungen")
     absencesCard:SetSize(752, 210)
-    absencesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -434)
+    absencesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -242)
     page.guildAbsencesTitle = absencesCard.title
     page.guildAbsenceRows = {}
     for index = 1, 5 do
@@ -1361,7 +1432,7 @@ function GC.UI:BuildMemberCarePage()
 
     local suggestionsCard = CreateCard(content, "Pflegevorschläge")
     suggestionsCard:SetSize(752, 368)
-    suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -656)
+    suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -464)
     page.memberCareSuggestionsTitle = suggestionsCard.title
     local suggestionHelp = CreateLabel(suggestionsCard,
         "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.",
@@ -1388,37 +1459,6 @@ function GC.UI:RefreshMemberCare()
     local page = self.pages.MEMBERCARE
     if not page then
         return
-    end
-
-    local profile = GC.Profile:Get()
-    local absence = profile.absence or {}
-    if not page.absenceEdits.FROM:HasFocus() then
-        page.absenceEdits.FROM:SetText(absence.from or "")
-    end
-    if not page.absenceEdits.TO:HasFocus() then
-        page.absenceEdits.TO:SetText(absence.to or "")
-    end
-    if not page.absenceEdits.REASON:HasFocus() then
-        page.absenceEdits.REASON:SetText(absence.reason or "")
-    end
-
-    local absenceState = GC.Profile:GetAbsenceState(profile)
-    if absenceState == "ACTIVE" then
-        page.absenceStatus:SetText("Aktiv bis " .. absence.to .. ".")
-        SetTextColor(page.absenceStatus, THEME.success)
-        page.clearAbsence:Enable()
-    elseif absenceState == "UPCOMING" then
-        page.absenceStatus:SetText("Geplant ab " .. absence.from .. ".")
-        SetTextColor(page.absenceStatus, THEME.warning)
-        page.clearAbsence:Enable()
-    elseif absenceState == "EXPIRED" then
-        page.absenceStatus:SetText("Abmeldung abgelaufen – neu eintragen oder löschen.")
-        SetTextColor(page.absenceStatus, THEME.muted)
-        page.clearAbsence:Enable()
-    else
-        page.absenceStatus:SetText("Keine Abmeldung eingetragen.")
-        SetTextColor(page.absenceStatus, THEME.muted)
-        page.clearAbsence:Disable()
     end
 
     local careSettings = GC.DB:GetGuild().memberCare
@@ -1797,7 +1837,21 @@ function GC.UI:RefreshWorkshop()
     end
 
     local missingProfessions = GC.Workshop:GetMissingOwnProfessions()
-    if #missingProfessions > 0 then
+    local syncStats = GC.Workshop.syncStats or {}
+    if #(GC.Workshop.syncQueue or {}) > 0 then
+        page.workshopStatus:SetText("|cff2ed9e6Synchronisierung läuft:|r "
+            .. #GC.Workshop.syncQueue .. " Pakete verbleiben. Das Fenster kann geschlossen werden.")
+        SetTextColor(page.workshopStatus, THEME.accent)
+    elseif (syncStats.failed or 0) > 0 then
+        page.workshopStatus:SetText("|cffff6266Übertragung unvollständig:|r "
+            .. syncStats.failed .. " Pakete konnten auch nach Wiederholungen nicht gesendet werden.")
+        SetTextColor(page.workshopStatus, THEME.danger)
+    elseif (syncStats.receivedProfessions or 0) > 0 then
+        page.workshopStatus:SetText("Empfangen: " .. syncStats.receivedProfessions .. " Berufe mit "
+            .. syncStats.receivedRecipes .. " Rezepten"
+            .. (syncStats.lastSender ~= "" and ("  •  zuletzt " .. syncStats.lastSender) or "") .. ".")
+        SetTextColor(page.workshopStatus, THEME.success)
+    elseif #missingProfessions > 0 then
         page.workshopStatus:SetText("|cffffb84dNoch nicht eingelesen:|r "
             .. table.concat(missingProfessions, ", ") .. ". Das jeweilige Berufsfenster einmal geöffnet lassen.")
         SetTextColor(page.workshopStatus, THEME.warning)
@@ -2574,6 +2628,7 @@ function GC.UI:Refresh()
     if not self.frame then
         return
     end
+    self:RefreshNavigationAccess()
     self:RefreshDashboard()
     self:RefreshSettings()
     self:RefreshRoster()
@@ -2757,7 +2812,7 @@ function GC.UI:RegisterInterfaceOptions()
         C_Timer.After(0, function()
             GC.UI:CreateMainFrame()
             GC.UI.frame:Show()
-            GC.UI:ShowPage("OVERVIEW")
+            GC.UI:ShowPage("ROSTER")
         end)
     end, "PRIMARY")
     panel.openButton:SetPoint("TOP", command, "BOTTOM", 0, -24)
@@ -2808,12 +2863,14 @@ end)
 GC:RegisterCallback("SETTINGS_UPDATED", GC.UI, function(self)
     self:RefreshSettings()
     self:RefreshGuild()
+    self:RefreshNavigationAccess()
 end)
 
 GC:RegisterCallback("GUILD_PROFILE_UPDATED", GC.UI, function(self)
     self:RefreshGuild()
     self:RefreshSettings()
     self:RefreshMemberCare()
+    self:RefreshNavigationAccess()
     self:RefreshSuggestions()
     self:RefreshPost()
     self:RefreshInbox()

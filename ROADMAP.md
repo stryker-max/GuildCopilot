@@ -77,6 +77,16 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - keine automatische Entfernung und derzeit bewusst kein direkter Kick-Knopf;
 - Minimap-Symbol in den Blizzard-Rahmen eingepasst, Unicode-Favoritensterne durch echte WoW-Symboltexturen ersetzt und Escape-Schließen zusätzlich abgesichert.
 
+## 0.4.5 – Persönliches Profil, Rechte und zuverlässige Werkstattsynchronisierung
+
+- **Profil** als erster Menüpunkt und Standardansicht;
+- Raidprofil, Dual-Spec, Berufe und eigene Abmeldung in einer persönlichen Ansicht gebündelt;
+- Mitgliederpflege nur für ausgewählte, gildenweit synchronisierte Gildenränge sichtbar;
+- gildenweite Einstellungen nur für ausgewählte Bearbeiter-Ränge änderbar, lokale Komfortoptionen bleiben persönlich;
+- aktive Raider-Ränge ebenfalls gildenweit synchronisiert;
+- Werkstattpakete deutlich gedrosselt, bei Sendefehlern wiederholt und nicht mehr still verworfen;
+- sichtbarer Status für laufende, fehlgeschlagene und empfangene Rezeptübertragungen.
+
 ## 0.5 – Raid Monitor
 
 ### Addon-Erkennung

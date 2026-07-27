@@ -5,10 +5,21 @@ GC.Workshop = {
     syncQueue = {},
     syncSending = false,
     scanPending = false,
+    syncStats = {
+        queued = 0,
+        sent = 0,
+        failed = 0,
+        receivedProfessions = 0,
+        receivedRecipes = 0,
+        lastSender = "",
+    },
 }
 
 local MAX_PAYLOAD_BYTES = 170
 local MAX_RECORD_BYTES = 165
+local SYNC_INTERVAL = 0.65
+local SYNC_RETRY_DELAY = 1.5
+local MAX_SEND_RETRIES = 5
 
 local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
@@ -401,13 +412,23 @@ function GC.Workshop:QueueProfessionSync(profession)
     end
     for _, message in ipairs(self:BuildProfessionMessages(profession)) do
         if #message <= GC.Constants.MAX_CHAT_BYTES then
-            self.syncQueue[#self.syncQueue + 1] = message
+            self.syncQueue[#self.syncQueue + 1] = {
+                message = message,
+                retries = 0,
+            }
+            self.syncStats.queued = self.syncStats.queued + 1
         end
     end
+    GC:FireCallback("WORKSHOP_UPDATED")
     self:PumpSyncQueue()
 end
 
 function GC.Workshop:QueueAllProfessions()
+    if #self.syncQueue == 0 and not self.syncSending then
+        self.syncStats.queued = 0
+        self.syncStats.sent = 0
+        self.syncStats.failed = 0
+    end
     for _, profession in pairs(self:GetOwnData().professions) do
         self:QueueProfessionSync(profession)
     end
@@ -418,11 +439,22 @@ function GC.Workshop:PumpSyncQueue()
         return
     end
     self.syncSending = true
-    local message = table.remove(self.syncQueue, 1)
-    if GC.Sync then
-        GC.Sync:Send(message)
+    local entry = self.syncQueue[1]
+    local sent = GC.Sync and GC.Sync:Send(entry.message)
+    local delay = SYNC_INTERVAL
+    if sent then
+        table.remove(self.syncQueue, 1)
+        self.syncStats.sent = self.syncStats.sent + 1
+    else
+        entry.retries = entry.retries + 1
+        delay = SYNC_RETRY_DELAY
+        if entry.retries >= MAX_SEND_RETRIES then
+            table.remove(self.syncQueue, 1)
+            self.syncStats.failed = self.syncStats.failed + 1
+        end
     end
-    C_Timer.After(0.18, function()
+    GC:FireCallback("WORKSHOP_UPDATED")
+    C_Timer.After(delay, function()
         self.syncSending = false
         self:PumpSyncQueue()
     end)
@@ -435,7 +467,11 @@ function GC.Workshop:RequestGuildData()
     if not GC.Sync or not GC.Sync:Send(BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "Q" })) then
         return false, "Werkstatt-Anfrage konnte nicht gesendet werden."
     end
-    return true, "Werkstattdaten bei Online-Gildenmitgliedern angefragt."
+    self.syncStats.receivedProfessions = 0
+    self.syncStats.receivedRecipes = 0
+    self.syncStats.lastSender = ""
+    GC:FireCallback("WORKSHOP_UPDATED")
+    return true, "Anfrage gesendet. Große Rezeptlisten werden sicher und gedrosselt übertragen."
 end
 
 local function DecodeRecipeRecord(record, professionName)
@@ -468,7 +504,7 @@ end
 function GC.Workshop:ReceiveSync(fields, sender)
     local operation = fields[3]
     if operation == "Q" then
-        C_Timer.After(math.random() * 1.5, function()
+        C_Timer.After(math.random() * 4.5, function()
             self:QueueAllProfessions()
         end)
         return
@@ -531,6 +567,13 @@ function GC.Workshop:ReceiveSync(fields, sender)
     }
     crafters[senderKey] = crafter
     self.incoming[incomingKey] = nil
+    local receivedRecipeCount = 0
+    for _ in pairs(recipes) do
+        receivedRecipeCount = receivedRecipeCount + 1
+    end
+    self.syncStats.receivedProfessions = self.syncStats.receivedProfessions + 1
+    self.syncStats.receivedRecipes = self.syncStats.receivedRecipes + receivedRecipeCount
+    self.syncStats.lastSender = GC.Util.PlayerShortName(sender)
     GC:FireCallback("WORKSHOP_UPDATED")
 end
 

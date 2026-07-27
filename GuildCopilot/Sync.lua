@@ -42,11 +42,21 @@ function GC.Sync:Send(payload)
     end
 
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        C_ChatInfo.SendAddonMessage(GC.Constants.COMM_PREFIX, payload, "GUILD")
-        return true
+        local success, result = pcall(
+            C_ChatInfo.SendAddonMessage,
+            GC.Constants.COMM_PREFIX,
+            payload,
+            "GUILD"
+        )
+        return success and result ~= false
     elseif SendAddonMessage then
-        SendAddonMessage(GC.Constants.COMM_PREFIX, payload, "GUILD")
-        return true
+        local success, result = pcall(
+            SendAddonMessage,
+            GC.Constants.COMM_PREFIX,
+            payload,
+            "GUILD"
+        )
+        return success and result ~= false
     end
     return false
 end
@@ -104,6 +114,7 @@ function GC.Sync:BuildGuildProfileMessages()
     local permissions = guildData.profilePermissions
     local templates = guildData.replyTemplates
     local memberCare = guildData.memberCare
+    local roster = guildData.roster
     local fields = {
         "GP",
         tostring(profile.updatedAt or 0),
@@ -121,6 +132,10 @@ function GC.Sync:BuildGuildProfileMessages()
         tostring(memberCare.inactivityDays or 60),
         BoolField(memberCare.protectedRanksConfigured),
         table.concat(SortedEnabledRanks(memberCare.protectedRanks), ","),
+        BoolField(memberCare.accessRanksConfigured),
+        table.concat(SortedEnabledRanks(memberCare.accessRanks), ","),
+        BoolField(roster.rankFilterConfigured),
+        table.concat(SortedEnabledRanks(roster.activeRaiderRanks), ","),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -155,15 +170,24 @@ function GC.Sync:SendGuildProfile(force)
     end
     local messages = self:BuildGuildProfileMessages()
     local index = 1
+    local retries = 0
     local function SendNext()
         local message = messages[index]
         if not message then
             return
         end
-        self:Send(message)
-        index = index + 1
+        local sent = self:Send(message)
+        if sent then
+            index = index + 1
+            retries = 0
+        else
+            retries = retries + 1
+            if retries >= 5 then
+                return
+            end
+        end
         if messages[index] then
-            C_Timer.After(0.12, SendNext)
+            C_Timer.After(sent and 0.45 or 1.25, SendNext)
         end
     end
     SendNext()
@@ -246,6 +270,16 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     guildData.memberCare.protectedRanks = {}
     for rankIndex in tostring(fields[16] or ""):gmatch("[^,]+") do
         guildData.memberCare.protectedRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
+    end
+    guildData.memberCare.accessRanksConfigured = fields[17] == "1"
+    guildData.memberCare.accessRanks = {}
+    for rankIndex in tostring(fields[18] or ""):gmatch("[^,]+") do
+        guildData.memberCare.accessRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
+    end
+    guildData.roster.rankFilterConfigured = fields[19] == "1"
+    guildData.roster.activeRaiderRanks = {}
+    for rankIndex in tostring(fields[20] or ""):gmatch("[^,]+") do
+        guildData.roster.activeRaiderRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")
@@ -360,7 +394,8 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     local schemaVersion = tonumber(fields[2])
     if fields[1] == "P"
         and (schemaVersion == 2 or schemaVersion == 3 or schemaVersion == 4
-            or schemaVersion == 5 or schemaVersion == GC.Constants.SCHEMA_VERSION) then
+            or schemaVersion == 5 or schemaVersion == 6
+            or schemaVersion == GC.Constants.SCHEMA_VERSION) then
         self:ReceiveProfile(fields, sender)
     elseif fields[1] == "W" and schemaVersion == GC.Constants.SCHEMA_VERSION and GC.Workshop then
         GC.Workshop:ReceiveSync(fields, sender)
