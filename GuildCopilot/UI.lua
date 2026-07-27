@@ -38,7 +38,7 @@ local TAB_DEFINITIONS = {
     { key = "MEMBERCARE", section = "ROSTER", label = "Mitgliederpflege", icon = "Interface\\Icons\\INV_Misc_Note_06" },
     { key = "WORKSHOP", section = "ROSTER", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
     { key = "WCL", section = "ROSTER", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
-    { key = "STATISTICS", section = "ROADMAP", label = "Statistiken", icon = "Interface\\Icons\\INV_Misc_Book_11" },
+    { key = "STATISTICS", section = "RAID", label = "Raidauswertung", icon = "Interface\\Icons\\INV_Misc_Book_11" },
     { key = "SETTINGS", section = "SYSTEM", label = "Einstellungen", icon = "Interface\\Icons\\INV_Gizmo_02" },
 }
 
@@ -2630,53 +2630,225 @@ function GC.UI:RefreshWarcraftLogs()
     end
 end
 
+local function FormatDuration(seconds)
+    seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    if hours > 0 then
+        return hours .. "h " .. minutes .. "m"
+    end
+    return minutes .. "m"
+end
+
+local function SetButtonEnabled(button, enabled)
+    if enabled then
+        button:Enable()
+    else
+        button:Disable()
+    end
+    button.label:SetAlpha(enabled and 1 or 0.45)
+end
+
+local function FormatSessionDate(summary)
+    if date and summary.startedAt and summary.startedAt > 0 then
+        local ok, formatted = pcall(date, "%d.%m. %H:%M", summary.startedAt)
+        if ok and formatted then
+            return formatted
+        end
+    end
+    return "unbekannt"
+end
+
 function GC.UI:BuildStatisticsPage()
     local page = self.pages.STATISTICS
-    CreatePageTitle(page, "Statistiken",
-        "Rekrutierung, Roster und Gildenwerkstatt sind aktiv; die Raid-Auswertungen folgen schrittweise.")
+    CreatePageTitle(page, "Raidauswertung",
+        "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge. Es werden nur Zusammenfassungen gespeichert, keine Rohdaten.")
 
-    local definitions = {
-        {
-            title = "Raidaktivität",
-            icon = "Interface\\Icons\\Achievement_Boss_KelThuzad_01",
-            text = "Geplant: Sitzungen, Anwesenheit, Bossversuche, Siege, Wipes, Interrupts und Dispels – live sowie aus Warcraft Logs.",
-        },
-        {
-            title = "Consumables & Ausrüstung",
-            icon = "Interface\\Icons\\INV_Potion_54",
-            text = "Geplant: Tränke, Fläschchen, Essen, Öle und Trommeln zählen sowie Verzauberungen und Edelsteine nachvollziehbar prüfen.",
-        },
-        {
-            title = "Gildenwerkstatt",
-            icon = "Interface\\Icons\\INV_Hammer_20",
-            status = "AKTIV",
-            text = "Rezepte aus geöffneten Berufsfenstern erfassen, Crafter finden und benötigte Materialien direkt anzeigen.",
-        },
-        {
-            title = "Mitgliederpflege",
-            icon = "Interface\\Icons\\INV_Misc_Note_06",
-            text = "Geplant: lange Inaktivität, Main/Twink, Abmeldungen und geschützte Ränge prüfen – nur Vorschläge, niemals Auto-Kicks.",
-        },
+    local controlCard = CreateCard(page)
+    controlCard:SetSize(776, 74)
+    controlCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    page.sessionStatus = CreateLabel(controlCard, "", { width = 470, height = 46, vertical = "TOP" })
+    page.sessionStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -14)
+
+    page.sessionButton = CreateButton(controlCard, "Sitzung starten", 150, 30, function()
+        local monitor = GC.RaidMonitor
+        local ok, message
+        if monitor.session then
+            ok, message = monitor:EndSession()
+        else
+            ok, message = monitor:BeginSession()
+        end
+        if not ok and message then
+            GC:Print(message)
+        end
+        GC.UI:RefreshStatistics()
+    end, "PRIMARY")
+    page.sessionButton:SetPoint("TOPRIGHT", controlCard, "TOPRIGHT", -18, -14)
+
+    page.requestButton = CreateButton(controlCard, "Auswertung anfordern", 150, 30, function()
+        local ok, message = GC.RaidMonitor:RequestSummaries()
+        if message then
+            GC:Print(message)
+        end
+    end)
+    page.requestButton:SetPoint("TOPRIGHT", page.sessionButton, "BOTTOMRIGHT", 0, -4)
+
+    local listCard = CreateCard(page, "Sitzungen")
+    listCard:SetSize(238, 380)
+    listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -150)
+    page.sessionRows = {}
+    for index = 1, 12 do
+        local row = CreateButton(listCard, "", 206, 26, function()
+            local summary = GC.RaidMonitor:GetSummaries()[index]
+            if summary then
+                GC.RaidMonitor.selectedSessionID = summary.id
+                GC.UI:RefreshStatistics()
+            end
+        end)
+        row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -50 - ((index - 1) * 28))
+        row.label:SetJustifyH("LEFT")
+        row.label:ClearAllPoints()
+        row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        page.sessionRows[index] = row
+    end
+    page.sessionEmpty = CreateLabel(listCard, "Noch keine Auswertung vorhanden.", { muted = true, width = 200, height = 40, vertical = "TOP" })
+    page.sessionEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
+
+    local detailCard = CreateCard(page, "Teilnehmer")
+    detailCard:SetSize(526, 380)
+    detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -150)
+    page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 380, height = 18 })
+    page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
+
+    local detailHeaders = {
+        { text = "SPIELER", x = 18, width = 104 },
+        { text = "DABEI", x = 126, width = 52 },
+        { text = "TODE", x = 182, width = 42 },
+        { text = "INT", x = 226, width = 36 },
+        { text = "DISP", x = 264, width = 40 },
+        { text = "TRÄNKE", x = 306, width = 58 },
+        { text = "FLASK", x = 366, width = 48 },
+        { text = "ESSEN", x = 416, width = 50 },
+        { text = "TROMM", x = 468, width = 54 },
     }
-
-    for index, definition in ipairs(definitions) do
-        local column = (index - 1) % 2
-        local row = math.floor((index - 1) / 2)
-        local card = CreateCard(page, definition.title)
-        card:SetSize(382, 196)
-        card:SetPoint("TOPLEFT", page, "TOPLEFT", column * 394, -66 - (row * 208))
-        local icon = card:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(38, 38)
-        icon:SetPoint("TOPLEFT", card, "TOPLEFT", 18, -51)
-        icon:SetTexture(definition.icon)
-        local status = CreateLabel(card, definition.status or "ROADMAP", {
-            muted = definition.status == nil,
-            color = definition.status and THEME.success or nil,
+    for _, headerDefinition in ipairs(detailHeaders) do
+        local headerLabel = CreateLabel(detailCard, headerDefinition.text, {
+            muted = true,
             font = "GameFontNormalSmall",
+            width = headerDefinition.width,
         })
-        status:SetPoint("TOPLEFT", card, "TOPLEFT", 70, -52)
-        local textLabel = CreateLabel(card, definition.text, { width = 292, height = 104, vertical = "TOP" })
-        textLabel:SetPoint("TOPLEFT", card, "TOPLEFT", 70, -76)
+        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+    end
+
+    local scroll = CreateModernScrollFrame(detailCard)
+    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
+    scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetWidth(492)
+    content:SetHeight(1100)
+    scroll:SetScrollChild(content)
+
+    page.participantRows = {}
+    for index = 1, 40 do
+        local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
+        row:SetSize(490, 25)
+        row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
+        local columns = {
+            { key = "name", x = 5, width = 104 },
+            { key = "presence", x = 113, width = 52 },
+            { key = "deaths", x = 169, width = 42 },
+            { key = "interrupts", x = 213, width = 36 },
+            { key = "dispels", x = 251, width = 40 },
+            { key = "potions", x = 293, width = 58 },
+            { key = "flasks", x = 353, width = 48 },
+            { key = "food", x = 403, width = 50 },
+            { key = "drums", x = 455, width = 54 },
+        }
+        for _, column in ipairs(columns) do
+            row[column.key] = CreateLabel(row, "", { width = column.width })
+            row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
+        end
+        page.participantRows[index] = row
+    end
+    page.participantEmpty = CreateLabel(detailCard, "Wähle links eine Sitzung aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
+    page.participantEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -88)
+end
+
+function GC.UI:RefreshStatistics()
+    local page = self.pages.STATISTICS
+    if not page then
+        return
+    end
+
+    local monitor = GC.RaidMonitor
+    local canControl = monitor:CanControlSession()
+    local session = monitor.session
+    if session then
+        local participantCount = 0
+        for _ in pairs(session.participants) do
+            participantCount = participantCount + 1
+        end
+        page.sessionStatus:SetText("|cff59e695Sitzung läuft|r  •  " .. participantCount .. " Teilnehmer  •  "
+            .. #session.pulls .. " Versuche\nGestartet von " .. (session.startedBy ~= "" and session.startedBy or "unbekannt")
+            .. (session.zone ~= "" and ("  •  " .. session.zone) or ""))
+        page.sessionButton:SetText("Sitzung beenden")
+    else
+        page.sessionStatus:SetText("|cff91a3b8Keine laufende Sitzung.|r\n"
+            .. (canControl and "Du darfst eine Sitzung starten und beenden."
+                or "Nur Raidleiter, Assistenten und berechtigte Gildenränge dürfen Sitzungen steuern."))
+        page.sessionButton:SetText("Sitzung starten")
+    end
+    SetButtonEnabled(page.sessionButton, canControl)
+    SetButtonEnabled(page.requestButton, canControl)
+
+    local summaries = monitor:GetSummaries()
+    page.sessionEmpty:SetShown(#summaries == 0)
+    local selectedID = monitor.selectedSessionID
+    if not monitor:GetSummary(selectedID) then
+        selectedID = summaries[1] and summaries[1].id
+        monitor.selectedSessionID = selectedID
+    end
+
+    for index, row in ipairs(page.sessionRows) do
+        local summary = summaries[index]
+        row:SetShown(summary ~= nil)
+        if summary then
+            local zone = summary.zone ~= "" and summary.zone or "Raid"
+            row:SetText(FormatSessionDate(summary) .. "  " .. zone)
+            row:SetActive(summary.id == selectedID)
+        end
+    end
+
+    local selected = monitor:GetSummary(selectedID)
+    page.participantEmpty:SetShown(selected == nil)
+    if selected then
+        page.sessionHeadline:SetText(FormatSessionDate(selected)
+            .. "  •  " .. FormatDuration((selected.endedAt or 0) - (selected.startedAt or 0))
+            .. "  •  " .. (selected.pulls or 0) .. " Versuche, " .. (selected.kills or 0) .. " Siege, "
+            .. (selected.wipes or 0) .. " Wipes  •  Quelle: "
+            .. (selected.source == "LIVE" and "Live" or "Addon-Sync"))
+    else
+        page.sessionHeadline:SetText("")
+    end
+
+    local participants = selected and selected.participants or {}
+    for index, row in ipairs(page.participantRows) do
+        local participant = participants[index]
+        row:SetShown(participant ~= nil)
+        if participant then
+            local consumables = participant.consumables or {}
+            row.name:SetText(participant.name)
+            row.name:SetTextColor(ClassColor(participant.classFile))
+            row.presence:SetText(FormatDuration(participant.seconds))
+            row.deaths:SetText(participant.deaths or 0)
+            row.interrupts:SetText(participant.interrupts or 0)
+            row.dispels:SetText(participant.dispels or 0)
+            row.potions:SetText(consumables.POTION or 0)
+            row.flasks:SetText(consumables.FLASK or 0)
+            row.food:SetText(consumables.FOOD or 0)
+            row.drums:SetText(consumables.DRUM or 0)
+        end
     end
 end
 
@@ -2696,6 +2868,7 @@ function GC.UI:Refresh()
     self:RefreshInbox()
     self:RefreshGuild()
     self:RefreshWarcraftLogs()
+    self:RefreshStatistics()
 end
 
 function GC.UI:AddGuildWindowButton()
@@ -2960,4 +3133,8 @@ end)
 
 GC:RegisterCallback("ADDON_USERS_UPDATED", GC.UI, function(self)
     self:RefreshDashboard()
+end)
+
+GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
+    self:RefreshStatistics()
 end)

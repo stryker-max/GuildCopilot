@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.4.6",
+    VERSION = "0.5.0",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -58,6 +58,64 @@ GC.SuccessSoundOptions = {
     { key = "RAID_WARNING", name = "Raidwarnung", soundID = 8959 },
     { key = "IG_QUEST_LIST_COMPLETE", name = "Quest abgeschlossen", soundID = 619 },
     { key = "MAP_PING", name = "Karten-Ping", soundID = 3175 },
+}
+
+-- Verbrauchsgegenstände werden nach Spell-ID gezählt. "repeatable" trennt
+-- Gegenstände, die pro Anwendung zählen (Tränke, Runen, Trommeln), von
+-- dauerhaften Buffs, die pro Sitzung nur einmal zählen sollen.
+GC.ConsumableCategories = {
+    { key = "POTION", label = "Tränke", repeatable = true },
+    { key = "RUNE", label = "Runen", repeatable = true },
+    { key = "DRUM", label = "Trommeln", repeatable = true },
+    { key = "FLASK", label = "Fläschchen", repeatable = false },
+    { key = "ELIXIR", label = "Elixiere", repeatable = false },
+    { key = "FOOD", label = "Essen", repeatable = false },
+    { key = "OIL", label = "Öle/Steine", repeatable = false },
+}
+
+GC.ConsumableCategoryByKey = {}
+for index, category in ipairs(GC.ConsumableCategories) do
+    category.index = index
+    GC.ConsumableCategoryByKey[category.key] = category
+end
+
+-- Ausgangsbestand gebräuchlicher TBC-Verbrauchsgegenstände. Die Liste ist
+-- bewusst erweiterbar gehalten: unbekannte Spell-IDs werden schlicht nicht
+-- gezählt, es entstehen also keine falschen Zahlen, sondern nur unvollständige.
+-- Vor dem Scharfschalten gegen echte Logs abgleichen.
+GC.Consumables = {
+    [28495] = { category = "POTION", name = "Übermächtiger Heiltrank" },
+    [28499] = { category = "POTION", name = "Übermächtiger Manatrank" },
+    [28507] = { category = "POTION", name = "Hasttrank" },
+    [28508] = { category = "POTION", name = "Zerstörungstrank" },
+    [28494] = { category = "POTION", name = "Trank der irren Stärke" },
+    [28511] = { category = "POTION", name = "Heldentrank" },
+    [28512] = { category = "POTION", name = "Eisenschildtrank" },
+    [38908] = { category = "POTION", name = "Teufelsmanatrank" },
+    [16666] = { category = "RUNE", name = "Dämonische Rune" },
+    [27869] = { category = "RUNE", name = "Dunkle Rune" },
+    [35476] = { category = "DRUM", name = "Trommeln der Schlacht" },
+    [35475] = { category = "DRUM", name = "Trommeln des Krieges" },
+    [35478] = { category = "DRUM", name = "Trommeln der Wiederherstellung" },
+    [35477] = { category = "DRUM", name = "Trommeln der Schnelligkeit" },
+    [35474] = { category = "DRUM", name = "Trommeln der Panik" },
+    [28518] = { category = "FLASK", name = "Fläschchen der Festigung" },
+    [28519] = { category = "FLASK", name = "Fläschchen der mächtigen Wiederherstellung" },
+    [28520] = { category = "FLASK", name = "Fläschchen des unerbittlichen Angriffs" },
+    [28521] = { category = "FLASK", name = "Fläschchen des blendenden Lichts" },
+    [28540] = { category = "FLASK", name = "Fläschchen des reinen Todes" },
+    [28490] = { category = "ELIXIR", name = "Elixier der Stärke" },
+    [28497] = { category = "ELIXIR", name = "Elixier der Beweglichkeit" },
+    [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft" },
+    [28493] = { category = "ELIXIR", name = "Elixier der Frostmacht" },
+    [28501] = { category = "ELIXIR", name = "Elixier der Feuermacht" },
+    [28502] = { category = "ELIXIR", name = "Elixier der Verteidigung" },
+    [28503] = { category = "ELIXIR", name = "Elixier der Schattenmacht" },
+    [28509] = { category = "ELIXIR", name = "Elixier des Magierbluts" },
+    [39625] = { category = "ELIXIR", name = "Elixier der Standhaftigkeit" },
+    [39627] = { category = "ELIXIR", name = "Elixier der Draeneiweisheit" },
+    [28017] = { category = "OIL", name = "Überlegenes Zaubereröl" },
+    [28019] = { category = "OIL", name = "Überlegenes Manaöl" },
 }
 
 GC.ClassOrder = {

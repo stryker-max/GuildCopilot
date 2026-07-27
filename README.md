@@ -1,4 +1,4 @@
-# Guild Copilot 0.4.6
+# Guild Copilot 0.5.0
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -47,6 +47,10 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - eigene statische Addon-Optionsseite mit Schriftlogo, Slash-Befehl und ausdrücklichem Öffnen-Button; sie öffnet kein zweites Fenster mehr automatisch und blockiert dadurch nicht die Escape-Taste;
 - zusätzliche direkte Escape-Behandlung für Hauptfenster und Textfelder;
 - eigenes Guild-Copilot-Logo im Fenstertitel und in den Addon-Metadaten;
+- **Raidauswertung** mit ausdrücklich gestarteter Sitzung: Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände;
+- Sitzungen dürfen Raidleiter, Assistenten und die für die Mitgliederpflege freigegebenen Gildenränge starten und beenden;
+- die fertige Auswertung wird über den Raidkanal an alle berechtigten Teilnehmer verteilt; Offiziere außerhalb des Raids fragen sie an und erhalten sie per Flüsterkanal;
+- gespeichert werden ausschließlich Zusammenfassungen, keine Combat-Log-Rohdaten;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
 - Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen.
 - manueller Profilimport ohne API im lesbaren Format `Name;Klasse;Primär-Spec;Dual-Spec`.
@@ -63,6 +67,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 7. Optional unter **Warcraft Logs** die Gildenseite speichern und einen Companion-Export importieren.
 8. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
 9. Unter **Mitgliederpflege** – mit freigegebenem Gildenrang – Abmeldungen und Inaktivitätsvorschläge prüfen sowie Inaktivitätsgrenze und geschützte Ränge festlegen.
+10. Unter **Raidauswertung** vor dem Raid **Sitzung starten** und danach **Sitzung beenden**. Offiziere außerhalb des Raids holen sich die Auswertung über **Auswertung anfordern**.
 
 ## Wichtige WoW-Grenzen
 

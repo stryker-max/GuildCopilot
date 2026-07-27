@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.4.6",
+  "## Version: 0.5.0",
 ];
 
 for (const entry of requiredMetadata) {
@@ -135,6 +135,12 @@ const requiredImplementations = [
   ["Handshake ohne Dauerbroadcast", /MIN_ANNOUNCE_INTERVAL/],
   ["Erkennung abweichender Datenversionen", /GetAddonUserStats/],
   ["Handshake-Fähigkeiten", /GC\.Capabilities/],
+  ["Raidsitzung mit ausdrücklichem Start", /function GC\.RaidMonitor:BeginSession/],
+  ["Rechteprüfung für die Raidauswertung", /CanControlSession/],
+  ["Auswertung ohne Rohdatenspeicher", /function GC\.RaidMonitor:BuildSummary/],
+  ["Consumables nach Spell-ID", /GC\.Consumables\[/],
+  ["Auswertung über Raid- und Flüsterkanal", /DistributeSummary/],
+  ["Anwesenheitszeit", /presentSince/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

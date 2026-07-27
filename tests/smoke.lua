@@ -269,6 +269,49 @@ function GetItemInfo(itemID)
     return names[tonumber(itemID)]
 end
 
+raidRoster = {}
+
+function IsInRaid()
+    return #raidRoster > 0
+end
+
+function IsInGroup()
+    return #raidRoster > 0
+end
+
+function GetNumGroupMembers()
+    return #raidRoster
+end
+
+-- name, rank, subgroup, level, class, fileName
+function GetRaidRosterInfo(index)
+    local member = raidRoster[index]
+    if not member then
+        return nil
+    end
+    return member[1], member[2], 1, 70, "", member[3]
+end
+
+function GetRealZoneText()
+    return "Karazhan"
+end
+
+local combatLogEvent = {}
+function CombatLogGetCurrentEventInfo()
+    return unpack(combatLogEvent)
+end
+
+-- Baut ein Combat-Log-Ereignis in der Reihenfolge des echten Clients auf.
+function FireCombatLog(subevent, sourceName, destName, spellID, destGUID)
+    combatLogEvent = {
+        1000, subevent, false,
+        "Player-" .. tostring(sourceName), sourceName, 0, 0,
+        destGUID or ("Player-" .. tostring(destName)), destName, 0, 0,
+        spellID,
+    }
+    GuildCopilot.RaidMonitor:OnCombatLogEvent()
+end
+
 function GetChannelList()
     return 1, "Allgemein", false, 2, "Handel", false, 4, "SucheNachGruppe", false, 5, "Gildenrekrutierung", false
 end
@@ -301,12 +344,12 @@ C_ChatInfo = {
     RegisterAddonMessagePrefix = function()
         return true
     end,
-    SendAddonMessage = function(prefix, message, distribution)
+    SendAddonMessage = function(prefix, message, distribution, target)
         if addonSendFailures > 0 then
             addonSendFailures = addonSendFailures - 1
             return false
         end
-        sentAddon[#sentAddon + 1] = { prefix, message, distribution }
+        sentAddon[#sentAddon + 1] = { prefix, message, distribution, target }
         return true
     end,
     SendChatMessage = function(message, chatType, language, target)
@@ -330,6 +373,7 @@ local files = {
     "WarcraftLogs.lua",
     "Roster.lua",
     "Workshop.lua",
+    "RaidMonitor.lua",
     "Sync.lua",
     "Recruitment.lua",
     "Chat.lua",
@@ -587,6 +631,128 @@ local function LastAddonMessage()
     return entry and entry[2] or ""
 end
 
+-- === Raidauswertung =========================================================
+raidRoster = {
+    { "Tester", 2, "HUNTER" },
+    { "Heiler", 1, "PRIEST" },
+    { "Schurke", 0, "ROGUE" },
+}
+
+assert(addon.RaidMonitor:GetRaidRank("Tester") == 2, "Der Raidleiter wurde nicht erkannt")
+assert(addon.RaidMonitor:GetRaidRank("Heiler") == 1, "Der Assistent wurde nicht erkannt")
+assert(addon.RaidMonitor:GetRaidRank("Schurke") == 0, "Ein einfaches Raidmitglied wurde falsch eingestuft")
+assert(addon.RaidMonitor:CanControlSession("Heiler") == true,
+    "Ein Assistent darf die Auswertung nicht steuern")
+assert(addon.RaidMonitor:CanControlSession("Schurke") == false,
+    "Ein einfaches Raidmitglied darf die Auswertung steuern")
+
+local sessionStarted = addon.RaidMonitor:BeginSession()
+assert(sessionStarted == true, "Die Raidsitzung wurde nicht gestartet")
+assert(addon.RaidMonitor.session ~= nil, "Es läuft keine Sitzung")
+assert(LastAddonMessage():sub(1, 3) == "RS|", "Der Sitzungsstart wurde nicht angekündigt")
+assert(sentAddon[#sentAddon][3] == "RAID", "Die Sitzung wurde nicht über den Raidkanal angekündigt")
+local liveSession = addon.RaidMonitor.session
+assert(liveSession.participants.schurke ~= nil, "Raidmitglieder wurden nicht übernommen")
+
+addon.RaidMonitor:BeginSegment(currentTime)
+FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
+FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
+FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 28518)
+FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 28518)
+FireCombatLog("SPELL_INTERRUPT", "Schurke", "Prinz", nil, "Creature-1")
+FireCombatLog("SPELL_DISPEL", "Heiler", "Tester", nil)
+FireCombatLog("UNIT_DIED", "", "Tester", nil)
+FireCombatLog("UNIT_DIED", "", "Prinz Malchezaar", nil, "Creature-1234")
+
+local rogue = liveSession.participants.schurke
+local healer = liveSession.participants.heiler
+assert(rogue.consumables.POTION == 2, "Wiederholbare Tränke wurden nicht mehrfach gezählt")
+assert(healer.consumables.FLASK == 1, "Ein dauerhaftes Fläschchen wurde doppelt gezählt")
+assert(rogue.interrupts == 1, "Der Interrupt wurde nicht gezählt")
+assert(healer.dispels == 1, "Der Dispel wurde nicht gezählt")
+assert(liveSession.participants.tester.deaths == 1, "Der Spielertod wurde nicht gezählt")
+assert(liveSession.segment.lastNPCDeath == "Prinz Malchezaar", "Der gestorbene Gegner wurde nicht erfasst")
+
+currentTime = currentTime + 120
+addon.RaidMonitor:CloseSegment(currentTime)
+assert(#liveSession.pulls == 1, "Der Kampfabschnitt wurde nicht als Versuch gewertet")
+assert(liveSession.pulls[1].result == "KILL", "Ein Kampf mit totem Boss wurde nicht als Sieg gewertet")
+assert(liveSession.pulls[1].name == "Prinz Malchezaar", "Der Versuch wurde nicht nach dem Gegner benannt")
+
+currentTime = currentTime + 60
+local sessionEnded = addon.RaidMonitor:EndSession()
+assert(sessionEnded == true, "Die Raidsitzung wurde nicht beendet")
+assert(addon.RaidMonitor.session == nil, "Die Sitzung läuft nach dem Beenden weiter")
+
+local storedSummary = addon.RaidMonitor:GetSummaries()[1]
+assert(storedSummary ~= nil, "Die Auswertung wurde nicht gespeichert")
+assert(storedSummary.kills == 1, "Der Sieg fehlt in der Auswertung")
+assert(#storedSummary.participants == 3, "Nicht alle Teilnehmer stehen in der Auswertung")
+assert(storedSummary.source == "LIVE", "Die eigene Auswertung ist nicht als Live-Daten gekennzeichnet")
+local storedRogue
+for _, participant in ipairs(storedSummary.participants) do
+    if participant.name == "Schurke" then
+        storedRogue = participant
+    end
+end
+assert(storedRogue.seconds >= 180, "Die Anwesenheitszeit wurde nicht mitgeschrieben")
+assert(storedRogue.consumables.POTION == 2, "Die Tränke fehlen in der Auswertung")
+
+-- Die Zusammenfassung überlebt Serialisierung und Zerlegung in Chatpakete.
+local summaryMessages = addon.RaidMonitor:BuildSummaryMessages(storedSummary, "token1")
+assert(#summaryMessages > 0, "Die Auswertung wurde nicht in Pakete zerlegt")
+for _, summaryMessage in ipairs(summaryMessages) do
+    assert(#summaryMessage <= 255, "Ein Auswertungspaket überschreitet das Addon-Limit")
+end
+local decoded = addon.RaidMonitor:DecodeSummary(addon.RaidMonitor:EncodeSummary(storedSummary))
+assert(decoded ~= nil, "Die Auswertung ließ sich nicht zurücklesen")
+assert(decoded.id == storedSummary.id, "Die Sitzungskennung ging verloren")
+assert(#decoded.participants == 3, "Teilnehmer gingen beim Übertragen verloren")
+assert(decoded.kills == 1, "Die Siege gingen beim Übertragen verloren")
+
+-- Ein Assistent verteilt eine fremde Auswertung; sie darf angenommen werden.
+addon.DB:GetGuild().raidSessions = {}
+for _, summaryMessage in ipairs(summaryMessages) do
+    addon.Sync:OnMessage("GuildCopilot", summaryMessage, "RAID", "Heiler-Realm")
+end
+local receivedSummary = addon.RaidMonitor:GetSummaries()[1]
+assert(receivedSummary ~= nil, "Die verteilte Auswertung wurde nicht übernommen")
+assert(receivedSummary.source == "SYNC", "Übernommene Daten sind nicht als Sync gekennzeichnet")
+assert(#receivedSummary.participants == 3, "Die übernommene Auswertung ist unvollständig")
+
+-- Ein einfaches Raidmitglied darf keine Auswertung setzen.
+addon.DB:GetGuild().raidSessions = {}
+for _, summaryMessage in ipairs(summaryMessages) do
+    addon.Sync:OnMessage("GuildCopilot", summaryMessage, "RAID", "Schurke-Realm")
+end
+assert(#addon.RaidMonitor:GetSummaries() == 0,
+    "Ein einfaches Raidmitglied konnte eine Auswertung einspielen")
+
+-- Offiziere außerhalb des Raids fragen an; geantwortet wird per Flüstern,
+-- nicht über den offenen Gildenkanal.
+addon.RaidMonitor:StoreSummary(decoded)
+addon.RaidMonitor.lastAnswerAt = 0
+currentTime = currentTime + 60
+local answerCountBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "RQ|7", "GUILD", "Heiler-Realm")
+assert(#sentAddon > answerCountBefore, "Auf die Auswertungsanfrage wurde nicht geantwortet")
+assert(sentAddon[#sentAddon][3] == "WHISPER", "Die Auswertung ging nicht über den Flüsterkanal")
+assert(sentAddon[#sentAddon][4] == "Heiler-Realm", "Die Auswertung ging an den falschen Empfänger")
+local ignoredRequestBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "RQ|7", "GUILD", "Schurke-Realm")
+assert(#sentAddon == ignoredRequestBefore,
+    "Einem unberechtigten Anfrager wurde die Auswertung geschickt")
+
+-- Die Auswertung erscheint auch in der Oberfläche.
+addon.UI:ShowPage("STATISTICS")
+local statisticsPage = addon.UI.pages.STATISTICS
+assert(statisticsPage.sessionRows[1].shown == true, "Die Sitzung fehlt in der Auswertungsliste")
+assert(statisticsPage.participantRows[1].shown == true, "Die Teilnehmerzeile fehlt in der Auswertung")
+assert(statisticsPage.participantRows[1].name.value == "Tester",
+    "Die Auswertung zeigt den falschen Spieler")
+assert(statisticsPage.participantRows[4].shown == false,
+    "Es werden mehr Teilnehmerzeilen angezeigt als vorhanden")
+
 assert(addon.Sync:GetAddonUserStats().known == 1,
     "Ohne Handshake wird mehr als der eigene Client als Addon-Nutzer gezählt")
 local announced = addon.Sync:AnnounceVersion(true)
@@ -594,7 +760,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.4.6", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.5.0", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")

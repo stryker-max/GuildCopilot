@@ -44,8 +44,15 @@ function GC.Sync:RegisterPrefix()
     end
 end
 
-function GC.Sync:Send(payload)
-    if not IsInGuild or not IsInGuild() or not payload or #payload > GC.Constants.MAX_CHAT_BYTES then
+function GC.Sync:Send(payload, distribution, target)
+    distribution = distribution or "GUILD"
+    if not payload or #payload > GC.Constants.MAX_CHAT_BYTES then
+        return false
+    end
+    if distribution == "GUILD" and (not IsInGuild or not IsInGuild()) then
+        return false
+    end
+    if distribution == "WHISPER" and GC.Util.Trim(target) == "" then
         return false
     end
 
@@ -54,7 +61,8 @@ function GC.Sync:Send(payload)
             C_ChatInfo.SendAddonMessage,
             GC.Constants.COMM_PREFIX,
             payload,
-            "GUILD"
+            distribution,
+            target
         )
         return success and result ~= false
     elseif SendAddonMessage then
@@ -62,7 +70,8 @@ function GC.Sync:Send(payload)
             SendAddonMessage,
             GC.Constants.COMM_PREFIX,
             payload,
-            "GUILD"
+            distribution,
+            target
         )
         return success and result ~= false
     end
@@ -507,11 +516,71 @@ function GC.Sync:GetAddonUserStats()
     return stats
 end
 
+function GC.Sync:AnnounceSessionStart(session)
+    return self:Send(table.concat({
+        "RS",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        session.id,
+        tostring(session.startedAt),
+        GC.Util.EscapeField(session.zone or ""),
+    }, "|"), "RAID")
+end
+
+function GC.Sync:AnnounceSessionEnd(summary)
+    return self:Send(table.concat({
+        "RE",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        summary.id,
+        tostring(summary.endedAt),
+    }, "|"), "RAID")
+end
+
+-- Die Zusammenfassung geht gedrosselt und in Teilen raus; fehlgeschlagene
+-- Pakete werden begrenzt wiederholt, damit keine Lücke entsteht.
+function GC.Sync:DistributeSummary(summary, distribution, target)
+    local messages = GC.RaidMonitor:BuildSummaryMessages(summary)
+    local index = 1
+    local retries = 0
+    local function SendNext()
+        local message = messages[index]
+        if not message then
+            return
+        end
+        local sent = self:Send(message, distribution or "RAID", target)
+        if sent then
+            index = index + 1
+            retries = 0
+        else
+            retries = retries + 1
+            if retries >= 5 then
+                return
+            end
+        end
+        if messages[index] then
+            C_Timer.After(sent and 0.5 or 1.5, SendNext)
+        end
+    end
+    SendNext()
+    return #messages
+end
+
 function GC.Sync:OnMessage(prefix, message, distribution, sender)
-    if prefix ~= GC.Constants.COMM_PREFIX or distribution ~= "GUILD" then
+    if prefix ~= GC.Constants.COMM_PREFIX then
         return
     end
     if GC.Util.NormalizeName(sender) == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
+        return
+    end
+
+    -- Raidauswertungen laufen über den Raid- und den Flüsterkanal, damit sie
+    -- nicht über den offenen Gildenkanal gehen.
+    if distribution == "RAID" or distribution == "PARTY" or distribution == "WHISPER" then
+        if GC.RaidMonitor then
+            GC.RaidMonitor:OnMessage(message, sender, distribution)
+        end
+        return
+    end
+    if distribution ~= "GUILD" then
         return
     end
 
@@ -525,6 +594,11 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
 
     if message:sub(1, 2) == "G|" then
         self:ReceiveGuildProfileChunk(message, sender)
+        return
+    elseif message == ("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) then
+        if GC.RaidMonitor then
+            GC.RaidMonitor:OnMessage(message, sender, distribution)
+        end
         return
     elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) then
         if GC.Roster:CanEditGuildProfile() then

@@ -69,6 +69,7 @@ local GUILD_DEFAULTS = {
     workshop = {
         crafters = {},
     },
+    raidSessions = {},
     memberCare = {
         inactivityDays = 60,
         protectedRanksConfigured = false,
@@ -175,6 +176,13 @@ function GC.DB:Prune()
     for name, crafter in pairs(guildData.workshop.crafters or {}) do
         if (crafter.updatedAt or 0) < cutoff then
             guildData.workshop.crafters[name] = nil
+        end
+    end
+
+    local sessionCutoff = GC.Util.Now() - (30 * 24 * 60 * 60)
+    for index = #guildData.raidSessions, 1, -1 do
+        if (guildData.raidSessions[index].endedAt or 0) < sessionCutoff then
+            table.remove(guildData.raidSessions, index)
         end
     end
 
