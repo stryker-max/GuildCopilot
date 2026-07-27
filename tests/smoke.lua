@@ -755,27 +755,40 @@ assert(statisticsPage.participantRows[1].name.value == "Tester",
 assert(statisticsPage.participantRows[4].shown == false,
     "Es werden mehr Teilnehmerzeilen angezeigt als vorhanden")
 
--- Rückmeldungen gehören ins Fenster, nicht in den Chat.
+-- Rückmeldungen stehen im Fenster und zusätzlich im Chat.
 local chatCountBefore = #chatMessages
 statisticsPage.sessionButton.scripts.OnClick()
 assert(statisticsPage.actionStatus.value:find("gestartet", 1, true),
     "Der Sitzungsstart wird nicht in der Oberfläche gemeldet")
+assert(#chatMessages > chatCountBefore,
+    "Der Sitzungsstart wurde nicht zusätzlich im Chat gemeldet")
+assert(chatMessages[#chatMessages]:find("gestartet", 1, true),
+    "Die Chatmeldung nennt den Sitzungsstart nicht")
+
 currentTime = currentTime + 60
+chatCountBefore = #chatMessages
 statisticsPage.sessionButton.scripts.OnClick()
 assert(statisticsPage.actionStatus.value:find("ausgewertet", 1, true),
     "Das Sitzungsende wird nicht in der Oberfläche gemeldet")
-assert(#chatMessages == chatCountBefore,
-    "Die Raidauswertung hat in den Chat geschrieben")
+assert(chatMessages[#chatMessages]:find("ausgewertet", 1, true),
+    "Das Sitzungsende wurde nicht zusätzlich im Chat gemeldet")
 
--- Auch eine abgelehnte Aktion meldet sich nur im Fenster.
+-- Auch eine abgelehnte Aktion meldet sich in beiden Kanälen.
 raidRoster = {}
 addon.DB:GetGuild().memberCare.accessRanks = {}
 chatCountBefore = #chatMessages
 statisticsPage.sessionButton.scripts.OnClick()
 assert(statisticsPage.actionStatus.value:find("Nur Raidleiter", 1, true),
     "Die Ablehnung wird nicht in der Oberfläche gemeldet")
-assert(#chatMessages == chatCountBefore,
-    "Eine abgelehnte Raidaktion hat in den Chat geschrieben")
+assert(chatMessages[#chatMessages]:find("Nur Raidleiter", 1, true),
+    "Die Ablehnung wurde nicht zusätzlich im Chat gemeldet")
+
+-- Die Teilnehmertabelle selbst bleibt in der Oberfläche und wird nicht
+-- zeilenweise in den Chat geschrieben.
+for _, chatMessage in ipairs(chatMessages) do
+    assert(not chatMessage:find("Interrupts", 1, true) and not chatMessage:find("Dispels", 1, true),
+        "Die Auswertungstabelle wurde in den Chat geschrieben")
+end
 
 assert(addon.Sync:GetAddonUserStats().known == 1,
     "Ohne Handshake wird mehr als der eigene Client als Addon-Nutzer gezählt")

@@ -2670,14 +2670,19 @@ function GC.UI:BuildStatisticsPage()
     page.sessionStatus = CreateLabel(controlCard, "", { width = 470, height = 46, vertical = "TOP" })
     page.sessionStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -14)
 
-    -- Rückmeldungen bleiben im Fenster; in den Chat geht aus der
-    -- Raidauswertung bewusst nichts.
+    -- Kurze Rückmeldungen stehen im Fenster und zusätzlich im Chat, damit sie
+    -- auch bei geschlossenem Addonfenster ankommen. Die Auswertung selbst
+    -- bleibt vollständig in der Oberfläche.
     page.actionStatus = CreateLabel(controlCard, "", { width = 560, height = 26, vertical = "TOP" })
     page.actionStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -64)
 
     function page:SetActionStatus(message, ok)
-        self.actionStatus:SetText(message or "")
+        message = GC.Util.Trim(message)
+        self.actionStatus:SetText(message)
         SetTextColor(self.actionStatus, ok == false and THEME.danger or THEME.success)
+        if message ~= "" then
+            GC:Print(message)
+        end
     end
 
     page.sessionButton = CreateButton(controlCard, "Sitzung starten", 150, 30, function()
