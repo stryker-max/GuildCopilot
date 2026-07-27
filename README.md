@@ -11,6 +11,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - automatische Erkennung des eigenen Talentbaums;
 - frei bestätigbares Raidprofil mit Primär-Spec, optionalem Dual-Spec, Main/Alt und Flexibilität;
 - unsichtbare Profilsynchronisierung zwischen Gildenmitgliedern mit installiertem Addon;
+- Addon-Erkennung in der Gildenübersicht: sichtbar, wer Guild Copilot nutzt und wessen Datenversion abweicht, ohne Dauerbroadcasts;
 - Gildenroster-Auswertung und TBC-orientierte Supportrollen-Vorschläge;
 - moderne, kompakte Oberfläche mit Seitenleiste und sauber begrenzten Scroll-Textfeldern;
 - aufklappbare Klassenkarten zur Auswahl ganzer Klassen oder beliebig vieler Specs, ohne Pflichtangabe einer Anzahl;

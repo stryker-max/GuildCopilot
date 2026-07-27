@@ -7,8 +7,19 @@ GC.Constants = {
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
     MAX_CHAT_BYTES = 255,
+    ADDON_USER_TTL = 30 * 24 * 60 * 60,
     DEFAULT_POST_COOLDOWN = 120,
     DEFAULT_LFG_COOLDOWN = 120,
+}
+
+-- Fähigkeiten, die dieser Client im Handshake meldet. Neue Module tragen sich
+-- hier ein, damit spätere Versionen erkennen können, was das Gegenüber kann,
+-- ohne die Schemaversion anheben zu müssen.
+GC.Capabilities = {
+    "profile",
+    "guildprofile",
+    "workshop",
+    "membercare",
 }
 
 GC.ProfessionOptions = {

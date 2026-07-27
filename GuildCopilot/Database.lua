@@ -46,6 +46,7 @@ local GUILD_DEFAULTS = {
         DISCORD = "Wenn du magst, lernen wir uns kurz im Discord kennen: {discord}",
     },
     remoteProfiles = {},
+    addonUsers = {},
     recruitment = {
         selections = {},
         raidMarker = 8,
@@ -163,6 +164,12 @@ function GC.DB:Prune()
     for name, profile in pairs(guildData.remoteProfiles) do
         if (profile.receivedAt or 0) < cutoff then
             guildData.remoteProfiles[name] = nil
+        end
+    end
+    local addonUserCutoff = GC.Util.Now() - GC.Constants.ADDON_USER_TTL
+    for name, addonUser in pairs(guildData.addonUsers or {}) do
+        if (addonUser.seenAt or 0) < addonUserCutoff then
+            guildData.addonUsers[name] = nil
         end
     end
     for name, crafter in pairs(guildData.workshop.crafters or {}) do

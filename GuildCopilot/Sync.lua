@@ -6,7 +6,15 @@ GC.Sync = {
     guildProfileSendPending = false,
     guildProfileForceSend = false,
     guildProfileIncoming = {},
+    lastAnnounceAt = 0,
 }
+
+-- Der Handshake läuft bewusst ohne Dauerbroadcast: gesendet wird nur beim
+-- Login, beim Betreten einer Gruppe und als Antwort auf eine Anfrage. Beide
+-- Mindestabstände verhindern, dass mehrere gleichzeitige Logins den
+-- Addon-Kanal fluten.
+local MIN_ANNOUNCE_INTERVAL = 60
+local MIN_REPLY_INTERVAL = 15
 
 local function BoolField(value)
     return value and "1" or "0"
@@ -370,12 +378,149 @@ function GC.Sync:ReceiveProfile(fields, sender)
     GC:FireCallback("ROSTER_UPDATED")
 end
 
+function GC.Sync:BuildVersionMessage(requestReply)
+    local fields = {
+        "V",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        GC.Constants.VERSION,
+        table.concat(GC.Capabilities, ","),
+        BoolField(requestReply),
+    }
+    for index, value in ipairs(fields) do
+        fields[index] = GC.Util.EscapeField(value)
+    end
+    return table.concat(fields, "|")
+end
+
+function GC.Sync:AnnounceVersion(requestReply, minimumInterval)
+    minimumInterval = tonumber(minimumInterval) or 0
+    local now = GC.Util.Now()
+    if minimumInterval > 0 and (now - (self.lastAnnounceAt or 0)) < minimumInterval then
+        return false
+    end
+    if not self:Send(self:BuildVersionMessage(requestReply)) then
+        return false
+    end
+    self.lastAnnounceAt = now
+    return true
+end
+
+function GC.Sync:NoteAddonUser(sender, info)
+    if GC.Util.Trim(sender) == "" then
+        return false
+    end
+    info = info or {}
+
+    local guildData = GC.DB:GetGuild()
+    local key = GC.Util.NormalizeName(sender)
+    local shortKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))
+    local entry = guildData.addonUsers[key] or guildData.addonUsers[shortKey]
+    local changed = entry == nil
+    entry = entry or {}
+
+    local schemaVersion = tonumber(info.schemaVersion)
+    if schemaVersion and entry.schemaVersion ~= schemaVersion then
+        entry.schemaVersion = schemaVersion
+        changed = true
+    end
+    local version = GC.Util.Trim(info.version)
+    if version ~= "" and entry.version ~= version then
+        entry.version = version
+        changed = true
+    end
+    local capabilities = GC.Util.Trim(info.capabilities)
+    if capabilities ~= "" and entry.capabilities ~= capabilities then
+        entry.capabilities = capabilities
+        changed = true
+    end
+    if info.source == "HANDSHAKE" and not entry.handshake then
+        entry.handshake = true
+        changed = true
+    end
+
+    entry.name = sender
+    entry.seenAt = GC.Util.Now()
+    guildData.addonUsers[key] = entry
+    guildData.addonUsers[shortKey] = entry
+    if changed then
+        GC:FireCallback("ADDON_USERS_UPDATED")
+    end
+    return changed
+end
+
+function GC.Sync:ReceiveVersion(fields, sender)
+    local schemaVersion = tonumber(fields[2])
+    if not schemaVersion then
+        return
+    end
+    self:NoteAddonUser(sender, {
+        schemaVersion = schemaVersion,
+        version = fields[3],
+        capabilities = fields[4],
+        source = "HANDSHAKE",
+    })
+
+    -- Nur auf ausdrückliche Anfragen antworten, niemals auf eine Antwort.
+    if fields[5] == "1" then
+        C_Timer.After(0.5 + math.random() * 4, function()
+            self:AnnounceVersion(false, MIN_REPLY_INTERVAL)
+        end)
+    end
+end
+
+function GC.Sync:GetAddonUser(name)
+    local addonUsers = GC.DB:GetGuild().addonUsers
+    return addonUsers[GC.Util.NormalizeName(name)]
+        or addonUsers[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
+end
+
+function GC.Sync:GetAddonUserStats()
+    local stats = {
+        known = 1,
+        compatible = 1,
+        outdated = 0,
+        ahead = 0,
+        outdatedNames = {},
+    }
+
+    -- Ausgetretene Mitglieder erst ausblenden, wenn das Roster gelesen ist;
+    -- direkt nach dem Login ist es noch leer.
+    local rosterReady = #GC.Roster.members > 0
+    local seen = {}
+    for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+        if not seen[entry] and (not rosterReady or GC.Roster:IsGuildMember(entry.name)) then
+            seen[entry] = true
+            stats.known = stats.known + 1
+            local schemaVersion = tonumber(entry.schemaVersion) or 0
+            if schemaVersion == GC.Constants.SCHEMA_VERSION then
+                stats.compatible = stats.compatible + 1
+            elseif schemaVersion > GC.Constants.SCHEMA_VERSION then
+                stats.ahead = stats.ahead + 1
+                stats.outdatedNames[#stats.outdatedNames + 1] = GC.Util.PlayerShortName(entry.name)
+            else
+                stats.outdated = stats.outdated + 1
+                stats.outdatedNames[#stats.outdatedNames + 1] = GC.Util.PlayerShortName(entry.name)
+            end
+        end
+    end
+    table.sort(stats.outdatedNames)
+    return stats
+end
+
 function GC.Sync:OnMessage(prefix, message, distribution, sender)
     if prefix ~= GC.Constants.COMM_PREFIX or distribution ~= "GUILD" then
         return
     end
     if GC.Util.NormalizeName(sender) == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
         return
+    end
+
+    -- Ältere Clients kennen den Handshake nicht. Ihre Schemaversion steht aber
+    -- in jedem P-, W-, G- und GQ-Paket, sodass sie trotzdem als Addon-Nutzer
+    -- mit abweichender Version sichtbar werden.
+    local messageType, messageSchema = message:match("^(%a+)|(%d+)")
+    if messageType == "P" or messageType == "W" or messageType == "G" or messageType == "GQ" then
+        self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
     if message:sub(1, 2) == "G|" then
@@ -399,12 +544,25 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         self:ReceiveProfile(fields, sender)
     elseif fields[1] == "W" and schemaVersion == GC.Constants.SCHEMA_VERSION and GC.Workshop then
         GC.Workshop:ReceiveSync(fields, sender)
+    elseif fields[1] == "V" then
+        -- Bewusst ohne Schemaprüfung: gerade abweichende Versionen sollen
+        -- erkannt werden.
+        self:ReceiveVersion(fields, sender)
     end
 end
 
 local syncEvents = CreateFrame("Frame")
 syncEvents:RegisterEvent("CHAT_MSG_ADDON")
-syncEvents:SetScript("OnEvent", function(_, _, prefix, message, distribution, sender)
+syncEvents:RegisterEvent("GROUP_ROSTER_UPDATE")
+syncEvents:SetScript("OnEvent", function(_, event, prefix, message, distribution, sender)
+    if event == "GROUP_ROSTER_UPDATE" then
+        local inGroup = IsInGroup and IsInGroup() == true
+        if inGroup and not GC.Sync.wasInGroup then
+            GC.Sync:AnnounceVersion(false, MIN_ANNOUNCE_INTERVAL)
+        end
+        GC.Sync.wasInGroup = inGroup
+        return
+    end
     GC.Sync:OnMessage(prefix, message, distribution, sender)
 end)
 
@@ -419,6 +577,10 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
         else
             self:RequestGuildProfile()
         end
+    end)
+    C_Timer.After(7, function()
+        self.wasInGroup = IsInGroup and IsInGroup() == true
+        self:AnnounceVersion(true)
     end)
 end)
 

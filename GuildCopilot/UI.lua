@@ -582,17 +582,46 @@ function GC.UI:BuildDashboardPage()
         { key = "MEMBERS", label = "MITGLIEDER" },
         { key = "ONLINE", label = "ONLINE" },
         { key = "PROFILES", label = "BEKANNTE PROFILE" },
+        { key = "ADDON", label = "MIT ADDON" },
     }
     for index, metric in ipairs(metrics) do
         local card = CreateCard(page)
-        card:SetSize(247, 76)
-        card:SetPoint("TOPLEFT", page, "TOPLEFT", (index - 1) * 260, -66)
+        card:SetSize(185, 76)
+        card:SetPoint("TOPLEFT", page, "TOPLEFT", (index - 1) * 197, -66)
         card.value = CreateLabel(card, "0", { title = true })
         card.value:SetPoint("TOPLEFT", card, "TOPLEFT", 16, -13)
         card.caption = CreateLabel(card, metric.label, { muted = true })
         card.caption:SetPoint("TOPLEFT", card.value, "BOTTOMLEFT", 0, -5)
         page.metricCards[metric.key] = card
     end
+
+    local addonCard = page.metricCards.ADDON
+    addonCard:EnableMouse(true)
+    addonCard:SetScript("OnEnter", function(self)
+        if not GameTooltip then
+            return
+        end
+        local stats = GC.Sync:GetAddonUserStats()
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Guild Copilot in der Gilde")
+        GameTooltip:AddLine(stats.known .. " erkannte Nutzer, davon " .. stats.compatible
+            .. " mit passender Datenversion", 1, 1, 1)
+        if #stats.outdatedNames > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Abweichende Datenversion:", 1, 0.72, 0.25)
+            GameTooltip:AddLine(table.concat(stats.outdatedNames, ", "), 1, 1, 1, true)
+            GameTooltip:AddLine("Mit ihnen werden Rezepte und gildenweite Einstellungen"
+                .. " nicht ausgetauscht.", 1, 1, 1, true)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Erkannt wird nur, wer das Addon aktiv nutzt.", 0.57, 0.64, 0.72, true)
+        GameTooltip:Show()
+    end)
+    addonCard:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
 
     local rosterCard = CreateCard(page, "Aktive Raider  •  Level 70")
     rosterCard:SetSize(776, 408)
@@ -653,6 +682,18 @@ function GC.UI:RefreshDashboard()
     page.metricCards.MEMBERS.value:SetText(summary.total)
     page.metricCards.ONLINE.value:SetText(summary.online)
     page.metricCards.PROFILES.value:SetText(summary.knownProfiles)
+
+    local addonStats = GC.Sync:GetAddonUserStats()
+    local addonCard = page.metricCards.ADDON
+    addonCard.value:SetText(addonStats.known)
+    local incompatible = addonStats.outdated + addonStats.ahead
+    if incompatible > 0 then
+        addonCard.caption:SetText("MIT ADDON  •  " .. incompatible .. " ABWEICHEND")
+        SetTextColor(addonCard.caption, THEME.warning)
+    else
+        addonCard.caption:SetText("MIT ADDON")
+        SetTextColor(addonCard.caption, THEME.muted)
+    end
 
     local ranks = GC.Roster:GetRankDefinitions()
     local selectedRanks = 0
@@ -2915,4 +2956,8 @@ end)
 
 GC:RegisterCallback("MEMBERCARE_UPDATED", GC.UI, function(self)
     self:RefreshMemberCare()
+end)
+
+GC:RegisterCallback("ADDON_USERS_UPDATED", GC.UI, function(self)
+    self:RefreshDashboard()
 end)

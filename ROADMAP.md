@@ -31,7 +31,7 @@ Guild Copilot soll ein modularer Gildenassistent werden. Rekrutierung bleibt ein
 - Materialien aus Taschen oder Gildenbank nur anzeigen, soweit die WoW-API sie dem Spieler zugänglich macht;
 - Rezeptdaten kompakt und nur bei Änderungen innerhalb der Gilde synchronisieren.
 
-Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Künftige Ergänzungen sind Taschen-/Gildenbankbestände und ein gemeinsamer Einkaufszettel.
+Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Künftige Ergänzung sind Taschen-/Gildenbankbestände.
 
 Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Copilot-Vorschläge bis zum Posting, ein Filter für die als aktive Raider sichtbaren Gildenränge sowie gezielte Whisper-Erkennung und Löschfunktionen im Bewerber-Postfach.
 
@@ -102,6 +102,8 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - Versions-/Capability-Handshake innerhalb der Gilde;
 - sichtbar machen, welche Spieler Guild Copilot installiert haben;
 - keine dauernden Broadcasts: Synchronisierung nur bei Login, Gruppenbeitritt oder geänderter Version.
+
+Umgesetzt: `V`-Handshake mit Version, Schemaversion und gemeldeten Fähigkeiten, Antwort nur auf ausdrückliche Anfrage und mit Mindestabstand, Kachel **Mit Addon** in der Gildenübersicht samt Tooltip. Ältere Clients kennen den Handshake nicht, werden aber über die Schemaversion ihrer gewöhnlichen Pakete erkannt und als abweichend gemeldet – damit wird sichtbar, wenn Rezepte und gildenweite Einstellungen mit ihnen gar nicht ausgetauscht werden.
 
 ### Live-Raidsitzung
 

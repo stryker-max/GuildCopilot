@@ -278,8 +278,10 @@ function PlaySound(soundID)
     playedSoundID = soundID
 end
 
+-- Stellbare Uhr, damit Mindestabstände und Cooldowns prüfbar sind.
+currentTime = 1000
 function time()
-    return 1000
+    return currentTime
 end
 
 function date()
@@ -579,6 +581,63 @@ assert(addon.Chat:RemoveLead(1) == true, "Einzelner Interessent konnte nicht gel
 assert(#addon.DB:GetGuild().inbox == 1, "Einzellöschung hat nicht genau einen Interessenten entfernt")
 assert(addon.Chat:ClearInbox() == true, "Postfach konnte nicht vollständig geleert werden")
 assert(#addon.DB:GetGuild().inbox == 0, "Postfach enthält nach dem Leeren noch Interessenten")
+
+local function LastAddonMessage()
+    local entry = sentAddon[#sentAddon]
+    return entry and entry[2] or ""
+end
+
+assert(addon.Sync:GetAddonUserStats().known == 1,
+    "Ohne Handshake wird mehr als der eigene Client als Addon-Nutzer gezählt")
+local announced = addon.Sync:AnnounceVersion(true)
+assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
+local announcement = LastAddonMessage()
+assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
+assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
+assert(announcement:find("0.4.6", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
+assert(addon.Sync:AnnounceVersion(false, 60) == false,
+    "Der Mindestabstand zwischen zwei Handshakes greift nicht")
+
+-- Ein alter Client kennt den Handshake nicht, verrät seine Datenversion aber
+-- über ein gewöhnliches Profilpaket.
+addon.Sync:OnMessage("GuildCopilot", "P|5|PRIEST|PRIEST:2|0/41/10|PRIEST:2||MAIN|0|1||||1000",
+    "GUILD", "Heiler-Realm")
+local legacyStats = addon.Sync:GetAddonUserStats()
+assert(legacyStats.known == 2, "Ein Client ohne Handshake wurde nicht erkannt")
+assert(legacyStats.outdated == 1, "Die ältere Datenversion wurde nicht als abweichend gemeldet")
+assert(legacyStats.compatible == 1, "Ein alter Client wurde als kompatibel gezählt")
+assert(legacyStats.outdatedNames[1] == "Heiler", "Der abweichende Client wird nicht benannt")
+assert(addon.Sync:GetAddonUser("Heiler-Realm").handshake == nil,
+    "Ein reines Profilpaket wurde als Handshake verbucht")
+
+-- Nach dem Update meldet sich derselbe Spieler per Handshake und wird
+-- aktualisiert statt doppelt gezählt.
+addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile,workshop|0", "GUILD", "Heiler-Realm")
+local handshakeStats = addon.Sync:GetAddonUserStats()
+assert(handshakeStats.known == 2, "Der aktualisierte Client wurde doppelt gezählt")
+assert(handshakeStats.compatible == 2, "Gleiche Datenversion wurde als unpassend gewertet")
+assert(handshakeStats.outdated == 0, "Passende Datenversion wurde als veraltet gewertet")
+assert(addon.Sync:GetAddonUser("Heiler-Realm").version == "0.4.6",
+    "Die gemeldete Version wurde nicht gespeichert")
+assert(addon.Sync:GetAddonUser("Heiler").capabilities:find("workshop", 1, true),
+    "Die gemeldeten Fähigkeiten wurden nicht gespeichert")
+
+-- Auf eine ausdrückliche Anfrage wird geantwortet, sobald der Mindestabstand
+-- verstrichen ist.
+currentTime = currentTime + 60
+local sentBeforeRequest = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|1", "GUILD", "Heiler-Realm")
+assert(#sentAddon == sentBeforeRequest + 1, "Auf eine Handshake-Anfrage wurde nicht geantwortet")
+assert(LastAddonMessage():sub(-2) == "|0",
+    "Die Handshake-Antwort fordert selbst wieder eine Antwort an")
+
+-- Auf eine Antwort darf nie geantwortet werden, sonst schaukelt sich der
+-- Handshake zwischen allen Gildenmitgliedern auf.
+currentTime = currentTime + 60
+local sentBeforeReply = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
+assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
 
 GuildCopilotDB.settings.editorRecoveryAvailable = false
 GuildCopilotDB.guilds["Altgilde@Realm"] = {}

@@ -131,6 +131,10 @@ const requiredImplementations = [
   ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],
   ["Einmalige Editor-Lockout-Reparatur", /CanUseEditorRecovery/],
   ["Blizzard-Offiziersprüfung für Lockout-Reparatur", /HasBlizzardOfficerAuthority/],
+  ["Versions-Handshake", /BuildVersionMessage/],
+  ["Handshake ohne Dauerbroadcast", /MIN_ANNOUNCE_INTERVAL/],
+  ["Erkennung abweichender Datenversionen", /GetAddonUserStats/],
+  ["Handshake-Fähigkeiten", /GC\.Capabilities/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
