@@ -39,6 +39,7 @@ local TAB_DEFINITIONS = {
     { key = "WORKSHOP", section = "ROSTER", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
     { key = "WCL", section = "ROSTER", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
     { key = "STATISTICS", section = "RAID", label = "Raidauswertung", icon = "Interface\\Icons\\INV_Misc_Book_11" },
+    { key = "GEAR", section = "RAID", label = "Ausrüstung", icon = "Interface\\Icons\\INV_Chest_Plate06" },
     { key = "SETTINGS", section = "SYSTEM", label = "Einstellungen", icon = "Interface\\Icons\\INV_Gizmo_02" },
 }
 
@@ -503,6 +504,7 @@ function GC.UI:CreateMainFrame()
     self:BuildGuildPage()
     self:BuildWarcraftLogsPage()
     self:BuildStatisticsPage()
+    self:BuildGearPage()
     self:ShowPage(self.activePage)
 end
 
@@ -2863,6 +2865,185 @@ function GC.UI:RefreshStatistics()
     end
 end
 
+local GEAR_VERDICT_STYLE = {
+    OPTIMAL = { label = "Optimal", color = THEME.success },
+    SOLID = { label = "Solide", color = THEME.accent },
+    IMPROVABLE = { label = "Verbesserbar", color = THEME.warning },
+    MISSING = { label = "Fehlt", color = THEME.danger },
+    UNKNOWN = { label = "Unbekannt", color = THEME.muted },
+    EMPTY = { label = "Leer", color = THEME.muted },
+}
+
+function GC.UI:BuildGearPage()
+    local page = self.pages.GEAR
+    CreatePageTitle(page, "Ausrüstung",
+        "Fehlende Verzauberungen und leere Sockel je Slot. Geprüft wird per Inspect, also nur wer in Reichweite und erreichbar ist. Es gibt bewusst keine Gesamtnote.")
+
+    local controlCard = CreateCard(page)
+    controlCard:SetSize(776, 96)
+    controlCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    page.gearStatus = CreateLabel(controlCard, "", { width = 560, height = 46, vertical = "TOP" })
+    page.gearStatus:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -14)
+    page.gearAction = CreateLabel(controlCard, "", { width = 560, height = 26, vertical = "TOP" })
+    page.gearAction:SetPoint("TOPLEFT", controlCard, "TOPLEFT", 18, -64)
+
+    function page:SetGearStatus(message, ok)
+        message = GC.Util.Trim(message)
+        self.gearAction:SetText(message)
+        SetTextColor(self.gearAction, ok == false and THEME.danger or THEME.success)
+        if message ~= "" then
+            GC:Print(message)
+        end
+    end
+
+    page.scanButton = CreateButton(controlCard, "Gruppe prüfen", 150, 30, function()
+        local ok, message = GC.GearAudit:StartRaidScan()
+        page:SetGearStatus(message, ok)
+        GC.UI:RefreshGear()
+    end, "PRIMARY")
+    page.scanButton:SetPoint("TOPRIGHT", controlCard, "TOPRIGHT", -18, -14)
+
+    page.selfButton = CreateButton(controlCard, "Eigene Ausrüstung", 150, 30, function()
+        local ok, message = GC.GearAudit:AuditSelf()
+        page:SetGearStatus(message, ok)
+        GC.UI:RefreshGear()
+    end)
+    page.selfButton:SetPoint("TOPRIGHT", page.scanButton, "BOTTOMRIGHT", 0, -4)
+
+    local listCard = CreateCard(page, "Geprüfte Spieler")
+    listCard:SetSize(238, 358)
+    listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
+    page.gearRows = {}
+    for index = 1, 12 do
+        local row = CreateButton(listCard, "", 206, 23, function()
+            local audit = GC.GearAudit:GetAudits()[index]
+            if audit then
+                GC.GearAudit.selectedName = audit.name
+                GC.UI:RefreshGear()
+            end
+        end)
+        row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -50 - ((index - 1) * 25))
+        row.label:ClearAllPoints()
+        row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        row.label:SetJustifyH("LEFT")
+        page.gearRows[index] = row
+    end
+    page.gearEmpty = CreateLabel(listCard, "Noch niemand geprüft.", { muted = true, width = 200, height = 40, vertical = "TOP" })
+    page.gearEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
+
+    local detailCard = CreateCard(page, "Slots")
+    detailCard:SetSize(526, 358)
+    detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
+    page.gearHeadline = CreateLabel(detailCard, "", { muted = true, width = 380, height = 18 })
+    page.gearHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
+
+    local gearHeaders = {
+        { text = "SLOT", x = 18, width = 112 },
+        { text = "BEWERTUNG", x = 134, width = 96 },
+        { text = "SOCKEL", x = 234, width = 58 },
+        { text = "HINWEIS", x = 296, width = 214 },
+    }
+    for _, headerDefinition in ipairs(gearHeaders) do
+        local headerLabel = CreateLabel(detailCard, headerDefinition.text, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = headerDefinition.width,
+        })
+        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+    end
+
+    local scroll = CreateModernScrollFrame(detailCard)
+    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
+    scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetWidth(492)
+    content:SetHeight(560)
+    scroll:SetScrollChild(content)
+
+    page.gearSlotRows = {}
+    for index = 1, #GC.GearSlots do
+        local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
+        row:SetSize(490, 25)
+        row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
+        row.slot = CreateLabel(row, "", { width = 112 })
+        row.slot:SetPoint("LEFT", row, "LEFT", 5, 0)
+        row.verdict = CreateLabel(row, "", { width = 96 })
+        row.verdict:SetPoint("LEFT", row, "LEFT", 121, 0)
+        row.sockets = CreateLabel(row, "", { width = 58 })
+        row.sockets:SetPoint("LEFT", row, "LEFT", 221, 0)
+        row.reason = CreateLabel(row, "", { width = 214, muted = true })
+        row.reason:SetPoint("LEFT", row, "LEFT", 283, 0)
+        page.gearSlotRows[index] = row
+    end
+    page.gearSlotEmpty = CreateLabel(detailCard, "Wähle links einen Spieler aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
+    page.gearSlotEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -88)
+end
+
+function GC.UI:RefreshGear()
+    local page = self.pages.GEAR
+    if not page then
+        return
+    end
+
+    local audits = GC.GearAudit:GetAudits()
+    local ruleCount = 0
+    for _ in pairs(GC.EnchantRuleSet.rules) do
+        ruleCount = ruleCount + 1
+    end
+    local statusText = GC.GearAudit.status
+    if statusText == "" then
+        statusText = "Noch keine Prüfung gelaufen."
+    end
+    page.gearStatus:SetText(statusText .. "\n"
+        .. (ruleCount > 0
+            and ("Regelsatz v" .. GC.EnchantRuleSet.version .. " mit " .. ruleCount .. " bewerteten Verzauberungen.")
+            or "|cffffb840Der Regelsatz ist noch leer: fehlende Verzauberungen und leere Sockel werden exakt erkannt, vorhandene Verzauberungen bleiben \"Unbekannt\".|r"))
+
+    page.gearEmpty:SetShown(#audits == 0)
+    local selectedName = GC.GearAudit.selectedName
+    if not GC.GearAudit:GetAudit(selectedName) then
+        selectedName = audits[1] and audits[1].name
+        GC.GearAudit.selectedName = selectedName
+    end
+
+    for index, row in ipairs(page.gearRows) do
+        local audit = audits[index]
+        row:SetShown(audit ~= nil)
+        if audit then
+            local issues = (audit.missingEnchants or 0) + (audit.emptySockets or 0)
+            row:SetText(audit.name .. (issues > 0 and ("  •  " .. issues) or "  •  ok"))
+            row:SetActive(audit.name == selectedName)
+        end
+    end
+
+    local selected = GC.GearAudit:GetAudit(selectedName)
+    page.gearSlotEmpty:SetShown(selected == nil)
+    if selected then
+        local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (selected.inspectedAt or 0)) / 60))
+        page.gearHeadline:SetText((selected.source == "SELF" and "Eigene Ausrüstung" or "Inspect")
+            .. "  •  vor " .. ageMinutes .. " Min.  •  Regelsatz v" .. (selected.ruleVersion or 0)
+            .. "  •  " .. GC.GearAudit:DescribeFindings(selected))
+    else
+        page.gearHeadline:SetText("")
+    end
+
+    local slots = selected and selected.slots or {}
+    for index, row in ipairs(page.gearSlotRows) do
+        local entry = slots[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            local style = GEAR_VERDICT_STYLE[entry.verdict] or GEAR_VERDICT_STYLE.UNKNOWN
+            row.slot:SetText(entry.label)
+            row.verdict:SetText(style.label)
+            SetTextColor(row.verdict, style.color)
+            local emptySockets = entry.emptySockets or 0
+            row.sockets:SetText(emptySockets > 0 and ("|cffff6166" .. emptySockets .. " leer|r") or "–")
+            row.reason:SetText(entry.reason or "")
+        end
+    end
+end
+
 function GC.UI:Refresh()
     if not self.frame then
         return
@@ -2880,6 +3061,7 @@ function GC.UI:Refresh()
     self:RefreshGuild()
     self:RefreshWarcraftLogs()
     self:RefreshStatistics()
+    self:RefreshGear()
 end
 
 function GC.UI:AddGuildWindowButton()
@@ -3148,4 +3330,8 @@ end)
 
 GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
     self:RefreshStatistics()
+end)
+
+GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
+    self:RefreshGear()
 end)

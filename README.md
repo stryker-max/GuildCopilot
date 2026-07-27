@@ -53,6 +53,10 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - gespeichert werden ausschließlich Zusammenfassungen, keine Combat-Log-Rohdaten;
 - die Auswertung steht vollständig im Addonfenster: Sitzungsliste und Teilnehmertabelle. Kurze Rückmeldungen wie Start, Ende und abgelehnte Aktionen erscheinen zusätzlich im Chat, damit sie auch bei geschlossenem Fenster ankommen;
 - die Übertragung zwischen den Addon-Nutzern läuft über den unsichtbaren Addon-Datenkanal, nicht über sichtbare Chatnachrichten;
+- **Ausrüstungsprüfung** über die Inspect-API: fehlende Verzauberungen und leere Sockel je Slot, für die eigene Ausrüstung auch ohne Gruppe;
+- geprüft wird nur, wer in Reichweite und erreichbar ist; nicht erreichbare Spieler werden ausdrücklich als übersprungen ausgewiesen;
+- Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen gelten als **Unbekannt** und nie als schlecht;
+- es gibt bewusst keine Gesamtnote je Spieler;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
 - Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen.
 - manueller Profilimport ohne API im lesbaren Format `Name;Klasse;Primär-Spec;Dual-Spec`.
@@ -70,6 +74,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 8. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
 9. Unter **Mitgliederpflege** – mit freigegebenem Gildenrang – Abmeldungen und Inaktivitätsvorschläge prüfen sowie Inaktivitätsgrenze und geschützte Ränge festlegen.
 10. Unter **Raidauswertung** vor dem Raid **Sitzung starten** und danach **Sitzung beenden**. Offiziere außerhalb des Raids holen sich die Auswertung über **Auswertung anfordern**.
+11. Unter **Ausrüstung** vor dem Raid **Gruppe prüfen**, um fehlende Verzauberungen und leere Sockel zu finden. **Eigene Ausrüstung** geht jederzeit ohne Gruppe.
 
 ## Wichtige WoW-Grenzen
 

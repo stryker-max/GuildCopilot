@@ -101,12 +101,14 @@ function UnitFullName()
     return "Tester", "Realm"
 end
 
-function UnitName()
-    return "Tester"
+unitNames = { player = "Tester" }
+function UnitName(unit)
+    return unitNames[unit] or "Tester"
 end
 
-function UnitClass()
-    return "Jäger", "HUNTER", 3
+unitClasses = { player = "HUNTER" }
+function UnitClass(unit)
+    return "Jäger", unitClasses[unit] or "HUNTER", 3
 end
 
 function UnitLevel()
@@ -314,6 +316,44 @@ function FireCombatLog(subevent, sourceName, destName, spellID, destGUID)
     GuildCopilot.RaidMonitor:OnCombatLogEvent()
 end
 
+-- Ausrüstung je Slot-ID und Einheit für den Gear Audit.
+inspectGear = {}
+
+function GetInventoryItemLink(unit, slotID)
+    return (inspectGear[unit] or {})[slotID]
+end
+
+function GetItemStats(link)
+    local sockets = tonumber(tostring(link or ""):match("SOCKETS(%d)"))
+    if not sockets then
+        return {}
+    end
+    return { EMPTY_SOCKET_RED = sockets }
+end
+
+function UnitExists(unit)
+    return (inspectGear[unit] ~= nil) or unit == "player"
+end
+
+function UnitIsUnit(left, right)
+    return left == right
+end
+
+function UnitGUID(unit)
+    return "GUID-" .. tostring(unit)
+end
+
+inspectableUnits = {}
+function CanInspect(unit)
+    return inspectableUnits[unit] ~= false
+end
+
+function NotifyInspect()
+end
+
+function ClearInspectPlayer()
+end
+
 function GetChannelList()
     return 1, "Allgemein", false, 2, "Handel", false, 4, "SucheNachGruppe", false, 5, "Gildenrekrutierung", false
 end
@@ -333,8 +373,16 @@ function date()
     return "2026-07-27"
 end
 
+-- Zeitgeber laufen sofort. Wer eine echte Verzoegerung braucht, setzt
+-- timerDelayThreshold: alles darueber wandert in pendingTimers statt zu feuern.
+timerDelayThreshold = math.huge
+pendingTimers = {}
 C_Timer = {
-    After = function(_, callback)
+    After = function(delay, callback)
+        if (tonumber(delay) or 0) > timerDelayThreshold then
+            pendingTimers[#pendingTimers + 1] = callback
+            return
+        end
         callback()
     end,
 }
@@ -376,6 +424,7 @@ local files = {
     "Roster.lua",
     "Workshop.lua",
     "RaidMonitor.lua",
+    "GearAudit.lua",
     "Sync.lua",
     "Recruitment.lua",
     "Chat.lua",
@@ -841,6 +890,109 @@ currentTime = currentTime + 60
 local sentBeforeReply = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
 assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
+
+-- === Gear Audit ============================================================
+local ENCHANTED_HEAD = "|cffa335ee|Hitem:1000:2564:0:0:0:0:0:0:70|h[Kopf]|h|r"
+local SOCKETED_CHEST = "|cffa335ee|Hitem:1001:0:3000:0:0:0:0:0:70|h[SOCKETS3]|h|r"
+
+local parsedHead = addon.GearAudit:ParseItemLink(ENCHANTED_HEAD)
+assert(parsedHead.itemID == 1000, "Die Gegenstands-ID wurde nicht gelesen")
+assert(parsedHead.enchantID == 2564, "Die Verzauberungs-ID wurde nicht gelesen")
+assert(parsedHead.filledGems == 0, "Ein leerer Sockel wurde als besetzt gelesen")
+local parsedChest = addon.GearAudit:ParseItemLink(SOCKETED_CHEST)
+assert(parsedChest.filledGems == 1, "Der eingesetzte Edelstein wurde nicht erkannt")
+assert(addon.GearAudit:ParseItemLink("kein Link") == nil, "Ein ungültiger Link wurde angenommen")
+assert(addon.GearAudit:CountEmptySockets(SOCKETED_CHEST, 1) == 2,
+    "Die leeren Sockel wurden falsch gezählt")
+
+inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
+local selfAudited, selfMessage = addon.GearAudit:AuditSelf()
+assert(selfAudited == true, "Die eigene Ausrüstung wurde nicht geprüft")
+local ownAudit = addon.GearAudit:GetAudit("Tester")
+assert(ownAudit ~= nil, "Die eigene Prüfung wurde nicht gespeichert")
+assert(ownAudit.source == "SELF", "Die eigene Prüfung ist nicht als solche gekennzeichnet")
+assert(ownAudit.missingEnchants == 1, "Die fehlende Verzauberung auf der Brust wurde nicht erkannt")
+assert(ownAudit.emptySockets == 2, "Die leeren Sockel fehlen in der Zusammenfassung")
+assert(ownAudit.unknownEnchants == 1, "Die unbewertete Verzauberung wurde nicht als unbekannt geführt")
+assert(ownAudit.emptySlots == 7, "Leere Pflichtslots wurden falsch gezählt")
+assert(selfMessage:find("leere Sockel", 1, true), "Die Rückmeldung nennt die leeren Sockel nicht")
+
+local headEntry, chestEntry, neckEntry
+for _, entry in ipairs(ownAudit.slots) do
+    if entry.key == "HEAD" then
+        headEntry = entry
+    elseif entry.key == "CHEST" then
+        chestEntry = entry
+    elseif entry.key == "NECK" then
+        neckEntry = entry
+    end
+end
+assert(headEntry.verdict == "UNKNOWN", "Eine unbewertete Verzauberung wurde nicht als unbekannt gemeldet")
+assert(chestEntry.verdict == "MISSING", "Die fehlende Verzauberung wurde nicht gemeldet")
+assert(neckEntry.verdict == "EMPTY", "Ein leerer Slot wurde nicht als leer gemeldet")
+
+-- Ein gepflegter Regelsatz bewertet dieselbe Verzauberung.
+addon.EnchantRuleSet.rules[2564] = {
+    verdict = "OPTIMAL",
+    name = "Beispielverzauberung",
+    slots = { "HEAD" },
+    source = "Testregel",
+}
+addon.GearAudit:AuditSelf()
+local ratedAudit = addon.GearAudit:GetAudit("Tester")
+local ratedHead
+for _, entry in ipairs(ratedAudit.slots) do
+    if entry.key == "HEAD" then
+        ratedHead = entry
+    end
+end
+assert(ratedHead.verdict == "OPTIMAL", "Die Regel wurde nicht angewendet")
+assert(ratedHead.reason:find("Testregel", 1, true), "Die Regelquelle fehlt in der Begründung")
+assert(ratedAudit.unknownEnchants == 0, "Die bewertete Verzauberung gilt weiter als unbekannt")
+addon.EnchantRuleSet.rules[2564] = nil
+addon.GearAudit:AuditSelf()
+assert(addon.GearAudit:GetAudit("Tester").unknownEnchants == 1,
+    "Ohne Regel gilt die Verzauberung nicht wieder als unbekannt")
+
+-- Inspect-Durchlauf: erreichbare Spieler werden geprüft, andere übersprungen.
+raidRoster = { { "Tester", 2, "HUNTER" }, { "Heiler", 1, "PRIEST" } }
+unitNames.raid1 = "Heiler"
+unitNames.raid2 = "Schurke"
+unitClasses.raid1 = "PRIEST"
+inspectGear.raid1 = { [5] = SOCKETED_CHEST }
+inspectGear.raid2 = { [5] = SOCKETED_CHEST }
+inspectableUnits.raid2 = false
+
+timerDelayThreshold = 3
+local scanStarted, scanMessage = addon.GearAudit:StartRaidScan()
+assert(scanStarted == true, scanMessage or "Die Ausrüstungsprüfung startete nicht")
+assert(addon.GearAudit.active ~= nil, "Es wird niemand inspiziert")
+assert(addon.GearAudit.active.unit == "raid1", "Der falsche Spieler wird inspiziert")
+assert(addon.GearAudit:OnInspectReady("GUID-raid1") == true, "Die Inspektion wurde nicht ausgewertet")
+assert(addon.GearAudit.scanning == false, "Die Prüfung läuft nach dem letzten Spieler weiter")
+assert(addon.GearAudit.completed == 1, "Der geprüfte Spieler wurde nicht gezählt")
+assert(addon.GearAudit.skipped == 1, "Der nicht erreichbare Spieler wurde nicht übersprungen")
+assert(addon.GearAudit.status:find("nicht in Reichweite", 1, true),
+    "Die Statusmeldung nennt die übersprungenen Spieler nicht")
+local healerAudit = addon.GearAudit:GetAudit("Heiler")
+assert(healerAudit ~= nil, "Die Inspektion wurde nicht gespeichert")
+assert(healerAudit.source == "INSPECT", "Die Inspektion ist nicht als solche gekennzeichnet")
+assert(healerAudit.missingEnchants == 1, "Die fehlende Verzauberung des Geprüften fehlt")
+assert(addon.GearAudit:GetAudit("Schurke") == nil,
+    "Ein nicht erreichbarer Spieler wurde trotzdem gespeichert")
+timerDelayThreshold = math.huge
+
+-- Die Prüfung erscheint in der Oberfläche, sortiert nach Anzahl der Funde.
+addon.UI:ShowPage("GEAR")
+local gearPage = addon.UI.pages.GEAR
+assert(gearPage.gearRows[1].shown == true, "Der geprüfte Spieler fehlt in der Liste")
+assert(gearPage.gearRows[3].shown == false, "Es werden mehr Spieler angezeigt als geprüft")
+assert(gearPage.gearSlotRows[1].shown == true, "Die Slot-Tabelle ist leer")
+addon.GearAudit.selectedName = "Tester"
+addon.UI:RefreshGear()
+assert(gearPage.gearSlotRows[1].slot.value == "Kopf", "Die Slot-Tabelle zeigt den falschen Slot")
+assert(gearPage.gearSlotRows[1].verdict.value == "Unbekannt",
+    "Die Bewertung wird nicht angezeigt")
 
 GuildCopilotDB.settings.editorRecoveryAvailable = false
 GuildCopilotDB.guilds["Altgilde@Realm"] = {}

@@ -70,6 +70,7 @@ local GUILD_DEFAULTS = {
         crafters = {},
     },
     raidSessions = {},
+    gearAudits = {},
     memberCare = {
         inactivityDays = 60,
         protectedRanksConfigured = false,

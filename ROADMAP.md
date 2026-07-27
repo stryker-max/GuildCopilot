@@ -145,6 +145,15 @@ Offen und bewusst noch nicht umgesetzt:
 - Ausnahmen für Farmgear, Widerstandssets und spezielle Encounter-Sets;
 - kein pauschaler „guter/schlechter Spieler“-Score.
 
+Umgesetzt: Erfassung über die Inspect-API mit Warteschlange, Reichweiten- und Erreichbarkeitsprüfung, Auswertung je Slot aus dem Item-Link, Zählung fehlender Verzauberungen und leerer Sockel, eigene Ausrüstung auch ohne Gruppe, versionierter Regelsatz mit Regel, Quelle und Datenalter je Einstufung sowie eine eigene Seite ohne Gesamtnote.
+
+Offen und bewusst noch nicht umgesetzt:
+
+- Der Regelsatz für **Optimal**, **Solide** und **Verbesserbar** ist leer. Die Enchant-IDs müssen aus einer belegbaren Quelle übernommen werden; bis dahin werden vorhandene Verzauberungen als **Unbekannt** ausgewiesen und nie als schlecht gewertet. Fehlende Verzauberungen und leere Sockel erkennt der Audit auch ohne Regeln exakt.
+- Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets fehlen noch.
+- Regeln nach Spec und Content-Phase sind vorbereitet (Rolle und Slot werden bereits ausgewertet), aber ohne Regeldaten noch nicht wirksam.
+- Die Ergebnisse bleiben lokal bei dem, der geprüft hat. Ob sie wie die Raidauswertung an Offiziere verteilt werden sollen, ist offen.
+
 Die Guides von [wowtbc.gg](https://wowtbc.gg/) führen spec-spezifische Consumables und Alternativen auf. Diese Trennung eignet sich als Grundlage für die Stufen **Optimal** und **Solide**, muss aber pro Phase und Spec gepflegt werden.
 
 ## 0.7 – Mitgliederpflege

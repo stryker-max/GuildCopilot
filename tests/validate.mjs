@@ -141,6 +141,11 @@ const requiredImplementations = [
   ["Consumables nach Spell-ID", /GC\.Consumables\[/],
   ["Auswertung über Raid- und Flüsterkanal", /DistributeSummary/],
   ["Anwesenheitszeit", /presentSince/],
+  ["Gear Audit über die Inspect-API", /function GC\.GearAudit:StartRaidScan/],
+  ["Verzauberungen und Sockel je Slot", /function GC\.GearAudit:BuildAudit/],
+  ["versionierter Regelsatz", /GC\.EnchantRuleSet/],
+  ["unbewertete Verzauberungen bleiben unbekannt", /UNKNOWN/],
+  ["kein Gesamtscore im Gear Audit", /keine Gesamtnote/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

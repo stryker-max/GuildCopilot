@@ -118,6 +118,61 @@ GC.Consumables = {
     [28019] = { category = "OIL", name = "Überlegenes Manaöl" },
 }
 
+-- Ausrüstungsslots für den Gear Audit. "enchantRequired" markiert nur Slots,
+-- die in TBC jede Raidklasse verzaubern kann. Ringe (nur Verzauberer),
+-- Schildhand (nur Schilde) und Distanz (nur Schusswaffen) sind bewusst nicht
+-- eingefordert, damit keine falschen Fehlmeldungen entstehen.
+GC.GearSlots = {
+    { id = 1, key = "HEAD", label = "Kopf", enchantRequired = true },
+    { id = 2, key = "NECK", label = "Hals" },
+    { id = 3, key = "SHOULDER", label = "Schulter", enchantRequired = true },
+    { id = 5, key = "CHEST", label = "Brust", enchantRequired = true },
+    { id = 6, key = "WAIST", label = "Gürtel" },
+    { id = 7, key = "LEGS", label = "Beine", enchantRequired = true },
+    { id = 8, key = "FEET", label = "Füße", enchantRequired = true },
+    { id = 9, key = "WRIST", label = "Handgelenke", enchantRequired = true },
+    { id = 10, key = "HANDS", label = "Hände", enchantRequired = true },
+    { id = 11, key = "FINGER1", label = "Ring 1" },
+    { id = 12, key = "FINGER2", label = "Ring 2" },
+    { id = 13, key = "TRINKET1", label = "Schmuck 1" },
+    { id = 14, key = "TRINKET2", label = "Schmuck 2" },
+    { id = 15, key = "BACK", label = "Rücken", enchantRequired = true },
+    { id = 16, key = "MAINHAND", label = "Waffenhand", enchantRequired = true },
+    { id = 17, key = "OFFHAND", label = "Schildhand" },
+    { id = 18, key = "RANGED", label = "Distanz" },
+}
+
+GC.GearVerdicts = {
+    OPTIMAL = { key = "OPTIMAL", label = "Optimal", order = 1 },
+    SOLID = { key = "SOLID", label = "Solide", order = 2 },
+    IMPROVABLE = { key = "IMPROVABLE", label = "Verbesserbar", order = 3 },
+    MISSING = { key = "MISSING", label = "Fehlt", order = 4 },
+    UNKNOWN = { key = "UNKNOWN", label = "Unbekannt", order = 5 },
+}
+
+-- Versionierte Regeln für die Bewertung vorhandener Verzauberungen.
+--
+-- Format je Eintrag:
+--   [enchantID] = {
+--       verdict = "OPTIMAL" | "SOLID" | "IMPROVABLE",
+--       name    = "Anzeigename der Verzauberung",
+--       slots   = { "HANDS", "BACK" },   -- optional, sonst für alle Slots
+--       roles   = { "TANK", "HEALER" },  -- optional, sonst für alle Rollen
+--       source  = "Quelle der Empfehlung",
+--   }
+--
+-- Die Tabelle ist bewusst leer: Enchant-IDs müssen aus einer belegbaren Quelle
+-- übernommen werden, sonst bewertet der Audit falsch. Unbekannte IDs werden
+-- als "Unbekannt" ausgewiesen und nie als schlecht gewertet. Fehlende
+-- Verzauberungen und leere Sockel erkennt der Audit auch ohne diese Regeln
+-- exakt, weil sie direkt aus dem Item-Link hervorgehen.
+GC.EnchantRuleSet = {
+    version = 1,
+    phase = "",
+    source = "",
+    rules = {},
+}
+
 GC.ClassOrder = {
     "WARRIOR",
     "PALADIN",
