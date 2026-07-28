@@ -11,7 +11,6 @@ local MAX_STORED_SESSIONS = 12
 local MIN_SEGMENT_SECONDS = 15
 local WIPE_RATIO = 0.5
 local MAX_PAYLOAD_BYTES = 165
-local SEND_INTERVAL = 0.5
 local MIN_ANSWER_INTERVAL = 30
 
 local function SanitizedText(value, maximumBytes)

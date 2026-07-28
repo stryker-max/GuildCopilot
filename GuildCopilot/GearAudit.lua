@@ -4,7 +4,6 @@ GC.GearAudit = {
     queue = {},
     active = nil,
     scanning = false,
-    lastRequestAt = 0,
     selectedName = nil,
     status = "",
 }
@@ -12,11 +11,6 @@ GC.GearAudit = {
 local INSPECT_INTERVAL = 1.5
 local INSPECT_TIMEOUT = 4
 local AUDIT_TTL = 7 * 24 * 60 * 60
-
-local SLOT_BY_ID = {}
-for _, slot in ipairs(GC.GearSlots) do
-    SLOT_BY_ID[slot.id] = slot
-end
 
 -- item:itemID:enchantID:gem1:gem2:gem3:gem4:...
 function GC.GearAudit:ParseItemLink(link)
@@ -48,30 +42,6 @@ function GC.GearAudit:ParseItemLink(link)
         gems = gems,
         filledGems = filledGems,
     }
-end
-
--- GetItemStats meldet die Sockel des Grundgegenstands. Die Differenz zu den
--- tatsächlich eingesetzten Steinen ergibt die leeren Sockel; die Rechnung
--- stimmt auch dann, wenn die API nur unbesetzte Sockel zurückgeben sollte.
-function GC.GearAudit:CountEmptySockets(link, filledGems)
-    if type(GetItemStats) ~= "function" then
-        return nil
-    end
-    local ok, stats = pcall(GetItemStats, link)
-    if not ok or type(stats) ~= "table" then
-        return nil
-    end
-
-    local sockets = 0
-    for key, value in pairs(stats) do
-        if tostring(key):find("EMPTY_SOCKET", 1, true) then
-            sockets = sockets + (tonumber(value) or 0)
-        end
-    end
-    if sockets == 0 then
-        return 0
-    end
-    return math.max(0, sockets - (tonumber(filledGems) or 0))
 end
 
 -- === Verzauberung im Klartext ==============================================
@@ -121,9 +91,82 @@ local function TooltipLines(link)
     return lines
 end
 
-function GC.GearAudit:ResolveEnchantName(link, enchantID)
-    if (tonumber(enchantID) or 0) <= 0 then
+-- Leere Sockel: zuerst aus dem Tooltip, weil GetItemStats in Classic als
+-- veraltet gilt und dort nicht zuverlaessig antwortet. WoW liefert die
+-- Beschriftungen leerer Sockel als globale, bereits uebersetzte Zeichenketten
+-- (EMPTY_SOCKET_RED und so weiter) - der Abgleich bleibt damit
+-- sprachunabhaengig. Nur wenn kein Tooltip zustande kommt, wird gerechnet.
+local EMPTY_SOCKET_KEYS = {
+    "EMPTY_SOCKET_RED",
+    "EMPTY_SOCKET_YELLOW",
+    "EMPTY_SOCKET_BLUE",
+    "EMPTY_SOCKET_META",
+    "EMPTY_SOCKET_PRISMATIC",
+    "EMPTY_SOCKET_NO_COLOR",
+}
+
+local function CountSocketLines(lines)
+    local labels = {}
+    for _, key in ipairs(EMPTY_SOCKET_KEYS) do
+        local label = _G[key]
+        if type(label) == "string" and label ~= "" then
+            labels[label] = true
+        end
+    end
+    if not next(labels) then
         return nil
+    end
+
+    local count = 0
+    for _, text in ipairs(lines) do
+        if labels[GC.Util.Trim(text)] then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+function GC.GearAudit:CountEmptySockets(link, filledGems)
+    local lines = TooltipLines(link)
+    if lines and #lines > 0 then
+        local fromTooltip = CountSocketLines(lines)
+        if fromTooltip then
+            return fromTooltip
+        end
+    end
+
+    if type(GetItemStats) ~= "function" then
+        return nil
+    end
+    local ok, stats = pcall(GetItemStats, link)
+    if not ok or type(stats) ~= "table" then
+        return nil
+    end
+
+    local sockets = 0
+    for key, value in pairs(stats) do
+        if tostring(key):find("EMPTY_SOCKET", 1, true) then
+            sockets = sockets + (tonumber(value) or 0)
+        end
+    end
+    if sockets == 0 then
+        return 0
+    end
+    return math.max(0, sockets - (tonumber(filledGems) or 0))
+end
+
+local enchantNameCache = {}
+
+function GC.GearAudit:ResolveEnchantName(link, enchantID)
+    enchantID = tonumber(enchantID) or 0
+    if enchantID <= 0 then
+        return nil
+    end
+    -- Der Name haengt nur an der Verzauberung, nicht am Gegenstand. Einmal
+    -- aufgeloest gilt er fuer den ganzen Raid.
+    local cached = enchantNameCache[enchantID]
+    if cached ~= nil then
+        return cached ~= false and cached or nil
     end
     local enchanted = TooltipLines(link)
     if not enchanted or #enchanted == 0 then
@@ -149,10 +192,12 @@ function GC.GearAudit:ResolveEnchantName(link, enchantID)
         else
             local name = GC.Util.Trim(text)
             if name ~= "" then
+                enchantNameCache[enchantID] = name
                 return name
             end
         end
     end
+    enchantNameCache[enchantID] = false
     return nil
 end
 
@@ -236,9 +281,10 @@ function GC.GearAudit:CycleEnchantRule(enchantID, enchantName)
     return self:SetEnchantRule(enchantID, nextVerdict, enchantName)
 end
 
-function GC.GearAudit:OnEnchantRulesChanged()
-    -- Bereits gespeicherte Pruefungen neu bewerten, damit die Anzeige sofort
-    -- stimmt, ohne dass jemand erneut inspizieren muss.
+-- Nur neu bewerten, ohne etwas zu senden. Diesen Weg nimmt der Empfang: Wer
+-- ein Gildenprofil bekommt, darf es nicht sofort wieder verschicken, sonst
+-- schaukeln sich zwei Clients gegenseitig auf.
+function GC.GearAudit:ReapplyEnchantRules()
     for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
         for _, entry in ipairs(audit.slots or {}) do
             if entry.verdict ~= "EMPTY" and (tonumber(entry.enchantID) or 0) > 0 then
@@ -254,11 +300,16 @@ function GC.GearAudit:OnEnchantRulesChanged()
             end
         end
     end
+    GC:FireCallback("GEAR_AUDIT_UPDATED")
+end
+
+-- Eigene Aenderung: neu bewerten und gildenweit verteilen.
+function GC.GearAudit:OnEnchantRulesChanged()
+    self:ReapplyEnchantRules()
     GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
     if GC.Sync and GC.Sync.QueueGuildProfile then
         GC.Sync:QueueGuildProfile(true)
     end
-    GC:FireCallback("GEAR_AUDIT_UPDATED")
 end
 
 function GC.GearAudit:GetRoleForProfile(profile)

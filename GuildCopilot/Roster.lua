@@ -546,10 +546,16 @@ function GC.Roster:RemoveMember(name)
     end
 
     local target = self:GetMember(name)
-    if type(GuildUninvite) ~= "function" then
+    -- In TBC Classic heisst die Funktion GuildUninvite; neuere Clients bieten
+    -- C_GuildInfo.Uninvite. Beide Wege werden unterstuetzt.
+    local removeFunction = GuildUninvite
+    if C_GuildInfo and type(C_GuildInfo.Uninvite) == "function" then
+        removeFunction = C_GuildInfo.Uninvite
+    end
+    if type(removeFunction) ~= "function" then
         return false, "Diese WoW-Version bietet kein Entfernen über Addons."
     end
-    local success = pcall(GuildUninvite, target.name)
+    local success = pcall(removeFunction, target.name)
     if not success then
         return false, "WoW hat das Entfernen abgelehnt."
     end

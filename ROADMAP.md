@@ -192,6 +192,18 @@ Der einzelne Gildenausschluss ist umgesetzt und mehrfach abgesichert: nur mit fr
 
 Damit sind die Punkte aus 0.7 abgearbeitet.
 
+## Offene Punkte (Stand 0.9.2)
+
+Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und Erprobung im Spiel:
+
+- **Enchant-Regelsatz**: wird seit 0.8.1 in der Gilde selbst gepflegt; ausgeliefert wird eine leere Tabelle. wowtbc.gg und Wowhead lassen sich nicht automatisch auslesen (beide antworten mit HTTP 403), und die Guides nennen nur englische Namen, während der Item-Link eine Enchant-ID führt.
+- **Consumable-Spell-IDs**: Ausgangsbestand aus dem Gedächtnis, nicht gegen echte Logs geprüft. Essen fehlt vollständig, weil die „Sattgegessen“-IDs je Gericht abweichen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
+- **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
+- **Companion-Abfragen für die WCL-Nachanalyse**: gegen die dokumentierte v2-API geschrieben, aber nie gegen echte Reports gelaufen.
+- **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen; Ergebnisse bleiben lokal bei dem, der geprüft hat.
+- **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
+- **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
+
 ## Datenschutz und Fairness
 
 - nur Daten erfassen, die WoW-API, Combat Log oder ausdrücklich konfigurierte externe Quellen liefern;

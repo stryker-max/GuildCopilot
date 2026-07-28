@@ -382,7 +382,7 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     if fields[22] ~= nil then
         guildData.enchantRules = DecodeEnchantRules(fields[22])
         if GC.GearAudit then
-            GC.GearAudit:OnEnchantRulesChanged()
+            GC.GearAudit:ReapplyEnchantRules()
         end
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)

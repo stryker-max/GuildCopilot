@@ -80,6 +80,9 @@ end
 UISpecialFrames = {}
 SlashCmdList = {}
 SOUNDKIT = { READY_CHECK = 8960 }
+EMPTY_SOCKET_RED = "Roter Sockel"
+EMPTY_SOCKET_YELLOW = "Gelber Sockel"
+EMPTY_SOCKET_BLUE = "Blauer Sockel"
 local optionsCategory
 function InterfaceOptions_AddCategory(panel)
     optionsCategory = panel
@@ -952,7 +955,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.1", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.2", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -1224,6 +1227,22 @@ assert(addon.GearAudit:ParseItemLink("kein Link") == nil, "Ein ungültiger Link 
 assert(addon.GearAudit:CountEmptySockets(SOCKETED_CHEST, 1) == 2,
     "Die leeren Sockel wurden falsch gezählt")
 
+-- GetItemStats gilt in Classic als veraltet. Liefert der Tooltip die
+-- uebersetzten Sockelzeilen, zaehlen die - unabhaengig von der Sprache.
+local TOOLTIP_SOCKETS = "|cffa335ee|Hitem:1234:0:0:0:0:0:0:0:70|h[Sockelteil]|h|r"
+tooltipLines[TOOLTIP_SOCKETS] = {
+    "Sockelteil",
+    "Rüstung 200",
+    "Roter Sockel",
+    "Blauer Sockel",
+    "Sockelbonus: +4 Ausdauer",
+}
+assert(addon.GearAudit:CountEmptySockets(TOOLTIP_SOCKETS, 0) == 2,
+    "Leere Sockel werden nicht aus dem Tooltip gelesen")
+tooltipLines[TOOLTIP_SOCKETS] = { "Sockelteil", "Rüstung 200" }
+assert(addon.GearAudit:CountEmptySockets(TOOLTIP_SOCKETS, 0) == 0,
+    "Ein Gegenstand ohne Sockel meldet trotzdem leere Sockel")
+
 inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
 local selfAudited, selfMessage = addon.GearAudit:AuditSelf()
 assert(selfAudited == true, "Die eigene Ausrüstung wurde nicht geprüft")
@@ -1385,6 +1404,21 @@ assert(not rulePayload:find("Außergewöhnliche", 1, true),
     "Der übersetzte Name wird unnötig mitgeschickt")
 local ruleFields = addon.Util.SplitFields(rulePayload)
 assert(ruleFields[22] ~= nil, "Das Regelfeld fehlt in der Nutzlast")
+
+-- Empfangen darf niemals ein Senden ausloesen, sonst schaukeln sich zwei
+-- Clients gegenseitig auf, und der Zeitstempel darf nicht neu gesetzt werden.
+addon.DB:GetGuild().enchantRules = {}
+addon.DB:GetGuild().profile.updatedAt = 0
+local incomingRules = addon.Sync:BuildGuildProfileMessages()
+addon.DB:GetGuild().profile.updatedAt = 0
+local sentBeforeReceive = #sentAddon
+for _, ruleMessage in ipairs(incomingRules) do
+    addon.Sync:ReceiveGuildProfileChunk(ruleMessage, "Tester-Realm")
+end
+assert(#sentAddon == sentBeforeReceive,
+    "Der Empfang eines Gildenprofils hat ein erneutes Senden ausgelöst")
+assert(addon.DB:GetGuild().profile.updatedAt == 0,
+    "Der Empfang hat den Zeitstempel auf jetzt gesetzt und damit die Reihenfolge zerstört")
 
 -- Ein Rang ohne Einstellungsrecht darf nichts bewerten.
 local editorRanks = addon.DB:GetGuild().profilePermissions.editorRanks
