@@ -87,10 +87,26 @@ local function CreateLabel(parent, text, style)
     if style.height then
         label:SetHeight(style.height)
     end
-    -- Fuer Tabellenzellen: lieber am Spaltenrand abschneiden als umbrechen.
+    -- Umbrechen ist die Ausnahme, nicht die Regel.
+    --
     -- Eine umgebrochene Zelle waechst ueber ihre Zeile hinaus und schiebt sich
-    -- optisch in die Nachbarzeilen.
-    if style.singleLine and label.SetWordWrap then
+    -- in die Nachbarzeilen. Genau dieser Fehler ist an vier Stellen unabhaengig
+    -- voneinander entstanden - Slot-Tabelle, Mitgliederpflege, Raidauswertung
+    -- und Gildenuebersicht -, weil Umbrechen die Voreinstellung war und jede
+    -- Tabelle einzeln daran denken musste.
+    --
+    -- Massgeblich ist, ob der Aufrufer eine feste Hoehe verlangt hat: Wer das
+    -- tut, hat sich auf einen Kasten festgelegt, und daraus soll nichts
+    -- herauswachsen. Ohne Hoehe darf eine Beschriftung weiter mitwachsen -
+    -- freistehende Meldungen wie Importergebnisse leben davon.
+    --
+    -- Ausdruecklich mehrzeilig bleibt, was sich als Textblock zu erkennen
+    -- gibt: ueber "vertical = TOP", das Hilfetexte ohnehin setzen, oder ueber
+    -- ein ausdrueckliches "multiline" bei fester Hoehe.
+    local wraps = style.multiline == true
+        or style.vertical == "TOP"
+        or style.height == nil
+    if not wraps and label.SetWordWrap then
         label:SetWordWrap(false)
     end
     return label
@@ -806,7 +822,6 @@ function GC.UI:BuildDashboardPage()
             row[column.key] = CreateLabel(row, "", {
                 width = column.width,
                 height = 25,
-                singleLine = true,
             })
             row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
         end
@@ -1362,7 +1377,9 @@ function GC.UI:BuildRosterPage()
         GC.UI:RefreshRoster()
     end)
     page.clearAbsence:SetPoint("LEFT", page.saveAbsence, "RIGHT", 8, 0)
-    page.absenceStatus = CreateLabel(absenceCard, "", { width = 402, height = 32 })
+    -- Meldungen wie "Abmeldung gespeichert und fuer die Gilde synchronisiert."
+    -- brauchen gelegentlich zwei Zeilen; die Hoehe ist dafuer ausgelegt.
+    page.absenceStatus = CreateLabel(absenceCard, "", { width = 402, height = 32, multiline = true })
     page.absenceStatus:SetPoint("LEFT", page.clearAbsence, "RIGHT", 12, 0)
 
     local gearCard = CreateCard(content, "Deine Ausrüstung")
@@ -1556,11 +1573,11 @@ function GC.UI:BuildSuggestionsPage()
         local row = CreatePanel(card, index % 2 == 0 and THEME.input or THEME.card)
         row:SetSize(740, 33)
         row:SetPoint("TOPLEFT", card, "TOPLEFT", 18, -72 - ((index - 1) * 37))
-        row.priority = CreateLabel(row, "", { width = 64, font = "GameFontNormalSmall" })
+        row.priority = CreateLabel(row, "", { width = 64, height = 33, font = "GameFontNormalSmall" })
         row.priority:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.name = CreateLabel(row, "", { width = 190 })
+        row.name = CreateLabel(row, "", { width = 190, height = 33 })
         row.name:SetPoint("LEFT", row, "LEFT", 78, 0)
-        row.reason = CreateLabel(row, "", { muted = true, width = 450 })
+        row.reason = CreateLabel(row, "", { muted = true, width = 450, height = 33 })
         row.reason:SetPoint("LEFT", row, "LEFT", 276, 0)
         page.suggestionRows[index] = row
     end
@@ -1697,13 +1714,13 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(absencesCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 26)
         row:SetPoint("TOPLEFT", absencesCard, "TOPLEFT", 18, -48 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 140 })
+        row.name = CreateLabel(row, "", { width = 140, height = 26 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.range = CreateLabel(row, "", { muted = true, width = 190 })
+        row.range = CreateLabel(row, "", { muted = true, width = 190, height = 26 })
         row.range:SetPoint("LEFT", row, "LEFT", 154, 0)
-        row.reason = CreateLabel(row, "", { muted = true, width = 284 })
+        row.reason = CreateLabel(row, "", { muted = true, width = 284, height = 26 })
         row.reason:SetPoint("LEFT", row, "LEFT", 350, 0)
-        row.state = CreateLabel(row, "", { align = "RIGHT", width = 70 })
+        row.state = CreateLabel(row, "", { align = "RIGHT", width = 70, height = 26 })
         row.state:SetPoint("RIGHT", row, "RIGHT", -9, 0)
         page.guildAbsenceRows[index] = row
     end
@@ -1723,14 +1740,14 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(suggestionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 27)
         row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -81 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 116, height = 27, singleLine = true })
+        row.name = CreateLabel(row, "", { width = 116, height = 27 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.status = CreateLabel(row, "", { width = 76, height = 27, singleLine = true })
+        row.status = CreateLabel(row, "", { width = 76, height = 27 })
         row.status:SetPoint("LEFT", row, "LEFT", 129, 0)
         -- Der Grund umbrach auf zwei Zeilen und lief damit ueber die 27 Pixel
         -- Zeilenhoehe hinaus in die Nachbarzeilen. Er bleibt jetzt einzeilig,
         -- vollstaendig steht er im Tooltip.
-        row.reason = CreateLabel(row, "", { muted = true, width = 196, height = 27, singleLine = true })
+        row.reason = CreateLabel(row, "", { muted = true, width = 196, height = 27 })
         row.reason:SetPoint("LEFT", row, "LEFT", 209, 0)
         row:EnableMouse(true)
         row:SetScript("OnEnter", function(self)
@@ -1825,11 +1842,11 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(decisionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 26)
         row:SetPoint("TOPLEFT", decisionsCard, "TOPLEFT", 18, -90 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 150 })
+        row.name = CreateLabel(row, "", { width = 150, height = 26 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.status = CreateLabel(row, "", { width = 130 })
+        row.status = CreateLabel(row, "", { width = 130, height = 26 })
         row.status:SetPoint("LEFT", row, "LEFT", 165, 0)
-        row.detail = CreateLabel(row, "", { muted = true, width = 300 })
+        row.detail = CreateLabel(row, "", { muted = true, width = 300, height = 26 })
         row.detail:SetPoint("LEFT", row, "LEFT", 301, 0)
         row.restoreButton = CreateButton(row, "Zurückholen", 96, 21, function()
             if row.playerName then
@@ -2075,7 +2092,7 @@ function GC.UI:BuildWorkshopPage()
         row.professionIcon = row:CreateTexture(nil, "ARTWORK")
         row.professionIcon:SetSize(21, 21)
         row.professionIcon:SetPoint("LEFT", row, "LEFT", 8, 0)
-        row.meta = CreateLabel(row, "", { muted = true, align = "RIGHT", width = 96 })
+        row.meta = CreateLabel(row, "", { muted = true, align = "RIGHT", width = 96, height = 31 })
         row.meta:SetPoint("RIGHT", row, "RIGHT", -9, 0)
         row.favoriteIcon = row:CreateTexture(nil, "ARTWORK")
         row.favoriteIcon:SetSize(15, 15)
@@ -2901,9 +2918,9 @@ function GC.UI:BuildInboxPage()
         local row = CreatePanel(filterCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 26)
         row:SetPoint("TOPLEFT", filterCard, "TOPLEFT", 18, -82 - ((index - 1) * 28))
-        row.name = CreateLabel(row, "", { width = 200, singleLine = true, height = 26 })
+        row.name = CreateLabel(row, "", { width = 200, height = 26 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.until_ = CreateLabel(row, "", { muted = true, width = 340, singleLine = true, height = 26 })
+        row.until_ = CreateLabel(row, "", { muted = true, width = 340, height = 26 })
         row.until_:SetPoint("LEFT", row, "LEFT", 217, 0)
         row.clear = CreateButton(row, "Wieder zulassen", 150, 22, function()
             local entry = page.filterEntries and page.filterEntries[rowIndex]
@@ -3324,7 +3341,7 @@ function GC.UI:BuildStatisticsPage()
             { key = "drums", x = 431, width = 56 },
         }
         for _, column in ipairs(columns) do
-            row[column.key] = CreateLabel(row, "", { width = column.width, height = 25, singleLine = true })
+            row[column.key] = CreateLabel(row, "", { width = column.width, height = 25 })
             row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
         end
 
@@ -3602,13 +3619,13 @@ function GC.UI:BuildGearPage()
         row.border:Hide()
         row.label:Hide()
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
-        row.slot = CreateLabel(row, "", { width = 112 })
+        row.slot = CreateLabel(row, "", { width = 112, height = 25 })
         row.slot:SetPoint("LEFT", row, "LEFT", 5, 0)
-        row.verdict = CreateLabel(row, "", { width = 96 })
+        row.verdict = CreateLabel(row, "", { width = 96, height = 25 })
         row.verdict:SetPoint("LEFT", row, "LEFT", 121, 0)
-        row.sockets = CreateLabel(row, "", { width = 58 })
+        row.sockets = CreateLabel(row, "", { width = 58, height = 25 })
         row.sockets:SetPoint("LEFT", row, "LEFT", 221, 0)
-        row.reason = CreateLabel(row, "", { width = 214, height = 25, muted = true, singleLine = true })
+        row.reason = CreateLabel(row, "", { width = 214, height = 25, muted = true })
         row.reason:SetPoint("LEFT", row, "LEFT", 283, 0)
 
         -- Der Hinweis passt selten in 214 Pixel. Abgeschnitten wird nur die
@@ -3639,7 +3656,7 @@ function GC.UI:BuildGearPage()
         -- Kein Pfeilzeichen: Die WoW-Schriftart kennt es nicht und zeichnet
         -- statt dessen leere Kaesten.
         "Klick auf eine Zeile schaltet weiter: Optimal, Solide, Verbesserbar, keine Bewertung.",
-        { muted = true, font = "GameFontNormalSmall", width = 488, height = 16, singleLine = true })
+        { muted = true, font = "GameFontNormalSmall", width = 488, height = 16 })
     page.gearRatingHint:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -104)
 
     page.gearSlotEmpty = CreateLabel(detailCard, "Wähle links einen Spieler aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
