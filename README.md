@@ -71,8 +71,10 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 
 ## Installation
 
-1. Den Ordner `GuildCopilot` in den Addon-Ordner der TBC-Anniversary-Installation kopieren:
+0. Der einfachste Weg unter Windows: `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation, ersetzt eine eventuell vorhandene ältere Version und legt das Addon an die richtige Stelle. Wird die Installation nicht gefunden, fragt es nach dem Pfad zum Ordner `_anniversary_`.
+1. Von Hand: den Ordner `GuildCopilot` in den Addon-Ordner der TBC-Anniversary-Installation kopieren:
    `World of Warcraft/_anniversary_/Interface/AddOns/`
+   Danach muss `GuildCopilot.toc` direkt in `AddOns/GuildCopilot/` liegen – ein doppelt verschachtelter Ordner ist der häufigste Installationsfehler.
 2. WoW neu starten oder am Charakterbildschirm **AddOns** öffnen.
 3. **Guild Copilot** aktivieren und im Spiel `/gcp` eingeben.
 4. Im Rekrutierungs-Workflow zuerst das **Gildenprofil** ausfüllen und danach die **Copilot-Vorschläge** prüfen.
