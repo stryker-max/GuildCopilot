@@ -203,17 +203,27 @@ function GC.Util.IsDateInRange(value, rangeFrom, rangeTo)
 end
 
 function GC:GetPlayerFullName()
-    local name, realm = UnitFullName and UnitFullName("player")
-    if not name then
+    -- Hier stand "local name, realm = UnitFullName and UnitFullName(...)".
+    -- Lua kuerzt einen and-Ausdruck auf genau einen Wert, realm blieb deshalb
+    -- immer leer und wurde jedes Mal ueber den Fallback unten neu geholt.
+    local name, realm
+    if UnitFullName then
+        name, realm = UnitFullName("player")
+    end
+    if not name or name == "" then
         name = UnitName and UnitName("player")
     end
     if not realm or realm == "" then
         realm = GetNormalizedRealmName and GetNormalizedRealmName() or GetRealmName and GetRealmName() or ""
     end
+    -- Ohne Namen darf hier nichts verkettet werden, sonst bricht der Aufruf ab.
+    if not name or name == "" then
+        return "Unbekannt"
+    end
     if realm and realm ~= "" then
         return name .. "-" .. realm
     end
-    return name or "Unbekannt"
+    return name
 end
 
 function GC:GetGuildName()
