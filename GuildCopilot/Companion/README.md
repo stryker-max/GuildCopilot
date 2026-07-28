@@ -32,4 +32,4 @@ node .\WCL-Import.mjs "https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/
 
 Danach liegt die Datei `GuildCopilot-WCL-Import.txt` im temporären Windows-Ordner. Beim einfachen Start kopiert das Startprogramm ihren Inhalt automatisch in die Zwischenablage. Im Addon unter **Warcraft Logs → Companion-Import** einfügen und **Daten importieren** klicken.
 
-Das Script betrachtet die zwölf jüngsten öffentlichen Reports. Der zuletzt beobachtete Spec wird Primär-Spec, ein weiterer beobachteter Spec wird Dual-Spec. Private Reports werden mit dem Client-Credentials-Verfahren bewusst nicht gelesen.
+Das Script betrachtet die zwölf jüngsten öffentlichen Reports und exportiert neben den Spielerprofilen auch je Report eine Raidauswertung (Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Interrupts, Dispels, Verbrauchsgegenstände). Der zuletzt beobachtete Spec wird Primär-Spec, ein weiterer beobachteter Spec wird Dual-Spec. Private Reports werden mit dem Client-Credentials-Verfahren bewusst nicht gelesen.

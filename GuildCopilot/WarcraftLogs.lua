@@ -118,6 +118,74 @@ function GC.WarcraftLogs:SaveSource(url)
     return true, "Warcraft-Logs-Gilde gespeichert."
 end
 
+-- Der Companion liefert Verbrauchsgegenstände als "Spell-ID:Anzahl". Welche
+-- Kategorie dahintersteckt, entscheidet allein GC.Consumables im Addon;
+-- unbekannte IDs werden ignoriert und erzeugen so nie falsche Zahlen.
+local function DecodeConsumables(payload)
+    local counters = {}
+    for _, category in ipairs(GC.ConsumableCategories) do
+        counters[category.key] = 0
+    end
+
+    for token in tostring(payload or ""):gmatch("[^,]+") do
+        local spellID, count = token:match("^(%d+):(%d+)$")
+        local consumable = spellID and GC.Consumables[tonumber(spellID)]
+        local category = consumable and GC.ConsumableCategoryByKey[consumable.category]
+        if category then
+            count = tonumber(count) or 0
+            if category.repeatable then
+                counters[category.key] = counters[category.key] + count
+            elseif count > 0 then
+                -- Dauerhafte Buffs zählen wie in der Livesitzung einmal je Spieler.
+                counters[category.key] = 1
+            end
+        end
+    end
+    return counters
+end
+
+local function ParseSessionLine(line)
+    local code, startedAt, endedAt, zone, pulls, kills, wipes =
+        line:match("^S|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$")
+    if not code or code == "" then
+        return nil
+    end
+    return {
+        id = "WCL:" .. code,
+        reportCode = code,
+        startedAt = tonumber(startedAt) or 0,
+        endedAt = tonumber(endedAt) or 0,
+        zone = GC.Util.Trim(zone),
+        startedBy = "",
+        pulls = tonumber(pulls) or 0,
+        kills = tonumber(kills) or 0,
+        wipes = tonumber(wipes) or 0,
+        participants = {},
+        source = "WCL",
+        receivedAt = GC.Util.Now(),
+    }
+end
+
+local function ParseParticipantLine(line)
+    local name, classFile, seconds, deaths, interrupts, dispels, consumables =
+        line:match("^P|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?([^|]*)$")
+    name = GC.Util.Trim(name)
+    if name == "" then
+        return nil
+    end
+    classFile = ResolveClass(classFile)
+    return {
+        name = name,
+        classFile = classFile,
+        seconds = math.max(0, tonumber(seconds) or 0),
+        deaths = tonumber(deaths) or 0,
+        resurrects = 0,
+        interrupts = tonumber(interrupts) or 0,
+        dispels = tonumber(dispels) or 0,
+        consumables = DecodeConsumables(consumables),
+    }
+end
+
 function GC.WarcraftLogs:Import(text)
     text = tostring(text or ""):gsub("\r", "")
     local headerSeen = false
@@ -126,14 +194,27 @@ function GC.WarcraftLogs:Import(text)
     local uniqueCount = 0
     local reportCount = 0
 
+    local sessions = {}
+    local currentSession
+
     for line in (text .. "\n"):gmatch("(.-)\n") do
         line = GC.Util.Trim(line)
         if line ~= "" then
-            local marker, reports = line:match("^(GCPWCL1)|?(%d*)$")
+            local marker, reports = line:match("^(GCPWCL[12])|?(%d*)$")
             if marker then
                 headerSeen = true
                 importSource = "WARCRAFT_LOGS"
                 reportCount = tonumber(reports) or 0
+            elseif line:sub(1, 2) == "S|" then
+                currentSession = ParseSessionLine(line)
+                if currentSession then
+                    sessions[#sessions + 1] = currentSession
+                end
+            elseif line:sub(1, 2) == "P|" then
+                local participant = currentSession and ParseParticipantLine(line)
+                if participant then
+                    currentSession.participants[#currentSession.participants + 1] = participant
+                end
             else
                 local name, classFile, primarySpecKey, secondarySpecKey = line:match("^([^;]+);([^;]+);([^;]*);?([^;]*)$")
                 name = GC.Util.Trim(name)
@@ -165,20 +246,38 @@ function GC.WarcraftLogs:Import(text)
         end
     end
 
-    if uniqueCount == 0 then
+    if uniqueCount == 0 and #sessions == 0 then
         return false, "Keine gültigen Profile gefunden. Format: Name;Klasse;Primär-Spec;Dual-Spec"
     end
 
     local data = GC.DB:GetGuild().warcraftLogs
-    data.members = imported
+    if uniqueCount > 0 then
+        data.members = imported
+    end
     data.importedAt = GC.Util.Now()
     data.reportCount = headerSeen and reportCount or 0
+
+    -- Nachanalysen werden als eigene Auswertungen abgelegt und niemals mit
+    -- einer Livesitzung verrechnet.
+    local storedSessions = 0
+    for _, session in ipairs(sessions) do
+        if #session.participants > 0 and GC.RaidMonitor:StoreSummary(session) then
+            storedSessions = storedSessions + 1
+        end
+    end
+    data.sessionCount = storedSessions
+
     GC:FireCallback("WCL_UPDATED")
     GC:FireCallback("ROSTER_UPDATED")
-    if headerSeen then
-        return true, uniqueCount .. " Warcraft-Logs-Profile importiert."
+
+    local parts = {}
+    if uniqueCount > 0 then
+        parts[#parts + 1] = uniqueCount .. (headerSeen and " Warcraft-Logs-Profile" or " Profile")
     end
-    return true, uniqueCount .. " Profile manuell importiert."
+    if storedSessions > 0 then
+        parts[#parts + 1] = storedSessions .. " Raidauswertungen"
+    end
+    return true, GC.Util.JoinGerman(parts) .. " importiert."
 end
 
 function GC.WarcraftLogs:GetImportedCount()

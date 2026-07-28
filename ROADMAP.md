@@ -130,6 +130,14 @@ Offen und bewusst noch nicht umgesetzt:
 - Live- und WCL-Daten werden getrennt gekennzeichnet und nicht doppelt gezählt;
 - private Reports nur nach einer späteren ausdrücklichen OAuth-Benutzerfreigabe.
 
+Umgesetzt: Der Companion liest je Report Kampfabschnitte, Teilnahme, Anwesenheitszeit, Tode, Interrupts, Dispels und Verbrauchsgegenstände und exportiert sie im Format `GCPWCL2`. Das Addon legt jede Nachanalyse als eigene Auswertung mit der Quelle **Warcraft Logs** ab. Live-, Sync- und Logs-Daten tragen unterschiedliche Kennungen und können sich gegenseitig nicht überschreiben – eine Auswertung anderer Quelle wird beim Speichern abgelehnt statt vermischt.
+
+Verbrauchsgegenstände überträgt der Companion als reine `Spell-ID:Anzahl`-Paare. Die Zuordnung zur Kategorie trifft ausschließlich `GC.Consumables` im Addon, damit es nur eine maßgebliche Tabelle gibt; unbekannte IDs werden ignoriert. Dauerhafte Buffs zählen wie in der Livesitzung einmal je Spieler und Sitzung.
+
+Der alte Profilimport `GCPWCL1` funktioniert unverändert weiter.
+
+Offen: Private Reports bleiben bewusst ausgeschlossen; dafür wäre die ausdrückliche OAuth-Benutzerfreigabe nötig. Die Abfragen des Companions sind gegen die dokumentierte WCL-v2-API geschrieben, aber noch nicht gegen echte Reports erprobt.
+
 ## 0.6 – Raid Readiness und Gear Audit
 
 - Ausrüstung über die WoW-Inspect-API erfassen, soweit Spieler in Reichweite und inspizierbar sind;

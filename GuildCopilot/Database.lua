@@ -65,6 +65,7 @@ local GUILD_DEFAULTS = {
         importedAt = 0,
         members = {},
         reportCount = 0,
+        sessionCount = 0,
     },
     workshop = {
         crafters = {},

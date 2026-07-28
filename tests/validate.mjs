@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.6.0",
+  "## Version: 0.7.0",
 ];
 
 for (const entry of requiredMetadata) {
@@ -151,6 +151,10 @@ const requiredImplementations = [
   ["Ausschluss nur mit Berechtigungsprüfung", /function GC\.Roster:CanRemoveMember/],
   ["echte Blizzard-Prüfung vor dem Ausschluss", /HasBlizzardRemovePermission/],
   ["zweite Bestätigung vor dem Ausschluss", /removeArmed/],
+  ["Nachanalyse aus Warcraft Logs", /GCPWCL\[12\]/],
+  ["Logs-Auswertungen als eigene Quelle", /source = "WCL"/],
+  ["Consumables aus Logs über die Addon-Tabelle", /DecodeConsumables/],
+  ["Quellen werden nicht vermischt", /stored\.source ~= summary\.source/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

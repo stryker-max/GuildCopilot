@@ -1,4 +1,4 @@
-# Guild Copilot 0.6.0
+# Guild Copilot 0.7.0
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -60,7 +60,10 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen gelten als **Unbekannt** und nie als schlecht;
 - es gibt bewusst keine Gesamtnote je Spieler;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
-- Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen.
+- Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen;
+- **Nachanalyse aus Warcraft Logs**: der Companion liest öffentliche Reports und liefert Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Interrupts, Dispels und Verbrauchsgegenstände;
+- Logs-Auswertungen erscheinen als eigene Einträge mit der Quelle **Warcraft Logs** neben den Livesitzungen; beide werden getrennt gehalten und niemals miteinander verrechnet;
+- welche Spell-ID welcher Verbrauchskategorie entspricht, entscheidet allein das Addon – unbekannte IDs aus dem Companion werden ignoriert statt falsch einsortiert.
 - manueller Profilimport ohne API im lesbaren Format `Name;Klasse;Primär-Spec;Dual-Spec`.
 
 ## Installation

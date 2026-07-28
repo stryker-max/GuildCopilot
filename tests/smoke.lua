@@ -856,7 +856,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.6.0", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.7.0", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -900,6 +900,76 @@ currentTime = currentTime + 60
 local sentBeforeReply = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
 assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
+
+-- === Warcraft-Logs-Nachanalyse =============================================
+addon.DB:GetGuild().raidSessions = {}
+local liveSummary = {
+    id = "live-1",
+    startedAt = 100,
+    endedAt = 200,
+    zone = "Karazhan",
+    pulls = 2,
+    kills = 2,
+    wipes = 0,
+    source = "LIVE",
+    participants = { { name = "Tester", seconds = 100, consumables = {} } },
+}
+addon.RaidMonitor:StoreSummary(liveSummary)
+
+local wclImported, wclMessage = addon.WarcraftLogs:Import(
+    "GCPWCL2|1\n"
+    .. "Heiler-Realm;PRIEST;PRIEST:2;PRIEST:3\n"
+    .. "S|abc123|1000|8200|Gruuls Lager|5|4|1\n"
+    .. "P|Tester|HUNTER|7200|1|3|0|28495:2,28518:3,99999:5\n"
+    .. "P|Heiler|PRIEST|7000|0|0|4|28499:1\n"
+)
+assert(wclImported == true, wclMessage or "Der Nachanalyse-Import schlug fehl")
+assert(wclMessage:find("Raidauswertungen", 1, true), "Die Rückmeldung nennt die Auswertungen nicht")
+
+local wclSummary = addon.RaidMonitor:GetSummary("WCL:abc123")
+assert(wclSummary ~= nil, "Die Nachanalyse wurde nicht gespeichert")
+assert(wclSummary.source == "WCL", "Die Nachanalyse ist nicht als Logs-Quelle gekennzeichnet")
+assert(wclSummary.kills == 4 and wclSummary.wipes == 1, "Siege und Wipes wurden nicht übernommen")
+assert(wclSummary.zone == "Gruuls Lager", "Die Instanz wurde nicht übernommen")
+assert(#wclSummary.participants == 2, "Nicht alle Teilnehmer wurden übernommen")
+
+local wclTester = wclSummary.participants[1]
+assert(wclTester.name == "Tester", "Die Teilnehmerreihenfolge stimmt nicht")
+assert(wclTester.seconds == 7200, "Die Anwesenheitszeit wurde nicht übernommen")
+assert(wclTester.interrupts == 3, "Die Interrupts wurden nicht übernommen")
+assert(wclTester.consumables.POTION == 2, "Wiederholbare Tränke wurden nicht gezählt")
+assert(wclTester.consumables.FLASK == 1,
+    "Ein dauerhaftes Fläschchen wurde mehrfach statt einmal gezählt")
+assert(wclTester.consumables.ELIXIR == 0, "Eine unbekannte Spell-ID wurde einer Kategorie zugeordnet")
+
+-- Live- und Logs-Daten bleiben getrennt und überschreiben sich nicht.
+assert(addon.RaidMonitor:GetSummary("live-1") ~= nil, "Die Livesitzung ging verloren")
+assert(addon.RaidMonitor:GetSummary("live-1").source == "LIVE",
+    "Die Livesitzung wurde von den Logs-Daten überschrieben")
+assert(#addon.RaidMonitor:GetSummaries() == 2, "Live und Logs wurden zusammengeworfen")
+
+local collidingSummary = {
+    id = "live-1",
+    startedAt = 100,
+    endedAt = 300,
+    zone = "Logs",
+    source = "WCL",
+    participants = { { name = "Tester", seconds = 1, consumables = {} } },
+}
+assert(addon.RaidMonitor:StoreSummary(collidingSummary) == false,
+    "Eine Logs-Auswertung konnte eine Livesitzung überschreiben")
+assert(addon.RaidMonitor:GetSummary("live-1").zone == "Karazhan",
+    "Die Livesitzung wurde doch verändert")
+
+-- Der alte Profilimport funktioniert unverändert weiter.
+local legacyImported = addon.WarcraftLogs:Import(
+    "GCPWCL1|2\nKrieger-Realm;WARRIOR;WARRIOR:2;\n"
+)
+assert(legacyImported == true, "Der alte Profilimport schlägt fehl")
+assert(addon.Roster:GetProfile("Krieger-Realm").raidSpecKey == "WARRIOR:2",
+    "Das alte Format importiert keine Profile mehr")
+
+addon.DB:GetGuild().raidSessions = {}
 
 -- === Mitgliederpflege: Entscheidungen und Ausschluss ========================
 addon.DB:GetGuild().memberCare.decisions = {}

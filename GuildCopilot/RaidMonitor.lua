@@ -255,6 +255,11 @@ function GC.RaidMonitor:StoreSummary(summary)
     local sessions = GC.DB:GetGuild().raidSessions
     for index, stored in ipairs(sessions) do
         if stored.id == summary.id then
+            -- Live-, Sync- und WCL-Daten bleiben getrennt und werden nie
+            -- ineinander verrechnet.
+            if stored.source ~= summary.source then
+                return false
+            end
             -- Die vollständigere Auswertung gewinnt, bei Gleichstand die neuere.
             local storedSize = #(stored.participants or {})
             local incomingSize = #(summary.participants or {})

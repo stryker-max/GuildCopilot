@@ -100,6 +100,46 @@ const PLAYERS_QUERY = `
   }
 `;
 
+const SESSION_QUERY = `
+  query GuildCopilotSession($code: String!) {
+    reportData {
+      report(code: $code) {
+        startTime
+        endTime
+        zone { name }
+        masterData { actors(type: "Player") { id name } }
+        fights(killType: Encounters) {
+          id
+          name
+          kill
+          startTime
+          endTime
+          friendlyPlayers
+        }
+        deaths: table(dataType: Deaths, hostilityType: Friendlies)
+        interrupts: table(dataType: Interrupts, hostilityType: Friendlies)
+        dispels: table(dataType: Dispels, hostilityType: Friendlies)
+        casts: table(dataType: Casts, hostilityType: Friendlies)
+        buffs: table(dataType: Buffs, hostilityType: Friendlies)
+      }
+    }
+  }
+`;
+
+// Spell-IDs, die als Verbrauchsgegenstand uebertragen werden duerfen. Diese
+// Liste entscheidet ausschliesslich, WAS uebertragen wird - in welche
+// Kategorie eine ID faellt, entscheidet allein GC.Consumables im Addon.
+// Unbekannte IDs werden dort ignoriert und erzeugen nie falsche Zahlen.
+// Die Liste darf daher grosszuegiger sein als die Addon-Tabelle.
+const CONSUMABLE_IDS = new Set([
+  28495, 28499, 28507, 28508, 28494, 28511, 28512, 38908,
+  16666, 27869,
+  35476, 35475, 35478, 35477, 35474,
+  28518, 28519, 28520, 28521, 28540,
+  28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
+  28017, 28019,
+]);
+
 const CLASS_KEYS = new Map([
   ["warrior", "WARRIOR"],
   ["paladin", "PALADIN"],
@@ -208,6 +248,110 @@ function collectPlayers(root, reportTime, players) {
   visit(root);
 }
 
+// Die WCL-Tabellen liefern je nach Datentyp unterschiedlich verschachtelte
+// Strukturen. Statt auf eine feste Form zu setzen, wird nach Eintraegen mit
+// Namen gesucht und deren Zaehler aufsummiert. Fehlt eine Tabelle, bleibt der
+// Wert schlicht null - dann wird nichts exportiert statt etwas geraten.
+function collectTableTotals(table) {
+  const totals = new Map();
+  if (!table) return totals;
+  const entries = table?.data?.entries ?? table?.entries ?? table?.data ?? [];
+  if (!Array.isArray(entries)) return totals;
+  for (const entry of entries) {
+    const name = entry?.name;
+    if (typeof name !== "string") continue;
+    const amount = Number(entry.total ?? entry.count ?? entry.uses ?? 1) || 0;
+    totals.set(name, (totals.get(name) || 0) + amount);
+  }
+  return totals;
+}
+
+// Casts- und Buffs-Tabellen listen je Spieler dessen Faehigkeiten. Nur IDs aus
+// CONSUMABLE_IDS werden uebernommen.
+function collectConsumables(table, perPlayer) {
+  const entries = table?.data?.entries ?? table?.entries ?? [];
+  if (!Array.isArray(entries)) return;
+  for (const entry of entries) {
+    const name = entry?.name;
+    if (typeof name !== "string") continue;
+    const abilities = entry.abilities ?? entry.spells ?? [];
+    if (!Array.isArray(abilities)) continue;
+    const counts = perPlayer.get(name) || new Map();
+    for (const ability of abilities) {
+      const abilityID = Number(ability?.guid ?? ability?.id ?? ability?.abilityIcon);
+      if (!CONSUMABLE_IDS.has(abilityID)) continue;
+      const amount = Number(ability.total ?? ability.uses ?? ability.hitCount ?? 1) || 0;
+      if (amount > 0) counts.set(abilityID, (counts.get(abilityID) || 0) + amount);
+    }
+    if (counts.size) perPlayer.set(name, counts);
+  }
+}
+
+function buildSessionLines(code, report) {
+  if (!report) return [];
+
+  const actorNames = new Map();
+  for (const actor of report.masterData?.actors || []) {
+    if (actor?.id != null && typeof actor.name === "string") {
+      actorNames.set(actor.id, actor.name.replace(/[|;,\r\n]/g, ""));
+    }
+  }
+
+  const fights = Array.isArray(report.fights) ? report.fights : [];
+  let kills = 0;
+  let wipes = 0;
+  const secondsByPlayer = new Map();
+  for (const fight of fights) {
+    if (fight.kill === true) kills += 1;
+    else if (fight.kill === false) wipes += 1;
+    const duration = Math.max(0, Number(fight.endTime || 0) - Number(fight.startTime || 0)) / 1000;
+    for (const actorID of fight.friendlyPlayers || []) {
+      const name = actorNames.get(actorID);
+      if (name) secondsByPlayer.set(name, (secondsByPlayer.get(name) || 0) + duration);
+    }
+  }
+
+  const deaths = collectTableTotals(report.deaths);
+  const interrupts = collectTableTotals(report.interrupts);
+  const dispels = collectTableTotals(report.dispels);
+  const consumables = new Map();
+  collectConsumables(report.casts, consumables);
+  collectConsumables(report.buffs, consumables);
+
+  const names = new Set([
+    ...secondsByPlayer.keys(),
+    ...deaths.keys(),
+    ...interrupts.keys(),
+    ...dispels.keys(),
+  ]);
+  if (!names.size) return [];
+
+  const zone = String(report.zone?.name || "").replace(/[|;,\r\n]/g, "");
+  const startedAt = Math.floor(Number(report.startTime || 0) / 1000);
+  const endedAt = Math.floor(Number(report.endTime || 0) / 1000);
+  const lines = [
+    `S|${code}|${startedAt}|${endedAt}|${zone}|${fights.length}|${kills}|${wipes}`,
+  ];
+
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const counts = consumables.get(name);
+    const consumableText = counts
+      ? [...counts.entries()].map(([id, count]) => `${id}:${count}`).join(",")
+      : "";
+    lines.push([
+      "P",
+      name,
+      "",
+      Math.round(secondsByPlayer.get(name) || 0),
+      deaths.get(name) || 0,
+      interrupts.get(name) || 0,
+      dispels.get(name) || 0,
+      consumableText,
+    ].join("|"));
+  }
+  return lines;
+}
+
 const token = await getAccessToken();
 const reportData = await graphql(token, REPORTS_QUERY, {
   guildName,
@@ -231,7 +375,7 @@ for (const report of reports) {
   );
 }
 
-const lines = [`GCPWCL1|${reports.length}`];
+const lines = [`GCPWCL2|${reports.length}`];
 for (const player of [...players.values()].sort((a, b) => a.name.localeCompare(b.name))) {
   const specs = [...player.specs.entries()]
     .sort((left, right) => right[1] - left[1])
@@ -239,8 +383,29 @@ for (const player of [...players.values()].sort((a, b) => a.name.localeCompare(b
   lines.push(`${player.name};${player.classFile};${specs[0]};${specs[1] || ""}`);
 }
 
-if (lines.length === 1) {
-  throw new Error("In den Reports konnten keine TBC-Spieler mit Spec erkannt werden.");
+const profileCount = lines.length - 1;
+
+// Nachanalyse je Report. Faellt eine Abfrage aus, bleibt der Profilexport
+// trotzdem nutzbar.
+let sessionCount = 0;
+for (const report of reports) {
+  try {
+    const sessionResult = await graphql(token, SESSION_QUERY, { code: report.code });
+    const sessionLines = buildSessionLines(
+      report.code,
+      sessionResult.reportData?.report
+    );
+    if (sessionLines.length > 1) {
+      lines.push(...sessionLines);
+      sessionCount += 1;
+    }
+  } catch (error) {
+    console.warn(`Report ${report.code} ohne Nachanalyse: ${error.message}`);
+  }
+}
+
+if (profileCount === 0 && sessionCount === 0) {
+  throw new Error("In den Reports konnten weder Spieler noch Raiddaten erkannt werden.");
 }
 
 const outputPath = path.join(
@@ -248,5 +413,7 @@ const outputPath = path.join(
   "GuildCopilot-WCL-Import.txt"
 );
 fs.writeFileSync(outputPath, `${lines.join("\n")}\n`, "utf8");
-console.log(`Fertig: ${lines.length - 1} Spieler aus ${reports.length} Reports.`);
+console.log(
+  `Fertig: ${profileCount} Spieler und ${sessionCount} Raidauswertungen aus ${reports.length} Reports.`
+);
 console.log(`Importdatei: ${outputPath}`);

@@ -133,6 +133,13 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     return button
 end
 
+-- Live, per Addon verteilt oder aus Warcraft Logs nachgereicht.
+local SESSION_SOURCE_LABEL = {
+    LIVE = "Live",
+    SYNC = "Addon-Sync",
+    WCL = "Warcraft Logs",
+}
+
 local function SetButtonEnabled(button, enabled)
     if enabled then
         button:Enable()
@@ -2959,6 +2966,9 @@ function GC.UI:RefreshStatistics()
         row:SetShown(summary ~= nil)
         if summary then
             local zone = summary.zone ~= "" and summary.zone or "Raid"
+            if summary.source == "WCL" then
+                zone = "[Logs] " .. zone
+            end
             row:SetText(FormatSessionDate(summary) .. "  " .. zone)
             row:SetActive(summary.id == selectedID)
         end
@@ -2971,7 +2981,7 @@ function GC.UI:RefreshStatistics()
             .. "  •  " .. FormatDuration((selected.endedAt or 0) - (selected.startedAt or 0))
             .. "  •  " .. (selected.pulls or 0) .. " Versuche, " .. (selected.kills or 0) .. " Siege, "
             .. (selected.wipes or 0) .. " Wipes  •  Quelle: "
-            .. (selected.source == "LIVE" and "Live" or "Addon-Sync"))
+            .. SESSION_SOURCE_LABEL[selected.source or "LIVE"])
     else
         page.sessionHeadline:SetText("")
     end
