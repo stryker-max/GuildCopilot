@@ -387,16 +387,30 @@ local function CreateChoiceDropdown(parent, width, options, onSelected, openBelo
     local visibleRows = math.min(#options, MAX_ROWS)
     local scrollable = #options > MAX_ROWS
 
-    local popup = CreatePanel(parent, THEME.input, THEME.accent)
+    -- Das Menue haengt bewusst NICHT unter der Karte, sondern unter dem
+    -- Hauptfenster. Mehrere Seiten liegen in einem ScrollFrame, und ein
+    -- ScrollFrame beschneidet alles, was ueber seinen Rand hinausragt. Als Kind
+    -- der Karte waere das aufgeklappte Menue also innerhalb des Scrollbereichs
+    -- und wuerde oben abgeschnitten - unabhaengig von seiner Hoehe. Verankert
+    -- wird trotzdem am Knopf, die Position stimmt also weiterhin.
+    local popupHost = GC.UI.frame or UIParent
+    local popup = CreatePanel(popupHost, THEME.input, THEME.accent)
     popup:SetSize(width, (visibleRows * ROW_HEIGHT) + 8)
-    local parentLevel = parent.GetFrameLevel and parent:GetFrameLevel() or 1
-    popup:SetFrameLevel((parentLevel or 1) + 20)
+    popup:SetFrameStrata(popupHost.GetFrameStrata and popupHost:GetFrameStrata() or "DIALOG")
+    local hostLevel = popupHost.GetFrameLevel and popupHost:GetFrameLevel() or 1
+    popup:SetFrameLevel((hostLevel or 1) + 60)
     popup:Hide()
     dropdown.popup = popup
 
+    -- Verschwindet der Knopf, muss das Menue mit. Sonst bliebe es beim
+    -- Seitenwechsel stehen, weil es nicht mehr am selben Elternteil haengt.
+    dropdown:HookScript("OnHide", function()
+        popup:Hide()
+    end)
+
     -- Richtung erst beim Aufklappen bestimmen: Nach oben nur, wenn es dort
-    -- reicht, sonst nach unten. GetBottom liefert den Abstand zum unteren
-    -- Bildschirmrand, GetTop entsprechend von unten gemessen.
+    -- reicht, sonst nach unten. GetTop und GetBottom messen beide vom unteren
+    -- Bildschirmrand.
     function dropdown:PlacePopup()
         popup:ClearAllPoints()
         local needed = popup:GetHeight() + 5

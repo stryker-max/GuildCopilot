@@ -192,7 +192,7 @@ Der einzelne Gildenausschluss ist umgesetzt und mehrfach abgesichert: nur mit fr
 
 Damit sind die Punkte aus 0.7 abgearbeitet.
 
-## Offene Punkte (Stand 0.9.5)
+## Offene Punkte (Stand 0.9.6)
 
 Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und Erprobung im Spiel:
 
