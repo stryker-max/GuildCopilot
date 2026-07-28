@@ -192,15 +192,34 @@ Der einzelne Gildenausschluss ist umgesetzt und mehrfach abgesichert: nur mit fr
 
 Damit sind die Punkte aus 0.7 abgearbeitet.
 
+## 0.8 – Verzauberungen beim Namen nennen
+
+Der Item-Link führt nur eine Enchant-ID, die Guides nennen nur Namen. Beides trifft sich im Client: Der Name wird aus dem WoW-Tooltip gelesen und steht dadurch ohne gepflegte Datenbank im Klartext da, in der Sprache des jeweiligen Clients.
+
+Darauf aufbauend pflegt die Gilde ihren Regelsatz selbst. Ein Klick auf eine Slotzeile stuft die erkannte Verzauberung ein, gespeichert und geteilt wird nur die ID mit ihrer Stufe.
+
+## 0.9 – Werbebalken, Automatik und Fehlerbehebungen
+
+Der Werbebalken wurde ein eigenes kleines Fenster, damit für das Posten nicht das ganze Addonfenster offen bleiben muss.
+
+Danach folgten überwiegend Korrekturen an Stellen, die im Spiel auffielen:
+
+- **Sync**: Ein Mitgliedsprofil ging nur beim Login und bei eigener Änderung raus, eine Abfrage gab es nicht. Wer zuerst eingeloggt war, sendete in einen leeren Raum und blieb für alle später Eingeloggten unsichtbar – Berufe und Specs erschienen deshalb nur in einer Richtung. Das Profil hängt jetzt an der vorhandenen Handshake-Antwort, mit eigenem Zeitfenster gegen Kanalflut.
+- **Gear Audit, Automatik**: Die eigene Ausrüstung prüft sich selbst, beim Login und nach dem Umziehen. Eine vorhandene, aber nirgends bewertete Verzauberung gilt wahlweise als in Ordnung, statt als „Unbekannt“ aufzufallen. Das behauptet keine Qualität, es unterscheidet nur verzaubert von nicht verzaubert. Beides ist abschaltbar und wirkt rein lokal.
+- **Gear Audit, Statuszeile**: Sie zählte nur die mitgelieferte, absichtlich leere Regelliste. Gildeneigene Bewertungen wurden dadurch nie anerkannt, die Meldung blieb dauerhaft auf „Regelsatz ist noch leer“ stehen.
+- **Aufklappmenüs**: Mehrere Seiten liegen in einem ScrollFrame, und ein ScrollFrame beschneidet alles, was über seinen Rand hinausragt. Als Kind der jeweiligen Karte wurde ein aufgeklapptes Menü oben abgeschnitten, unabhängig von seiner Höhe. Es hängt jetzt am Hauptfenster und wird nur noch am Knopf verankert; ab neun Einträgen scrollt es.
+- **Kleinigkeiten**: Der Werbebalken kappte seinen Text bei 110 Bytes statt bei den 255, die in den Chat gehen. Die Hinweisspalte der Slot-Tabelle brach um und lief in die Nachbarzeilen. In `GetPlayerFullName` kürzte ein `and`-Ausdruck die Zuweisung auf einen Wert, der Realm kam dadurch nie an.
+
 ## Offene Punkte (Stand 0.9.6)
 
 Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und Erprobung im Spiel:
 
 - **Enchant-Regelsatz**: wird seit 0.8.1 in der Gilde selbst gepflegt; ausgeliefert wird eine leere Tabelle. wowtbc.gg und Wowhead lassen sich nicht automatisch auslesen (beide antworten mit HTTP 403), und die Guides nennen nur englische Namen, während der Item-Link eine Enchant-ID führt.
+- **Regelsatz ohne Klassenbezug**: Eine gildeneigene Bewertung hängt allein an der Enchant-ID – ohne Slot, ohne Rolle, ohne Klasse. Wer eine Verzauberung als Optimal einstuft, tut das für jeden in der Gilde. In der Praxis fällt das selten auf, weil die meisten Verzauberungen ohnehin nur von einer Rolle getragen werden; bei generischen Verzauberungen, die mehrere Rollen unterschiedlich bewerten, trifft es aber zu. Das Format der mitgelieferten Regelliste kennt `slots` und `roles` bereits, der gildeneigene Weg nutzt sie noch nicht. Klassen kennt bisher keiner von beiden.
 - **Consumable-Spell-IDs**: Ausgangsbestand aus dem Gedächtnis, nicht gegen echte Logs geprüft. Essen fehlt vollständig, weil die „Sattgegessen“-IDs je Gericht abweichen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
 - **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
 - **Companion-Abfragen für die WCL-Nachanalyse**: gegen die dokumentierte v2-API geschrieben, aber nie gegen echte Reports gelaufen.
-- **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen; Ergebnisse bleiben lokal bei dem, der geprüft hat.
+- **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen; Ergebnisse bleiben lokal bei dem, der geprüft hat. Automatisch prüft sich seit 0.9.5 nur die eigene Ausrüstung – **Gruppe prüfen** bleibt ein Klick, weil ein selbsttätiger Raidscan für jeden Teilnehmer eine Inspect-Anfrage auslöst.
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
 
