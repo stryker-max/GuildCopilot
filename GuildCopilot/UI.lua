@@ -112,6 +112,28 @@ local function CreateLabel(parent, text, style)
     return label
 end
 
+-- Tooltips an Tabellenzeilen hingen fest rechts. Steht das Fenster am rechten
+-- Bildschirmrand, laeuft der Tooltip hinaus - und abgeschnitten wird die
+-- rechte Spalte, also ausgerechnet die Zahlen. Die Seite wird deshalb nach
+-- verfuegbarem Platz gewaehlt.
+local function AnchorRowTooltip(frame)
+    if not GameTooltip then
+        return false
+    end
+    GameTooltip:SetOwner(frame, "ANCHOR_NONE")
+    GameTooltip:SetClampedToScreen(true)
+    GameTooltip:ClearAllPoints()
+
+    local right = frame:GetRight() or 0
+    local screenRight = UIParent:GetRight() or 0
+    if screenRight - right < 320 then
+        GameTooltip:SetPoint("TOPRIGHT", frame, "TOPLEFT", -8, 0)
+    else
+        GameTooltip:SetPoint("TOPLEFT", frame, "TOPRIGHT", 8, 0)
+    end
+    return true
+end
+
 local function CreatePageTitle(page, title, subtitle)
     local heading = CreateLabel(page, title, { title = true })
     heading:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
@@ -831,7 +853,7 @@ function GC.UI:BuildDashboardPage()
             if not self.member or not GameTooltip then
                 return
             end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            AnchorRowTooltip(self)
             GameTooltip:SetText(GC.Util.PlayerShortName(self.member.name))
             GameTooltip:AddLine(self.tooltipSpec or "", 1, 1, 1, true)
             if self.tooltipProfessions and self.tooltipProfessions ~= "" then
@@ -1754,7 +1776,7 @@ function GC.UI:BuildMemberCarePage()
             if not GameTooltip or not self.tooltipText or self.tooltipText == "" then
                 return
             end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            AnchorRowTooltip(self)
             GameTooltip:SetText(self.tooltipName or "")
             GameTooltip:AddLine(self.tooltipText, 1, 1, 1, true)
             GameTooltip:Show()
@@ -3354,9 +3376,14 @@ function GC.UI:BuildStatisticsPage()
                 return
             end
             local consumables = participant.consumables or {}
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            AnchorRowTooltip(self)
             GameTooltip:SetText(participant.name or "")
-            GameTooltip:AddLine("Dabei: " .. FormatDuration(participant.seconds), 1, 1, 1)
+            local presence = "Dabei: " .. FormatDuration(participant.seconds)
+            if (self.sessionSeconds or 0) > 0 then
+                presence = presence .. "  von  " .. FormatDuration(self.sessionSeconds)
+                    .. "   (" .. math.floor(((participant.seconds or 0) / self.sessionSeconds) * 100 + 0.5) .. " %)"
+            end
+            GameTooltip:AddLine(presence, 1, 1, 1)
             GameTooltip:AddLine("Tode: " .. (participant.deaths or 0)
                 .. "   Wiederbelebungen: " .. (participant.resurrects or 0), 1, 1, 1)
             GameTooltip:AddLine("Unterbrechungen: " .. (participant.interrupts or 0)
@@ -3445,6 +3472,9 @@ function GC.UI:RefreshStatistics()
     end
 
     local participants = selected and selected.participants or {}
+    local sessionSeconds = selected
+        and math.max(0, (selected.endedAt or 0) - (selected.startedAt or 0))
+        or 0
     if selected and #participants == 0 then
         page.participantEmpty:SetText("Für diese Sitzung wurden keine Teilnehmer erfasst.")
         page.participantEmpty:SetShown(true)
@@ -3457,9 +3487,26 @@ function GC.UI:RefreshStatistics()
         if participant then
             local consumables = participant.consumables or {}
             row.participant = participant
+            row.sessionSeconds = sessionSeconds
             row.name:SetText(participant.name)
             row.name:SetTextColor(ClassColor(participant.classFile))
+
+            -- Eine nackte Dauer sagt wenig: "36m" ist nur im Verhaeltnis zur
+            -- Sitzung zu lesen. Wer deutlich kuerzer da war, faellt deshalb
+            -- farblich auf - genau das macht die Spalte brauchbar.
             row.presence:SetText(FormatDuration(participant.seconds))
+            if sessionSeconds > 0 then
+                local share = (participant.seconds or 0) / sessionSeconds
+                if share < 0.5 then
+                    SetTextColor(row.presence, THEME.danger)
+                elseif share < 0.85 then
+                    SetTextColor(row.presence, THEME.warning)
+                else
+                    SetTextColor(row.presence, THEME.text)
+                end
+            else
+                SetTextColor(row.presence, THEME.text)
+            end
             row.deaths:SetText(participant.deaths or 0)
             row.interrupts:SetText(participant.interrupts or 0)
             row.dispels:SetText(participant.dispels or 0)
@@ -3635,7 +3682,7 @@ function GC.UI:BuildGearPage()
             if not entry or not GameTooltip then
                 return
             end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            AnchorRowTooltip(self)
             GameTooltip:SetText(entry.label or "")
             if entry.reason and entry.reason ~= "" then
                 GameTooltip:AddLine(entry.reason, 1, 1, 1, true)
