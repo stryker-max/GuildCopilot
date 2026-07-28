@@ -884,7 +884,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.8.0", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.8.1", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -1276,6 +1276,57 @@ assert(namedHead.reason == "Verzaubert: Außergewöhnliche Gesundheit",
     "Der Hinweis zeigt weiter die nackte Verzauberungs-ID")
 assert(namedHead.verdict == "UNKNOWN",
     "Ein gelesener Name darf noch keine Qualitätsbewertung bedeuten")
+
+-- Die Gilde bewertet eine erkannte Verzauberung selbst; die ID kommt aus dem
+-- Item-Link, den Namen liefert der Tooltip.
+addon.DB:GetGuild().enchantRules = {}
+local rated, ratedMessage = addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
+assert(rated == true, ratedMessage or "Die Bewertung ließ sich nicht setzen")
+assert(ratedMessage:find("Optimal", 1, true), "Die erste Stufe ist nicht Optimal")
+assert(addon.GearAudit:GetGuildEnchantRule(2564).verdict == "OPTIMAL",
+    "Die Gildenregel wurde nicht gespeichert")
+
+local ratedHead
+for _, entry in ipairs(addon.GearAudit:GetAudit("Tester").slots) do
+    if entry.key == "HEAD" then
+        ratedHead = entry
+    end
+end
+assert(ratedHead.verdict == "OPTIMAL",
+    "Bereits gespeicherte Prüfungen wurden nicht neu bewertet")
+assert(ratedHead.reason:find("Gildenregel", 1, true), "Die Herkunft der Bewertung fehlt")
+
+addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
+assert(addon.GearAudit:GetGuildEnchantRule(2564).verdict == "SOLID", "Zweite Stufe ist nicht Solide")
+addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
+assert(addon.GearAudit:GetGuildEnchantRule(2564).verdict == "IMPROVABLE",
+    "Dritte Stufe ist nicht Verbesserbar")
+addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
+assert(addon.GearAudit:GetGuildEnchantRule(2564) == nil,
+    "Nach der letzten Stufe wurde die Bewertung nicht entfernt")
+
+-- Der Regelsatz wandert als ID und Stufe durch die Gilde, ohne Namen.
+addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
+local rulePayload = ""
+for _, ruleMessage in ipairs(addon.Sync:BuildGuildProfileMessages()) do
+    assert(#ruleMessage <= 255, "Ein Gildenprofil-Paket mit Regelsatz ist zu lang")
+    rulePayload = rulePayload .. ruleMessage:match("^G|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+assert(rulePayload:find("2564:O", 1, true), "Die Regel fehlt in der Synchronisierung")
+assert(not rulePayload:find("Außergewöhnliche", 1, true),
+    "Der übersetzte Name wird unnötig mitgeschickt")
+local ruleFields = addon.Util.SplitFields(rulePayload)
+assert(ruleFields[22] ~= nil, "Das Regelfeld fehlt in der Nutzlast")
+
+-- Ein Rang ohne Einstellungsrecht darf nichts bewerten.
+local editorRanks = addon.DB:GetGuild().profilePermissions.editorRanks
+addon.DB:GetGuild().profilePermissions.editorRanks = { ["9"] = true }
+local denied, deniedMessage = addon.GearAudit:CycleEnchantRule(7777, "Testverzauberung")
+assert(denied == false and deniedMessage:find("Regelsatz nicht ändern", 1, true),
+    "Ein unberechtigter Rang konnte den Regelsatz ändern")
+addon.DB:GetGuild().profilePermissions.editorRanks = editorRanks
+addon.DB:GetGuild().enchantRules = {}
+addon.GearAudit:AuditSelf()
 
 -- Funde werden in ganzen Sätzen aufbereitet.
 local ownFindings = addon.GearAudit:GetFindings(addon.GearAudit:GetAudit("Tester"))

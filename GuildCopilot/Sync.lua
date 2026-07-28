@@ -74,6 +74,42 @@ local function DecodeMemberCareDecisions(payload)
     return decisions
 end
 
+-- Nur ID und Stufe wandern durch die Gilde; den Namen loest jeder Client in
+-- seiner eigenen Sprache aus dem Tooltip auf.
+local VERDICT_CODES = { OPTIMAL = "O", SOLID = "S", IMPROVABLE = "V" }
+local VERDICT_BY_CODE = { O = "OPTIMAL", S = "SOLID", V = "IMPROVABLE" }
+
+local function EncodeEnchantRules(rules)
+    local records = {}
+    for enchantID, rule in pairs(rules or {}) do
+        local code = VERDICT_CODES[rule.verdict]
+        if code and tonumber(enchantID) then
+            records[#records + 1] = tostring(tonumber(enchantID)) .. ":" .. code
+        end
+    end
+    table.sort(records)
+    while #records > 80 do
+        table.remove(records)
+    end
+    return table.concat(records, ",")
+end
+
+local function DecodeEnchantRules(payload)
+    local rules = {}
+    for record in tostring(payload or ""):gmatch("[^,]+") do
+        local enchantID, code = record:match("^(%d+):(%a)$")
+        if enchantID and VERDICT_BY_CODE[code] then
+            rules[enchantID] = {
+                verdict = VERDICT_BY_CODE[code],
+                name = "",
+                by = "",
+                at = GC.Util.Now(),
+            }
+        end
+    end
+    return rules
+end
+
 function GC.Sync:RegisterPrefix()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         self.registered = C_ChatInfo.RegisterAddonMessagePrefix(GC.Constants.COMM_PREFIX) == true
@@ -192,6 +228,7 @@ function GC.Sync:BuildGuildProfileMessages()
         BoolField(roster.rankFilterConfigured),
         table.concat(SortedEnabledRanks(roster.activeRaiderRanks), ","),
         EncodeMemberCareDecisions(memberCare.decisions),
+        EncodeEnchantRules(guildData.enchantRules),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -341,6 +378,12 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     -- Entscheidungen unangetastet statt gelöscht zu werden.
     if fields[21] ~= nil then
         guildData.memberCare.decisions = DecodeMemberCareDecisions(fields[21])
+    end
+    if fields[22] ~= nil then
+        guildData.enchantRules = DecodeEnchantRules(fields[22])
+        if GC.GearAudit then
+            GC.GearAudit:OnEnchantRulesChanged()
+        end
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")

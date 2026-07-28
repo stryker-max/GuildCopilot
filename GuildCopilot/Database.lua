@@ -72,6 +72,7 @@ local GUILD_DEFAULTS = {
     },
     raidSessions = {},
     gearAudits = {},
+    enchantRules = {},
     memberCare = {
         inactivityDays = 60,
         protectedRanksConfigured = false,

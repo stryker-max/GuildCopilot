@@ -3188,8 +3188,18 @@ function GC.UI:BuildGearPage()
 
     page.gearSlotRows = {}
     for index = 1, #GC.GearSlots do
-        local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
-        row:SetSize(490, 25)
+        local row = CreateButton(content, "", 490, 25, function()
+            local entry = page.gearSlotEntries and page.gearSlotEntries[index]
+            if not entry then
+                return
+            end
+            local ok, message = GC.GearAudit:CycleEnchantRule(entry.enchantID, entry.enchantName)
+            page:SetGearStatus(message, ok)
+            GC.UI:RefreshGear()
+        end)
+        SetTextureColor(row.background, index % 2 == 0 and THEME.input or THEME.card)
+        row.border:Hide()
+        row.label:Hide()
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         row.slot = CreateLabel(row, "", { width = 112 })
         row.slot:SetPoint("LEFT", row, "LEFT", 5, 0)
@@ -3201,6 +3211,11 @@ function GC.UI:BuildGearPage()
         row.reason:SetPoint("LEFT", row, "LEFT", 283, 0)
         page.gearSlotRows[index] = row
     end
+    page.gearRatingHint = CreateLabel(detailCard,
+        "Klick auf eine Zeile bewertet die Verzauberung: Optimal, Solide, Verbesserbar, keine Bewertung.",
+        { muted = true, font = "GameFontNormalSmall", width = 488, height = 16 })
+    page.gearRatingHint:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -104)
+
     page.gearSlotEmpty = CreateLabel(detailCard, "Wähle links einen Spieler aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
     page.gearSlotEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -66)
 end
@@ -3268,6 +3283,8 @@ function GC.UI:RefreshGear()
     end
 
     local slots = selected and selected.slots or {}
+    page.gearSlotEntries = slots
+    page.gearRatingHint:SetShown(selected ~= nil and GC.GearAudit:CanEditEnchantRules())
     for index, row in ipairs(page.gearSlotRows) do
         local entry = slots[index]
         row:SetShown(entry ~= nil)

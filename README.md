@@ -1,4 +1,4 @@
-# Guild Copilot 0.8.0
+# Guild Copilot 0.8.1
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -58,6 +58,9 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - **Ausrüstungsprüfung** über die Inspect-API: fehlende Verzauberungen und leere Sockel je Slot, für die eigene Ausrüstung auch ohne Gruppe;
 - geprüft wird nur, wer in Reichweite und erreichbar ist; nicht erreichbare Spieler werden ausdrücklich als übersprungen ausgewiesen;
 - Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen gelten als **Unbekannt** und nie als schlecht;
+- **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück;
+- gespeichert und geteilt wird nur die Verzauberungs-ID mit ihrer Stufe – den Namen löst jeder Client selbst in seiner Sprache auf;
+- den Regelsatz dürfen nur Ränge mit Einstellungsrecht ändern, er gilt gildenweit und wirkt sofort auf alle gespeicherten Prüfungen;
 - der Name der Verzauberung kommt aus dem WoW-Tooltip selbst und steht dadurch ohne gepflegte Datenbank im Klartext da („Verzaubert: Außergewöhnliche Gesundheit“), in der Sprache des Clients;
 - es gibt bewusst keine Gesamtnote je Spieler;
 - die Funde stehen als lesbare Sätze da statt als nackte Zahlen: „2 fehlende Verzauberungen: Kopf, Schulter“, „3 leere Sockel: Brust, Hände“;

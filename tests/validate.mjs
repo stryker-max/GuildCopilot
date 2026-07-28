@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.8.0",
+  "## Version: 0.8.1",
 ];
 
 for (const entry of requiredMetadata) {
@@ -160,6 +160,10 @@ const requiredImplementations = [
   ["eigene Ausrüstung im Profil", /profileGearFindings/],
   ["Verzauberungsname aus dem Tooltip", /function GC\.GearAudit:ResolveEnchantName/],
   ["Tooltip-Vergleich ohne Verzauberung", /local plainLink = tostring\(link\):gsub/],
+  ["gildeneigener Verzauberungs-Regelsatz", /function GC\.GearAudit:SetEnchantRule/],
+  ["Bewertung per Klick durchschalten", /function GC\.GearAudit:CycleEnchantRule/],
+  ["Regelsatz nur mit Einstellungsrecht", /function GC\.GearAudit:CanEditEnchantRules/],
+  ["Regelsatz wird gildenweit geteilt", /EncodeEnchantRules/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

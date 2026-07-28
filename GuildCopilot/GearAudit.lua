@@ -156,6 +156,111 @@ function GC.GearAudit:ResolveEnchantName(link, enchantID)
     return nil
 end
 
+-- === Gildeneigener Regelsatz ===============================================
+--
+-- Die Guides nennen Verzauberungen beim Namen, der Item-Link nur ihre ID.
+-- Beides trifft sich im Client: Die Gilde bewertet eine erkannte Verzauberung
+-- einmal in der Oberflaeche, das Addon merkt sich die ID und gibt sie
+-- gildenweit weiter. Damit werden Empfehlungen als IDs versioniert statt als
+-- abgeschriebener Guide-Text.
+
+GC.GearAudit.RATING_ORDER = { "OPTIMAL", "SOLID", "IMPROVABLE" }
+
+function GC.GearAudit:GetGuildEnchantRule(enchantID)
+    enchantID = tonumber(enchantID)
+    if not enchantID then
+        return nil
+    end
+    return GC.DB:GetGuild().enchantRules[tostring(enchantID)]
+end
+
+function GC.GearAudit:CanEditEnchantRules()
+    return GC.Roster:CanEditGuildSettings()
+end
+
+function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName)
+    enchantID = tonumber(enchantID)
+    if not enchantID or enchantID <= 0 then
+        return false, "Für diesen Slot gibt es keine Verzauberung zu bewerten."
+    end
+    if not self:CanEditEnchantRules() then
+        return false, "Dein Gildenrang darf den Regelsatz nicht ändern."
+    end
+
+    local rules = GC.DB:GetGuild().enchantRules
+    local key = tostring(enchantID)
+    if not verdict then
+        if not rules[key] then
+            return false, "Für diese Verzauberung ist nichts hinterlegt."
+        end
+        rules[key] = nil
+        self:OnEnchantRulesChanged()
+        return true, "Bewertung entfernt."
+    end
+    if not GC.GearVerdicts[verdict] then
+        return false, "Unbekannte Bewertung."
+    end
+
+    local count = 0
+    for _ in pairs(rules) do
+        count = count + 1
+    end
+    if not rules[key] and count >= 80 then
+        return false, "Der Regelsatz ist voll."
+    end
+
+    rules[key] = {
+        verdict = verdict,
+        name = GC.Util.Trim(enchantName):gsub("[,:|]", " "),
+        by = GC.Util.PlayerShortName(GC:GetPlayerFullName()),
+        at = GC.Util.Now(),
+    }
+    self:OnEnchantRulesChanged()
+    return true, (GC.Util.Trim(enchantName) ~= "" and enchantName or ("Verzauberung " .. enchantID))
+        .. " gilt jetzt als " .. GC.GearVerdicts[verdict].label .. "."
+end
+
+-- Reihum durch die Stufen und wieder zurueck auf "keine Bewertung".
+function GC.GearAudit:CycleEnchantRule(enchantID, enchantName)
+    local current = self:GetGuildEnchantRule(enchantID)
+    local nextVerdict = self.RATING_ORDER[1]
+    if current then
+        nextVerdict = nil
+        for index, verdict in ipairs(self.RATING_ORDER) do
+            if current.verdict == verdict then
+                nextVerdict = self.RATING_ORDER[index + 1]
+                break
+            end
+        end
+    end
+    return self:SetEnchantRule(enchantID, nextVerdict, enchantName)
+end
+
+function GC.GearAudit:OnEnchantRulesChanged()
+    -- Bereits gespeicherte Pruefungen neu bewerten, damit die Anzeige sofort
+    -- stimmt, ohne dass jemand erneut inspizieren muss.
+    for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
+        for _, entry in ipairs(audit.slots or {}) do
+            if entry.verdict ~= "EMPTY" and (tonumber(entry.enchantID) or 0) > 0 then
+                local slot = { key = entry.key, enchantRequired = entry.required }
+                entry.verdict, entry.reason =
+                    self:EvaluateEnchant(slot, entry.enchantID, audit.role, entry.enchantName)
+            end
+        end
+        audit.unknownEnchants = 0
+        for _, entry in ipairs(audit.slots or {}) do
+            if entry.verdict == "UNKNOWN" then
+                audit.unknownEnchants = audit.unknownEnchants + 1
+            end
+        end
+    end
+    GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
+    GC:FireCallback("GEAR_AUDIT_UPDATED")
+end
+
 function GC.GearAudit:GetRoleForProfile(profile)
     local specKey = profile and (profile.raidSpecKey or profile.detectedSpecKey)
     local spec = specKey and GC.SpecByKey[specKey]
@@ -168,6 +273,15 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName)
             return "MISSING", "Keine Verzauberung auf einem Pflichtslot."
         end
         return nil
+    end
+
+    local guildRule = self:GetGuildEnchantRule(enchantID)
+    if guildRule and GC.GearVerdicts[guildRule.verdict] then
+        local label = enchantName
+        if not label or label == "" then
+            label = guildRule.name ~= "" and guildRule.name or ("Verzauberung " .. enchantID)
+        end
+        return guildRule.verdict, label .. "  •  Gildenregel von " .. (guildRule.by or "?")
     end
 
     local rule = GC.EnchantRuleSet.rules[enchantID]
