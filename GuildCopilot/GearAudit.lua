@@ -11,6 +11,8 @@ GC.GearAudit = {
 local INSPECT_INTERVAL = 1.5
 local INSPECT_TIMEOUT = 4
 local AUDIT_TTL = 7 * 24 * 60 * 60
+local AUTO_SELF_DELAY = 3
+local AUTO_SELF_LOGIN_DELAY = 8
 
 -- item:itemID:enchantID:gem1:gem2:gem3:gem4:...
 function GC.GearAudit:ParseItemLink(link)
@@ -211,6 +213,26 @@ end
 
 GC.GearAudit.RATING_ORDER = { "OPTIMAL", "SOLID", "IMPROVABLE" }
 
+-- Lokale Automatik-Schalter. Der Zugriff geht bewusst ueber eine Funktion:
+-- MergeDefaults ergaenzt den Zweig erst beim naechsten Login, und bis dahin
+-- darf nichts auf eine fehlende Tabelle zugreifen.
+function GC.GearAudit:GetAutoSettings()
+    local settings = GC.DB:GetSettings()
+    return settings and settings.gearAudit or {}
+end
+
+-- Ob eine vorhandene, aber nirgends bewertete Verzauberung als in Ordnung
+-- durchgeht. Das erfindet keine Qualitaet: Es sagt nur "verzaubert ist besser
+-- als nicht verzaubert" und haelt damit die Liste frei fuer die Funde, die
+-- direkt aus dem Item-Link hervorgehen.
+function GC.GearAudit:AcceptsUnratedEnchants()
+    return self:GetAutoSettings().acceptUnratedEnchants ~= false
+end
+
+function GC.GearAudit:AuditsSelfAutomatically()
+    return self:GetAutoSettings().auditSelf ~= false
+end
+
 function GC.GearAudit:GetGuildEnchantRule(enchantID)
     enchantID = tonumber(enchantID)
     if not enchantID then
@@ -337,6 +359,12 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName)
 
     local rule = GC.EnchantRuleSet.rules[enchantID]
     if not rule then
+        local label = (enchantName and enchantName ~= "")
+            and enchantName
+            or ("Verzauberung " .. enchantID)
+        if self:AcceptsUnratedEnchants() then
+            return "SOLID", "Verzaubert: " .. label .. "  •  automatisch anerkannt"
+        end
         if enchantName and enchantName ~= "" then
             return "UNKNOWN", "Verzaubert: " .. enchantName
         end
@@ -472,7 +500,7 @@ function GC.GearAudit:Prune()
     end
 end
 
-function GC.GearAudit:AuditSelf()
+function GC.GearAudit:AuditSelf(automatic)
     if type(GetInventoryItemLink) ~= "function" then
         return false, "Die Ausrüstung konnte nicht gelesen werden."
     end
@@ -482,8 +510,33 @@ function GC.GearAudit:AuditSelf()
     end, "SELF")
     self:StoreAudit(audit)
     self.selectedName = audit.name
-    self:SetStatus("Eigene Ausrüstung geprüft.")
+    self:SetStatus(automatic and "Eigene Ausrüstung automatisch geprüft." or "Eigene Ausrüstung geprüft.")
     return true, "Eigene Ausrüstung geprüft: " .. self:DescribeFindings(audit)
+end
+
+-- Automatische Selbstpruefung.
+--
+-- Beim Umziehen feuert PLAYER_EQUIPMENT_CHANGED je Slot einzeln, ein
+-- kompletter Satz Ausruestung loest also ein gutes Dutzend Ereignisse aus.
+-- Deshalb wird nur einmal eingeplant und der Rest verworfen, bis der Lauf
+-- durch ist. Der Verzoegerung liegt zugrunde, dass der Client den Item-Link
+-- erst mit etwas Abstand vollstaendig liefert.
+function GC.GearAudit:QueueSelfAudit(delay)
+    if not self:AuditsSelfAutomatically() or self.autoSelfPending then
+        return false
+    end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        return false
+    end
+
+    self.autoSelfPending = true
+    C_Timer.After(delay or AUTO_SELF_DELAY, function()
+        self.autoSelfPending = false
+        if self:AuditsSelfAutomatically() then
+            self:AuditSelf(true)
+        end
+    end)
+    return true
 end
 
 -- Aufbereitete Funde in ganzen Sätzen, damit die Oberfläche nicht nur Zahlen
@@ -742,12 +795,19 @@ end
 
 local gearEvents = CreateFrame("Frame")
 gearEvents:RegisterEvent("INSPECT_READY")
+gearEvents:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 gearEvents:SetScript("OnEvent", function(_, event, guid)
     if event == "INSPECT_READY" then
         GC.GearAudit:OnInspectReady(guid)
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        GC.GearAudit:QueueSelfAudit()
     end
 end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.GearAudit, function(self)
     self:Prune()
+    -- Beim Login grosszuegiger warten: Item-Links und Tooltips sind direkt
+    -- nach dem Laden noch nicht vollstaendig, die Verzauberungsnamen kaemen
+    -- sonst leer zurueck.
+    self:QueueSelfAudit(AUTO_SELF_LOGIN_DELAY)
 end)

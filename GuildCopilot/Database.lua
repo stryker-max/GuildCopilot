@@ -19,6 +19,13 @@ local DEFAULTS = {
         },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
+        -- Lokale Automatik des Gear Audits. Bewusst nicht gildenweit: Beides
+        -- aendert nur, wann geprueft und wie eine unbewertete Verzauberung
+        -- angezeigt wird, nie was tatsaechlich in der Ausruestung steckt.
+        gearAudit = {
+            auditSelf = true,
+            acceptUnratedEnchants = true,
+        },
         channels = {
             RECRUITMENT = true,
             LFG = false,

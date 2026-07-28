@@ -87,6 +87,12 @@ local function CreateLabel(parent, text, style)
     if style.height then
         label:SetHeight(style.height)
     end
+    -- Fuer Tabellenzellen: lieber am Spaltenrand abschneiden als umbrechen.
+    -- Eine umgebrochene Zelle waechst ueber ihre Zeile hinaus und schiebt sich
+    -- optisch in die Nachbarzeilen.
+    if style.singleLine and label.SetWordWrap then
+        label:SetWordWrap(false)
+    end
     return label
 end
 
@@ -351,7 +357,15 @@ end
 local function CreateChoiceDropdown(parent, width, options, onSelected, openBelow, emptyLabel, iconResolver)
     local dropdown
     dropdown = CreateButton(parent, "Nicht gesetzt", width, 32, function()
-        dropdown.popup:SetShown(not dropdown.popup:IsShown())
+        local show = not dropdown.popup:IsShown()
+        if show then
+            dropdown:PlacePopup()
+            if dropdown.popup.scroll then
+                dropdown.popup.scroll:SetVerticalScroll(0)
+                dropdown.popup.scroll:UpdateModernThumb()
+            end
+        end
+        dropdown.popup:SetShown(show)
     end)
     dropdown.value = ""
     if iconResolver then
@@ -364,26 +378,64 @@ local function CreateChoiceDropdown(parent, width, options, onSelected, openBelo
         dropdown.label:SetJustifyH("LEFT")
     end
 
+    -- Lange Listen wurden frueher als eine hohe Flaeche gezeichnet: Bei elf
+    -- Berufen sind das 283 Pixel, die nach oben aus dem Fenster herausragten
+    -- und sich nicht erreichen liessen. Ab MAX_ROWS bekommt das Menue deshalb
+    -- eine feste Hoehe und scrollt darin.
+    local MAX_ROWS = 8
+    local ROW_HEIGHT = 25
+    local visibleRows = math.min(#options, MAX_ROWS)
+    local scrollable = #options > MAX_ROWS
+
     local popup = CreatePanel(parent, THEME.input, THEME.accent)
-    popup:SetSize(width, (#options * 25) + 8)
-    if openBelow then
-        popup:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -5)
-    else
-        popup:SetPoint("BOTTOMLEFT", dropdown, "TOPLEFT", 0, 5)
-    end
+    popup:SetSize(width, (visibleRows * ROW_HEIGHT) + 8)
     local parentLevel = parent.GetFrameLevel and parent:GetFrameLevel() or 1
     popup:SetFrameLevel((parentLevel or 1) + 20)
     popup:Hide()
     dropdown.popup = popup
 
+    -- Richtung erst beim Aufklappen bestimmen: Nach oben nur, wenn es dort
+    -- reicht, sonst nach unten. GetBottom liefert den Abstand zum unteren
+    -- Bildschirmrand, GetTop entsprechend von unten gemessen.
+    function dropdown:PlacePopup()
+        popup:ClearAllPoints()
+        local needed = popup:GetHeight() + 5
+        local spaceAbove = UIParent:GetHeight() - (self:GetTop() or 0)
+        local spaceBelow = self:GetBottom() or 0
+        if openBelow or (spaceAbove < needed and spaceBelow >= needed) then
+            popup:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -5)
+        else
+            popup:SetPoint("BOTTOMLEFT", self, "TOPLEFT", 0, 5)
+        end
+    end
+
+    local rowParent = popup
+    local rowWidth = width - 8
+    if scrollable then
+        local scroll = CreateModernScrollFrame(popup)
+        scroll:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4)
+        scroll:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -4, 4)
+        local list = CreateFrame("Frame", nil, scroll)
+        list:SetWidth(width - 8)
+        list:SetHeight(#options * ROW_HEIGHT)
+        scroll:SetScrollChild(list)
+        popup.scroll = scroll
+        rowParent = list
+        rowWidth = width - 18
+    end
+
     for index, option in ipairs(options) do
         local selectedOption = option
-        local optionButton = CreateButton(popup, option ~= "" and option or (emptyLabel or "Nicht gesetzt"), width - 8, 23, function()
+        local optionButton = CreateButton(rowParent, option ~= "" and option or (emptyLabel or "Nicht gesetzt"), rowWidth, 23, function()
             dropdown:SetValue(selectedOption)
             popup:Hide()
             onSelected(selectedOption)
         end)
-        optionButton:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4 - ((index - 1) * 25))
+        if scrollable then
+            optionButton:SetPoint("TOPLEFT", rowParent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
+        else
+            optionButton:SetPoint("TOPLEFT", rowParent, "TOPLEFT", 4, -4 - ((index - 1) * ROW_HEIGHT))
+        end
         if iconResolver then
             optionButton.choiceIcon = optionButton:CreateTexture(nil, "ARTWORK")
             optionButton.choiceIcon:SetSize(17, 17)
@@ -779,7 +831,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(680)
+    content:SetHeight(822)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -915,8 +967,42 @@ function GC.UI:BuildSettingsPage()
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
     page.minimapToggle.text:SetWidth(260)
 
+    local gearCard = CreateCard(content, "Ausrüstung – Automatik")
+    gearCard:SetSize(752, 132)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
+    CreateLabel(gearCard, "Beides wirkt nur lokal für dich und braucht keinen Gildenrang.", {
+        muted = true,
+        width = 716,
+        height = 18,
+    }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -44)
+
+    page.gearAutoSelfToggle = CreateToggle(gearCard, "Eigene Ausrüstung selbst prüfen", function(checked)
+        GC.DB:GetSettings().gearAudit.auditSelf = checked
+        if checked then
+            GC.GearAudit:QueueSelfAudit(1)
+        end
+    end)
+    page.gearAutoSelfToggle:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -70)
+    page.gearAutoSelfToggle.text:SetWidth(290)
+
+    page.gearAcceptToggle = CreateToggle(gearCard, "Vorhandene Verzauberung gilt als in Ordnung", function(checked)
+        GC.DB:GetSettings().gearAudit.acceptUnratedEnchants = checked
+        GC.GearAudit:ReapplyEnchantRules()
+        GC.UI:RefreshGear()
+    end)
+    page.gearAcceptToggle:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 385, -70)
+    page.gearAcceptToggle.text:SetWidth(310)
+
+    CreateLabel(gearCard, "Ohne den zweiten Schalter bleibt jede nicht bewertete Verzauberung \"Unbekannt\"."
+        .. " Er bewertet keine Qualität, er unterscheidet nur verzaubert von nicht verzaubert.", {
+        muted = true,
+        width = 716,
+        height = 30,
+        vertical = "TOP",
+    }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -96)
+
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -646)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -788)
 end
 
 function GC.UI:RefreshSettings()
@@ -971,6 +1057,8 @@ function GC.UI:RefreshSettings()
     SetToggle(page.captureDuringSearchToggle, settings.captureOnlyDuringSearch)
     SetToggle(page.watchChannelToggle, settings.watchRecruitmentTriggers)
     SetToggle(page.minimapToggle, not settings.minimap.hidden)
+    SetToggle(page.gearAutoSelfToggle, GC.GearAudit:AuditsSelfAutomatically())
+    SetToggle(page.gearAcceptToggle, GC.GearAudit:AcceptsUnratedEnchants())
     local selectedSoundName = GC.SuccessSoundOptions[1].name
     for _, sound in ipairs(GC.SuccessSoundOptions) do
         if sound.key == settings.successSoundKey then
@@ -3242,13 +3330,36 @@ function GC.UI:BuildGearPage()
         row.verdict:SetPoint("LEFT", row, "LEFT", 121, 0)
         row.sockets = CreateLabel(row, "", { width = 58 })
         row.sockets:SetPoint("LEFT", row, "LEFT", 221, 0)
-        row.reason = CreateLabel(row, "", { width = 214, muted = true })
+        row.reason = CreateLabel(row, "", { width = 214, height = 25, muted = true, singleLine = true })
         row.reason:SetPoint("LEFT", row, "LEFT", 283, 0)
+
+        -- Der Hinweis passt selten in 214 Pixel. Abgeschnitten wird nur die
+        -- Anzeige, im Tooltip steht er vollstaendig.
+        row:HookScript("OnEnter", function(self)
+            local entry = page.gearSlotEntries and page.gearSlotEntries[index]
+            if not entry or not GameTooltip then
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(entry.label or "")
+            if entry.reason and entry.reason ~= "" then
+                GameTooltip:AddLine(entry.reason, 1, 1, 1, true)
+            end
+            if (entry.emptySockets or 0) > 0 then
+                GameTooltip:AddLine(entry.emptySockets .. " leere Sockel", 1, 0.38, 0.4, true)
+            end
+            GameTooltip:Show()
+        end)
+        row:HookScript("OnLeave", function()
+            if GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
         page.gearSlotRows[index] = row
     end
     page.gearRatingHint = CreateLabel(detailCard,
-        "Klick auf eine Zeile bewertet die Verzauberung: Optimal, Solide, Verbesserbar, keine Bewertung.",
-        { muted = true, font = "GameFontNormalSmall", width = 488, height = 16 })
+        "Klick auf eine Zeile: Optimal → Solide → Verbesserbar → keine Bewertung.",
+        { muted = true, font = "GameFontNormalSmall", width = 488, height = 16, singleLine = true })
     page.gearRatingHint:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -104)
 
     page.gearSlotEmpty = CreateLabel(detailCard, "Wähle links einen Spieler aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
@@ -3262,9 +3373,17 @@ function GC.UI:RefreshGear()
     end
 
     local audits = GC.GearAudit:GetAudits()
-    local ruleCount = 0
+    -- Zwei getrennte Quellen: die mitgelieferte Regelliste und die Regeln, die
+    -- die Gilde selbst gepflegt hat. Die Statuszeile hat frueher nur die erste
+    -- gezaehlt und deshalb auch dann "leer" gemeldet, wenn laengst gildeneigene
+    -- Bewertungen vorlagen.
+    local shippedRules = 0
     for _ in pairs(GC.EnchantRuleSet.rules) do
-        ruleCount = ruleCount + 1
+        shippedRules = shippedRules + 1
+    end
+    local guildRules = 0
+    for _ in pairs(GC.DB:GetGuild().enchantRules or {}) do
+        guildRules = guildRules + 1
     end
     local overview = GC.GearAudit:GetOverview()
     local statusText = GC.GearAudit.status
@@ -3282,10 +3401,30 @@ function GC.UI:RefreshGear()
             statusText = statusText .. "  •  |cffff6166" .. overview.emptySockets .. " leere Sockel|r"
         end
     end
-    page.gearStatus:SetText(statusText .. "\n"
-        .. (ruleCount > 0
-            and ("Regelsatz v" .. GC.EnchantRuleSet.version .. " mit " .. ruleCount .. " bewerteten Verzauberungen.")
-            or "|cffffb840Der Regelsatz ist noch leer: fehlende Verzauberungen und leere Sockel werden exakt erkannt, vorhandene Verzauberungen bleiben \"Unbekannt\".|r"))
+    local ruleParts = {}
+    if shippedRules > 0 then
+        ruleParts[#ruleParts + 1] = "Regelsatz v" .. GC.EnchantRuleSet.version
+            .. " mit " .. shippedRules .. " Verzauberungen"
+    end
+    if guildRules > 0 then
+        ruleParts[#ruleParts + 1] = guildRules .. " gildeneigene "
+            .. (guildRules == 1 and "Bewertung" or "Bewertungen")
+    end
+
+    local ruleLine
+    if #ruleParts > 0 then
+        ruleLine = GC.Util.JoinGerman(ruleParts) .. "."
+        if GC.GearAudit:AcceptsUnratedEnchants() then
+            ruleLine = ruleLine .. " Alles Übrige gilt automatisch als in Ordnung."
+        end
+    elseif GC.GearAudit:AcceptsUnratedEnchants() then
+        ruleLine = "|cff7ac943Automatik aktiv:|r keine Bewertungen hinterlegt, deshalb gilt jede vorhandene"
+            .. " Verzauberung als in Ordnung. Gemeldet werden fehlende Verzauberungen und leere Sockel."
+    else
+        ruleLine = "|cffffb840Der Regelsatz ist noch leer: fehlende Verzauberungen und leere Sockel werden"
+            .. " exakt erkannt, vorhandene Verzauberungen bleiben \"Unbekannt\".|r"
+    end
+    page.gearStatus:SetText(statusText .. "\n" .. ruleLine)
 
     page.gearEmpty:SetShown(#audits == 0)
     local selectedName = GC.GearAudit.selectedName
@@ -3368,7 +3507,10 @@ function GC.UI:CreatePostBar()
     end
 
     local bar = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotPostBar")
-    bar:SetSize(330, 104)
+    -- Hoch genug fuer den vollstaendigen Werbetext: 255 Bytes brauchen bei
+    -- 306 Pixel Breite bis zu fuenf Zeilen. Darunter Statuszeile und Knopf,
+    -- die sich frueher ueberlappt haben.
+    bar:SetSize(330, 162)
     local settings = GC.DB:GetSettings().postBar
     bar:SetPoint("CENTER", UIParent, "CENTER", tonumber(settings.x) or 0, tonumber(settings.y) or -220)
     bar:SetClampedToScreen(true)
@@ -3395,11 +3537,11 @@ function GC.UI:CreatePostBar()
     end)
     close:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -8, -7)
 
-    bar.text = CreateLabel(bar, "", { muted = true, width = 306, height = 26, vertical = "TOP" })
+    bar.text = CreateLabel(bar, "", { muted = true, width = 306, height = 70, vertical = "TOP" })
     bar.text:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -28)
 
     bar.status = CreateLabel(bar, "", { font = "GameFontNormalSmall", width = 306, height = 14 })
-    bar.status:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -58)
+    bar.status:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -102)
 
     bar.sendButton = CreateButton(bar, "Suche starten", 306, 26, function()
         local recruitment = GC.DB:GetGuild().recruitment
@@ -3449,7 +3591,8 @@ function GC.UI:RefreshPostBar()
     if confirmed == "" then
         bar.text:SetText("|cffffb840Kein bestätigter Text. Unter „Werbung posten“ bestätigen.|r")
     else
-        bar.text:SetText(GC.Util.SafeChatText(confirmed, 110))
+        -- Voller Text statt 110 Bytes: Was hier steht, geht so in den Chat.
+        bar.text:SetText(GC.Util.SafeChatText(confirmed, GC.Constants.MAX_CHAT_BYTES))
     end
 
     -- Ein Kanal ist bereit, wenn er ausgewählt, beigetreten und ohne Cooldown
