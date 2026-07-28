@@ -527,6 +527,46 @@ function GC.UI:CreateMainFrame()
     local subtitle = CreateLabel(header, "TBC Anniversary  •  v" .. GC.Constants.VERSION, { muted = true })
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
 
+    -- Sichtbar neben der Version: Laeuft der Abgleich mit der Gilde, und fahren
+    -- alle denselben Stand? Ein Klick fragt sofort nach, statt auf den naechsten
+    -- Login zu warten.
+    self.syncBadge = CreateButton(header, "", 250, 20, function()
+        GC.Sync:RequestSync()
+        GC.UI:RefreshSyncBadge()
+    end)
+    self.syncBadge:SetPoint("LEFT", subtitle, "RIGHT", 14, 0)
+    self.syncBadge.background:Hide()
+    self.syncBadge.border:Hide()
+    self.syncBadge.label:ClearAllPoints()
+    self.syncBadge.label:SetPoint("LEFT", self.syncBadge, "LEFT", 0, 0)
+    self.syncBadge.label:SetJustifyH("LEFT")
+    self.syncBadge.label:SetFontObject("GameFontNormalSmall")
+    self.syncBadge:SetScript("OnEnter", function(badge)
+        if not GameTooltip then
+            return
+        end
+        local stats = GC.Sync:GetAddonUserStats()
+        GameTooltip:SetOwner(badge, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Abgleich mit der Gilde")
+        GameTooltip:AddLine(stats.known .. " erkannte Nutzer, davon " .. stats.compatible
+            .. " mit gleicher Datenversion.", 1, 1, 1, true)
+        if #stats.outdatedNames > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Abweichende Datenversion:", 1, 0.72, 0.25)
+            GameTooltip:AddLine(table.concat(stats.outdatedNames, ", "), 1, 1, 1, true)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Erkannt wird nur, wer das Addon aktiv nutzt und seit deinem"
+            .. " Login etwas gesendet hat.", 0.57, 0.64, 0.72, true)
+        GameTooltip:AddLine("Klick fragt sofort bei allen nach.", 0.31, 0.79, 1, true)
+        GameTooltip:Show()
+    end)
+    self.syncBadge:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+
     local close = CreateButton(header, "×", 34, 34, function()
         frame:Hide()
     end)
@@ -3488,10 +3528,33 @@ function GC.UI:RefreshGear()
     end
 end
 
+-- Zustand des Gildenabgleichs in einem Satz neben der Version.
+function GC.UI:RefreshSyncBadge()
+    local badge = self.syncBadge
+    if not badge then
+        return
+    end
+
+    local stats = GC.Sync:GetAddonUserStats()
+    local others = math.max(0, (stats.known or 1) - 1)
+    local differing = (stats.outdated or 0) + (stats.ahead or 0)
+
+    if others == 0 then
+        badge:SetText("|cff8b98a5• kein anderer Nutzer erkannt|r")
+    elseif differing > 0 then
+        badge:SetText("|cffffb840• " .. others .. (others == 1 and " Nutzer" or " Nutzer")
+            .. ", " .. differing .. " mit anderer Version|r")
+    else
+        badge:SetText("|cff59e695• synchron mit " .. others
+            .. (others == 1 and " Nutzer" or " Nutzern") .. "|r")
+    end
+end
+
 function GC.UI:Refresh()
     if not self.frame then
         return
     end
+    self:RefreshSyncBadge()
     self:RefreshNavigationAccess()
     self:RefreshDashboard()
     self:RefreshSettings()
@@ -3911,6 +3974,7 @@ end)
 
 GC:RegisterCallback("ADDON_USERS_UPDATED", GC.UI, function(self)
     self:RefreshDashboard()
+    self:RefreshSyncBadge()
 end)
 
 GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)

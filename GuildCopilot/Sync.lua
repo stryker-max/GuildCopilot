@@ -16,6 +16,7 @@ GC.Sync = {
 local MIN_ANNOUNCE_INTERVAL = 60
 local MIN_REPLY_INTERVAL = 15
 local MIN_PROFILE_REPLY_INTERVAL = 30
+local MIN_MANUAL_SYNC_INTERVAL = 15
 
 local function BoolField(value)
     return value and "1" or "0"
@@ -198,6 +199,22 @@ function GC.Sync:QueueProfile()
     C_Timer.After(1, function()
         self:SendProfile()
     end)
+end
+
+-- Auf Zuruf alles anstossen: Versionen und Profile erfragen, das eigene
+-- Profil senden, das Gildenprofil nachfordern. Gedacht fuer den Fall, dass
+-- jemand nicht auf den naechsten Login warten will.
+function GC.Sync:RequestSync()
+    local now = GC.Util.Now()
+    if (now - (self.lastManualSyncAt or 0)) < MIN_MANUAL_SYNC_INTERVAL then
+        return false, "Der Abgleich lief gerade eben schon."
+    end
+    self.lastManualSyncAt = now
+
+    self:AnnounceVersion(true)
+    self:QueueProfile()
+    self:RequestGuildProfile()
+    return true, "Abgleich angefragt."
 end
 
 -- Antwort auf eine Anfrage. Gedrosselt, damit mehrere Logins kurz
@@ -579,9 +596,14 @@ function GC.Sync:ReceiveVersion(fields, sender)
         -- Das eigene Profil gleich mitschicken. Ohne diese Antwort erfaehrt ein
         -- Client nur von denen etwas, die sich nach ihm einloggen oder ihr
         -- Profil aendern: Wer zuerst da war, hat laengst in einen leeren Raum
-        -- gesendet. Eigenes Fenster mit breiterer Streuung, damit bei vielen
-        -- gleichzeitig Antwortenden der Addon-Kanal nicht zulaeuft.
-        C_Timer.After(1 + math.random() * 9, function()
+        -- gesendet.
+        --
+        -- Die Streuung haengt an der Zahl der bekannten Nutzer. Bei zweien
+        -- muss niemand zehn Sekunden warten; bei zwanzig darf nicht alles
+        -- gleichzeitig losgehen, sonst verschluckt der Addon-Kanal Nachrichten.
+        local others = math.max(0, (self:GetAddonUserStats().known or 1) - 1)
+        local spread = math.min(9, math.max(1, others))
+        C_Timer.After(0.5 + math.random() * spread, function()
             self:ReplyWithProfile()
         end)
     end
