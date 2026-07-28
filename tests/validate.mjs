@@ -155,6 +155,9 @@ const requiredImplementations = [
   ["Logs-Auswertungen als eigene Quelle", /source = "WCL"/],
   ["Consumables aus Logs über die Addon-Tabelle", /DecodeConsumables/],
   ["Quellen werden nicht vermischt", /stored\.source ~= summary\.source/],
+  ["aufbereitete Ausrüstungsfunde", /function GC\.GearAudit:GetFindings/],
+  ["Gesamtübersicht der Ausrüstungsprüfung", /function GC\.GearAudit:GetOverview/],
+  ["eigene Ausrüstung im Profil", /profileGearFindings/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

@@ -160,7 +160,9 @@ Offen und bewusst noch nicht umgesetzt:
 - Der Regelsatz für **Optimal**, **Solide** und **Verbesserbar** ist leer. Die Enchant-IDs müssen aus einer belegbaren Quelle übernommen werden; bis dahin werden vorhandene Verzauberungen als **Unbekannt** ausgewiesen und nie als schlecht gewertet. Fehlende Verzauberungen und leere Sockel erkennt der Audit auch ohne Regeln exakt.
 - Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets fehlen noch.
 - Regeln nach Spec und Content-Phase sind vorbereitet (Rolle und Slot werden bereits ausgewertet), aber ohne Regeldaten noch nicht wirksam.
-- Die Ergebnisse bleiben lokal bei dem, der geprüft hat. Ob sie wie die Raidauswertung an Offiziere verteilt werden sollen, ist offen.
+- Die Ergebnisse bleiben lokal bei dem, der geprüft hat. Ob sie zusätzlich wie die Raidauswertung über den Addon-Kanal an Offiziere verteilt werden sollen, ist weiterhin offen.
+
+Ergänzt: Die Funde werden als lesbare Sätze mit Slotnamen aufbereitet statt als nackte Zahlen, eine Kopfzeile fasst alle geprüften Spieler zusammen, und jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort selbst auslösen.
 
 Die Guides von [wowtbc.gg](https://wowtbc.gg/) führen spec-spezifische Consumables und Alternativen auf. Diese Trennung eignet sich als Grundlage für die Stufen **Optimal** und **Solide**, muss aber pro Phase und Spec gepflegt werden.
 

@@ -59,6 +59,9 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - geprüft wird nur, wer in Reichweite und erreichbar ist; nicht erreichbare Spieler werden ausdrücklich als übersprungen ausgewiesen;
 - Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen gelten als **Unbekannt** und nie als schlecht;
 - es gibt bewusst keine Gesamtnote je Spieler;
+- die Funde stehen als lesbare Sätze da statt als nackte Zahlen: „2 fehlende Verzauberungen: Kopf, Schulter“, „3 leere Sockel: Brust, Hände“;
+- eine Kopfzeile fasst alle geprüften Spieler zusammen, etwa „8 geprüft, davon 5 ohne Funde • 6 fehlende Verzauberungen • 4 leere Sockel“;
+- jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort jederzeit selbst auslösen;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
 - Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen;
 - **Nachanalyse aus Warcraft Logs**: der Companion liest öffentliche Reports und liefert Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Interrupts, Dispels und Verbrauchsgegenstände;

@@ -151,6 +151,7 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
             itemLink = link,
         }
 
+        entry.required = slot.enchantRequired == true
         if not parsed then
             entry.verdict = "EMPTY"
             entry.reason = "Kein Gegenstand angelegt."
@@ -231,6 +232,102 @@ function GC.GearAudit:AuditSelf()
     self:StoreAudit(audit)
     self.selectedName = audit.name
     return true, "Eigene Ausrüstung geprüft: " .. self:DescribeFindings(audit)
+end
+
+-- Aufbereitete Funde in ganzen Sätzen, damit die Oberfläche nicht nur Zahlen
+-- zeigt: "3 fehlende Verzauberungen: Schulter, Brust, Rücken".
+function GC.GearAudit:GetFindings(audit)
+    local findings = {}
+    if not audit then
+        return findings
+    end
+
+    local missingEnchants = {}
+    local socketSlots = {}
+    local emptySlots = {}
+    local unknownEnchants = 0
+    for _, entry in ipairs(audit.slots or {}) do
+        if entry.verdict == "MISSING" then
+            missingEnchants[#missingEnchants + 1] = entry.label
+        elseif entry.verdict == "EMPTY" and entry.required then
+            emptySlots[#emptySlots + 1] = entry.label
+        elseif entry.verdict == "UNKNOWN" then
+            unknownEnchants = unknownEnchants + 1
+        end
+        if (entry.emptySockets or 0) > 0 then
+            socketSlots[#socketSlots + 1] = entry.label
+        end
+    end
+
+    if #missingEnchants == 1 then
+        findings[#findings + 1] = {
+            severity = "PROBLEM",
+            text = "1 fehlende Verzauberung: " .. missingEnchants[1],
+        }
+    elseif #missingEnchants > 1 then
+        findings[#findings + 1] = {
+            severity = "PROBLEM",
+            text = #missingEnchants .. " fehlende Verzauberungen: " .. table.concat(missingEnchants, ", "),
+        }
+    end
+
+    local emptySockets = audit.emptySockets or 0
+    if emptySockets > 0 then
+        findings[#findings + 1] = {
+            severity = "PROBLEM",
+            text = (emptySockets == 1 and "1 leerer Sockel" or (emptySockets .. " leere Sockel"))
+                .. ": " .. table.concat(socketSlots, ", "),
+        }
+    end
+
+    if #emptySlots > 0 then
+        findings[#findings + 1] = {
+            severity = "WARNING",
+            text = (#emptySlots == 1 and "1 leerer Ausrüstungsplatz" or (#emptySlots .. " leere Ausrüstungsplätze"))
+                .. ": " .. table.concat(emptySlots, ", "),
+        }
+    end
+
+    if #findings == 0 then
+        findings[#findings + 1] = {
+            severity = "OK",
+            text = "Alles verzaubert und alle Sockel besetzt.",
+        }
+    end
+
+    -- Nur erwähnen, wenn überhaupt Regeln gepflegt sind. Bei leerer Regelliste
+    -- wäre "alles unbewertet" nur Rauschen.
+    local ruleCount = 0
+    for _ in pairs(GC.EnchantRuleSet.rules) do
+        ruleCount = ruleCount + 1
+    end
+    if ruleCount > 0 and unknownEnchants > 0 then
+        findings[#findings + 1] = {
+            severity = "INFO",
+            text = unknownEnchants .. " Verzauberungen sind noch nicht bewertet.",
+        }
+    end
+    return findings
+end
+
+function GC.GearAudit:GetOverview()
+    local overview = {
+        players = 0,
+        missingEnchants = 0,
+        emptySockets = 0,
+        emptySlots = 0,
+        clean = 0,
+    }
+    for _, audit in ipairs(self:GetAudits()) do
+        overview.players = overview.players + 1
+        overview.missingEnchants = overview.missingEnchants + (audit.missingEnchants or 0)
+        overview.emptySockets = overview.emptySockets + (audit.emptySockets or 0)
+        overview.emptySlots = overview.emptySlots + (audit.emptySlots or 0)
+        if (audit.missingEnchants or 0) == 0 and (audit.emptySockets or 0) == 0 then
+            overview.clean = overview.clean + 1
+        end
+    end
+    return overview
 end
 
 function GC.GearAudit:DescribeFindings(audit)

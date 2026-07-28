@@ -1165,6 +1165,66 @@ assert(addon.GearAudit:GetAudit("Schurke") == nil,
     "Ein nicht erreichbarer Spieler wurde trotzdem gespeichert")
 timerDelayThreshold = math.huge
 
+-- Funde werden in ganzen Sätzen aufbereitet.
+local ownFindings = addon.GearAudit:GetFindings(addon.GearAudit:GetAudit("Tester"))
+local findingTexts = {}
+for _, finding in ipairs(ownFindings) do
+    findingTexts[#findingTexts + 1] = finding.text
+end
+local findingBlock = table.concat(findingTexts, "\n")
+assert(findingBlock:find("1 fehlende Verzauberung: Brust", 1, true),
+    "Eine einzelne fehlende Verzauberung wird nicht mit Slotnamen benannt")
+assert(findingBlock:find("2 leere Sockel: Brust", 1, true),
+    "Die leeren Sockel werden nicht mit Slotnamen benannt")
+assert(findingBlock:find("leere Ausrüstungsplätze", 1, true),
+    "Leere Pflichtslots werden nicht gemeldet")
+for _, finding in ipairs(ownFindings) do
+    assert(finding.severity ~= "INFO" or not finding.text:find("nicht bewertet", 1, true),
+        "Bei leerer Regelliste wird über unbewertete Verzauberungen berichtet")
+end
+
+-- Mehrere fehlende Verzauberungen werden zusammengefasst aufgezählt.
+inspectGear.player = { [1] = "|Hitem:1:0:0:0:0:0:0:0:70|h[K]|h", [3] = "|Hitem:2:0:0:0:0:0:0:0:70|h[S]|h" }
+addon.GearAudit:AuditSelf()
+local multiBlock = ""
+for _, finding in ipairs(addon.GearAudit:GetFindings(addon.GearAudit:GetAudit("Tester"))) do
+    multiBlock = multiBlock .. finding.text .. "\n"
+end
+assert(multiBlock:find("2 fehlende Verzauberungen: Kopf, Schulter", 1, true),
+    "Mehrere fehlende Verzauberungen werden nicht aufgezählt")
+
+-- Saubere Ausrüstung meldet das ausdrücklich.
+addon.EnchantRuleSet.rules[7777] = { verdict = "SOLID", name = "Testverzauberung" }
+inspectGear.player = {}
+for _, slot in ipairs(addon.GearSlots) do
+    if slot.enchantRequired then
+        inspectGear.player[slot.id] = "|Hitem:9:7777:0:0:0:0:0:0:70|h[X]|h"
+    end
+end
+addon.GearAudit:AuditSelf()
+local cleanFindings = addon.GearAudit:GetFindings(addon.GearAudit:GetAudit("Tester"))
+assert(cleanFindings[1].severity == "OK", "Saubere Ausrüstung wird nicht als in Ordnung gemeldet")
+assert(cleanFindings[1].text:find("Alles verzaubert", 1, true), "Die Erfolgsmeldung fehlt")
+addon.EnchantRuleSet.rules[7777] = nil
+
+-- Der eigene Audit erscheint im persönlichen Profil.
+addon.UI:ShowPage("ROSTER")
+local profilePage = addon.UI.pages.ROSTER
+assert(profilePage.profileGearFindings.value:find("Alles verzaubert", 1, true),
+    "Die eigene Ausrüstung wird im Profil nicht aufbereitet angezeigt")
+assert(profilePage.profileGearAge.value:find("Zuletzt geprüft", 1, true),
+    "Das Profil zeigt kein Datenalter")
+profilePage.profileGearButton.scripts.OnClick()
+assert(profilePage.profileGearFindings.value ~= "", "Der Prüfknopf im Profil bleibt wirkungslos")
+
+-- Eine Gesamtübersicht über alle geprüften Spieler.
+inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
+addon.GearAudit:AuditSelf()
+local gearOverview = addon.GearAudit:GetOverview()
+assert(gearOverview.players >= 1, "Die Übersicht zählt keine geprüften Spieler")
+assert(gearOverview.emptySockets >= 2, "Die Übersicht summiert die leeren Sockel nicht")
+assert(gearOverview.missingEnchants >= 1, "Die Übersicht summiert die fehlenden Verzauberungen nicht")
+
 -- Die Prüfung erscheint in der Oberfläche, sortiert nach Anzahl der Funde.
 addon.UI:ShowPage("GEAR")
 local gearPage = addon.UI.pages.GEAR

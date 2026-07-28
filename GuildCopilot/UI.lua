@@ -1044,7 +1044,7 @@ function GC.UI:BuildRosterPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(606)
+    content:SetHeight(786)
     scroll:SetScrollChild(content)
     page.profileScroll = scroll
 
@@ -1204,6 +1204,51 @@ function GC.UI:BuildRosterPage()
     page.clearAbsence:SetPoint("LEFT", page.saveAbsence, "RIGHT", 8, 0)
     page.absenceStatus = CreateLabel(absenceCard, "", { width = 402, height = 32 })
     page.absenceStatus:SetPoint("LEFT", page.clearAbsence, "RIGHT", 12, 0)
+
+    local gearCard = CreateCard(content, "Deine Ausrüstung")
+    gearCard:SetSize(752, 162)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -612)
+    local gearHelp = CreateLabel(gearCard,
+        "Prüft deine eigene Ausrüstung auf fehlende Verzauberungen und leere Sockel. Läuft nur bei dir und ohne Gruppe.",
+        { muted = true, width = 560, height = 18, vertical = "TOP" })
+    gearHelp:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -46)
+
+    page.profileGearFindings = CreateLabel(gearCard, "", { width = 560, height = 62, vertical = "TOP" })
+    page.profileGearFindings:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -70)
+    page.profileGearAge = CreateLabel(gearCard, "", { muted = true, width = 560, height = 18 })
+    page.profileGearAge:SetPoint("BOTTOMLEFT", gearCard, "BOTTOMLEFT", 18, 12)
+
+    page.profileGearButton = CreateButton(gearCard, "Ausrüstung prüfen", 150, 30, function()
+        local ok, message = GC.GearAudit:AuditSelf()
+        if not ok and message then
+            GC:Print(message)
+        end
+        GC.UI:RefreshRoster()
+    end, "PRIMARY")
+    page.profileGearButton:SetPoint("TOPRIGHT", gearCard, "TOPRIGHT", -18, -46)
+
+    page.profileGearOpen = CreateButton(gearCard, "Alle Prüfungen", 150, 26, function()
+        GC.UI:ShowPage("GEAR")
+    end)
+    page.profileGearOpen:SetPoint("TOPRIGHT", page.profileGearButton, "BOTTOMRIGHT", 0, -6)
+
+end
+
+function GC.UI:RefreshProfileGear()
+    local page = self.pages.ROSTER
+    if not page or not page.profileGearFindings then
+        return
+    end
+    local audit = GC.GearAudit:GetAudit(GC:GetPlayerFullName())
+    if not audit then
+        page.profileGearFindings:SetText("|cff91a3b8Noch nicht geprüft. Ein Klick auf "
+            .. "\"Ausrüstung prüfen\" liest deine angelegten Gegenstände aus.|r")
+        page.profileGearAge:SetText("")
+        return
+    end
+    page.profileGearFindings:SetText(self:FormatGearFindings(audit, 3))
+    local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (audit.inspectedAt or 0)) / 60))
+    page.profileGearAge:SetText("Zuletzt geprüft vor " .. ageMinutes .. " Minuten.")
 end
 
 function GC.UI:RefreshRoster()
@@ -1211,6 +1256,7 @@ function GC.UI:RefreshRoster()
     if not page then
         return
     end
+    self:RefreshProfileGear()
 
     local profile = GC.Profile:Get()
     local detected = GC.SpecByKey[profile.detectedSpecKey or ""]
@@ -2889,11 +2935,11 @@ function GC.UI:BuildStatisticsPage()
             font = "GameFontNormalSmall",
             width = headerDefinition.width,
         })
-        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -122)
     end
 
     local scroll = CreateModernScrollFrame(detailCard)
-    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
+    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -142)
     scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(492)
@@ -3015,6 +3061,28 @@ local GEAR_VERDICT_STYLE = {
     EMPTY = { label = "Leer", color = THEME.muted },
 }
 
+local GEAR_SEVERITY_COLOR = {
+    PROBLEM = "ffff6166",
+    WARNING = "ffffb840",
+    OK = "ff59e695",
+    INFO = "ff91a3b8",
+}
+
+-- Funde als eingefaerbte Zeilen, damit dieselbe Aufbereitung auf der
+-- Ausruestungsseite und im persoenlichen Profil erscheint.
+function GC.UI:FormatGearFindings(audit, maximumLines)
+    local findings = GC.GearAudit:GetFindings(audit)
+    local lines = {}
+    for index, finding in ipairs(findings) do
+        if maximumLines and index > maximumLines then
+            break
+        end
+        lines[#lines + 1] = "|c" .. (GEAR_SEVERITY_COLOR[finding.severity] or GEAR_SEVERITY_COLOR.INFO)
+            .. finding.text .. "|r"
+    end
+    return table.concat(lines, "\n")
+end
+
 function GC.UI:BuildGearPage()
     local page = self.pages.GEAR
     CreatePageTitle(page, "Ausrüstung",
@@ -3076,8 +3144,10 @@ function GC.UI:BuildGearPage()
     local detailCard = CreateCard(page, "Slots")
     detailCard:SetSize(526, 358)
     detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
-    page.gearHeadline = CreateLabel(detailCard, "", { muted = true, width = 380, height = 18 })
+    page.gearHeadline = CreateLabel(detailCard, "", { muted = true, width = 480, height = 18 })
     page.gearHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
+    page.gearFindings = CreateLabel(detailCard, "", { width = 488, height = 52, vertical = "TOP" })
+    page.gearFindings:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -64)
 
     local gearHeaders = {
         { text = "SLOT", x = 18, width = 112 },
@@ -3118,7 +3188,7 @@ function GC.UI:BuildGearPage()
         page.gearSlotRows[index] = row
     end
     page.gearSlotEmpty = CreateLabel(detailCard, "Wähle links einen Spieler aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
-    page.gearSlotEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -88)
+    page.gearSlotEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -66)
 end
 
 function GC.UI:RefreshGear()
@@ -3132,9 +3202,21 @@ function GC.UI:RefreshGear()
     for _ in pairs(GC.EnchantRuleSet.rules) do
         ruleCount = ruleCount + 1
     end
+    local overview = GC.GearAudit:GetOverview()
     local statusText = GC.GearAudit.status
     if statusText == "" then
         statusText = "Noch keine Prüfung gelaufen."
+    end
+    if overview.players > 0 then
+        statusText = statusText .. "  •  " .. overview.players .. " geprüft"
+            .. ", davon " .. overview.clean .. " ohne Funde"
+        if overview.missingEnchants > 0 then
+            statusText = statusText .. "  •  |cffff6166" .. overview.missingEnchants
+                .. " fehlende Verzauberungen|r"
+        end
+        if overview.emptySockets > 0 then
+            statusText = statusText .. "  •  |cffff6166" .. overview.emptySockets .. " leere Sockel|r"
+        end
     end
     page.gearStatus:SetText(statusText .. "\n"
         .. (ruleCount > 0
@@ -3153,7 +3235,7 @@ function GC.UI:RefreshGear()
         row:SetShown(audit ~= nil)
         if audit then
             local issues = (audit.missingEnchants or 0) + (audit.emptySockets or 0)
-            row:SetText(audit.name .. (issues > 0 and ("  •  " .. issues) or "  •  ok"))
+            row:SetText(audit.name .. (issues > 0 and ("  •  " .. issues .. " Funde") or "  •  ok"))
             row:SetActive(audit.name == selectedName)
         end
     end
@@ -3165,8 +3247,10 @@ function GC.UI:RefreshGear()
         page.gearHeadline:SetText((selected.source == "SELF" and "Eigene Ausrüstung" or "Inspect")
             .. "  •  vor " .. ageMinutes .. " Min.  •  Regelsatz v" .. (selected.ruleVersion or 0)
             .. "  •  " .. GC.GearAudit:DescribeFindings(selected))
+        page.gearFindings:SetText(self:FormatGearFindings(selected, 3))
     else
         page.gearHeadline:SetText("")
+        page.gearFindings:SetText("")
     end
 
     local slots = selected and selected.slots or {}
@@ -3475,4 +3559,5 @@ end)
 
 GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
     self:RefreshGear()
+    self:RefreshProfileGear()
 end)
