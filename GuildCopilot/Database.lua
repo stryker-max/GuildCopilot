@@ -12,6 +12,11 @@ local DEFAULTS = {
             angle = 225,
         },
         workshopFavorites = {},
+        postBar = {
+            hidden = true,
+            x = 0,
+            y = -220,
+        },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         channels = {

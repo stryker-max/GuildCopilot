@@ -2405,8 +2405,14 @@ function GC.UI:BuildPostPage()
         GC.UI:RefreshPost()
     end, "PRIMARY")
     page.searchButton:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 0)
-    page.postResult = CreateLabel(page, "", { width = 535 })
-    page.postResult:SetPoint("LEFT", page.searchButton, "RIGHT", 16, 0)
+    page.postBarToggle = CreateButton(page, "Werbebalken", 150, 44, function()
+        GC.UI:TogglePostBar()
+        GC.UI:RefreshPost()
+    end)
+    page.postBarToggle:SetPoint("LEFT", page.searchButton, "RIGHT", 12, 0)
+
+    page.postResult = CreateLabel(page, "", { width = 370 })
+    page.postResult:SetPoint("LEFT", page.postBarToggle, "RIGHT", 16, 0)
 
     page:SetScript("OnUpdate", function(_, elapsed)
         page.elapsed = (page.elapsed or 0) + elapsed
@@ -2451,6 +2457,11 @@ function GC.UI:RefreshPost()
     local page = self.pages.POST
     if not page then
         return
+    end
+    if page.postBarToggle then
+        local visible = GC.DB:GetSettings().postBar.hidden == false
+        page.postBarToggle:SetActive(visible)
+        page.postBarToggle:SetText(visible and "Balken aus" or "Werbebalken")
     end
     local recruitment = GC.DB:GetGuild().recruitment
     if not recruitment.adText or recruitment.adText == "" then
@@ -3320,6 +3331,134 @@ function GC.UI:Refresh()
     self:RefreshGear()
 end
 
+-- === Werbebalken ===========================================================
+--
+-- Kleines, verschiebbares Fenster nur fuer das Posten: bestaetigter Text,
+-- Countdown je Kanal und ein Knopf. Gesendet wird ausschliesslich durch einen
+-- echten Klick - der Countdown schaltet den Knopf nur frei, er loest nie
+-- selbst aus.
+
+function GC.UI:CreatePostBar()
+    if self.postBar then
+        return self.postBar
+    end
+
+    local bar = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotPostBar")
+    bar:SetSize(330, 104)
+    local settings = GC.DB:GetSettings().postBar
+    bar:SetPoint("CENTER", UIParent, "CENTER", tonumber(settings.x) or 0, tonumber(settings.y) or -220)
+    bar:SetClampedToScreen(true)
+    bar:SetMovable(true)
+    bar:EnableMouse(true)
+    bar:RegisterForDrag("LeftButton")
+    bar:SetScript("OnDragStart", bar.StartMoving)
+    bar:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, _, x, y = self:GetPoint()
+        if point then
+            GC.DB:GetSettings().postBar.x = math.floor(tonumber(x) or 0)
+            GC.DB:GetSettings().postBar.y = math.floor(tonumber(y) or 0)
+        end
+    end)
+    bar:SetFrameStrata("MEDIUM")
+    bar:Hide()
+
+    local title = CreateLabel(bar, "Gildenwerbung", { font = "GameFontNormalSmall" })
+    title:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -9)
+
+    local close = CreateButton(bar, "×", 20, 20, function()
+        GC.UI:SetPostBarShown(false)
+    end)
+    close:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -8, -7)
+
+    bar.text = CreateLabel(bar, "", { muted = true, width = 306, height = 26, vertical = "TOP" })
+    bar.text:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -28)
+
+    bar.status = CreateLabel(bar, "", { font = "GameFontNormalSmall", width = 306, height = 14 })
+    bar.status:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -58)
+
+    bar.sendButton = CreateButton(bar, "Suche starten", 306, 26, function()
+        local recruitment = GC.DB:GetGuild().recruitment
+        local success, message = GC.Chat:StartSearch(recruitment.confirmedText or "")
+        bar.status:SetText(message or "")
+        SetTextColor(bar.status, success and THEME.success or THEME.danger)
+        GC.UI:RefreshPostBar()
+        GC.UI:RefreshPost()
+    end, "PRIMARY")
+    bar.sendButton:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 12, 10)
+
+    bar:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 0.5 then
+            self.elapsed = 0
+            GC.UI:RefreshPostBar()
+        end
+    end)
+
+    self.postBar = bar
+    self:RefreshPostBar()
+    return bar
+end
+
+function GC.UI:SetPostBarShown(shown)
+    GC.DB:GetSettings().postBar.hidden = not shown
+    self:CreatePostBar()
+    self.postBar:SetShown(shown == true)
+    if shown then
+        self:RefreshPostBar()
+    end
+    self:RefreshPost()
+end
+
+function GC.UI:TogglePostBar()
+    self:SetPostBarShown(GC.DB:GetSettings().postBar.hidden ~= false)
+end
+
+function GC.UI:RefreshPostBar()
+    local bar = self.postBar
+    if not bar or not bar:IsShown() then
+        return
+    end
+
+    local recruitment = GC.DB:GetGuild().recruitment
+    local confirmed = recruitment.confirmedText or ""
+    if confirmed == "" then
+        bar.text:SetText("|cffffb840Kein bestätigter Text. Unter „Werbung posten“ bestätigen.|r")
+    else
+        bar.text:SetText(GC.Util.SafeChatText(confirmed, 110))
+    end
+
+    -- Ein Kanal ist bereit, wenn er ausgewählt, beigetreten und ohne Cooldown
+    -- ist. Der laengste Cooldown steht als Countdown im Knopf.
+    local ready = 0
+    local waiting = 0
+    local longest = 0
+    for _, kind in ipairs({ "RECRUITMENT", "LFG", "TRADE", "GENERAL" }) do
+        if GC.DB:GetSettings().channels[kind] then
+            local remaining = GC.Chat:GetRemainingCooldown(kind)
+            if remaining > 0 then
+                waiting = waiting + 1
+                longest = math.max(longest, remaining)
+            elseif GC.Chat:FindChannel(kind) then
+                ready = ready + 1
+            end
+        end
+    end
+
+    local canSend = confirmed ~= "" and ready > 0
+    SetButtonEnabled(bar.sendButton, canSend)
+    if longest > 0 and ready == 0 then
+        bar.sendButton:SetText(math.ceil(longest) .. "s Cooldown")
+    else
+        bar.sendButton:SetText("Suche starten")
+    end
+    if bar.status:GetText() == "" or waiting > 0 or ready > 0 then
+        bar.status:SetText(ready .. " Kanäle bereit"
+            .. (waiting > 0 and ("  •  " .. waiting .. " im Cooldown") or ""))
+        SetTextColor(bar.status, ready > 0 and THEME.muted or THEME.warning)
+    end
+end
+
 function GC.UI:AddGuildWindowButton()
     if self.guildButton or not GuildFrame then
         return
@@ -3510,7 +3649,13 @@ end
 
 SLASH_GUILDCOPILOT1 = "/gcp"
 SLASH_GUILDCOPILOT2 = "/guildcopilot"
-SlashCmdList.GUILDCOPILOT = function()
+SlashCmdList.GUILDCOPILOT = function(input)
+    local command = GC.Util.Trim(tostring(input or "")):lower()
+    if command == "werbung" or command == "balken" then
+        GC.UI:CreateMainFrame()
+        GC.UI:TogglePostBar()
+        return
+    end
     GC.UI:Toggle()
 end
 
@@ -3522,6 +3667,9 @@ end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.UI, function(self)
     self:CreateMainFrame()
+    if GC.DB:GetSettings().postBar.hidden == false then
+        self:SetPostBarShown(true)
+    end
     self:AddGuildWindowButton()
     self:AddMinimapButton()
     self:RegisterInterfaceOptions()

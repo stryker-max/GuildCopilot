@@ -1,4 +1,4 @@
-# Guild Copilot 0.8.1
+# Guild Copilot 0.9.0
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -27,6 +27,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - ausdrückliche Prüfung über **Text bestätigen**, bevor ein Posting möglich ist;
 - ein Klick auf **Suche starten** postet einmalig in alle ausgewählten und verfügbaren Kanäle;
 - 120-Sekunden-Sicherheits-Cooldown pro Kanal und zusätzliche Server-Throttle-Erkennung;
+- **Werbebalken**: ein kleines, verschiebbares Fenster nur fürs Posten – bestätigter Text, Zahl der bereiten Kanäle und der laufende Cooldown als Countdown direkt im Knopf. Damit muss für Werbung nicht das ganze Addonfenster offen bleiben;
+- der Werbebalken sendet ausschließlich per echtem Klick; der Countdown schaltet den Knopf nur frei und löst nie selbst aus. Ein- und ausblenden über den Knopf auf **Werbung posten** oder `/gcp werbung`;
 - Bewerber-Postfach mit Rekrutierungsfilter für eingehende Whispers und erkannte „Suche Gilde“-Chatnachrichten, auswählbarem Erfolgssound, editierbarer Antwortvorschau, optionalen Raid-Symbolen und Gildeneinladung;
 - die Standardtexte für **Danke**, **Gildeninfos** und **Discord** lassen sich mit Platzhaltern gildenweit pflegen;
 - Interessenten lassen sich über ein **×** direkt neben ihrem Eintrag entfernen oder nach einem Bestätigungsklick vollständig aus dem Postfach löschen;
@@ -114,6 +116,7 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 
 - `/gcp`
 - `/guildcopilot`
+- `/gcp werbung` – blendet den Werbebalken ein oder aus
 
 ## Gespeicherte Daten
 

@@ -639,6 +639,55 @@ local posted, message = addon.Chat:StartSearch(advertisement)
 assert(posted == true, message)
 assert(#sentChat == 4, "Nicht alle vier ausgewählten Kanäle wurden bedient")
 
+-- === Werbebalken ===========================================================
+-- Kleines Fenster fuer das Posten ohne die grosse Oberflaeche. Gesendet wird
+-- nur durch einen echten Klick.
+assert(addon.DB:GetSettings().postBar.hidden == true, "Der Werbebalken ist ungefragt an")
+addon.UI:SetPostBarShown(true)
+local postBar = addon.UI.postBar
+assert(postBar ~= nil and postBar.shown == true, "Der Werbebalken wurde nicht eingeblendet")
+assert(addon.DB:GetSettings().postBar.hidden == false, "Der Zustand wurde nicht gespeichert")
+
+addon.DB:GetGuild().recruitment.confirmedText = advertisement
+addon.DB:GetGuild().lastPosts = {}
+addon.UI:RefreshPostBar()
+assert(postBar.sendButton.label.value == "Suche starten", "Der Knopf ist ohne Cooldown nicht bereit")
+
+local barSentBefore = #sentChat
+postBar.sendButton.scripts.OnClick()
+assert(#sentChat > barSentBefore, "Der Werbebalken hat nichts gepostet")
+
+-- Direkt danach greift der Cooldown und der Knopf zeigt ihn als Countdown.
+addon.UI:RefreshPostBar()
+assert(postBar.sendButton.label.value:find("s Cooldown", 1, true),
+    "Der Cooldown erscheint nicht als Countdown im Knopf")
+
+-- Ohne bestaetigten Text darf gar nicht gesendet werden.
+addon.DB:GetGuild().lastPosts = {}
+addon.DB:GetGuild().recruitment.confirmedText = ""
+addon.UI:RefreshPostBar()
+local blockedBefore = #sentChat
+postBar.sendButton.scripts.OnClick()
+assert(#sentChat == blockedBefore, "Ohne bestätigten Text wurde trotzdem gepostet")
+assert(postBar.text.value:find("Kein bestätigter Text", 1, true),
+    "Der fehlende Bestätigungstext wird nicht erklärt")
+
+-- Die eigentliche Sperre: ein geaenderter, nicht neu bestaetigter Text darf
+-- nicht rausgehen - egal ueber welchen Weg.
+addon.DB:GetGuild().recruitment.confirmedText = advertisement
+addon.DB:GetGuild().lastPosts = {}
+local unconfirmedBefore = #sentChat
+local unconfirmed, unconfirmedMessage = addon.Chat:StartSearch(advertisement .. " nachtraeglich geaendert")
+assert(unconfirmed == false and unconfirmedMessage:find("bestätigen", 1, true),
+    "Ein geänderter, nicht bestätigter Werbetext wurde gepostet")
+assert(#sentChat == unconfirmedBefore, "Trotz Ablehnung wurde in den Chat geschrieben")
+
+addon.UI:SetPostBarShown(false)
+assert(postBar.shown == false, "Der Werbebalken ließ sich nicht schließen")
+assert(addon.DB:GetSettings().postBar.hidden == true, "Der ausgeblendete Zustand wurde nicht gespeichert")
+addon.DB:GetGuild().recruitment.confirmedText = advertisement
+addon.DB:GetGuild().lastPosts = {}
+
 addon.Recruitment:Clear()
 for _, classFile in ipairs(addon.ClassOrder) do
     addon.Recruitment:SetClass(classFile, true)
@@ -884,7 +933,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.8.1", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.0", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")

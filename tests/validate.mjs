@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.8.1",
+  "## Version: 0.9.0",
 ];
 
 for (const entry of requiredMetadata) {
@@ -164,6 +164,9 @@ const requiredImplementations = [
   ["Bewertung per Klick durchschalten", /function GC\.GearAudit:CycleEnchantRule/],
   ["Regelsatz nur mit Einstellungsrecht", /function GC\.GearAudit:CanEditEnchantRules/],
   ["Regelsatz wird gildenweit geteilt", /EncodeEnchantRules/],
+  ["Werbebalken als eigenes Fenster", /function GC\.UI:CreatePostBar/],
+  ["Werbebalken mit Countdown", /s Cooldown"\)/],
+  ["Werbebalken sendet nur per Klick", /bar\.sendButton = CreateButton/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
