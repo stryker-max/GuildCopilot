@@ -779,7 +779,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(940)
+    content:SetHeight(680)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -915,45 +915,8 @@ function GC.UI:BuildSettingsPage()
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
     page.minimapToggle.text:SetWidth(260)
 
-    local templateCard = CreateCard(content, "Standardtexte im Postfach")
-    templateCard:SetSize(752, 294)
-    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -646)
-    local templateHelp = CreateLabel(templateCard,
-        "Die Vorlagen sind vorausgefüllt und frei änderbar. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
-        { muted = true, width = 716, height = 30, vertical = "TOP" })
-    templateHelp:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 18, -47)
-    page.templateEdits = {}
-    local templateDefinitions = {
-        { key = "THANKS", label = "Danke", y = -82 },
-        { key = "INFO", label = "Gildeninfos", y = -132 },
-        { key = "DISCORD", label = "Discord", y = -182 },
-    }
-    for _, definition in ipairs(templateDefinitions) do
-        local label = CreateLabel(templateCard, definition.label, { muted = true, width = 100 })
-        label:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 18, definition.y)
-        local edit = CreateEdit(templateCard, 600, 36)
-        edit.container:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 134, definition.y + 8)
-        page.templateEdits[definition.key] = edit
-    end
-    page.saveTemplates = CreateButton(templateCard, "Vorlagen speichern", 180, 36, function()
-        if not GC.Roster:CanEditGuildProfile() then
-            page.settingsStatus:SetText("Dein Gildenrang darf die gildenweiten Vorlagen nicht bearbeiten.")
-            SetTextColor(page.settingsStatus, THEME.danger)
-            return
-        end
-        local guildData = GC.DB:GetGuild()
-        for key, edit in pairs(page.templateEdits) do
-            guildData.replyTemplates[key] = GC.Util.Trim(edit:GetText())
-        end
-        guildData.profile.updatedAt = GC.Util.Now()
-        GC.Sync:QueueGuildProfile()
-        GC:FireCallback("GUILD_PROFILE_UPDATED")
-        page.settingsStatus:SetText("Antwortvorlagen gespeichert und für die Gilde synchronisiert.")
-        SetTextColor(page.settingsStatus, THEME.success)
-    end, "PRIMARY")
-    page.saveTemplates:SetPoint("BOTTOMLEFT", templateCard, "BOTTOMLEFT", 134, 18)
-    page.settingsStatus = CreateLabel(templateCard, "", { width = 410 })
-    page.settingsStatus:SetPoint("LEFT", page.saveTemplates, "RIGHT", 14, 0)
+    page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -646)
 end
 
 function GC.UI:RefreshSettings()
@@ -1017,28 +980,17 @@ function GC.UI:RefreshSettings()
     end
     page.successSoundDropdown:SetValue(selectedSoundName)
 
-    local templates = GC.DB:GetGuild().replyTemplates
-    for key, edit in pairs(page.templateEdits) do
-        if not edit:HasFocus() then
-            edit:SetText(templates[key] or "")
-        end
-        if canEditGuildProfile then
-            edit:Enable()
-        else
-            edit:Disable()
-        end
-    end
     if canEditGuildProfile then
-        page.saveTemplates:Enable()
         if page.settingsStatus:GetText() == "" then
             page.settingsStatus:SetText("Gildenweite Änderungen sind für deinen Rang freigegeben.")
             SetTextColor(page.settingsStatus, THEME.muted)
         end
     else
-        page.saveTemplates:Disable()
-        page.settingsStatus:SetText("Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar.")
+        page.settingsStatus:SetText(
+            "Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar.")
         SetTextColor(page.settingsStatus, THEME.warning)
     end
+
     page.settingsScroll:UpdateModernThumb()
 end
 
@@ -1538,7 +1490,7 @@ function GC.UI:BuildMemberCarePage()
 
     local absencesCard = CreateCard(content, "Aktuelle Abmeldungen")
     absencesCard:SetSize(752, 210)
-    absencesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -242)
+    absencesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -880)
     page.guildAbsencesTitle = absencesCard.title
     page.guildAbsenceRows = {}
     for index = 1, 5 do
@@ -1560,7 +1512,7 @@ function GC.UI:BuildMemberCarePage()
 
     local suggestionsCard = CreateCard(content, "Pflegevorschläge")
     suggestionsCard:SetSize(752, 368)
-    suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -464)
+    suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -242)
     page.memberCareSuggestionsTitle = suggestionsCard.title
     local suggestionHelp = CreateLabel(suggestionsCard,
         "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.",
@@ -1631,7 +1583,7 @@ function GC.UI:BuildMemberCarePage()
 
     local decisionsCard = CreateCard(content, "Ausnahmen und Entscheidungen")
     decisionsCard:SetSize(752, 246)
-    decisionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -844)
+    decisionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -622)
     page.memberCareDecisionsTitle = decisionsCard.title
     local decisionsHelp = CreateLabel(decisionsCard,
         "Diese Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten.",
@@ -2493,9 +2445,18 @@ function GC.UI:BuildInboxPage()
     local page = self.pages.INBOX
     CreatePageTitle(page, "Postfach", "Whispers und erkannte „Suche Gilde“-Nachrichten werden hier gesammelt.")
 
-    local leadCard = CreateCard(page, "Interessenten")
+    local scroll = CreateModernScrollFrame(page)
+    scroll:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -58)
+    scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetWidth(752)
+    content:SetHeight(756)
+    scroll:SetScrollChild(content)
+    page.inboxScroll = scroll
+
+    local leadCard = CreateCard(content, "Interessenten")
     leadCard:SetSize(224, 490)
-    leadCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    leadCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     page.leadButtons = {}
     page.leadDeleteButtons = {}
     for index = 1, 9 do
@@ -2544,9 +2505,9 @@ function GC.UI:BuildInboxPage()
     end)
     page.clearInboxButton:SetPoint("BOTTOMLEFT", leadCard, "BOTTOMLEFT", 18, 14)
 
-    local detailCard = CreateCard(page, "Unterhaltung")
-    detailCard:SetSize(540, 490)
-    detailCard:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -66)
+    local detailCard = CreateCard(content, "Unterhaltung")
+    detailCard:SetSize(528, 490)
+    detailCard:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
     page.leadTitle = CreateLabel(detailCard, "Kein Bewerber ausgewählt", { title = true })
     page.leadTitle:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -51)
     page.lastMessage = CreateLabel(detailCard, "", { width = 504, height = 52, vertical = "TOP" })
@@ -2630,8 +2591,52 @@ function GC.UI:BuildInboxPage()
         end
     end)
     page.inviteButton:SetPoint("LEFT", page.replyButton, "RIGHT", 8, 0)
-    page.replyResult = CreateLabel(detailCard, "", { width = 504, height = 40, vertical = "TOP" })
+    page.replyResult = CreateLabel(detailCard, "", { width = 492, height = 40, vertical = "TOP" })
     page.replyResult:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -419)
+
+    -- Die Vorlagen hinter den drei Knoepfen werden dort gepflegt, wo sie
+    -- benutzt werden, nicht in den Einstellungen.
+    local templateCard = CreateCard(content, "Vorlagen für Danke, Gildeninfos und Discord")
+    templateCard:SetSize(752, 244)
+    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -502)
+    local templateHelp = CreateLabel(templateCard,
+        "Diese Texte füllen die drei Knöpfe oben. Sie gelten gildenweit. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
+        { muted = true, width = 716, height = 30, vertical = "TOP" })
+    templateHelp:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 18, -44)
+
+    page.templateEdits = {}
+    local templateDefinitions = {
+        { key = "THANKS", label = "Danke", y = -82 },
+        { key = "INFO", label = "Gildeninfos", y = -124 },
+        { key = "DISCORD", label = "Discord", y = -166 },
+    }
+    for _, definition in ipairs(templateDefinitions) do
+        local label = CreateLabel(templateCard, definition.label, { muted = true, width = 100 })
+        label:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 18, definition.y)
+        local edit = CreateEdit(templateCard, 590, 32)
+        edit.container:SetPoint("TOPLEFT", templateCard, "TOPLEFT", 134, definition.y + 6)
+        page.templateEdits[definition.key] = edit
+    end
+
+    page.saveTemplates = CreateButton(templateCard, "Vorlagen speichern", 180, 32, function()
+        if not GC.Roster:CanEditGuildProfile() then
+            page.templateStatus:SetText("Dein Gildenrang darf die gildenweiten Vorlagen nicht bearbeiten.")
+            SetTextColor(page.templateStatus, THEME.danger)
+            return
+        end
+        local guildData = GC.DB:GetGuild()
+        for key, edit in pairs(page.templateEdits) do
+            guildData.replyTemplates[key] = GC.Util.Trim(edit:GetText())
+        end
+        guildData.profile.updatedAt = GC.Util.Now()
+        GC.Sync:QueueGuildProfile()
+        GC:FireCallback("GUILD_PROFILE_UPDATED")
+        page.templateStatus:SetText("Vorlagen gespeichert und für die Gilde synchronisiert.")
+        SetTextColor(page.templateStatus, THEME.success)
+    end, "PRIMARY")
+    page.saveTemplates:SetPoint("BOTTOMLEFT", templateCard, "BOTTOMLEFT", 134, 14)
+    page.templateStatus = CreateLabel(templateCard, "", { width = 420 })
+    page.templateStatus:SetPoint("LEFT", page.saveTemplates, "RIGHT", 14, 0)
 end
 
 function GC.UI:RefreshInbox()
@@ -2639,6 +2644,25 @@ function GC.UI:RefreshInbox()
     if not page then
         return
     end
+
+    local canEditTemplates = GC.Roster:CanEditGuildProfile()
+    local templates = GC.DB:GetGuild().replyTemplates
+    for key, edit in pairs(page.templateEdits) do
+        if not edit:HasFocus() then
+            edit:SetText(templates[key] or "")
+        end
+        if canEditTemplates then
+            edit:Enable()
+        else
+            edit:Disable()
+        end
+    end
+    SetButtonEnabled(page.saveTemplates, canEditTemplates)
+    if not canEditTemplates and page.templateStatus:GetText() == "" then
+        page.templateStatus:SetText("Die Vorlagen sind für deinen Rang schreibgeschützt.")
+        SetTextColor(page.templateStatus, THEME.warning)
+    end
+
     local inbox = GC.DB:GetGuild().inbox
     if #inbox > 0 then
         page.clearInboxButton:Enable()

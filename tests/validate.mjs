@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.0",
+  "## Version: 0.9.1",
 ];
 
 for (const entry of requiredMetadata) {
@@ -184,6 +184,43 @@ const settingsPosition = uiSource.indexOf('{ key = "SETTINGS"');
 const statisticsPosition = uiSource.indexOf('{ key = "STATISTICS"');
 if (settingsPosition < statisticsPosition) {
   throw new Error("Einstellungen stehen nicht als letzter Navigationspunkt.");
+}
+
+// Zusammengehoerendes soll beieinander stehen: In der Mitgliederpflege gehoert
+// der Inaktivitaets-Ablauf (Regeln, Vorschlaege, Entscheidungen) zusammen, die
+// Abmeldungen sind ein eigenes Thema und stehen darunter.
+const memberCarePage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildMemberCarePage"),
+  uiSource.indexOf("function GC.UI:RefreshMemberCare")
+);
+const cardOffset = (name) => {
+  const match = memberCarePage.match(
+    new RegExp(`${name}:SetPoint\\("TOPLEFT", content, "TOPLEFT", 0, -(\\d+)\\)`)
+  );
+  if (!match) throw new Error(`Karte ${name} fehlt in der Mitgliederpflege.`);
+  return Number(match[1]);
+};
+if (!(cardOffset("suggestionsCard") < cardOffset("decisionsCard"))) {
+  throw new Error("Die Entscheidungen stehen nicht direkt unter den Pflegevorschlägen.");
+}
+if (!(cardOffset("decisionsCard") < cardOffset("absencesCard"))) {
+  throw new Error("Die Abmeldungen stehen wieder zwischen den zusammengehörenden Karten.");
+}
+
+// Die Antwortvorlagen gehoeren ins Postfach, wo die Knoepfe sind.
+const inboxPage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildInboxPage"),
+  uiSource.indexOf("function GC.UI:RefreshInbox")
+);
+if (!inboxPage.includes("page.templateEdits = {}") || !inboxPage.includes("page.saveTemplates")) {
+  throw new Error("Die Antwortvorlagen fehlen im Postfach.");
+}
+const settingsPage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildSettingsPage"),
+  uiSource.indexOf("function GC.UI:RefreshSettings")
+);
+if (settingsPage.includes("page.templateEdits")) {
+  throw new Error("Die Antwortvorlagen stehen wieder in den Einstellungen.");
 }
 
 // Die Seitenleiste hat keine Bildlaufleiste. Ein neuer Navigationspunkt darf

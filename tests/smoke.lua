@@ -717,6 +717,25 @@ addon.DB:GetGuild().replyTemplates.THANKS = ""
 local editedReply = addon.Recruitment:DecorateReply("{rt6} Eigener Text {rt6}", 2)
 assert(editedReply == "{rt2} Eigener Text {rt2}", "Editierter Antworttext wurde nicht sauber neu dekoriert")
 
+-- Die Vorlagen fuer die drei Antwortknoepfe werden dort gepflegt, wo die
+-- Knoepfe sind: im Postfach, nicht in den Einstellungen.
+addon.UI:ShowPage("INBOX")
+local inboxPage = addon.UI.pages.INBOX
+assert(inboxPage.templateEdits ~= nil, "Die Vorlagen fehlen im Postfach")
+assert(inboxPage.templateEdits.THANKS ~= nil, "Die Danke-Vorlage fehlt im Postfach")
+assert(addon.UI.pages.SETTINGS.templateEdits == nil,
+    "Die Vorlagen stehen weiterhin in den Einstellungen")
+
+inboxPage.templateEdits.THANKS:SetText("Servus {name}, willkommen!")
+inboxPage.saveTemplates.scripts.OnClick()
+assert(addon.DB:GetGuild().replyTemplates.THANKS == "Servus {name}, willkommen!",
+    "Die im Postfach bearbeitete Vorlage wurde nicht gespeichert")
+assert(inboxPage.templateStatus.value:find("gespeichert", 1, true),
+    "Das Speichern wird im Postfach nicht bestätigt")
+assert(addon.Recruitment:GenerateReply("THANKS", "Bewerber-Realm"):find("Servus Bewerber", 1, true),
+    "Die neue Vorlage wirkt sich nicht auf die Antwort aus")
+addon.DB:GetGuild().replyTemplates.THANKS = ""
+
 assert(addon.Roster:CanEditGuildProfile("Tester-Realm") == true, "Offiziersrang darf das Gildenprofil nicht bearbeiten")
 assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false, "Nicht freigegebener Rang darf das Gildenprofil bearbeiten")
 local selfRemovalAllowed, selfRemovalReason = addon.Roster:SetGuildProfileRankActive(1, false)
@@ -933,7 +952,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.0", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.1", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")

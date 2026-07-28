@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.0
+# Guild Copilot 0.9.1
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -30,7 +30,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - **Werbebalken**: ein kleines, verschiebbares Fenster nur fürs Posten – bestätigter Text, Zahl der bereiten Kanäle und der laufende Cooldown als Countdown direkt im Knopf. Damit muss für Werbung nicht das ganze Addonfenster offen bleiben;
 - der Werbebalken sendet ausschließlich per echtem Klick; der Countdown schaltet den Knopf nur frei und löst nie selbst aus. Ein- und ausblenden über den Knopf auf **Werbung posten** oder `/gcp werbung`;
 - Bewerber-Postfach mit Rekrutierungsfilter für eingehende Whispers und erkannte „Suche Gilde“-Chatnachrichten, auswählbarem Erfolgssound, editierbarer Antwortvorschau, optionalen Raid-Symbolen und Gildeneinladung;
-- die Standardtexte für **Danke**, **Gildeninfos** und **Discord** lassen sich mit Platzhaltern gildenweit pflegen;
+- die Standardtexte für **Danke**, **Gildeninfos** und **Discord** werden direkt im **Postfach** unter den zugehörigen Knöpfen gepflegt – dort, wo sie benutzt werden – und gelten gildenweit;
 - Interessenten lassen sich über ein **×** direkt neben ihrem Eintrag entfernen oder nach einem Bestätigungsklick vollständig aus dem Postfach löschen;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Alt-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
@@ -45,6 +45,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - suchbasierte Gildenwerkstatt: Statt hunderte Rezepte ungefiltert zu laden, werden Ergebnisse erst nach Suchbegriff, Berufsauswahl oder über gespeicherte Favoriten angezeigt;
 - bebilderter Berufsfilter, Berufssymbole in der Rezeptliste und lokale Rezeptfavoriten;
 - Einstellungsseite für aktive Raider-Ränge, berechtigte Einstellungs-Editoren, Mitgliederpflege-Zugriff, Postfach-Erkennung, TBC-kompatible Erfolgssounds und das Minimap-Symbol;
+- in der **Mitgliederpflege** stehen Prüfregeln, Pflegevorschläge und Entscheidungen als zusammenhängender Ablauf untereinander; die Abmeldungen als eigenes Thema darunter;
 - Lockout-Schutz für gildenweite Einstellungen: eigener Rang nicht abwählbar, Entzug nur durch höhere Ränge und einmalige Offiziers-Wiederherstellung je Gilde für alte Sperren;
 - Gildenprofil, Editor-Ränge, Mitgliederpflege-Zugriff, Raider-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
 - Aufruf über `/gcp`, den Button im Blizzard-Gildenfenster, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**;
