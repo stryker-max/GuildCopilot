@@ -762,12 +762,15 @@ function GC.UI:BuildDashboardPage()
         GC.UI:ShowPage("SETTINGS")
     end)
     page.rankFilterButton:SetPoint("TOPRIGHT", rosterCard, "TOPRIGHT", -18, -12)
+    -- STATUS war 74 Pixel breit, "nicht bestaetigt" braucht rund 95. Der Text
+    -- brach um und sprengte die 25 Pixel hohe Zeile. Die Spalte bekommt mehr
+    -- Platz, die Berufe geben ihn ab - sie sind ohnehin selten voll.
     local headers = {
-        { text = "SPIELER", x = 18, width = 132 },
-        { text = "SPEC", x = 158, width = 168 },
-        { text = "STATUS", x = 334, width = 74 },
-        { text = "BERUFE", x = 416, width = 226 },
-        { text = "AKTIV", x = 650, width = 100 },
+        { text = "SPIELER", x = 18, width = 128 },
+        { text = "SPEC", x = 154, width = 164 },
+        { text = "STATUS", x = 326, width = 92 },
+        { text = "BERUFE", x = 426, width = 214 },
+        { text = "AKTIV", x = 648, width = 100 },
     }
     for _, headerDefinition in ipairs(headers) do
         local headerLabel = CreateLabel(rosterCard, headerDefinition.text, {
@@ -783,23 +786,51 @@ function GC.UI:BuildDashboardPage()
     scroll:SetPoint("BOTTOMRIGHT", rosterCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(742)
-    content:SetHeight(700)
+    content:SetHeight(25 * 27)
     scroll:SetScrollChild(content)
     page.raiderRows = {}
     for index = 1, 25 do
         local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
         row:SetSize(740, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
-        row.name = CreateLabel(row, "", { width = 132 })
-        row.name:SetPoint("LEFT", row, "LEFT", 5, 0)
-        row.spec = CreateLabel(row, "", { width = 168 })
-        row.spec:SetPoint("LEFT", row, "LEFT", 145, 0)
-        row.status = CreateLabel(row, "", { width = 74 })
-        row.status:SetPoint("LEFT", row, "LEFT", 321, 0)
-        row.professions = CreateLabel(row, "", { width = 226 })
-        row.professions:SetPoint("LEFT", row, "LEFT", 403, 0)
-        row.activity = CreateLabel(row, "", { width = 100 })
-        row.activity:SetPoint("LEFT", row, "LEFT", 637, 0)
+        -- Durchgehend einzeilig: Jede umbrechende Zelle waechst ueber ihre
+        -- Zeile hinaus und schiebt sich optisch in die Nachbarzeilen.
+        local columns = {
+            { key = "name", x = 5, width = 128 },
+            { key = "spec", x = 141, width = 164 },
+            { key = "status", x = 313, width = 92 },
+            { key = "professions", x = 413, width = 214 },
+            { key = "activity", x = 635, width = 100 },
+        }
+        for _, column in ipairs(columns) do
+            row[column.key] = CreateLabel(row, "", {
+                width = column.width,
+                height = 25,
+                singleLine = true,
+            })
+            row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
+        end
+
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
+            if not self.member or not GameTooltip then
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(GC.Util.PlayerShortName(self.member.name))
+            GameTooltip:AddLine(self.tooltipSpec or "", 1, 1, 1, true)
+            if self.tooltipProfessions and self.tooltipProfessions ~= "" then
+                GameTooltip:AddLine("Berufe: " .. self.tooltipProfessions, 1, 1, 1, true)
+            end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(self.tooltipStatus or "", 0.57, 0.64, 0.72, true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            if GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
         page.raiderRows[index] = row
     end
 
@@ -852,25 +883,52 @@ function GC.UI:RefreshDashboard()
             if secondary then
                 specText = specText .. " / " .. secondary.name
             end
-            local statusText = "nicht bestätigt"
-            if profile then
+            -- Der Status trug frueher drei verschiedene Aussagen in einem Wort.
+            -- Farbe und Tooltip trennen sie jetzt: Wer gar kein Profil hat,
+            -- ist etwas anderes als wer eines hat und es nicht bestaetigt hat.
+            local statusText, statusColor, statusHint
+            if not profile then
+                statusText = "kein Profil"
+                statusColor = THEME.muted
+                statusHint = "Dieser Spieler hat sein Raidprofil noch nie ausgefüllt."
+            else
                 if profile.source == "WARCRAFT_LOGS" then
                     statusText = "Logs"
+                    statusHint = "Stammt aus einem Warcraft-Logs-Import, nicht vom Spieler selbst."
                 elseif profile.source == "MANUAL" then
                     statusText = "Manuell"
+                    statusHint = "Wurde von Hand eingetragen, nicht vom Spieler selbst."
                 else
                     statusText = profile.mainStatus == "ALT" and "Alt" or "Main"
+                    statusHint = profile.mainStatus == "ALT"
+                        and "Als Zweitcharakter gemeldet."
+                        or "Als Hauptcharakter gemeldet."
                 end
                 if not profile.confirmed and profile.source ~= "WARCRAFT_LOGS" then
                     statusText = statusText .. " ?"
+                    statusColor = THEME.warning
+                    statusHint = statusHint .. " Der Spieler hat das Profil noch nicht bestätigt."
+                else
+                    statusColor = THEME.text
                 end
             end
+
+            local professionText = ProfessionSummary(profile)
+            row.member = member
+            row.tooltipSpec = specText
+            row.tooltipProfessions = professionText ~= "–" and professionText or ""
+            row.tooltipStatus = statusHint
+
             row.name:SetText(GC.Util.PlayerShortName(member.name))
             row.name:SetTextColor(ClassColor(member.classFile))
             row.spec:SetText(specText)
             row.status:SetText(statusText)
-            row.professions:SetText(ProfessionSummary(profile))
+            SetTextColor(row.status, statusColor)
+            row.professions:SetText(professionText)
+            SetTextColor(row.professions, professionText == "–" and THEME.muted or THEME.text)
             row.activity:SetText(LastOnlineLabel(member))
+        else
+            row.member = nil
         end
     end
 end
