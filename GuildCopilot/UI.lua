@@ -3476,6 +3476,12 @@ function GC.UI:BuildGearPage()
             local audit = GC.GearAudit:GetAudits()[index]
             if audit then
                 GC.GearAudit.selectedName = audit.name
+                -- Beim Spielerwechsel oben anfangen, sonst haengt die Liste
+                -- an der Scrollposition des vorherigen Spielers fest.
+                if page.gearSlotScroll then
+                    page.gearSlotScroll:SetVerticalScroll(0)
+                    page.gearSlotScroll:UpdateModernThumb()
+                end
                 GC.UI:RefreshGear()
             end
         end)
@@ -3517,8 +3523,11 @@ function GC.UI:BuildGearPage()
     scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(492)
-    content:SetHeight(560)
+    -- Genau so hoch wie die Zeilen brauchen. Vorher standen 560 fest im Code,
+    -- also rund hundert Pixel Leerraum, in den man hineinscrollen konnte.
+    content:SetHeight(#GC.GearSlots * 27)
     scroll:SetScrollChild(content)
+    page.gearSlotScroll = scroll
 
     page.gearSlotRows = {}
     for index = 1, #GC.GearSlots do
@@ -3569,7 +3578,9 @@ function GC.UI:BuildGearPage()
         page.gearSlotRows[index] = row
     end
     page.gearRatingHint = CreateLabel(detailCard,
-        "Klick auf eine Zeile: Optimal → Solide → Verbesserbar → keine Bewertung.",
+        -- Kein Pfeilzeichen: Die WoW-Schriftart kennt es nicht und zeichnet
+        -- statt dessen leere Kaesten.
+        "Klick auf eine Zeile schaltet weiter: Optimal, Solide, Verbesserbar, keine Bewertung.",
         { muted = true, font = "GameFontNormalSmall", width = 488, height = 16, singleLine = true })
     page.gearRatingHint:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -104)
 
@@ -3649,7 +3660,9 @@ function GC.UI:RefreshGear()
         row:SetShown(audit ~= nil)
         if audit then
             local issues = (audit.missingEnchants or 0) + (audit.emptySockets or 0)
-            row:SetText(audit.name .. (issues > 0 and ("  •  " .. issues .. " Funde") or "  •  ok"))
+            row:SetText(audit.name .. (issues > 0
+            and ("  •  " .. issues .. (issues == 1 and " Fund" or " Funde"))
+            or "  •  ok"))
             row:SetActive(audit.name == selectedName)
         end
     end
