@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.7.1",
+  "## Version: 0.7.2",
 ];
 
 for (const entry of requiredMetadata) {
@@ -175,6 +175,36 @@ const settingsPosition = uiSource.indexOf('{ key = "SETTINGS"');
 const statisticsPosition = uiSource.indexOf('{ key = "STATISTICS"');
 if (settingsPosition < statisticsPosition) {
   throw new Error("Einstellungen stehen nicht als letzter Navigationspunkt.");
+}
+
+// Die Seitenleiste hat keine Bildlaufleiste. Ein neuer Navigationspunkt darf
+// deshalb nicht unten aus dem Fenster ragen - genau das war mit dem Eintrag
+// "Ausruestung" passiert.
+const navNumber = (name) => {
+  const match = uiSource.match(new RegExp(`local ${name} = (\\d+)`));
+  if (!match) throw new Error(`Seitenleisten-Mass ${name} fehlt in UI.lua.`);
+  return Number(match[1]);
+};
+const frameHeight = Number(uiSource.match(/frame:SetSize\(\d+, (\d+)\)/)[1]);
+const sidebarTop = Number(uiSource.match(/sidebar:SetPoint\("TOPLEFT", frame, "TOPLEFT", 1, -(\d+)\)/)[1]);
+const tabBlock = uiSource.slice(
+  uiSource.indexOf("local TAB_DEFINITIONS = {"),
+  uiSource.indexOf("local function SetTextColor")
+);
+const tabCount = (tabBlock.match(/\{ key = "/g) || []).length;
+const sections = new Set([...tabBlock.matchAll(/section = "([A-ZÄÖÜ]+)"/g)].map((m) => m[1]));
+const navHeight =
+  navNumber("NAV_TOP") +
+  sections.size * navNumber("NAV_SECTION_HEIGHT") +
+  (sections.size - 1) * navNumber("NAV_SECTION_GAP") +
+  (tabCount - 1) * navNumber("NAV_TAB_SPACING") +
+  navNumber("NAV_TAB_HEIGHT");
+const sidebarHeight = frameHeight - sidebarTop - 1;
+if (navHeight > sidebarHeight) {
+  throw new Error(
+    `Die Seitenleiste ist zu klein: ${tabCount} Navigationspunkte brauchen ${navHeight} px, ` +
+      `verfuegbar sind ${sidebarHeight} px.`
+  );
 }
 
 // Beide Detailkarten heissen intern "detailCard". Ein Suchen-und-Ersetzen ohne

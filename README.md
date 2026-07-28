@@ -1,4 +1,4 @@
-# Guild Copilot 0.7.1
+# Guild Copilot 0.7.2
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">

@@ -27,6 +27,14 @@ local THEME = {
     danger = { 1.00, 0.38, 0.40, 1 },
 }
 
+-- Masse der Seitenleiste. Sie muessen zur Fensterhoehe passen: kommt ein
+-- Navigationspunkt dazu, prueft tests/validate.mjs, ob noch alles hineinpasst.
+local NAV_TOP = 10
+local NAV_SECTION_GAP = 3
+local NAV_SECTION_HEIGHT = 22
+local NAV_TAB_HEIGHT = 32
+local NAV_TAB_SPACING = 34
+
 local TAB_DEFINITIONS = {
     { key = "ROSTER", section = "COPILOT", label = "Profil", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "OVERVIEW", section = "COPILOT", label = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Note_01" },
@@ -465,12 +473,12 @@ function GC.UI:CreateMainFrame()
     sidebar:SetWidth(190)
     frame.sidebar = sidebar
 
-    local navigationY = -10
+    local navigationY = -NAV_TOP
     local currentSection
     for _, definition in ipairs(TAB_DEFINITIONS) do
         if definition.section ~= currentSection then
             if currentSection then
-                navigationY = navigationY - 4
+                navigationY = navigationY - NAV_SECTION_GAP
             end
             currentSection = definition.section
             local sectionLabel = CreateLabel(sidebar, currentSection, {
@@ -481,14 +489,14 @@ function GC.UI:CreateMainFrame()
                 height = 18,
             })
             sectionLabel:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 14, navigationY)
-            navigationY = navigationY - 24
+            navigationY = navigationY - NAV_SECTION_HEIGHT
         end
         local pageKey = definition.key
-        local tab = CreateButton(sidebar, definition.label, 160, 35, function()
+        local tab = CreateButton(sidebar, definition.label, 160, NAV_TAB_HEIGHT, function()
             self:ShowPage(pageKey)
         end)
         tab:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 14, navigationY)
-        navigationY = navigationY - 38
+        navigationY = navigationY - NAV_TAB_SPACING
         tab.key = pageKey
         tab.label:ClearAllPoints()
         tab.label:SetPoint("LEFT", tab, "LEFT", 43, 0)
