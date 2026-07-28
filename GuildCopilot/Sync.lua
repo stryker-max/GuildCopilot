@@ -96,6 +96,44 @@ local function EncodeEnchantRules(rules)
     return table.concat(records, ",")
 end
 
+-- Spec-Bewertungen als "spec:id:code". Das Feld haengt am Ende der Nutzlast,
+-- damit aeltere Clients es schlicht ignorieren, statt daran zu scheitern.
+local function EncodeSpecEnchantRules(specRules)
+    local records = {}
+    for specKey, rules in pairs(specRules or {}) do
+        if GC.SpecByKey[specKey] then
+            for enchantID, rule in pairs(rules or {}) do
+                local code = VERDICT_CODES[rule.verdict]
+                if code and tonumber(enchantID) then
+                    records[#records + 1] = specKey .. ":" .. tostring(tonumber(enchantID)) .. ":" .. code
+                end
+            end
+        end
+    end
+    table.sort(records)
+    while #records > 240 do
+        table.remove(records)
+    end
+    return table.concat(records, ",")
+end
+
+local function DecodeSpecEnchantRules(payload)
+    local specRules = {}
+    for record in tostring(payload or ""):gmatch("[^,]+") do
+        local specKey, enchantID, code = record:match("^([%u]+:%d+):(%d+):(%a)$")
+        if specKey and GC.SpecByKey[specKey] and VERDICT_BY_CODE[code] then
+            specRules[specKey] = specRules[specKey] or {}
+            specRules[specKey][enchantID] = {
+                verdict = VERDICT_BY_CODE[code],
+                name = "",
+                by = "",
+                at = GC.Util.Now(),
+            }
+        end
+    end
+    return specRules
+end
+
 local function DecodeEnchantRules(payload)
     local rules = {}
     for record in tostring(payload or ""):gmatch("[^,]+") do
@@ -261,6 +299,7 @@ function GC.Sync:BuildGuildProfileMessages()
         table.concat(SortedEnabledRanks(roster.activeRaiderRanks), ","),
         EncodeMemberCareDecisions(memberCare.decisions),
         EncodeEnchantRules(guildData.enchantRules),
+        EncodeSpecEnchantRules(guildData.enchantSpecRules),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -413,6 +452,14 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     end
     if fields[22] ~= nil then
         guildData.enchantRules = DecodeEnchantRules(fields[22])
+        if GC.GearAudit then
+            GC.GearAudit:ReapplyEnchantRules()
+        end
+    end
+    -- Fehlt das Feld, sendet der Absender eine aeltere Version. Dann bleiben
+    -- die eigenen Spec-Regeln stehen, statt geleert zu werden.
+    if fields[23] ~= nil then
+        guildData.enchantSpecRules = DecodeSpecEnchantRules(fields[23])
         if GC.GearAudit then
             GC.GearAudit:ReapplyEnchantRules()
         end

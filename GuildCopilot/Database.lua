@@ -87,7 +87,12 @@ local GUILD_DEFAULTS = {
     },
     raidSessions = {},
     gearAudits = {},
+    -- Bewertungen ohne Spec-Bezug. Sie gelten fuer alle und sind der
+    -- Rueckfall, wenn fuer eine Spec nichts hinterlegt ist.
     enchantRules = {},
+    -- Bewertungen je Spec: enchantSpecRules["WARRIOR:1"]["2748"]. Dieselbe
+    -- Verzauberung kann fuer Waffen optimal und fuer Schutz verbesserbar sein.
+    enchantSpecRules = {},
     memberCare = {
         inactivityDays = 60,
         protectedRanksConfigured = false,

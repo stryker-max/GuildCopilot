@@ -233,19 +233,66 @@ function GC.GearAudit:AuditsSelfAutomatically()
     return self:GetAutoSettings().auditSelf ~= false
 end
 
-function GC.GearAudit:GetGuildEnchantRule(enchantID)
+-- === Bewertungen je Spec ===================================================
+--
+-- Dieselbe Verzauberung ist nicht fuer jeden gleich gut: Feingefuehl auf der
+-- Waffe ist fuer einen Waffen-Krieger etwas anderes als fuer einen
+-- Schutz-Krieger. Bewertet wird deshalb je Spec.
+--
+-- Die alten Bewertungen ohne Spec-Bezug bleiben als Rueckfall bestehen. Wer
+-- schon welche gepflegt hat, verliert sie nicht; sie greifen ueberall dort,
+-- wo fuer die konkrete Spec nichts hinterlegt ist.
+
+function GC.GearAudit:GetSpecRuleTable(specKey, create)
+    if type(specKey) ~= "string" or specKey == "" then
+        return nil
+    end
+    local guildData = GC.DB:GetGuild()
+    guildData.enchantSpecRules = guildData.enchantSpecRules or {}
+    if not guildData.enchantSpecRules[specKey] and create then
+        guildData.enchantSpecRules[specKey] = {}
+    end
+    return guildData.enchantSpecRules[specKey]
+end
+
+function GC.GearAudit:GetSpecKeyForProfile(profile)
+    local specKey = profile and (profile.raidSpecKey or profile.detectedSpecKey)
+    if specKey and GC.SpecByKey[specKey] then
+        return specKey
+    end
+    return nil
+end
+
+function GC.GearAudit:DescribeSpec(specKey)
+    local spec = specKey and GC.SpecByKey[specKey]
+    if not spec then
+        return "ohne Spec"
+    end
+    local class = GC.Classes[spec.classFile]
+    return (class and class.name or spec.classFile) .. " " .. spec.name
+end
+
+-- Erst die Spec, dann die allgemeine Regel.
+function GC.GearAudit:GetGuildEnchantRule(enchantID, specKey)
     enchantID = tonumber(enchantID)
     if not enchantID then
         return nil
     end
-    return GC.DB:GetGuild().enchantRules[tostring(enchantID)]
+    local key = tostring(enchantID)
+
+    local specRules = self:GetSpecRuleTable(specKey, false)
+    if specRules and specRules[key] then
+        return specRules[key], true
+    end
+    return GC.DB:GetGuild().enchantRules[key], false
 end
 
 function GC.GearAudit:CanEditEnchantRules()
     return GC.Roster:CanEditGuildSettings()
 end
 
-function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName)
+-- Ohne specKey wird die allgemeine Regel gesetzt, mit specKey die der Spec.
+function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName, specKey)
     enchantID = tonumber(enchantID)
     if not enchantID or enchantID <= 0 then
         return false, "Für diesen Slot gibt es keine Verzauberung zu bewerten."
@@ -254,15 +301,18 @@ function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName)
         return false, "Dein Gildenrang darf den Regelsatz nicht ändern."
     end
 
-    local rules = GC.DB:GetGuild().enchantRules
+    local scoped = specKey ~= nil and GC.SpecByKey[specKey] ~= nil
+    local rules = scoped and self:GetSpecRuleTable(specKey, true) or GC.DB:GetGuild().enchantRules
+    local scopeText = scoped and (" für " .. self:DescribeSpec(specKey)) or " für alle Specs"
+
     local key = tostring(enchantID)
     if not verdict then
         if not rules[key] then
-            return false, "Für diese Verzauberung ist nichts hinterlegt."
+            return false, "Für diese Verzauberung ist" .. scopeText .. " nichts hinterlegt."
         end
         rules[key] = nil
         self:OnEnchantRulesChanged()
-        return true, "Bewertung entfernt."
+        return true, "Bewertung" .. scopeText .. " entfernt."
     end
     if not GC.GearVerdicts[verdict] then
         return false, "Unbekannte Bewertung."
@@ -273,7 +323,7 @@ function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName)
         count = count + 1
     end
     if not rules[key] and count >= 80 then
-        return false, "Der Regelsatz ist voll."
+        return false, "Der Regelsatz" .. scopeText .. " ist voll."
     end
 
     rules[key] = {
@@ -284,12 +334,19 @@ function GC.GearAudit:SetEnchantRule(enchantID, verdict, enchantName)
     }
     self:OnEnchantRulesChanged()
     return true, (GC.Util.Trim(enchantName) ~= "" and enchantName or ("Verzauberung " .. enchantID))
-        .. " gilt jetzt als " .. GC.GearVerdicts[verdict].label .. "."
+        .. " gilt" .. scopeText .. " jetzt als " .. GC.GearVerdicts[verdict].label .. "."
 end
 
 -- Reihum durch die Stufen und wieder zurueck auf "keine Bewertung".
-function GC.GearAudit:CycleEnchantRule(enchantID, enchantName)
-    local current = self:GetGuildEnchantRule(enchantID)
+--
+-- Weitergeschaltet wird immer die Regel der uebergebenen Spec. Eine allgemeine
+-- Regel bleibt dabei unangetastet - sie wird nur ueberstimmt, sobald die Spec
+-- eine eigene bekommt.
+function GC.GearAudit:CycleEnchantRule(enchantID, enchantName, specKey)
+    local scoped = specKey ~= nil and GC.SpecByKey[specKey] ~= nil
+    local rules = scoped and self:GetSpecRuleTable(specKey, false) or GC.DB:GetGuild().enchantRules
+    local current = rules and rules[tostring(tonumber(enchantID) or 0)]
+
     local nextVerdict = self.RATING_ORDER[1]
     if current then
         nextVerdict = nil
@@ -300,7 +357,7 @@ function GC.GearAudit:CycleEnchantRule(enchantID, enchantName)
             end
         end
     end
-    return self:SetEnchantRule(enchantID, nextVerdict, enchantName)
+    return self:SetEnchantRule(enchantID, nextVerdict, enchantName, specKey)
 end
 
 -- Nur neu bewerten, ohne etwas zu senden. Diesen Weg nimmt der Empfang: Wer
@@ -311,8 +368,8 @@ function GC.GearAudit:ReapplyEnchantRules()
         for _, entry in ipairs(audit.slots or {}) do
             if entry.verdict ~= "EMPTY" and (tonumber(entry.enchantID) or 0) > 0 then
                 local slot = { key = entry.key, enchantRequired = entry.required }
-                entry.verdict, entry.reason =
-                    self:EvaluateEnchant(slot, entry.enchantID, audit.role, entry.enchantName)
+                entry.verdict, entry.reason = self:EvaluateEnchant(
+                    slot, entry.enchantID, audit.role, entry.enchantName, audit.specKey)
             end
         end
         audit.unknownEnchants = 0
@@ -340,7 +397,7 @@ function GC.GearAudit:GetRoleForProfile(profile)
     return spec and spec.role or nil
 end
 
-function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName)
+function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKey)
     if (tonumber(enchantID) or 0) <= 0 then
         if slot.enchantRequired then
             return "MISSING", "Keine Verzauberung auf einem Pflichtslot."
@@ -348,13 +405,18 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName)
         return nil
     end
 
-    local guildRule = self:GetGuildEnchantRule(enchantID)
+    local guildRule, fromSpec = self:GetGuildEnchantRule(enchantID, specKey)
     if guildRule and GC.GearVerdicts[guildRule.verdict] then
         local label = enchantName
         if not label or label == "" then
             label = guildRule.name ~= "" and guildRule.name or ("Verzauberung " .. enchantID)
         end
-        return guildRule.verdict, label .. "  •  Gildenregel von " .. (guildRule.by or "?")
+        -- Sichtbar machen, worauf die Bewertung beruht: auf der Spec des
+        -- Geprueften oder auf einer Regel, die fuer alle gilt.
+        local scope = fromSpec
+            and ("Regel für " .. self:DescribeSpec(specKey))
+            or "Regel für alle Specs"
+        return guildRule.verdict, label .. "  •  " .. scope .. ", von " .. (guildRule.by or "?")
     end
 
     local rule = GC.EnchantRuleSet.rules[enchantID]
@@ -406,10 +468,15 @@ end
 function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
     local profile = GC.Roster:GetProfile(playerName)
     local role = self:GetRoleForProfile(profile)
+    -- Die Spec entscheidet ueber die Bewertung und wandert deshalb mit in die
+    -- Pruefung. Ohne bestaetigtes Profil bleibt sie leer, dann greifen nur die
+    -- allgemeinen Regeln.
+    local specKey = self:GetSpecKeyForProfile(profile)
     local audit = {
         name = GC.Util.PlayerShortName(playerName),
         classFile = classFile or (profile and profile.classFile),
         role = role,
+        specKey = specKey,
         inspectedAt = GC.Util.Now(),
         source = source or "INSPECT",
         ruleVersion = GC.EnchantRuleSet.version,
@@ -441,7 +508,8 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
             entry.enchantID = parsed.enchantID
             entry.emptySockets = self:CountEmptySockets(link, parsed.filledGems) or 0
             entry.enchantName = self:ResolveEnchantName(link, parsed.enchantID)
-            local verdict, reason = self:EvaluateEnchant(slot, parsed.enchantID, role, entry.enchantName)
+            local verdict, reason = self:EvaluateEnchant(
+                slot, parsed.enchantID, role, entry.enchantName, specKey)
             entry.verdict = verdict
             entry.reason = reason
 

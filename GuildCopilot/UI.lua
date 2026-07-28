@@ -124,9 +124,12 @@ local function AnchorRowTooltip(frame)
     GameTooltip:SetClampedToScreen(true)
     GameTooltip:ClearAllPoints()
 
-    local right = frame:GetRight() or 0
-    local screenRight = UIParent:GetRight() or 0
-    if screenRight - right < 320 then
+    -- GetRight liefert Koordinaten im Massstab des jeweiligen Rahmens. Ohne
+    -- Umrechnung auf Bildschirmeinheiten vergleicht man zwei verschiedene
+    -- Systeme, und die Entscheidung faellt falsch aus.
+    local right = (frame:GetRight() or 0) * (frame:GetEffectiveScale() or 1)
+    local screenRight = (UIParent:GetRight() or 0) * (UIParent:GetEffectiveScale() or 1)
+    if screenRight - right < 340 * (UIParent:GetEffectiveScale() or 1) then
         GameTooltip:SetPoint("TOPRIGHT", frame, "TOPLEFT", -8, 0)
     else
         GameTooltip:SetPoint("TOPLEFT", frame, "TOPRIGHT", 8, 0)
@@ -3658,7 +3661,11 @@ function GC.UI:BuildGearPage()
             if not entry then
                 return
             end
-            local ok, message = GC.GearAudit:CycleEnchantRule(entry.enchantID, entry.enchantName)
+            -- Bewertet wird fuer die Spec des gerade gewaehlten Spielers.
+            -- Ohne bekannte Spec faellt es auf die allgemeine Regel zurueck.
+            local audit = GC.GearAudit:GetAudit(GC.GearAudit.selectedName)
+            local ok, message = GC.GearAudit:CycleEnchantRule(
+                entry.enchantID, entry.enchantName, audit and audit.specKey)
             page:SetGearStatus(message, ok)
             GC.UI:RefreshGear()
         end)
@@ -3794,8 +3801,9 @@ function GC.UI:RefreshGear()
     if selected then
         local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (selected.inspectedAt or 0)) / 60))
         page.gearHeadline:SetText((selected.source == "SELF" and "Eigene Ausrüstung" or "Inspect")
-            .. "  •  vor " .. ageMinutes .. " Min.  •  Regelsatz v" .. (selected.ruleVersion or 0)
-            )
+            .. "  •  vor " .. ageMinutes .. " Min.  •  "
+            .. (selected.specKey and GC.GearAudit:DescribeSpec(selected.specKey)
+                or "|cffffb840Spec unbekannt|r"))
         page.gearFindings:SetText(self:FormatGearFindings(selected, 3))
     else
         page.gearHeadline:SetText("")
@@ -3805,6 +3813,13 @@ function GC.UI:RefreshGear()
     local slots = selected and selected.slots or {}
     page.gearSlotEntries = slots
     page.gearRatingHint:SetShown(selected ~= nil and GC.GearAudit:CanEditEnchantRules())
+    if selected and GC.GearAudit:CanEditEnchantRules() then
+        page.gearRatingHint:SetText(selected.specKey
+            and ("Klick auf eine Zeile bewertet für |cff4ec9ff"
+                .. GC.GearAudit:DescribeSpec(selected.specKey)
+                .. "|r: Optimal, Solide, Verbesserbar, keine Bewertung.")
+            or "Spec unbekannt – ein Klick bewertet für alle Specs.")
+    end
     for index, row in ipairs(page.gearSlotRows) do
         local entry = slots[index]
         row:SetShown(entry ~= nil)
