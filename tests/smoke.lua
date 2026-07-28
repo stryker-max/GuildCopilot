@@ -89,10 +89,33 @@ DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
     chatMessages[#chatMessages + 1] = tostring(message)
 end }
 
+-- Tooltipzeilen je Item-Link, damit die Verzauberungsaufloesung pruefbar ist.
+tooltipLines = {}
+
 function CreateFrame(_, name)
     local frame = setmetatable({ shown = false, scripts = {} }, Dummy)
     if name then
         _G[name] = frame
+    end
+    if name == "GuildCopilotScanTooltip" then
+        frame.lines = {}
+        function frame:ClearLines()
+            self.lines = {}
+        end
+        function frame:SetHyperlink(link)
+            self.lines = tooltipLines[link] or {}
+            for index = 1, 12 do
+                local text = self.lines[index]
+                _G[name .. "TextLeft" .. index] = text and {
+                    GetText = function()
+                        return text
+                    end,
+                } or nil
+            end
+        end
+        function frame:NumLines()
+            return #self.lines
+        end
     end
     return frame
 end
@@ -861,7 +884,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.7.2", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.8.0", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -1210,6 +1233,49 @@ assert(healerAudit.missingEnchants == 1, "Die fehlende Verzauberung des Geprüft
 assert(addon.GearAudit:GetAudit("Schurke") == nil,
     "Ein nicht erreichbarer Spieler wurde trotzdem gespeichert")
 timerDelayThreshold = math.huge
+
+-- Die Verzauberung wird aus dem Tooltip gelesen, nicht aus einer eigenen
+-- Datenbank: die Zeile, die ohne Verzauberung fehlt, ist der Name.
+local PLAIN_HEAD = "|cffa335ee|Hitem:1000:0:0:0:0:0:0:0:70|h[Kopf]|h|r"
+tooltipLines[ENCHANTED_HEAD] = {
+    "Kopf des Testens",
+    "Rüstung 100",
+    "Außergewöhnliche Gesundheit",
+    "Haltbarkeit 60 / 60",
+}
+tooltipLines[PLAIN_HEAD] = {
+    "Kopf des Testens",
+    "Rüstung 100",
+    "Haltbarkeit 60 / 60",
+}
+assert(addon.GearAudit:ResolveEnchantName(ENCHANTED_HEAD, 2564) == "Außergewöhnliche Gesundheit",
+    "Die Verzauberung wurde nicht aus dem Tooltip gelesen")
+assert(addon.GearAudit:ResolveEnchantName(PLAIN_HEAD, 0) == nil,
+    "Ohne Verzauberung wurde trotzdem ein Name gemeldet")
+assert(addon.GearAudit:ResolveEnchantName("|cff|Hitem:4242:9:0:0:0:0:0:0:70|h[Unbekannt]|h|r", 9) == nil,
+    "Ohne Tooltipdaten wurde ein Name erfunden")
+
+-- Faellt nur die Vergleichsfassung aus, waere jede Zeile "neu". Dann darf
+-- nichts gemeldet werden, sonst gilt der Gegenstandsname als Verzauberung.
+local LONELY = "|cff|Hitem:5555:1234:0:0:0:0:0:0:70|h[Einsam]|h|r"
+tooltipLines[LONELY] = { "Einsamer Helm", "Rüstung 5", "Irgendeine Verzauberung" }
+assert(addon.GearAudit:ResolveEnchantName(LONELY, 1234) == nil,
+    "Ohne Vergleichs-Tooltip wurde der Gegenstandsname als Verzauberung gemeldet")
+
+inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
+addon.GearAudit:AuditSelf()
+local namedHead
+for _, entry in ipairs(addon.GearAudit:GetAudit("Tester").slots) do
+    if entry.key == "HEAD" then
+        namedHead = entry
+    end
+end
+assert(namedHead.enchantName == "Außergewöhnliche Gesundheit",
+    "Der Verzauberungsname fehlt im Audit")
+assert(namedHead.reason == "Verzaubert: Außergewöhnliche Gesundheit",
+    "Der Hinweis zeigt weiter die nackte Verzauberungs-ID")
+assert(namedHead.verdict == "UNKNOWN",
+    "Ein gelesener Name darf noch keine Qualitätsbewertung bedeuten")
 
 -- Funde werden in ganzen Sätzen aufbereitet.
 local ownFindings = addon.GearAudit:GetFindings(addon.GearAudit:GetAudit("Tester"))

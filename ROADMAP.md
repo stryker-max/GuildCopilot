@@ -157,6 +157,7 @@ Umgesetzt: Erfassung über die Inspect-API mit Warteschlange, Reichweiten- und E
 
 Offen und bewusst noch nicht umgesetzt:
 
+- Der Name jeder vorhandenen Verzauberung wird inzwischen aus dem WoW-Tooltip gelesen: das Addon baut den Tooltip einmal mit und einmal mit auf 0 gesetzter Verzauberung auf und nimmt die Zeile, die nur in der ersten Fassung vorkommt. Das ist sprachunabhängig und braucht keine ID-Datenbank. Lässt sich die Vergleichsfassung nicht aufbauen, wird bewusst nichts gemeldet, damit nie der Gegenstandsname als Verzauberung erscheint.
 - Der Regelsatz für **Optimal**, **Solide** und **Verbesserbar** ist leer. Die Enchant-IDs müssen aus einer belegbaren Quelle übernommen werden; bis dahin werden vorhandene Verzauberungen als **Unbekannt** ausgewiesen und nie als schlecht gewertet. Fehlende Verzauberungen und leere Sockel erkennt der Audit auch ohne Regeln exakt.
 - Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets fehlen noch.
 - Regeln nach Spec und Content-Phase sind vorbereitet (Rolle und Slot werden bereits ausgewertet), aber ohne Regeldaten noch nicht wirksam.

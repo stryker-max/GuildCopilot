@@ -74,13 +74,95 @@ function GC.GearAudit:CountEmptySockets(link, filledGems)
     return math.max(0, sockets - (tonumber(filledGems) or 0))
 end
 
+-- === Verzauberung im Klartext ==============================================
+--
+-- Statt eine eigene Enchant-Datenbank zu pflegen, lässt sich WoW die
+-- Verzauberung selbst auflösen: Der Tooltip wird zweimal aufgebaut, einmal mit
+-- und einmal mit auf 0 gesetzter Verzauberung. Die Zeile, die nur in der
+-- ersten Fassung vorkommt, ist die Verzauberung – in der Sprache des Clients
+-- und ohne jede Pflege.
+
+local SCAN_TOOLTIP_NAME = "GuildCopilotScanTooltip"
+local scanTooltip
+
+local function TooltipLines(link)
+    if not link or link == "" or type(CreateFrame) ~= "function" then
+        return nil
+    end
+    if not scanTooltip then
+        local created = pcall(function()
+            scanTooltip = CreateFrame("GameTooltip", SCAN_TOOLTIP_NAME, nil, "GameTooltipTemplate")
+        end)
+        if not created or not scanTooltip then
+            return nil
+        end
+    end
+
+    if scanTooltip.SetOwner and UIParent then
+        pcall(scanTooltip.SetOwner, scanTooltip, UIParent, "ANCHOR_NONE")
+    end
+    if scanTooltip.ClearLines then
+        pcall(scanTooltip.ClearLines, scanTooltip)
+    end
+    if not scanTooltip.SetHyperlink or not pcall(scanTooltip.SetHyperlink, scanTooltip, link) then
+        return nil
+    end
+
+    local ok, count = pcall(scanTooltip.NumLines, scanTooltip)
+    count = ok and tonumber(count) or 0
+    local lines = {}
+    for index = 1, count do
+        local fontString = _G[SCAN_TOOLTIP_NAME .. "TextLeft" .. index]
+        local text = fontString and fontString.GetText and fontString:GetText()
+        if text and text ~= "" then
+            lines[#lines + 1] = text
+        end
+    end
+    return lines
+end
+
+function GC.GearAudit:ResolveEnchantName(link, enchantID)
+    if (tonumber(enchantID) or 0) <= 0 then
+        return nil
+    end
+    local enchanted = TooltipLines(link)
+    if not enchanted or #enchanted == 0 then
+        return nil
+    end
+
+    -- Ohne Vergleichsfassung ist kein Abgleich moeglich. Dann lieber nichts
+    -- melden, als die erste Tooltipzeile - den Gegenstandsnamen - faelschlich
+    -- als Verzauberung auszugeben.
+    local plainLink = tostring(link):gsub("(|Hitem:%d+):[^:|]*", "%1:0", 1)
+    local plain = TooltipLines(plainLink)
+    if not plain or #plain == 0 then
+        return nil
+    end
+
+    local remaining = {}
+    for _, text in ipairs(plain) do
+        remaining[text] = (remaining[text] or 0) + 1
+    end
+    for _, text in ipairs(enchanted) do
+        if (remaining[text] or 0) > 0 then
+            remaining[text] = remaining[text] - 1
+        else
+            local name = GC.Util.Trim(text)
+            if name ~= "" then
+                return name
+            end
+        end
+    end
+    return nil
+end
+
 function GC.GearAudit:GetRoleForProfile(profile)
     local specKey = profile and (profile.raidSpecKey or profile.detectedSpecKey)
     local spec = specKey and GC.SpecByKey[specKey]
     return spec and spec.role or nil
 end
 
-function GC.GearAudit:EvaluateEnchant(slot, enchantID, role)
+function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName)
     if (tonumber(enchantID) or 0) <= 0 then
         if slot.enchantRequired then
             return "MISSING", "Keine Verzauberung auf einem Pflichtslot."
@@ -90,6 +172,9 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role)
 
     local rule = GC.EnchantRuleSet.rules[enchantID]
     if not rule then
+        if enchantName and enchantName ~= "" then
+            return "UNKNOWN", "Verzaubert: " .. enchantName
+        end
         return "UNKNOWN", "Verzauberung " .. enchantID .. " ist in der Regelliste noch nicht bewertet."
     end
 
@@ -118,7 +203,7 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role)
         end
     end
 
-    local reason = rule.name or ("Verzauberung " .. enchantID)
+    local reason = rule.name or enchantName or ("Verzauberung " .. enchantID)
     if rule.source and rule.source ~= "" then
         reason = reason .. "  •  Quelle: " .. rule.source
     end
@@ -162,7 +247,8 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
             entry.itemID = parsed.itemID
             entry.enchantID = parsed.enchantID
             entry.emptySockets = self:CountEmptySockets(link, parsed.filledGems) or 0
-            local verdict, reason = self:EvaluateEnchant(slot, parsed.enchantID, role)
+            entry.enchantName = self:ResolveEnchantName(link, parsed.enchantID)
+            local verdict, reason = self:EvaluateEnchant(slot, parsed.enchantID, role, entry.enchantName)
             entry.verdict = verdict
             entry.reason = reason
 

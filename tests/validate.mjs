@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.7.2",
+  "## Version: 0.8.0",
 ];
 
 for (const entry of requiredMetadata) {
@@ -158,6 +158,8 @@ const requiredImplementations = [
   ["aufbereitete Ausrüstungsfunde", /function GC\.GearAudit:GetFindings/],
   ["Gesamtübersicht der Ausrüstungsprüfung", /function GC\.GearAudit:GetOverview/],
   ["eigene Ausrüstung im Profil", /profileGearFindings/],
+  ["Verzauberungsname aus dem Tooltip", /function GC\.GearAudit:ResolveEnchantName/],
+  ["Tooltip-Vergleich ohne Verzauberung", /local plainLink = tostring\(link\):gsub/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
