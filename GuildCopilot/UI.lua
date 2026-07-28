@@ -2915,7 +2915,7 @@ function GC.UI:BuildStatisticsPage()
     local detailCard = CreateCard(page, "Teilnehmer")
     detailCard:SetSize(526, 358)
     detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
-    page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 380, height = 18 })
+    page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 486, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
 
     local detailHeaders = {
@@ -3033,6 +3033,12 @@ function GC.UI:RefreshStatistics()
     end
 
     local participants = selected and selected.participants or {}
+    if selected and #participants == 0 then
+        page.participantEmpty:SetText("Für diese Sitzung wurden keine Teilnehmer erfasst.")
+        page.participantEmpty:SetShown(true)
+    elseif selected then
+        page.participantEmpty:SetText("Wähle links eine Sitzung aus.")
+    end
     for index, row in ipairs(page.participantRows) do
         local participant = participants[index]
         row:SetShown(participant ~= nil)

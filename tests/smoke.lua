@@ -280,11 +280,16 @@ function IsInRaid()
 end
 
 function IsInGroup()
-    return #raidRoster > 0
+    return #raidRoster > 0 or #partyRoster > 0
 end
 
+partyRoster = {}
+
 function GetNumGroupMembers()
-    return #raidRoster
+    if #raidRoster > 0 then
+        return #raidRoster
+    end
+    return #partyRoster
 end
 
 -- name, rank, subgroup, level, class, fileName
@@ -332,7 +337,7 @@ function GetItemStats(link)
 end
 
 function UnitExists(unit)
-    return (inspectGear[unit] ~= nil) or unit == "player"
+    return (inspectGear[unit] ~= nil) or (unitNames[unit] ~= nil) or unit == "player"
 end
 
 function UnitIsUnit(left, right)
@@ -856,7 +861,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.7.0", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.7.1", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -900,6 +905,46 @@ currentTime = currentTime + 60
 local sentBeforeReply = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
 assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
+
+-- Eine Sitzung ohne Gruppe muss den Spieler selbst erfassen.
+raidRoster = {}
+partyRoster = {}
+addon.DB:GetGuild().raidSessions = {}
+addon.DB:GetGuild().memberCare.accessRanksConfigured = true
+addon.DB:GetGuild().memberCare.accessRanks = { ["1"] = true, ["5"] = true }
+assert(addon.RaidMonitor:BeginSession() == true, "Solo-Sitzung ließ sich nicht starten")
+assert(addon.RaidMonitor.session.participants.tester ~= nil,
+    "Der Spieler selbst fehlt in einer Sitzung ohne Gruppe")
+currentTime = currentTime + 30
+local soloEnded, soloMessage = addon.RaidMonitor:EndSession()
+assert(soloEnded == true, "Solo-Sitzung ließ sich nicht beenden")
+assert(soloMessage:find("1 Teilnehmer", 1, true),
+    "Eine Sitzung ohne Gruppe meldet immer noch 0 Teilnehmer")
+local soloSummary = addon.RaidMonitor:GetSummaries()[1]
+assert(#soloSummary.participants == 1, "Die Solo-Auswertung enthält keinen Teilnehmer")
+assert(soloSummary.participants[1].seconds >= 30, "Die eigene Anwesenheitszeit fehlt")
+
+-- In einer 5er-Gruppe gibt es kein Raidroster; die Teilnehmer kommen aus den
+-- party-Einheiten.
+partyRoster = { "party1", "party2" }
+unitNames.party1 = "Grupppler"
+unitNames.party2 = "Zweiter"
+unitClasses.party1 = "MAGE"
+addon.DB:GetGuild().raidSessions = {}
+assert(addon.RaidMonitor:BeginSession() == true, "Gruppensitzung ließ sich nicht starten")
+local partySession = addon.RaidMonitor.session
+assert(partySession.participants.tester ~= nil, "Der Spieler fehlt in der Gruppensitzung")
+assert(partySession.participants.grupppler ~= nil, "Ein Gruppenmitglied wurde nicht erfasst")
+assert(partySession.participants.grupppler.classFile == "MAGE",
+    "Die Klasse des Gruppenmitglieds fehlt")
+currentTime = currentTime + 10
+addon.RaidMonitor:EndSession()
+assert(#addon.RaidMonitor:GetSummaries()[1].participants == 2,
+    "Die Gruppensitzung hat nicht alle Teilnehmer")
+partyRoster = {}
+unitNames.party1 = nil
+unitNames.party2 = nil
+addon.DB:GetGuild().raidSessions = {}
 
 -- === Warcraft-Logs-Nachanalyse =============================================
 addon.DB:GetGuild().raidSessions = {}

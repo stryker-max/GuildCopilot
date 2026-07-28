@@ -29,8 +29,12 @@ local function NewCounters()
 end
 
 function GC.RaidMonitor:IsInRaidGroup()
-    if IsInRaid then
-        return IsInRaid() == true
+    return IsInRaid and IsInRaid() == true
+end
+
+function GC.RaidMonitor:IsInAnyGroup()
+    if self:IsInRaidGroup() then
+        return true
     end
     return IsInGroup and IsInGroup() == true
 end
@@ -107,15 +111,33 @@ function GC.RaidMonitor:SyncParticipants()
 
     local now = GC.Util.Now()
     local present = {}
+
+    local function MarkPresent(name, classFile)
+        local participant = name and self:GetParticipant(session, name, classFile)
+        if participant then
+            present[participant] = true
+            participant.presentSince = participant.presentSince or now
+        end
+    end
+
+    -- Wer die Sitzung mitschreibt, ist immer dabei. Ohne diese Zeile bliebe
+    -- eine Sitzung ausserhalb eines Raids ganz ohne Teilnehmer.
+    local _, ownClassFile = UnitClass("player")
+    MarkPresent(GC:GetPlayerFullName(), ownClassFile)
+
     if self:IsInRaidGroup() and GetNumGroupMembers and GetRaidRosterInfo then
         for index = 1, (GetNumGroupMembers() or 0) do
             local name, _, _, _, _, classFile = GetRaidRosterInfo(index)
-            if name then
-                local participant = self:GetParticipant(session, name, classFile)
-                if participant then
-                    present[participant] = true
-                    participant.presentSince = participant.presentSince or now
-                end
+            MarkPresent(name, classFile)
+        end
+    elseif self:IsInAnyGroup() and GetNumGroupMembers then
+        -- In einer Gruppe gibt es kein Raidroster; dort zaehlen die
+        -- party-Einheiten. GetNumGroupMembers zaehlt den Spieler mit.
+        for index = 1, math.max(0, (GetNumGroupMembers() or 0) - 1) do
+            local unit = "party" .. index
+            if UnitExists and UnitExists(unit) then
+                local _, classFile = UnitClass(unit)
+                MarkPresent(UnitName(unit), classFile)
             end
         end
     end
