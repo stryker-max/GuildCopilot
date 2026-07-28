@@ -3316,29 +3316,50 @@ function GC.UI:BuildStatisticsPage()
     page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 486, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
 
-    -- Sieben Verbrauchskategorien passen nicht als sieben Spalten in 490
-    -- Pixel. Zusammengefasst wird deshalb, was im Raid ohnehin zusammengehoert:
-    -- Traenke und Runen stellen im Kampf wieder her, Flaeschchen und Elixiere
-    -- besetzen denselben Platz. Oele und Steine stehen im Tooltip der Zeile,
-    -- dort steht auch die vollstaendige Aufschluesselung.
+    -- Elixiere haben eine eigene Spalte. Sie mit Flaeschchen zusammenzufassen
+    -- war ein Fehler: In einem Raid, in dem niemand Flaeschchen nimmt, stand
+    -- jede Elixierzahl unter der Ueberschrift "Flasche" - und war damit
+    -- praktisch unauffindbar. Nur Runen laufen weiter bei den Traenken mit,
+    -- Oele und Steine stehen im Tooltip.
     local detailHeaders = {
-        { text = "SPIELER", x = 18, width = 90 },
-        { text = "DABEI", x = 111, width = 46 },
-        { text = "TODE", x = 160, width = 36 },
-        { text = "INT", x = 199, width = 34 },
-        { text = "BANN", x = 236, width = 42 },
-        { text = "TRÄNKE", x = 281, width = 54 },
-        { text = "FLASCHE", x = 338, width = 56 },
-        { text = "ESSEN", x = 397, width = 44 },
-        { text = "TROMMEL", x = 444, width = 56 },
+        { text = "SPIELER",  key = "name",       x = 18,  width = 80 },
+        { text = "DABEI",    key = "presence",   x = 101, width = 44 },
+        { text = "TODE",     key = "deaths",     x = 148, width = 32 },
+        { text = "INT",      key = "interrupts", x = 183, width = 32 },
+        { text = "BANN",     key = "dispels",    x = 218, width = 38 },
+        { text = "TRÄNKE",   key = "potions",    x = 259, width = 46 },
+        { text = "FLÄSCH",   key = "flasks",     x = 308, width = 44 },
+        { text = "ELIXIER",  key = "elixirs",    x = 355, width = 48 },
+        { text = "ESSEN",    key = "food",       x = 406, width = 40 },
+        { text = "TROMMEL",  key = "drums",      x = 449, width = 48 },
     }
+
+    -- Die Kopfzeile sortiert. Erster Klick absteigend, zweiter aufsteigend -
+    -- "wer hat keine Flaeschchen" ist damit ein Klick statt einer Suche.
+    page.sortHeaders = {}
     for _, headerDefinition in ipairs(detailHeaders) do
-        local headerLabel = CreateLabel(detailCard, headerDefinition.text, {
-            muted = true,
-            font = "GameFontNormalSmall",
-            width = headerDefinition.width,
-        })
-        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+        local sortKey = headerDefinition.key
+        local header = CreateButton(detailCard, headerDefinition.text,
+            headerDefinition.width, 18, function()
+                if page.sortKey == sortKey then
+                    page.sortDescending = not page.sortDescending
+                else
+                    page.sortKey = sortKey
+                    -- Namen von A nach Z, Zahlen von viel nach wenig.
+                    page.sortDescending = sortKey ~= "name"
+                end
+                GC.UI:RefreshStatistics()
+            end)
+        header:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+        header.background:Hide()
+        header.border:Hide()
+        header.label:SetFontObject("GameFontNormalSmall")
+        header.label:ClearAllPoints()
+        header.label:SetPoint("LEFT", header, "LEFT", 0, 0)
+        header.label:SetJustifyH("LEFT")
+        header.baseText = headerDefinition.text
+        header.sortKey = sortKey
+        page.sortHeaders[#page.sortHeaders + 1] = header
     end
 
     local scroll = CreateModernScrollFrame(detailCard)
@@ -3355,15 +3376,16 @@ function GC.UI:BuildStatisticsPage()
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         local columns = {
-            { key = "name", x = 5, width = 90 },
-            { key = "presence", x = 98, width = 46 },
-            { key = "deaths", x = 147, width = 36 },
-            { key = "interrupts", x = 186, width = 34 },
-            { key = "dispels", x = 223, width = 42 },
-            { key = "potions", x = 268, width = 54 },
-            { key = "flasks", x = 325, width = 56 },
-            { key = "food", x = 384, width = 44 },
-            { key = "drums", x = 431, width = 56 },
+            { key = "name", x = 5, width = 80 },
+            { key = "presence", x = 88, width = 44 },
+            { key = "deaths", x = 135, width = 32 },
+            { key = "interrupts", x = 170, width = 32 },
+            { key = "dispels", x = 205, width = 38 },
+            { key = "potions", x = 246, width = 46 },
+            { key = "flasks", x = 295, width = 44 },
+            { key = "elixirs", x = 342, width = 48 },
+            { key = "food", x = 393, width = 40 },
+            { key = "drums", x = 436, width = 48 },
         }
         for _, column in ipairs(columns) do
             row[column.key] = CreateLabel(row, "", { width = column.width, height = 25 })
@@ -3474,10 +3496,57 @@ function GC.UI:RefreshStatistics()
         page.sessionHeadline:SetText("")
     end
 
-    local participants = selected and selected.participants or {}
     local sessionSeconds = selected
         and math.max(0, (selected.endedAt or 0) - (selected.startedAt or 0))
         or 0
+
+    -- Sortiert wird eine Kopie: Die gespeicherte Reihenfolge der Sitzung
+    -- bleibt unangetastet, sonst wuerde ein Klick auf die Kopfzeile die
+    -- Auswertung dauerhaft umbauen.
+    local participants = {}
+    for index, participant in ipairs(selected and selected.participants or {}) do
+        participants[index] = participant
+    end
+
+    local SORT_VALUES = {
+        name = function(p) return tostring(p.name or ""):lower() end,
+        presence = function(p) return p.seconds or 0 end,
+        deaths = function(p) return p.deaths or 0 end,
+        interrupts = function(p) return p.interrupts or 0 end,
+        dispels = function(p) return p.dispels or 0 end,
+        potions = function(p) return ((p.consumables or {}).POTION or 0) + ((p.consumables or {}).RUNE or 0) end,
+        flasks = function(p) return (p.consumables or {}).FLASK or 0 end,
+        elixirs = function(p) return (p.consumables or {}).ELIXIR or 0 end,
+        food = function(p) return (p.consumables or {}).FOOD or 0 end,
+        drums = function(p) return (p.consumables or {}).DRUM or 0 end,
+    }
+
+    local valueOf = page.sortKey and SORT_VALUES[page.sortKey]
+    if valueOf then
+        local descending = page.sortDescending
+        table.sort(participants, function(left, right)
+            local leftValue, rightValue = valueOf(left), valueOf(right)
+            if leftValue == rightValue then
+                -- Gleichstand nach Namen, damit die Reihenfolge stabil bleibt
+                -- und nicht bei jedem Neuzeichnen springt.
+                return tostring(left.name or "") < tostring(right.name or "")
+            end
+            if descending then
+                return leftValue > rightValue
+            end
+            return leftValue < rightValue
+        end)
+    end
+
+    for _, header in ipairs(page.sortHeaders or {}) do
+        if page.sortKey == header.sortKey then
+            header:SetText(header.baseText .. (page.sortDescending and " v" or " ^"))
+            SetTextColor(header.label, THEME.accent)
+        else
+            header:SetText(header.baseText)
+            SetTextColor(header.label, THEME.muted)
+        end
+    end
     if selected and #participants == 0 then
         page.participantEmpty:SetText("Für diese Sitzung wurden keine Teilnehmer erfasst.")
         page.participantEmpty:SetShown(true)
@@ -3513,10 +3582,11 @@ function GC.UI:RefreshStatistics()
             row.deaths:SetText(participant.deaths or 0)
             row.interrupts:SetText(participant.interrupts or 0)
             row.dispels:SetText(participant.dispels or 0)
-            -- Runen und Elixiere wurden erfasst, aber nirgends gezeigt. Sie
-            -- laufen jetzt in der jeweils passenden Spalte mit.
+            -- Runen laufen bei den Traenken mit, Elixiere haben eine eigene
+            -- Spalte. Oele und Steine stehen im Tooltip.
             row.potions:SetText((consumables.POTION or 0) + (consumables.RUNE or 0))
-            row.flasks:SetText((consumables.FLASK or 0) + (consumables.ELIXIR or 0))
+            row.flasks:SetText(consumables.FLASK or 0)
+            row.elixirs:SetText(consumables.ELIXIR or 0)
             row.food:SetText(consumables.FOOD or 0)
             row.drums:SetText(consumables.DRUM or 0)
         else

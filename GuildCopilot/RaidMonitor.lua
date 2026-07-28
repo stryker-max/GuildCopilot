@@ -374,9 +374,30 @@ function GC.RaidMonitor:CloseSegment(endedAt)
     GC:FireCallback("RAID_SESSION_UPDATED")
 end
 
-local function CountConsumable(monitor, session, playerName, spellID)
+-- Essen laesst sich nicht ueber Zauber-IDs erfassen: Jedes Gericht hat eine
+-- eigene, und es gibt Dutzende. Gemeinsam ist ihnen der Name der Aura, die sie
+-- setzen. Ueber den wird erkannt, was keine Liste je vollstaendig abbilden
+-- wuerde.
+local WELL_FED_AURAS = {
+    ["sattgegessen"] = true,
+    ["well fed"] = true,
+}
+
+local function ResolveConsumable(spellID, spellName)
     local consumable = GC.Consumables[tonumber(spellID) or 0]
-    if not consumable then
+    if consumable then
+        return consumable.category
+    end
+    local normalized = tostring(spellName or ""):lower()
+    if WELL_FED_AURAS[normalized] then
+        return "FOOD"
+    end
+    return nil
+end
+
+local function CountConsumable(monitor, session, playerName, spellID, spellName)
+    local categoryKey = ResolveConsumable(spellID, spellName)
+    if not categoryKey then
         return
     end
     local participant = monitor:FindParticipant(session, playerName)
@@ -384,15 +405,19 @@ local function CountConsumable(monitor, session, playerName, spellID)
         return
     end
 
-    local category = GC.ConsumableCategoryByKey[consumable.category]
+    local category = GC.ConsumableCategoryByKey[categoryKey]
     if not category then
         return
     end
     if not category.repeatable then
-        if participant.seenConsumables[spellID] then
+        -- Ohne ID - also bei ueber den Namen erkanntem Essen - haelt der
+        -- Kategorieschluessel den Platz, sonst zaehlte jede Aktualisierung
+        -- der Aura erneut.
+        local seenKey = tonumber(spellID) or categoryKey
+        if participant.seenConsumables[seenKey] then
             return
         end
-        participant.seenConsumables[spellID] = true
+        participant.seenConsumables[seenKey] = true
     end
     participant.consumables[category.key] = (participant.consumables[category.key] or 0) + 1
 end
@@ -411,7 +436,7 @@ local TRACKED_SUBEVENTS = {
     SPELL_AURA_REFRESH = true,
 }
 
-function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, destGUID, destName, spellID)
+function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, destGUID, destName, spellID, spellName)
     local session = self.session
     if not session or not TRACKED_SUBEVENTS[subevent] then
         return
@@ -457,9 +482,9 @@ function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, d
     -- Tränke, Runen und Trommeln werden gewirkt, dauerhafte Buffs erscheinen
     -- als Aura auf dem Ziel.
     if subevent == "SPELL_CAST_SUCCESS" then
-        CountConsumable(self, session, sourceName, spellID)
+        CountConsumable(self, session, sourceName, spellID, spellName)
     elseif subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" then
-        CountConsumable(self, session, destName, spellID)
+        CountConsumable(self, session, destName, spellID, spellName)
     end
 end
 
@@ -467,9 +492,11 @@ function GC.RaidMonitor:OnCombatLogEvent()
     if not self.session or not CombatLogGetCurrentEventInfo then
         return
     end
-    local _, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID =
+    -- Der Zaubername steht an dreizehnter Stelle. Er wurde bisher nicht
+    -- ausgelesen, weshalb Essen nie erkannt werden konnte.
+    local _, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID, spellName =
         CombatLogGetCurrentEventInfo()
-    self:HandleCombatLogEvent(subevent, sourceGUID, sourceName, destGUID, destName, spellID)
+    self:HandleCombatLogEvent(subevent, sourceGUID, sourceName, destGUID, destName, spellID, spellName)
 end
 
 function GC.RaidMonitor:EncodeSummary(summary)
