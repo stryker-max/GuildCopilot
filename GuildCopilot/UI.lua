@@ -3144,7 +3144,9 @@ end
 function GC.UI:BuildStatisticsPage()
     local page = self.pages.STATISTICS
     CreatePageTitle(page, "Raidauswertung",
-        "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge. Es werden nur Zusammenfassungen gespeichert, keine Rohdaten.")
+        "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge."
+        .. " Es werden nur Zusammenfassungen gespeichert, keine Rohdaten."
+        .. " INT sind Unterbrechungen, BANN entfernte Effekte; die Maus über einer Zeile zeigt alles im Detail.")
 
     local controlCard = CreateCard(page)
     controlCard:SetSize(776, 96)
@@ -3214,16 +3216,21 @@ function GC.UI:BuildStatisticsPage()
     page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 486, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
 
+    -- Sieben Verbrauchskategorien passen nicht als sieben Spalten in 490
+    -- Pixel. Zusammengefasst wird deshalb, was im Raid ohnehin zusammengehoert:
+    -- Traenke und Runen stellen im Kampf wieder her, Flaeschchen und Elixiere
+    -- besetzen denselben Platz. Oele und Steine stehen im Tooltip der Zeile,
+    -- dort steht auch die vollstaendige Aufschluesselung.
     local detailHeaders = {
-        { text = "SPIELER", x = 18, width = 104 },
-        { text = "DABEI", x = 126, width = 52 },
-        { text = "TODE", x = 182, width = 42 },
-        { text = "INT", x = 226, width = 36 },
-        { text = "DISP", x = 264, width = 40 },
-        { text = "TRÄNKE", x = 306, width = 58 },
-        { text = "FLASK", x = 366, width = 48 },
-        { text = "ESSEN", x = 416, width = 50 },
-        { text = "TROMM", x = 468, width = 54 },
+        { text = "SPIELER", x = 18, width = 90 },
+        { text = "DABEI", x = 111, width = 46 },
+        { text = "TODE", x = 160, width = 36 },
+        { text = "INT", x = 199, width = 34 },
+        { text = "BANN", x = 236, width = 42 },
+        { text = "TRÄNKE", x = 281, width = 54 },
+        { text = "FLASCHE", x = 338, width = 56 },
+        { text = "ESSEN", x = 397, width = 44 },
+        { text = "TROMMEL", x = 444, width = 56 },
     }
     for _, headerDefinition in ipairs(detailHeaders) do
         local headerLabel = CreateLabel(detailCard, headerDefinition.text, {
@@ -3248,20 +3255,54 @@ function GC.UI:BuildStatisticsPage()
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         local columns = {
-            { key = "name", x = 5, width = 104 },
-            { key = "presence", x = 113, width = 52 },
-            { key = "deaths", x = 169, width = 42 },
-            { key = "interrupts", x = 213, width = 36 },
-            { key = "dispels", x = 251, width = 40 },
-            { key = "potions", x = 293, width = 58 },
-            { key = "flasks", x = 353, width = 48 },
-            { key = "food", x = 403, width = 50 },
-            { key = "drums", x = 455, width = 54 },
+            { key = "name", x = 5, width = 90 },
+            { key = "presence", x = 98, width = 46 },
+            { key = "deaths", x = 147, width = 36 },
+            { key = "interrupts", x = 186, width = 34 },
+            { key = "dispels", x = 223, width = 42 },
+            { key = "potions", x = 268, width = 54 },
+            { key = "flasks", x = 325, width = 56 },
+            { key = "food", x = 384, width = 44 },
+            { key = "drums", x = 431, width = 56 },
         }
         for _, column in ipairs(columns) do
-            row[column.key] = CreateLabel(row, "", { width = column.width })
+            row[column.key] = CreateLabel(row, "", { width = column.width, height = 25, singleLine = true })
             row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
         end
+
+        -- Die Spaltenkoepfe muessen kurz sein. Was sie bedeuten und was in den
+        -- zusammengefassten Spalten steckt, steht hier vollstaendig.
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
+            local participant = self.participant
+            if not participant or not GameTooltip then
+                return
+            end
+            local consumables = participant.consumables or {}
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(participant.name or "")
+            GameTooltip:AddLine("Dabei: " .. FormatDuration(participant.seconds), 1, 1, 1)
+            GameTooltip:AddLine("Tode: " .. (participant.deaths or 0)
+                .. "   Wiederbelebungen: " .. (participant.resurrects or 0), 1, 1, 1)
+            GameTooltip:AddLine("Unterbrechungen: " .. (participant.interrupts or 0)
+                .. "   Bannen: " .. (participant.dispels or 0), 1, 1, 1)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Verbrauchsgegenstände", 0.31, 0.79, 1)
+            for _, category in ipairs(GC.ConsumableCategories) do
+                local count = consumables[category.key] or 0
+                local red, green, blue = 0.57, 0.64, 0.72
+                if count > 0 then
+                    red, green, blue = 1, 1, 1
+                end
+                GameTooltip:AddDoubleLine(category.label, tostring(count), red, green, blue, red, green, blue)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            if GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
         page.participantRows[index] = row
     end
     page.participantEmpty = CreateLabel(detailCard, "Wähle links eine Sitzung aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
@@ -3340,16 +3381,21 @@ function GC.UI:RefreshStatistics()
         row:SetShown(participant ~= nil)
         if participant then
             local consumables = participant.consumables or {}
+            row.participant = participant
             row.name:SetText(participant.name)
             row.name:SetTextColor(ClassColor(participant.classFile))
             row.presence:SetText(FormatDuration(participant.seconds))
             row.deaths:SetText(participant.deaths or 0)
             row.interrupts:SetText(participant.interrupts or 0)
             row.dispels:SetText(participant.dispels or 0)
-            row.potions:SetText(consumables.POTION or 0)
-            row.flasks:SetText(consumables.FLASK or 0)
+            -- Runen und Elixiere wurden erfasst, aber nirgends gezeigt. Sie
+            -- laufen jetzt in der jeweils passenden Spalte mit.
+            row.potions:SetText((consumables.POTION or 0) + (consumables.RUNE or 0))
+            row.flasks:SetText((consumables.FLASK or 0) + (consumables.ELIXIR or 0))
             row.food:SetText(consumables.FOOD or 0)
             row.drums:SetText(consumables.DRUM or 0)
+        else
+            row.participant = nil
         end
     end
 end
