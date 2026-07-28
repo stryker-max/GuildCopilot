@@ -3246,7 +3246,8 @@ function GC.UI:BuildStatisticsPage()
     CreatePageTitle(page, "Raidauswertung",
         "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge."
         .. " Es werden nur Zusammenfassungen gespeichert, keine Rohdaten."
-        .. " INT sind Unterbrechungen, BANN entfernte Effekte; die Maus über einer Zeile zeigt alles im Detail.")
+        .. " TIME ist die Anwesenheit, INT sind Unterbrechungen, DISP entfernte Effekte."
+        .. " Klick auf einen Spaltenkopf sortiert; die Maus über einer Zeile zeigt alles im Detail.")
 
     local controlCard = CreateCard(page)
     controlCard:SetSize(776, 96)
@@ -3321,17 +3322,21 @@ function GC.UI:BuildStatisticsPage()
     -- jede Elixierzahl unter der Ueberschrift "Flasche" - und war damit
     -- praktisch unauffindbar. Nur Runen laufen weiter bei den Traenken mit,
     -- Oele und Steine stehen im Tooltip.
+    -- Englische Koepfe: kuerzer als die deutschen und in Raid-Werkzeugen
+    -- gebraeuchlich. Der gewonnene Platz geht an die Namensspalte, die vorher
+    -- laengere Namen abschnitt. Was die Kuerzel bedeuten, steht im Seitentext
+    -- und ausgeschrieben im Tooltip der Zeile.
     local detailHeaders = {
-        { text = "SPIELER",  key = "name",       x = 18,  width = 80 },
-        { text = "DABEI",    key = "presence",   x = 101, width = 44 },
-        { text = "TODE",     key = "deaths",     x = 148, width = 32 },
-        { text = "INT",      key = "interrupts", x = 183, width = 32 },
-        { text = "BANN",     key = "dispels",    x = 218, width = 38 },
-        { text = "TRÄNKE",   key = "potions",    x = 259, width = 46 },
-        { text = "FLÄSCH",   key = "flasks",     x = 308, width = 44 },
-        { text = "ELIXIER",  key = "elixirs",    x = 355, width = 48 },
-        { text = "ESSEN",    key = "food",       x = 406, width = 40 },
-        { text = "TROMMEL",  key = "drums",      x = 449, width = 48 },
+        { text = "NAME",   key = "name",       x = 18,  width = 96 },
+        { text = "TIME",   key = "presence",   x = 117, width = 44 },
+        { text = "DEATH",  key = "deaths",     x = 164, width = 42 },
+        { text = "INT",    key = "interrupts", x = 209, width = 32 },
+        { text = "DISP",   key = "dispels",    x = 244, width = 38 },
+        { text = "POT",    key = "potions",    x = 285, width = 36 },
+        { text = "FLASK",  key = "flasks",     x = 324, width = 44 },
+        { text = "ELIXIR", key = "elixirs",    x = 371, width = 48 },
+        { text = "FOOD",   key = "food",       x = 422, width = 40 },
+        { text = "DRUM",   key = "drums",      x = 465, width = 38 },
     }
 
     -- Die Kopfzeile sortiert. Erster Klick absteigend, zweiter aufsteigend -
@@ -3376,16 +3381,16 @@ function GC.UI:BuildStatisticsPage()
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         local columns = {
-            { key = "name", x = 5, width = 80 },
-            { key = "presence", x = 88, width = 44 },
-            { key = "deaths", x = 135, width = 32 },
-            { key = "interrupts", x = 170, width = 32 },
-            { key = "dispels", x = 205, width = 38 },
-            { key = "potions", x = 246, width = 46 },
-            { key = "flasks", x = 295, width = 44 },
-            { key = "elixirs", x = 342, width = 48 },
-            { key = "food", x = 393, width = 40 },
-            { key = "drums", x = 436, width = 48 },
+            { key = "name", x = 5, width = 96 },
+            { key = "presence", x = 104, width = 44 },
+            { key = "deaths", x = 151, width = 42 },
+            { key = "interrupts", x = 196, width = 32 },
+            { key = "dispels", x = 231, width = 38 },
+            { key = "potions", x = 272, width = 36 },
+            { key = "flasks", x = 311, width = 44 },
+            { key = "elixirs", x = 358, width = 48 },
+            { key = "food", x = 409, width = 40 },
+            { key = "drums", x = 452, width = 38 },
         }
         for _, column in ipairs(columns) do
             row[column.key] = CreateLabel(row, "", { width = column.width, height = 25 })
