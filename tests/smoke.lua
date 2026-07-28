@@ -1091,6 +1091,7 @@ assert(addon.GearAudit:CountEmptySockets(SOCKETED_CHEST, 1) == 2,
 inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
 local selfAudited, selfMessage = addon.GearAudit:AuditSelf()
 assert(selfAudited == true, "Die eigene Ausrüstung wurde nicht geprüft")
+assert(addon.GearAudit.status ~= "", "Nach der Eigenprüfung steht der Status weiter auf leer")
 local ownAudit = addon.GearAudit:GetAudit("Tester")
 assert(ownAudit ~= nil, "Die eigene Prüfung wurde nicht gespeichert")
 assert(ownAudit.source == "SELF", "Die eigene Prüfung ist nicht als solche gekennzeichnet")

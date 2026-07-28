@@ -231,6 +231,7 @@ function GC.GearAudit:AuditSelf()
     end, "SELF")
     self:StoreAudit(audit)
     self.selectedName = audit.name
+    self:SetStatus("Eigene Ausrüstung geprüft.")
     return true, "Eigene Ausrüstung geprüft: " .. self:DescribeFindings(audit)
 end
 

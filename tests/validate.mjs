@@ -177,6 +177,28 @@ if (settingsPosition < statisticsPosition) {
   throw new Error("Einstellungen stehen nicht als letzter Navigationspunkt.");
 }
 
+// Beide Detailkarten heissen intern "detailCard". Ein Suchen-und-Ersetzen ohne
+// Bereichsgrenze trifft deshalb leicht die falsche Seite. Diese Pruefung haelt
+// die Ausruestungsseite auf ihrem groesseren Kopfabstand, weil dort ueber der
+// Tabelle noch der Funde-Block steht.
+const statisticsPage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildStatisticsPage"),
+  uiSource.indexOf("function GC.UI:RefreshStatistics")
+);
+const gearPage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildGearPage"),
+  uiSource.indexOf("function GC.UI:RefreshGear")
+);
+if (!statisticsPage.includes("headerDefinition.x, -66)")) {
+  throw new Error("Die Raidauswertung hat nicht mehr ihren eigenen Tabellenkopf-Abstand.");
+}
+if (!gearPage.includes("headerDefinition.x, -122)")) {
+  throw new Error("Auf der Ausrüstungsseite überlappt der Funde-Block den Tabellenkopf.");
+}
+if (!gearPage.includes("page.gearFindings:SetPoint")) {
+  throw new Error("Der Funde-Block fehlt auf der Ausrüstungsseite.");
+}
+
 if (uiSource.includes("☆") || uiSource.includes("★")) {
   throw new Error("Nicht unterstützte Unicode-Sterne werden noch als Favoritensymbole verwendet.");
 }

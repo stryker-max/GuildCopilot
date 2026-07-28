@@ -2935,11 +2935,11 @@ function GC.UI:BuildStatisticsPage()
             font = "GameFontNormalSmall",
             width = headerDefinition.width,
         })
-        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -122)
+        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
     end
 
     local scroll = CreateModernScrollFrame(detailCard)
-    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -142)
+    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
     scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(492)
@@ -3161,11 +3161,11 @@ function GC.UI:BuildGearPage()
             font = "GameFontNormalSmall",
             width = headerDefinition.width,
         })
-        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -66)
+        headerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", headerDefinition.x, -122)
     end
 
     local scroll = CreateModernScrollFrame(detailCard)
-    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
+    scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -142)
     scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(492)
@@ -3205,7 +3205,7 @@ function GC.UI:RefreshGear()
     local overview = GC.GearAudit:GetOverview()
     local statusText = GC.GearAudit.status
     if statusText == "" then
-        statusText = "Noch keine Prüfung gelaufen."
+        statusText = overview.players > 0 and "Bereit." or "Noch keine Prüfung gelaufen."
     end
     if overview.players > 0 then
         statusText = statusText .. "  •  " .. overview.players .. " geprüft"
@@ -3246,7 +3246,7 @@ function GC.UI:RefreshGear()
         local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (selected.inspectedAt or 0)) / 60))
         page.gearHeadline:SetText((selected.source == "SELF" and "Eigene Ausrüstung" or "Inspect")
             .. "  •  vor " .. ageMinutes .. " Min.  •  Regelsatz v" .. (selected.ruleVersion or 0)
-            .. "  •  " .. GC.GearAudit:DescribeFindings(selected))
+            )
         page.gearFindings:SetText(self:FormatGearFindings(selected, 3))
     else
         page.gearHeadline:SetText("")
