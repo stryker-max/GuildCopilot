@@ -1665,12 +1665,30 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(suggestionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 27)
         row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -81 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 116 })
+        row.name = CreateLabel(row, "", { width = 116, height = 27, singleLine = true })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.status = CreateLabel(row, "", { width = 76 })
+        row.status = CreateLabel(row, "", { width = 76, height = 27, singleLine = true })
         row.status:SetPoint("LEFT", row, "LEFT", 129, 0)
-        row.reason = CreateLabel(row, "", { muted = true, width = 196 })
+        -- Der Grund umbrach auf zwei Zeilen und lief damit ueber die 27 Pixel
+        -- Zeilenhoehe hinaus in die Nachbarzeilen. Er bleibt jetzt einzeilig,
+        -- vollstaendig steht er im Tooltip.
+        row.reason = CreateLabel(row, "", { muted = true, width = 196, height = 27, singleLine = true })
         row.reason:SetPoint("LEFT", row, "LEFT", 209, 0)
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
+            if not GameTooltip or not self.tooltipText or self.tooltipText == "" then
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(self.tooltipName or "")
+            GameTooltip:AddLine(self.tooltipText, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function()
+            if GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
 
         local function DecideRow(status)
             if not row.playerName then
@@ -1845,6 +1863,8 @@ function GC.UI:RefreshMemberCare()
             row.status:SetText(candidate.status)
             SetTextColor(row.status, candidate.status == "VORSCHLAG" and THEME.danger or THEME.warning)
             row.reason:SetText(candidate.reason)
+            row.tooltipName = GC.Util.PlayerShortName(candidate.member.name)
+            row.tooltipText = candidate.reason
 
             local canDecide = GC.Roster:CanAccessMemberCare()
             SetButtonEnabled(row.ignoreButton, canDecide)
@@ -2592,7 +2612,7 @@ function GC.UI:BuildInboxPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(756)
+    content:SetHeight(966)
     scroll:SetScrollChild(content)
     page.inboxScroll = scroll
 
@@ -2733,8 +2753,36 @@ function GC.UI:BuildInboxPage()
         end
     end)
     page.inviteButton:SetPoint("LEFT", page.replyButton, "RIGHT", 8, 0)
-    page.replyResult = CreateLabel(detailCard, "", { width = 492, height = 40, vertical = "TOP" })
-    page.replyResult:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -419)
+    page.replyResult = CreateLabel(detailCard, "", { width = 492, height = 20, vertical = "TOP" })
+    page.replyResult:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -412)
+
+    -- Wer immer wieder schreibt, ohne dass etwas daraus wird, laesst sich
+    -- ausblenden. Befristet oder dauerhaft; zuruecknehmen geht in der Liste
+    -- unter den Vorlagen.
+    local function FilterSelectedLead(days)
+        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        if not lead then
+            page.replyResult:SetText("Kein Interessent ausgewählt.")
+            SetTextColor(page.replyResult, THEME.danger)
+            return
+        end
+        local ok, message = GC.Chat:SetInboxFilter(lead.name, days)
+        page.replyResult:SetText(message or "")
+        SetTextColor(page.replyResult, ok and THEME.success or THEME.danger)
+        GC.UI.selectedLead = 1
+        page.replyEdit:SetText("")
+        GC.UI:RefreshInbox()
+    end
+
+    page.hideTempButton = CreateButton(detailCard, "7 Tage ausblenden", 248, 34, function()
+        FilterSelectedLead(7)
+    end)
+    page.hideTempButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -438)
+
+    page.hideForeverButton = CreateButton(detailCard, "Dauerhaft ignorieren", 248, 34, function()
+        FilterSelectedLead(0)
+    end)
+    page.hideForeverButton:SetPoint("LEFT", page.hideTempButton, "RIGHT", 8, 0)
 
     -- Die Vorlagen hinter den drei Knoepfen werden dort gepflegt, wo sie
     -- benutzt werden, nicht in den Einstellungen.
@@ -2779,6 +2827,37 @@ function GC.UI:BuildInboxPage()
     page.saveTemplates:SetPoint("BOTTOMLEFT", templateCard, "BOTTOMLEFT", 134, 14)
     page.templateStatus = CreateLabel(templateCard, "", { width = 420 })
     page.templateStatus:SetPoint("LEFT", page.saveTemplates, "RIGHT", 14, 0)
+
+    local filterCard = CreateCard(content, "Ausgeblendete Spieler")
+    filterCard:SetSize(752, 196)
+    filterCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -758)
+    local filterHelp = CreateLabel(filterCard,
+        "Von diesen Spielern landet nichts mehr im Postfach. Befristete Einträge verschwinden"
+        .. " von selbst, sobald das Datum erreicht ist. Die Liste gilt nur für dich.",
+        { muted = true, width = 716, height = 30, vertical = "TOP" })
+    filterHelp:SetPoint("TOPLEFT", filterCard, "TOPLEFT", 18, -44)
+
+    page.filterRows = {}
+    for index = 1, 4 do
+        local rowIndex = index
+        local row = CreatePanel(filterCard, index % 2 == 0 and THEME.input or THEME.cardHover)
+        row:SetSize(716, 26)
+        row:SetPoint("TOPLEFT", filterCard, "TOPLEFT", 18, -82 - ((index - 1) * 28))
+        row.name = CreateLabel(row, "", { width = 200, singleLine = true, height = 26 })
+        row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
+        row.until_ = CreateLabel(row, "", { muted = true, width = 340, singleLine = true, height = 26 })
+        row.until_:SetPoint("LEFT", row, "LEFT", 217, 0)
+        row.clear = CreateButton(row, "Wieder zulassen", 150, 22, function()
+            local entry = page.filterEntries and page.filterEntries[rowIndex]
+            if entry and GC.Chat:ClearInboxFilter(entry.key) then
+                GC.UI:RefreshInbox()
+            end
+        end)
+        row.clear:SetPoint("RIGHT", row, "RIGHT", -9, 0)
+        page.filterRows[index] = row
+    end
+    page.filterNotice = CreateLabel(filterCard, "", { muted = true, width = 716, height = 20 })
+    page.filterNotice:SetPoint("BOTTOMLEFT", filterCard, "BOTTOMLEFT", 18, 12)
 end
 
 function GC.UI:RefreshInbox()
@@ -2828,10 +2907,42 @@ function GC.UI:RefreshInbox()
         button:SetShown(lead ~= nil)
         page.leadDeleteButtons[index]:SetShown(lead ~= nil)
         if lead then
-            button:SetText((lead.unread and "•  " or "") .. GC.Util.PlayerShortName(lead.name))
+            -- Mehrfaches Anschreiben landet bereits in einem Eintrag. Die Zahl
+            -- macht sichtbar, dass dahinter mehr als eine Nachricht steckt.
+            local count = #(lead.messages or {})
+            button:SetText((lead.unread and "•  " or "") .. GC.Util.PlayerShortName(lead.name)
+                .. (count > 1 and ("  |cff8b98a5(" .. count .. ")|r") or ""))
             button:SetActive(self.selectedLead == index)
         end
     end
+
+    local filters = GC.Chat:GetInboxFilterList()
+    page.filterEntries = filters
+    for index, row in ipairs(page.filterRows) do
+        local entry = filters[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.name:SetText(entry.name)
+            if entry.until_ ~= "" then
+                local days = GC.Util.DaysBetweenISO(GC.Util.TodayISO(), entry.until_)
+                row.until_:SetText("ausgeblendet bis " .. entry.until_
+                    .. (days and ("  •  noch " .. days .. (days == 1 and " Tag" or " Tage")) or ""))
+            else
+                row.until_:SetText("dauerhaft ignoriert")
+            end
+        end
+    end
+    if #filters == 0 then
+        page.filterNotice:SetText("Niemand ausgeblendet.")
+    elseif #filters > #page.filterRows then
+        page.filterNotice:SetText("Weitere " .. (#filters - #page.filterRows)
+            .. " ausgeblendete Spieler sind vorhanden.")
+    else
+        page.filterNotice:SetText("")
+    end
+
+    SetButtonEnabled(page.hideTempButton, inbox[self.selectedLead] ~= nil)
+    SetButtonEnabled(page.hideForeverButton, inbox[self.selectedLead] ~= nil)
 
     local lead = inbox[self.selectedLead]
     if not lead then
@@ -3535,18 +3646,20 @@ function GC.UI:RefreshSyncBadge()
         return
     end
 
+    -- Dieselbe Zahl wie die Kachel "Mit Addon" in der Uebersicht: Sie zaehlt
+    -- den eigenen Charakter mit. Zwei verschiedene Zahlen fuer dieselbe Sache
+    -- auf einem Bildschirm sind schlimmer als eine unscharfe.
     local stats = GC.Sync:GetAddonUserStats()
-    local others = math.max(0, (stats.known or 1) - 1)
+    local known = stats.known or 1
     local differing = (stats.outdated or 0) + (stats.ahead or 0)
 
-    if others == 0 then
+    if known <= 1 then
         badge:SetText("|cff8b98a5• kein anderer Nutzer erkannt|r")
     elseif differing > 0 then
-        badge:SetText("|cffffb840• " .. others .. (others == 1 and " Nutzer" or " Nutzer")
-            .. ", " .. differing .. " mit anderer Version|r")
+        badge:SetText("|cffffb840• " .. known .. " Nutzer, "
+            .. differing .. " mit anderer Version|r")
     else
-        badge:SetText("|cff59e695• synchron mit " .. others
-            .. (others == 1 and " Nutzer" or " Nutzern") .. "|r")
+        badge:SetText("|cff59e695• " .. known .. " Nutzer, alle synchron|r")
     end
 end
 

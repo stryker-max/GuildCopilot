@@ -77,6 +77,102 @@ local function SameLead(leftName, leftGUID, rightName, rightGUID)
             or not tostring(rightName or ""):find("-", 1, true))
 end
 
+-- === Postfachfilter ========================================================
+--
+-- Manche schreiben immer wieder, ohne dass daraus je etwas wird. Wer hier
+-- steht, erzeugt keinen neuen Eintrag mehr - entweder dauerhaft oder bis zu
+-- einem Datum. Abgelaufene Eintraege raeumt der Filter selbst weg, damit die
+-- Liste nicht endlos waechst.
+
+function GC.Chat:GetInboxFilters()
+    local guildData = GC.DB:GetGuild()
+    guildData.inboxFilters = guildData.inboxFilters or {}
+    return guildData.inboxFilters
+end
+
+function GC.Chat:PruneInboxFilters()
+    local filters = self:GetInboxFilters()
+    local today = GC.Util.TodayISO()
+    for key, entry in pairs(filters) do
+        local untilDate = entry and entry.until_ or ""
+        if untilDate ~= "" and untilDate < today then
+            filters[key] = nil
+        end
+    end
+end
+
+function GC.Chat:IsInboxFiltered(name)
+    if GC.Util.Trim(name) == "" then
+        return false
+    end
+    self:PruneInboxFilters()
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    return self:GetInboxFilters()[key] ~= nil
+end
+
+-- days = nil oder 0 bedeutet dauerhaft.
+function GC.Chat:SetInboxFilter(name, days)
+    name = GC.Util.Trim(name)
+    if name == "" then
+        return false, "Kein Spieler ausgewählt."
+    end
+
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    if key == "" then
+        return false, "Kein Spieler ausgewählt."
+    end
+
+    days = tonumber(days) or 0
+    local untilDate = days > 0 and GC.Util.AddDaysISO(days) or ""
+    self:GetInboxFilters()[key] = {
+        name = GC.Util.PlayerShortName(name),
+        until_ = untilDate,
+        at = GC.Util.Now(),
+    }
+
+    -- Den vorhandenen Eintrag gleich mitnehmen, sonst bleibt er sichtbar
+    -- stehen, obwohl kuenftig nichts mehr nachkommt.
+    local inbox = GC.DB:GetGuild().inbox
+    for index = #inbox, 1, -1 do
+        if GC.Util.NormalizeName(GC.Util.PlayerShortName(inbox[index].name)) == key then
+            table.remove(inbox, index)
+        end
+    end
+
+    GC:FireCallback("INBOX_UPDATED")
+    if untilDate ~= "" then
+        return true, GC.Util.PlayerShortName(name) .. " ist bis " .. untilDate .. " ausgeblendet."
+    end
+    return true, GC.Util.PlayerShortName(name) .. " wird dauerhaft ignoriert."
+end
+
+function GC.Chat:ClearInboxFilter(key)
+    local filters = self:GetInboxFilters()
+    if not filters[key] then
+        return false
+    end
+    filters[key] = nil
+    GC:FireCallback("INBOX_UPDATED")
+    return true
+end
+
+function GC.Chat:GetInboxFilterList()
+    self:PruneInboxFilters()
+    local list = {}
+    for key, entry in pairs(self:GetInboxFilters()) do
+        list[#list + 1] = {
+            key = key,
+            name = entry.name or key,
+            until_ = entry.until_ or "",
+            at = entry.at or 0,
+        }
+    end
+    table.sort(list, function(left, right)
+        return tostring(left.name):lower() < tostring(right.name):lower()
+    end)
+    return list
+end
+
 function GC.Chat:MergeDuplicateLeads()
     local inbox = GC.DB:GetGuild().inbox
     local index = 1
@@ -217,6 +313,9 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
         return
     end
     if GC.Roster:IsGuildMember(sender) then
+        return
+    end
+    if self:IsInboxFiltered(sender) then
         return
     end
 

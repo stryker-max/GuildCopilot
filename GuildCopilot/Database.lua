@@ -67,6 +67,9 @@ local GUILD_DEFAULTS = {
         priorities = {},
     },
     inbox = {},
+    -- Wer hier steht, erzeugt keinen Postfacheintrag mehr. Leeres "until_"
+    -- bedeutet dauerhaft, sonst gilt der Eintrag bis zu diesem Datum.
+    inboxFilters = {},
     postHistory = {},
     lastPosts = {},
     warcraftLogs = {
