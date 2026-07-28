@@ -15,6 +15,7 @@ GC.Sync = {
 -- Addon-Kanal fluten.
 local MIN_ANNOUNCE_INTERVAL = 60
 local MIN_REPLY_INTERVAL = 15
+local MIN_PROFILE_REPLY_INTERVAL = 30
 
 local function BoolField(value)
     return value and "1" or "0"
@@ -197,6 +198,20 @@ function GC.Sync:QueueProfile()
     C_Timer.After(1, function()
         self:SendProfile()
     end)
+end
+
+-- Antwort auf eine Anfrage. Gedrosselt, damit mehrere Logins kurz
+-- hintereinander nicht jedes Mal das ganze Profil erneut durch die Gilde
+-- schicken; wer neu dazukommt, hat es dann vom letzten Mal noch nicht, deshalb
+-- ist das Fenster bewusst kurz gehalten.
+function GC.Sync:ReplyWithProfile()
+    local now = GC.Util.Now()
+    if (now - (self.lastProfileReplyAt or 0)) < MIN_PROFILE_REPLY_INTERVAL then
+        return false
+    end
+    self.lastProfileReplyAt = now
+    self:QueueProfile()
+    return true
 end
 
 function GC.Sync:BuildGuildProfileMessages()
@@ -560,6 +575,14 @@ function GC.Sync:ReceiveVersion(fields, sender)
     if fields[5] == "1" then
         C_Timer.After(0.5 + math.random() * 4, function()
             self:AnnounceVersion(false, MIN_REPLY_INTERVAL)
+        end)
+        -- Das eigene Profil gleich mitschicken. Ohne diese Antwort erfaehrt ein
+        -- Client nur von denen etwas, die sich nach ihm einloggen oder ihr
+        -- Profil aendern: Wer zuerst da war, hat laengst in einen leeren Raum
+        -- gesendet. Eigenes Fenster mit breiterer Streuung, damit bei vielen
+        -- gleichzeitig Antwortenden der Addon-Kanal nicht zulaeuft.
+        C_Timer.After(1 + math.random() * 9, function()
+            self:ReplyWithProfile()
         end)
     end
 end
