@@ -98,7 +98,8 @@ local function RecipeCount(profession)
     return count
 end
 
-local function BuildRecipeRecord(recipe)
+local function BuildRecipeRecord(recipe, recordLimit)
+    recordLimit = math.min(MAX_RECORD_BYTES, tonumber(recordLimit) or MAX_RECORD_BYTES)
     local reagentTokens = {}
     for _, reagent in ipairs(recipe.reagents or {}) do
         if tonumber(reagent.itemID) then
@@ -117,18 +118,23 @@ local function BuildRecipeRecord(recipe)
     end
 
     local record = Compose()
-    while #record > MAX_RECORD_BYTES and #reagentTokens > 0 do
+    while #record > recordLimit and #reagentTokens > 0 do
         table.remove(reagentTokens)
         record = Compose()
     end
-    while #record > MAX_RECORD_BYTES and #name > 8 do
+    while #record > recordLimit and #name > 8 do
         name = GC.Util.SafeChatText(name, #name - 4)
         record = Compose()
     end
-    return record
+    if #record > recordLimit then
+        name = ""
+        record = Compose()
+    end
+    return #record <= recordLimit and record or nil
 end
 
-local function BuildCompactRecipeRecord(recipe)
+local function BuildCompactRecipeRecord(recipe, recordLimit)
+    recordLimit = math.min(MAX_RECORD_BYTES, tonumber(recordLimit) or MAX_RECORD_BYTES)
     local recipeKey = GC.Util.SafeChatText(tostring(recipe.key or ""), 36)
     if recipeKey == "" then
         return nil
@@ -153,15 +159,19 @@ local function BuildCompactRecipeRecord(recipe)
     end
 
     local record = Compose()
-    while #record > MAX_RECORD_BYTES and #reagentTokens > 0 do
+    while #record > recordLimit and #reagentTokens > 0 do
         table.remove(reagentTokens)
         record = Compose()
     end
-    while #record > MAX_RECORD_BYTES and #name > 8 do
+    while #record > recordLimit and #name > 8 do
         name = GC.Util.SafeChatText(name, #name - 4)
         record = Compose()
     end
-    return record
+    if #record > recordLimit then
+        name = ""
+        record = Compose()
+    end
+    return #record <= recordLimit and record or nil
 end
 
 local function BuildMessage(fields)
@@ -527,17 +537,54 @@ function GC.Workshop:ScanOpenProfession()
 end
 
 function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
+    local operation = compact == false and "D" or "C"
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+    -- Der Herstellername wird als zusaetzliches Feld angehaengt, damit auch die
+    -- Berufe der eigenen Twinks korrekt dem jeweiligen Charakter zugeordnet
+    -- werden. Aeltere Clients ignorieren das Feld schlicht und schreiben die
+    -- Daten wie bisher dem Absender zu.
+    local crafterField = GC.Util.SafeChatText(GC.Util.Trim(crafterName or ""), 40)
+    local fingerprintHash = profession.fingerprintHash
+        or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession))
+
+    -- Das Nutzlast-Budget ergibt sich aus dem echten 255-Byte-Chatlimit
+    -- abzueglich der vollstaendigen Kopfzeile (mit dreistelligen Platzhaltern
+    -- fuer Teil und Gesamtzahl). Eine feste Nutzlastgroesse hat bei langen
+    -- Berufs- oder Herstellernamen das Limit gesprengt; solche Pakete wurden
+    -- vor dem Senden kommentarlos verworfen und der Transfer blieb beim
+    -- Empfaenger fuer immer unvollstaendig.
+    local header = BuildMessage({
+        "W",
+        GC.Constants.SCHEMA_VERSION,
+        operation,
+        token,
+        "000",
+        "000",
+        profession.key,
+        profession.name,
+        "",
+        tostring(profession.updatedAt or 0),
+        fingerprintHash,
+        crafterField,
+    })
+    local payloadLimit = math.min(
+        compact == false and LEGACY_MAX_PAYLOAD_BYTES or MAX_PAYLOAD_BYTES,
+        GC.Constants.MAX_CHAT_BYTES - #header
+    )
+
     local records = {}
     for _, recipeKey in ipairs(SortedKeys(profession.recipes)) do
         local recipe = profession.recipes[recipeKey]
-        records[#records + 1] = compact == false
-            and BuildRecipeRecord(recipe)
-            or BuildCompactRecipeRecord(recipe)
+        local record = compact == false
+            and BuildRecipeRecord(recipe, payloadLimit)
+            or BuildCompactRecipeRecord(recipe, payloadLimit)
+        if record then
+            records[#records + 1] = record
+        end
     end
 
     local payloads = {}
     local current = ""
-    local payloadLimit = compact == false and LEGACY_MAX_PAYLOAD_BYTES or MAX_PAYLOAD_BYTES
     for _, record in ipairs(records) do
         local candidate = current == "" and record or (current .. ";" .. record)
         if #candidate > payloadLimit and current ~= "" then
@@ -549,14 +596,7 @@ function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
     end
     payloads[#payloads + 1] = current
 
-    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
     local messages = {}
-    local operation = compact == false and "D" or "C"
-    -- Der Herstellername wird als zusaetzliches Feld angehaengt, damit auch die
-    -- Berufe der eigenen Twinks korrekt dem jeweiligen Charakter zugeordnet
-    -- werden. Aeltere Clients ignorieren das Feld schlicht und schreiben die
-    -- Daten wie bisher dem Absender zu.
-    local crafterField = GC.Util.SafeChatText(GC.Util.Trim(crafterName or ""), 60)
     for index, payload in ipairs(payloads) do
         messages[#messages + 1] = BuildMessage({
             "W",
@@ -569,7 +609,7 @@ function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
             profession.name,
             payload,
             tostring(profession.updatedAt or 0),
-            profession.fingerprintHash or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession)),
+            fingerprintHash,
             crafterField,
         })
     end

@@ -205,6 +205,22 @@ function GC.Sync:RegisterPrefix()
     end
 end
 
+-- Der Anniversary-Client liefert Enum.SendAddonMessageResult (0 = Erfolg,
+-- 3/8 = gedrosselt, ...), klassische Clients true oder gar nichts. Wer nur auf
+-- "~= false" prueft, haelt gedrosselte Pakete fuer zugestellt - sie gehen dann
+-- lautlos verloren und der Transfer bleibt ohne erkennbaren Grund
+-- unvollstaendig. Nur ein echter Erfolg zaehlt als gesendet; alles andere
+-- laesst die Warteschlangen mit ihrem Backoff erneut anlaufen.
+local function AddonSendSucceeded(result)
+    if result == nil or result == true then
+        return true
+    end
+    if type(result) == "number" then
+        return result == 0
+    end
+    return result ~= false
+end
+
 function GC.Sync:Send(payload, distribution, target)
     distribution = distribution or "GUILD"
     if not payload or #payload > GC.Constants.MAX_CHAT_BYTES then
@@ -225,7 +241,7 @@ function GC.Sync:Send(payload, distribution, target)
             distribution,
             target
         )
-        return success and result ~= false
+        return success and AddonSendSucceeded(result)
     elseif SendAddonMessage then
         local success, result = pcall(
             SendAddonMessage,
@@ -234,7 +250,7 @@ function GC.Sync:Send(payload, distribution, target)
             distribution,
             target
         )
-        return success and result ~= false
+        return success and AddonSendSucceeded(result)
     end
     return false
 end

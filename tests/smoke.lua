@@ -1448,6 +1448,62 @@ assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions
 assert(addon.DB:GetGuild().workshop.crafters["mainchar-realm"] == nil,
     "Ein geteilter Twink-Beruf wurde fälschlich dem absendenden Charakter zugeordnet")
 
+-- Lange Berufs- und Herstellernamen dürfen das 255-Byte-Chatlimit nie
+-- sprengen: das Nutzlast-Budget richtet sich nach der echten Kopfzeile.
+-- Zuvor wurden zu lange Pakete vor dem Senden kommentarlos verworfen und der
+-- Transfer blieb beim Empfänger für immer unvollständig.
+longProfession = {
+    key = "ingenieurskunst",
+    name = "Ingenieurskunst",
+    updatedAt = 1767225600,
+    recipes = {},
+}
+for recipeIndex = 1, 80 do
+    longProfession.recipes["I" .. (23700 + recipeIndex)] = {
+        key = "I" .. (23700 + recipeIndex),
+        itemID = 23700 + recipeIndex,
+        name = "Ingenieursrezept " .. recipeIndex,
+        reagents = {
+            { itemID = 23445, count = 3 },
+            { itemID = 23446, count = 2 },
+            { itemID = 23447, count = 4 },
+        },
+    }
+end
+longMessages = addon.Workshop:BuildProfessionMessages(longProfession, true, "Twinkschneider-Realm")
+assert(#longMessages > 1, "Der Langnamen-Test erzeugt nicht mehrere Pakete")
+for _, longMessage in ipairs(longMessages) do
+    assert(#longMessage <= 255,
+        "Ein Werkstattpaket mit langem Berufs- und Herstellernamen überschreitet das Chatlimit")
+end
+for _, longMessage in ipairs(longMessages) do
+    addon.Sync:OnMessage("GuildCopilot", longMessage, "GUILD", "Mainchar-Realm")
+end
+longReceived = addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions.ingenieurskunst
+assert(longReceived ~= nil, "Der Beruf mit langem Namen wurde nicht gespeichert")
+longReceivedCount = 0
+for _ in pairs(longReceived.recipes) do
+    longReceivedCount = longReceivedCount + 1
+end
+assert(longReceivedCount == 80,
+    "Der Beruf mit langem Namen kam nicht vollständig an")
+
+-- Der Anniversary-Client meldet Sendeerfolge als Enum: 0 ist Erfolg, 3 und 8
+-- sind Drosselungen. Wer nur auf "~= false" prüft, verliert gedrosselte
+-- Pakete lautlos.
+originalSendAddonMessage = C_ChatInfo.SendAddonMessage
+C_ChatInfo.SendAddonMessage = function()
+    return 3
+end
+assert(addon.Sync:Send("W|7|Q|3") == false,
+    "Ein vom Client gedrosseltes Paket (Enum 3) galt fälschlich als gesendet")
+C_ChatInfo.SendAddonMessage = function()
+    return 0
+end
+assert(addon.Sync:Send("W|7|Q|3") == true,
+    "Ein erfolgreich gesendetes Paket (Enum 0) galt fälschlich als fehlgeschlagen")
+C_ChatInfo.SendAddonMessage = originalSendAddonMessage
+
 ackBeforeRecruitmentWhisper = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", recruitmentMessages[1], "WHISPER", "Heiler-Realm")
 assert(#sentAddon == ackBeforeRecruitmentWhisper + 1
