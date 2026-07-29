@@ -6,6 +6,7 @@ GC.GearAudit = {
     scanning = false,
     selectedName = nil,
     status = "",
+    equipmentIncoming = {},
 }
 
 local INSPECT_INTERVAL = 1.5
@@ -13,6 +14,29 @@ local INSPECT_TIMEOUT = 4
 local AUDIT_TTL = 7 * 24 * 60 * 60
 local AUTO_SELF_DELAY = 3
 local AUTO_SELF_LOGIN_DELAY = 8
+local EQUIPMENT_CHUNK_BYTES = 165
+local EQUIPMENT_MAX_PARTS = 10
+local EQUIPMENT_MAX_INCOMING = 40
+local EQUIPMENT_INCOMING_TTL = 5 * 60
+local EQUIPMENT_REPLY_INTERVAL = 30
+local EQUIPMENT_SEND_INTERVAL = 0.45
+local EQUIPMENT_MAX_RETRIES = 5
+
+local function WholeNumber(value, minimum, maximum)
+    value = tonumber(value)
+    if not value or value % 1 ~= 0 or value < minimum or value > maximum then
+        return nil
+    end
+    return value
+end
+
+local function GearSlotByID()
+    local slots = {}
+    for _, slot in ipairs(GC.GearSlots) do
+        slots[slot.id] = slot
+    end
+    return slots
+end
 
 -- item:itemID:enchantID:gem1:gem2:gem3:gem4:...
 function GC.GearAudit:ParseItemLink(link)
@@ -230,7 +254,7 @@ function GC.GearAudit:AcceptsUnratedEnchants()
 end
 
 function GC.GearAudit:AuditsSelfAutomatically()
-    return self:GetAutoSettings().auditSelf ~= false
+    return true
 end
 
 -- === Bewertungen je Spec ===================================================
@@ -526,6 +550,354 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
     return audit
 end
 
+-- === Automatischer Ausrüstungsabgleich =====================================
+--
+-- Geteilte Daten sind absichtlich nur Messwerte: Slot, Gegenstand,
+-- Verzauberungs-ID und Zahl leerer Sockel. Bewertungen und Begründungen
+-- entstehen auf dem empfangenden Client aus dem aktuellen Gildenregelsatz.
+-- Damit muss weder ein fremder Tooltiptext übertragen noch eine alte
+-- Bewertung als Wahrheit behandelt werden.
+
+function GC.GearAudit:BuildEquipmentMessages(audit)
+    audit = audit or self:GetAudit(GC:GetPlayerFullName())
+    local classFile = audit and audit.classFile
+    if not audit or not GC.Classes[classFile] then
+        return {}, nil
+    end
+
+    local specKey = audit.specKey
+    if specKey and (not GC.SpecByKey[specKey] or GC.SpecByKey[specKey].classFile ~= classFile) then
+        specKey = nil
+    end
+
+    local entriesByKey = {}
+    for _, entry in ipairs(audit.slots or {}) do
+        if type(entry) == "table" and type(entry.key) == "string" then
+            entriesByKey[entry.key] = entry
+        end
+    end
+
+    local records = {}
+    local equipped = 0
+    for _, slot in ipairs(GC.GearSlots) do
+        local entry = entriesByKey[slot.key] or {}
+        local itemID = WholeNumber(entry.itemID, 0, 99999999) or 0
+        local enchantID = WholeNumber(entry.enchantID, 0, 99999999) or 0
+        local emptySockets = WholeNumber(entry.emptySockets, 0, 4) or 0
+        if itemID <= 0 then
+            enchantID = 0
+            emptySockets = 0
+        else
+            equipped = equipped + 1
+        end
+        records[#records + 1] = table.concat({
+            tostring(slot.id),
+            tostring(itemID),
+            tostring(enchantID),
+            tostring(emptySockets),
+        }, ":")
+    end
+    if equipped == 0 then
+        return {}, nil
+    end
+
+    local recordText = table.concat(records, ",")
+    local fingerprint = table.concat({ classFile, specKey or "", recordText }, "|")
+    local payload = table.concat({
+        "ES",
+        classFile,
+        specKey or "",
+        tostring(WholeNumber(audit.inspectedAt, 1, 9999999999) or GC.Util.Now()),
+        recordText,
+    }, "|")
+
+    local chunks = {}
+    for offset = 1, #payload, EQUIPMENT_CHUNK_BYTES do
+        chunks[#chunks + 1] = payload:sub(offset, offset + EQUIPMENT_CHUNK_BYTES - 1)
+    end
+    if #chunks == 0 or #chunks > EQUIPMENT_MAX_PARTS then
+        return {}, nil
+    end
+
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
+    local messages = {}
+    for index, chunk in ipairs(chunks) do
+        messages[index] = table.concat({
+            "E",
+            tostring(GC.Constants.SCHEMA_VERSION),
+            token,
+            tostring(index),
+            tostring(#chunks),
+            chunk,
+        }, "|")
+    end
+    return messages, fingerprint
+end
+
+function GC.GearAudit:SendEquipmentSnapshot(audit, force)
+    if not GC.Sync or type(GC.Sync.Send) ~= "function" then
+        return false
+    end
+    local messages, fingerprint = self:BuildEquipmentMessages(audit)
+    if #messages == 0 or not fingerprint then
+        return false
+    end
+    if not force and fingerprint == self.lastEquipmentFingerprint then
+        return false
+    end
+
+    self.equipmentSendGeneration = (self.equipmentSendGeneration or 0) + 1
+    local generation = self.equipmentSendGeneration
+    local index = 1
+    local retries = 0
+    local function SendNext()
+        if self.equipmentSendGeneration ~= generation then
+            return
+        end
+        local message = messages[index]
+        if not message then
+            self.lastEquipmentFingerprint = fingerprint
+            return
+        end
+        local sent = GC.Sync:Send(message)
+        if sent then
+            index = index + 1
+            retries = 0
+        else
+            retries = retries + 1
+            if retries >= EQUIPMENT_MAX_RETRIES then
+                return
+            end
+        end
+        C_Timer.After(sent and EQUIPMENT_SEND_INTERVAL or 1.25, SendNext)
+    end
+    SendNext()
+    return true
+end
+
+function GC.GearAudit:QueueEquipmentSnapshot(audit, force)
+    self.pendingEquipmentAudit = audit or self:GetAudit(GC:GetPlayerFullName())
+    self.pendingEquipmentForce = self.pendingEquipmentForce or force == true
+    if not self.pendingEquipmentAudit or self.equipmentSendPending then
+        return false
+    end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        return false
+    end
+
+    self.equipmentSendPending = true
+    C_Timer.After(1.2, function()
+        self.equipmentSendPending = false
+        local pending = self.pendingEquipmentAudit
+        local forced = self.pendingEquipmentForce
+        self.pendingEquipmentAudit = nil
+        self.pendingEquipmentForce = false
+        self:SendEquipmentSnapshot(pending, forced)
+    end)
+    return true
+end
+
+function GC.GearAudit:ReplyWithEquipmentSnapshot()
+    local now = GC.Util.Now()
+    if self.lastEquipmentReplyAt
+        and (now - self.lastEquipmentReplyAt) < EQUIPMENT_REPLY_INTERVAL then
+        return false
+    end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        return false
+    end
+    local audit = self:GetAudit(GC:GetPlayerFullName())
+    if not audit or audit.source ~= "SELF" then
+        return false
+    end
+    self.lastEquipmentReplyAt = now
+    C_Timer.After(0.5 + math.random() * 2.5, function()
+        -- Bis die gestreute Antwort gesendet wird, kann ein Umziehen bereits
+        -- einen neueren SELF-Audit erzeugt haben. Deshalb hier noch einmal den
+        -- aktuellen Stand lesen und nie den alten Closure-Wert zurücksenden.
+        self:QueueEquipmentSnapshot(nil, true)
+    end)
+    return true
+end
+
+function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records)
+    local spec = specKey and GC.SpecByKey[specKey]
+    local audit = {
+        name = GC.Util.PlayerShortName(sender),
+        classFile = classFile,
+        role = spec and spec.role or nil,
+        specKey = specKey,
+        inspectedAt = inspectedAt,
+        receivedAt = GC.Util.Now(),
+        source = "SYNC",
+        ruleVersion = GC.EnchantRuleSet.version,
+        slots = {},
+        missingEnchants = 0,
+        emptySockets = 0,
+        unknownEnchants = 0,
+        emptySlots = 0,
+    }
+
+    for _, slot in ipairs(GC.GearSlots) do
+        local measured = records[slot.id]
+        local entry = {
+            key = slot.key,
+            label = slot.label,
+            required = slot.enchantRequired == true,
+        }
+        if not measured or measured.itemID <= 0 then
+            entry.verdict = "EMPTY"
+            entry.reason = "Kein Gegenstand angelegt."
+            if entry.required then
+                audit.emptySlots = audit.emptySlots + 1
+            end
+        else
+            entry.itemID = measured.itemID
+            entry.enchantID = measured.enchantID
+            entry.emptySockets = measured.emptySockets
+            entry.verdict, entry.reason = self:EvaluateEnchant(
+                slot, measured.enchantID, audit.role, nil, specKey)
+            if entry.verdict == "MISSING" then
+                audit.missingEnchants = audit.missingEnchants + 1
+            elseif entry.verdict == "UNKNOWN" then
+                audit.unknownEnchants = audit.unknownEnchants + 1
+            end
+            audit.emptySockets = audit.emptySockets + measured.emptySockets
+        end
+        audit.slots[#audit.slots + 1] = entry
+    end
+    return audit
+end
+
+function GC.GearAudit:DecodeEquipmentPayload(payload, sender)
+    local fields = GC.Util.SplitFields(payload)
+    if #fields ~= 5 or fields[1] ~= "ES" or not GC.Classes[fields[2]] then
+        return nil
+    end
+
+    local classFile = fields[2]
+    local specKey = fields[3] ~= "" and fields[3] or nil
+    if specKey and (not GC.SpecByKey[specKey] or GC.SpecByKey[specKey].classFile ~= classFile) then
+        return nil
+    end
+    local member = GC.Roster and GC.Roster:GetMember(sender)
+    if member and member.classFile and member.classFile ~= classFile then
+        return nil
+    end
+
+    local now = GC.Util.Now()
+    local inspectedAt = WholeNumber(fields[4], 1, 9999999999)
+    if not inspectedAt or inspectedAt < (now - AUDIT_TTL) or inspectedAt > (now + 300) then
+        return nil
+    end
+
+    local slotsByID = GearSlotByID()
+    local records = {}
+    local count = 0
+    local equipped = 0
+    for record in tostring(fields[5] or ""):gmatch("[^,]+") do
+        local slotText, itemText, enchantText, socketsText =
+            record:match("^(%d+):(%d+):(%d+):(%d+)$")
+        local slotID = WholeNumber(slotText, 1, 19)
+        local itemID = WholeNumber(itemText, 0, 99999999)
+        local enchantID = WholeNumber(enchantText, 0, 99999999)
+        local emptySockets = WholeNumber(socketsText, 0, 4)
+        if not slotID or not slotsByID[slotID] or records[slotID]
+            or not itemID or not enchantID or not emptySockets
+            or (itemID == 0 and (enchantID ~= 0 or emptySockets ~= 0)) then
+            return nil
+        end
+        records[slotID] = {
+            itemID = itemID,
+            enchantID = enchantID,
+            emptySockets = emptySockets,
+        }
+        count = count + 1
+        if itemID > 0 then
+            equipped = equipped + 1
+        end
+    end
+    if count ~= #GC.GearSlots or equipped == 0 then
+        return nil
+    end
+    return self:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records)
+end
+
+function GC.GearAudit:ReceiveEquipmentChunk(message, sender)
+    local schemaText, token, indexText, totalText, chunk =
+        message:match("^E|([^|]+)|([^|]+)|([^|]+)|([^|]+)|(.*)$")
+    local schemaVersion = tonumber(schemaText)
+    local index = WholeNumber(indexText, 1, EQUIPMENT_MAX_PARTS)
+    local total = WholeNumber(totalText, 1, EQUIPMENT_MAX_PARTS)
+    local senderKey = GC.Util.NormalizeName(sender)
+    if schemaVersion ~= GC.Constants.SCHEMA_VERSION or not index or not total
+        or index > total or senderKey == "" or not token or #token > 40
+        or not token:match("^[%w%-]+$")
+        or type(chunk) ~= "string" or #chunk > EQUIPMENT_CHUNK_BYTES then
+        return false
+    end
+
+    local now = GC.Util.Now()
+    local incomingCount = 0
+    for key, transfer in pairs(self.equipmentIncoming) do
+        if (now - (tonumber(transfer.receivedAt) or 0)) > EQUIPMENT_INCOMING_TTL then
+            self.equipmentIncoming[key] = nil
+        else
+            incomingCount = incomingCount + 1
+        end
+    end
+
+    local incomingKey = senderKey .. "|" .. token
+    local incoming = self.equipmentIncoming[incomingKey]
+    if incoming and incoming.total ~= total then
+        self.equipmentIncoming[incomingKey] = nil
+        return false
+    end
+    if not incoming then
+        if incomingCount >= EQUIPMENT_MAX_INCOMING then
+            return false
+        end
+        incoming = {
+            total = total,
+            chunks = {},
+            received = 0,
+            receivedAt = now,
+        }
+        self.equipmentIncoming[incomingKey] = incoming
+    end
+    incoming.receivedAt = now
+    if incoming.chunks[index] and incoming.chunks[index] ~= chunk then
+        self.equipmentIncoming[incomingKey] = nil
+        return false
+    elseif not incoming.chunks[index] then
+        incoming.chunks[index] = chunk
+        incoming.received = incoming.received + 1
+    end
+    if incoming.received < total then
+        return true
+    end
+
+    local payload = {}
+    for chunkIndex = 1, total do
+        if incoming.chunks[chunkIndex] == nil then
+            return true
+        end
+        payload[chunkIndex] = incoming.chunks[chunkIndex]
+    end
+    self.equipmentIncoming[incomingKey] = nil
+
+    local audit = self:DecodeEquipmentPayload(table.concat(payload), sender)
+    if not audit then
+        return false
+    end
+    local current = self:GetAudit(sender)
+    if current and (tonumber(current.inspectedAt) or 0) > audit.inspectedAt then
+        return false
+    end
+    self:StoreAudit(audit)
+    return true
+end
+
 function GC.GearAudit:StoreAudit(audit)
     if not audit or not audit.name or audit.name == "" then
         return false
@@ -577,6 +949,7 @@ function GC.GearAudit:AuditSelf(automatic)
         return GetInventoryItemLink("player", slotID)
     end, "SELF")
     self:StoreAudit(audit)
+    self:QueueEquipmentSnapshot(audit)
     self.selectedName = audit.name
     self:SetStatus(automatic and "Eigene Ausrüstung automatisch geprüft." or "Eigene Ausrüstung geprüft.")
     return true, "Eigene Ausrüstung geprüft: " .. self:DescribeFindings(audit)
@@ -590,7 +963,7 @@ end
 -- durch ist. Der Verzoegerung liegt zugrunde, dass der Client den Item-Link
 -- erst mit etwas Abstand vollstaendig liefert.
 function GC.GearAudit:QueueSelfAudit(delay)
-    if not self:AuditsSelfAutomatically() or self.autoSelfPending then
+    if self.autoSelfPending then
         return false
     end
     if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
@@ -600,9 +973,7 @@ function GC.GearAudit:QueueSelfAudit(delay)
     self.autoSelfPending = true
     C_Timer.After(delay or AUTO_SELF_DELAY, function()
         self.autoSelfPending = false
-        if self:AuditsSelfAutomatically() then
-            self:AuditSelf(true)
-        end
+        self:AuditSelf(true)
     end)
     return true
 end
@@ -759,6 +1130,13 @@ function GC.GearAudit:CanInspectUnit(unit)
     return true
 end
 
+function GC.GearAudit:HasFreshSyncedAudit(name)
+    local audit = self:GetAudit(name)
+    return audit ~= nil
+        and audit.source == "SYNC"
+        and (tonumber(audit.inspectedAt) or 0) >= (GC.Util.Now() - AUDIT_TTL)
+end
+
 function GC.GearAudit:StartRaidScan()
     if self.scanning then
         return false, "Es läuft bereits eine Prüfung."
@@ -769,13 +1147,27 @@ function GC.GearAudit:StartRaidScan()
         return false, "Es sind keine Gruppenmitglieder zum Prüfen da."
     end
 
-    self.queue = targets
+    local inspectTargets = {}
+    local shared = 0
+    for _, target in ipairs(targets) do
+        if self:HasFreshSyncedAudit(target.name) then
+            shared = shared + 1
+        else
+            inspectTargets[#inspectTargets + 1] = target
+        end
+    end
+
+    self.queue = inspectTargets
     self.scanning = true
     self.skipped = 0
     self.completed = 0
-    self:SetStatus("Prüfe " .. #targets .. " Spieler …")
+    self.shared = shared
+    self:SetStatus("Prüfe " .. #inspectTargets .. " Spieler"
+        .. (shared > 0 and (", " .. shared .. " bereits per Addon-Abgleich") or "") .. " …")
     self:ProcessQueue()
-    return true, "Ausrüstungsprüfung gestartet."
+    return true, shared > 0
+        and ("Ausrüstungsprüfung gestartet; " .. shared .. " Spieler liefern ihre Daten selbst.")
+        or "Ausrüstungsprüfung gestartet."
 end
 
 function GC.GearAudit:SetStatus(status)
@@ -790,7 +1182,10 @@ function GC.GearAudit:FinishScan()
     self.scanning = false
     self.active = nil
     self.queue = {}
-    local message = (self.completed or 0) .. " Spieler geprüft"
+    local message = (self.completed or 0) .. " Spieler per Inspect geprüft"
+    if (self.shared or 0) > 0 then
+        message = message .. ", " .. self.shared .. " über Addon-Daten"
+    end
     if (self.skipped or 0) > 0 then
         message = message .. ", " .. self.skipped .. " nicht in Reichweite"
     end

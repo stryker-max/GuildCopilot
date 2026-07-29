@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.18
+# Guild Copilot 0.9.19
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -59,11 +59,13 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - gespeichert werden ausschließlich Zusammenfassungen, keine Combat-Log-Rohdaten;
 - die Auswertung steht vollständig im Addonfenster: Sitzungsliste und Teilnehmertabelle. Kurze Rückmeldungen wie Start, Ende und abgelehnte Aktionen erscheinen zusätzlich im Chat, damit sie auch bei geschlossenem Fenster ankommen;
 - die Übertragung zwischen den Addon-Nutzern läuft über den unsichtbaren Addon-Datenkanal, nicht über sichtbare Chatnachrichten;
-- **Ausrüstungsprüfung** über die Inspect-API: fehlende Verzauberungen und leere Sockel je Slot, für die eigene Ausrüstung auch ohne Gruppe;
+- **Ausrüstungsprüfung** über automatische Eigendaten und die Inspect-API als Rückfall: fehlende Verzauberungen und leere Sockel je Slot, für die eigene Ausrüstung auch ohne Gruppe;
 - geprüft wird nur, wer in Reichweite und erreichbar ist; nicht erreichbare Spieler werden ausdrücklich als übersprungen ausgewiesen;
 - Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen werden nie als schlecht gewertet;
 - **ohne hinterlegte Bewertung** gilt eine vorhandene Verzauberung standardmäßig als in Ordnung, damit als Fund übrig bleibt, was objektiv aus dem Item-Link hervorgeht: fehlende Verzauberungen und leere Sockel. Das behauptet keine Qualität, es unterscheidet nur verzaubert von nicht verzaubert. Wer stattdessen **Unbekannt** sehen will, schaltet es in den Einstellungen ab;
-- die eigene Ausrüstung prüft sich selbst – beim Login und nach jedem Umziehen, entprellt, damit ein kompletter Ausrüstungswechsel nur eine Prüfung auslöst. Auch das ist abschaltbar und wirkt rein lokal, ohne Gildenrang;
+- die eigene Ausrüstung prüft sich beim Login und nach jedem Umziehen automatisch, entprellt, damit ein kompletter Ausrüstungswechsel nur eine Prüfung auslöst;
+- jeder Addon-Client stellt diesen kompakten Rohdaten-Snapshot ohne Schalter im Hintergrund der Gilde bereit. Andere Clients bewerten ihn mit dem aktuellen Regelsatz und müssen diesen Spieler nicht zusätzlich inspecten;
+- synchronisiert werden ausschließlich Slot, Gegenstands-ID, Verzauberungs-ID und Zahl leerer Sockel. Fertige Bewertungen, Tooltiptexte und Inventarinhalte werden nicht übertragen;
 - **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück;
 - gespeichert und geteilt wird nur die Verzauberungs-ID mit ihrer Stufe – den Namen löst jeder Client selbst in seiner Sprache auf;
 - den Regelsatz dürfen nur Ränge mit Einstellungsrecht ändern, er gilt gildenweit und wirkt sofort auf alle gespeicherten Prüfungen;
@@ -100,7 +102,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 9. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
 10. Unter **Mitgliederpflege** – mit freigegebenem Gildenrang – Abmeldungen und Inaktivitätsvorschläge prüfen sowie Inaktivitätsgrenze und geschützte Ränge festlegen.
 11. Unter **Raidauswertung** vor dem Raid **Sitzung starten** und danach **Sitzung beenden**. Offiziere außerhalb des Raids holen sich die Auswertung über **Auswertung anfordern**.
-12. Unter **Ausrüstung** vor dem Raid **Gruppe prüfen**, um fehlende Verzauberungen und leere Sockel zu finden. Die eigene Ausrüstung prüft sich von selbst; **Gruppe prüfen** bleibt bewusst ein Klick, weil dabei für jeden Teilnehmer eine Inspect-Anfrage anfällt.
+12. Unter **Ausrüstung** stehen Daten von Addon-Nutzern automatisch bereit. **Gruppe prüfen** ist nur noch der manuelle Rückfall für Teilnehmer ohne frischen Addon-Snapshot; bereits synchronisierte Spieler werden dabei nicht erneut inspectet.
 
 Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fenstertitel, und abweichende Datenversionen werden in der Gildenübersicht ausgewiesen.
 
@@ -115,7 +117,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.2 und das Addon bei 0.9.18; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.2 und das Addon bei 0.9.19; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 
@@ -157,6 +159,6 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 
 ## Gespeicherte Daten
 
-Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter- und Werkstattprofile sowie das Gildenprofil mit Berechtigungen, Antwortvorlagen, Pflegeentscheidungen und Verzauberungsregeln ausschließlich innerhalb der eigenen Gilde synchronisiert. Fertige Raidauswertungen laufen nur über Raid-, Gruppen- oder gezielte Flüsternachrichten.
+Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter-, Ausrüstungs- und Werkstattprofile sowie das Gildenprofil mit Berechtigungen, Antwortvorlagen, Pflegeentscheidungen und Verzauberungsregeln ausschließlich innerhalb der eigenen Gilde synchronisiert. Fertige Raidauswertungen laufen nur über Raid-, Gruppen- oder gezielte Flüsternachrichten.
 
 Raidstatistik, Consumable-Auswertung, Gear-Audit und Mitgliederpflege sind umgesetzt. Verbleibende Datenpflege, bekannte Grenzen und spätere Ausbaustufen stehen in [ROADMAP.md](ROADMAP.md).

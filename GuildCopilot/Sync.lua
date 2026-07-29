@@ -665,6 +665,9 @@ function GC.Sync:ReceiveVersion(fields, sender)
         C_Timer.After(0.5 + math.random() * spread, function()
             self:ReplyWithProfile()
         end)
+        if GC.GearAudit then
+            GC.GearAudit:ReplyWithEquipmentSnapshot()
+        end
     end
 end
 
@@ -779,12 +782,18 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- in jedem P-, W-, G- und GQ-Paket, sodass sie trotzdem als Addon-Nutzer
     -- mit abweichender Version sichtbar werden.
     local messageType, messageSchema = message:match("^(%a+)|(%d+)")
-    if messageType == "P" or messageType == "W" or messageType == "G" or messageType == "GQ" then
+    if messageType == "P" or messageType == "W" or messageType == "G"
+        or messageType == "GQ" or messageType == "E" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
     if message:sub(1, 2) == "G|" then
         self:ReceiveGuildProfileChunk(message, sender)
+        return
+    elseif message:sub(1, 2) == "E|" then
+        if GC.GearAudit then
+            GC.GearAudit:ReceiveEquipmentChunk(message, sender)
+        end
         return
     elseif message == ("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) then
         if GC.RaidMonitor then

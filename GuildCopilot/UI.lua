@@ -1133,33 +1133,25 @@ function GC.UI:BuildSettingsPage()
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
     page.minimapToggle.text:SetWidth(260)
 
-    local gearCard = CreateCard(content, "Ausrüstung – Automatik")
+    local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
     gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
-    CreateLabel(gearCard, "Beides wirkt nur lokal für dich und braucht keinen Gildenrang.", {
+    CreateLabel(gearCard,
+        "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
         width = 716,
         height = 18,
     }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -44)
-
-    page.gearAutoSelfToggle = CreateToggle(gearCard, "Eigene Ausrüstung selbst prüfen", function(checked)
-        GC.DB:GetSettings().gearAudit.auditSelf = checked
-        if checked then
-            GC.GearAudit:QueueSelfAudit(1)
-        end
-    end)
-    page.gearAutoSelfToggle:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -70)
-    page.gearAutoSelfToggle.text:SetWidth(290)
 
     page.gearAcceptToggle = CreateToggle(gearCard, "Vorhandene Verzauberung gilt als in Ordnung", function(checked)
         GC.DB:GetSettings().gearAudit.acceptUnratedEnchants = checked
         GC.GearAudit:ReapplyEnchantRules()
         GC.UI:RefreshGear()
     end)
-    page.gearAcceptToggle:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 385, -70)
-    page.gearAcceptToggle.text:SetWidth(310)
+    page.gearAcceptToggle:SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -70)
+    page.gearAcceptToggle.text:SetWidth(360)
 
-    CreateLabel(gearCard, "Ohne den zweiten Schalter bleibt jede nicht bewertete Verzauberung \"Unbekannt\"."
+    CreateLabel(gearCard, "Ohne diesen Schalter bleibt jede nicht bewertete Verzauberung \"Unbekannt\"."
         .. " Er bewertet keine Qualität, er unterscheidet nur verzaubert von nicht verzaubert.", {
         muted = true,
         width = 716,
@@ -1223,7 +1215,6 @@ function GC.UI:RefreshSettings()
     SetToggle(page.captureDuringSearchToggle, settings.captureOnlyDuringSearch)
     SetToggle(page.watchChannelToggle, settings.watchRecruitmentTriggers)
     SetToggle(page.minimapToggle, not settings.minimap.hidden)
-    SetToggle(page.gearAutoSelfToggle, GC.GearAudit:AuditsSelfAutomatically())
     SetToggle(page.gearAcceptToggle, GC.GearAudit:AcceptsUnratedEnchants())
     local selectedSoundName = GC.SuccessSoundOptions[1].name
     for _, sound in ipairs(GC.SuccessSoundOptions) do
@@ -3970,7 +3961,10 @@ function GC.UI:RefreshGear()
     page.gearSlotEmpty:SetShown(selected == nil)
     if selected then
         local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (selected.inspectedAt or 0)) / 60))
-        page.gearHeadline:SetText((selected.source == "SELF" and "Eigene Ausrüstung" or "Inspect")
+        local sourceLabel = selected.source == "SELF" and "Eigene Ausrüstung"
+            or selected.source == "SYNC" and "Addon-Abgleich"
+            or "Inspect"
+        page.gearHeadline:SetText(sourceLabel
             .. "  •  vor " .. ageMinutes .. " Min.  •  "
             .. (selected.specKey and GC.GearAudit:DescribeSpec(selected.specKey)
                 or "|cffffb840Spec unbekannt|r"))

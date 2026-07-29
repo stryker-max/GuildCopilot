@@ -23,7 +23,6 @@ local DEFAULTS = {
         -- aendert nur, wann geprueft und wie eine unbewertete Verzauberung
         -- angezeigt wird, nie was tatsaechlich in der Ausruestung steckt.
         gearAudit = {
-            auditSelf = true,
             acceptUnratedEnchants = true,
         },
         channels = {
@@ -112,6 +111,9 @@ GC.DB = {}
 function GC.DB:Initialize()
     local previousSchema = type(GuildCopilotDB) == "table" and tonumber(GuildCopilotDB.schemaVersion) or 0
     GuildCopilotDB = GC.Util.MergeDefaults(GuildCopilotDB, DEFAULTS)
+    -- Die Selbstprüfung und ihr Gildenabgleich sind seit 0.9.19 fester
+    -- Hintergrunddienst. Ein alter lokaler Schalter darf sie nicht abschalten.
+    GuildCopilotDB.settings.gearAudit.auditSelf = nil
     if GuildCopilotDB.settings.successSoundKey == "UI_GROUP_FINDER_RECEIVE_APPLICATION" then
         GuildCopilotDB.settings.successSoundKey = "GROUP_FINDER"
     end

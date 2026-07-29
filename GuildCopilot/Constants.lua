@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.18",
+    VERSION = "0.9.19",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -22,6 +22,7 @@ GC.Capabilities = {
     "membercare",
     "raidmonitor",
     "gearaudit",
+    "gearsync",
     "wclimport",
 }
 

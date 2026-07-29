@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.18",
+  "## Version: 0.9.19",
 ];
 
 for (const entry of requiredMetadata) {
@@ -175,6 +175,9 @@ const requiredImplementations = [
   ["Auswertung über Raid- und Flüsterkanal", /DistributeSummary/],
   ["Anwesenheitszeit", /presentSince/],
   ["Gear Audit über die Inspect-API", /function GC\.GearAudit:StartRaidScan/],
+  ["automatischer Ausrüstungsabgleich", /function GC\.GearAudit:QueueEquipmentSnapshot/],
+  ["Ausrüstungs-Rohdaten statt synchronisierter Bewertung", /function GC\.GearAudit:BuildSyncedAudit/],
+  ["Inspect-Rückfall überspringt synchronisierte Daten", /function GC\.GearAudit:HasFreshSyncedAudit/],
   ["Verzauberungen und Sockel je Slot", /function GC\.GearAudit:BuildAudit/],
   ["versionierter Regelsatz", /GC\.EnchantRuleSet/],
   ["umschaltbare Behandlung unbewerteter Verzauberungen", /AcceptsUnratedEnchants/],
@@ -220,6 +223,9 @@ if (allSource.includes("RefreshOverview")) {
 }
 
 const uiSource = fs.readFileSync(path.join(root, "UI.lua"), "utf8");
+if (uiSource.includes("gearAutoSelfToggle") || uiSource.includes("Eigene Ausrüstung selbst prüfen")) {
+  throw new Error("Der feste Ausrüstungs-Hintergrundabgleich ist noch abschaltbar.");
+}
 const settingsPosition = uiSource.indexOf('{ key = "SETTINGS"');
 const statisticsPosition = uiSource.indexOf('{ key = "STATISTICS"');
 if (settingsPosition < statisticsPosition) {

@@ -1021,8 +1021,9 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.18", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.19", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
+assert(announcement:find("gearsync", 1, true), "Der automatische Ausrüstungsabgleich fehlt im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
 
@@ -1406,8 +1407,29 @@ assert(addon.GearAudit:CountEmptySockets(TOOLTIP_SOCKETS, 0) == 0,
     "Ein Gegenstand ohne Sockel meldet trotzdem leere Sockel")
 
 inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
+local sentBeforeOwnGear = #sentAddon
 local selfAudited, selfMessage = addon.GearAudit:AuditSelf()
 assert(selfAudited == true, "Die eigene Ausrüstung wurde nicht geprüft")
+local ownEquipmentMessages = {}
+for messageIndex = sentBeforeOwnGear + 1, #sentAddon do
+    local message = sentAddon[messageIndex][2]
+    if message:sub(1, 2) == "E|" then
+        ownEquipmentMessages[#ownEquipmentMessages + 1] = message
+        assert(#message <= 255, "Ein Ausrüstungspaket überschreitet das Addon-Nachrichtenlimit")
+    end
+end
+assert(#ownEquipmentMessages > 0,
+    "Die automatisch geprüfte eigene Ausrüstung wurde nicht im Hintergrund bereitgestellt")
+local sentAfterOwnGear = #sentAddon
+addon.GearAudit:AuditSelf()
+assert(#sentAddon == sentAfterOwnGear,
+    "Ein unveränderter Ausrüstungsstand wurde ohne Anlass erneut übertragen")
+assert(addon.GearAudit:ReplyWithEquipmentSnapshot() == true and #sentAddon > sentAfterOwnGear,
+    "Eine automatische Handshake-Antwort stellt den aktuellen Ausrüstungsstand nicht bereit")
+local sentAfterEquipmentReply = #sentAddon
+assert(addon.GearAudit:ReplyWithEquipmentSnapshot() == false
+    and #sentAddon == sentAfterEquipmentReply,
+    "Ausrüstungsantworten auf Handshakes werden nicht gedrosselt")
 assert(addon.GearAudit.status ~= "", "Nach der Eigenprüfung steht der Status weiter auf leer")
 local ownAudit = addon.GearAudit:GetAudit("Tester")
 assert(ownAudit ~= nil, "Die eigene Prüfung wurde nicht gespeichert")
@@ -1501,6 +1523,53 @@ assert(healerAudit.missingEnchants == 1, "Die fehlende Verzauberung des Geprüft
 assert(addon.GearAudit:GetAudit("Schurke") == nil,
     "Ein nicht erreichbarer Spieler wurde trotzdem gespeichert")
 timerDelayThreshold = math.huge
+
+-- Ein Addon-Nutzer liefert seine eigenen Messwerte automatisch. Der Empfänger
+-- bewertet sie lokal und ein späterer Gruppenlauf inspectet ihn nicht erneut.
+currentTime = currentTime + 1
+local remoteSnapshot = addon.Util.DeepCopy(addon.GearAudit:GetAudit("Tester"))
+remoteSnapshot.name = "Heiler"
+remoteSnapshot.classFile = "PRIEST"
+remoteSnapshot.specKey = "PRIEST:2"
+remoteSnapshot.inspectedAt = currentTime
+local remoteMessages = addon.GearAudit:BuildEquipmentMessages(remoteSnapshot)
+assert(#remoteMessages > 0, "Der kompakte Ausrüstungs-Snapshot wurde nicht erzeugt")
+local remotePayloadParts = {}
+for _, message in ipairs(remoteMessages) do
+    assert(#message <= 255, "Ein empfangbares Ausrüstungspaket ist zu lang")
+    remotePayloadParts[#remotePayloadParts + 1] =
+        message:match("^E|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+    addon.Sync:OnMessage("GuildCopilot", message, "GUILD", "Heiler-Realm")
+end
+local syncedHealer = addon.GearAudit:GetAudit("Heiler")
+assert(syncedHealer and syncedHealer.source == "SYNC",
+    "Der automatisch bereitgestellte Ausrüstungs-Snapshot wurde nicht gespeichert")
+assert(syncedHealer.specKey == "PRIEST:2",
+    "Die Spec des bereitgestellten Ausrüstungs-Snapshots fehlt")
+assert(syncedHealer.slots[1].itemID == 1000 and syncedHealer.slots[1].enchantID == 2564,
+    "Die kompakten Slot-Messwerte wurden beim Empfang verändert")
+
+local syncedAt = syncedHealer.inspectedAt
+local malformedAccepted = addon.GearAudit:ReceiveEquipmentChunk(
+    "E|7|kaputt|1|1|ES|PRIEST|PRIEST:2|" .. currentTime .. "|1:0:99:0",
+    "Heiler-Realm")
+assert(malformedAccepted == false and addon.GearAudit:GetAudit("Heiler").inspectedAt == syncedAt,
+    "Ein unvollständiger oder widersprüchlicher Ausrüstungs-Snapshot wurde übernommen")
+local extraFieldAudit = addon.GearAudit:DecodeEquipmentPayload(
+    table.concat(remotePayloadParts) .. "|unerwartet", "Heiler-Realm")
+assert(extraFieldAudit == nil and addon.GearAudit:GetAudit("Heiler").inspectedAt == syncedAt,
+    "Ein Ausrüstungspaket mit unerwarteten Feldern wurde übernommen")
+
+raidRoster = { { "Tester", 2, "HUNTER" }, { "Heiler", 1, "PRIEST" } }
+unitNames.raid1 = "Heiler"
+unitNames.raid2 = "Schurke"
+inspectableUnits.raid2 = false
+local fallbackStarted = addon.GearAudit:StartRaidScan()
+assert(fallbackStarted == true, "Der Inspect-Rückfall ließ sich nicht starten")
+assert(addon.GearAudit.shared == 1 and addon.GearAudit.completed == 0 and addon.GearAudit.skipped == 1,
+    "Frische Addon-Daten wurden im Gruppenlauf nicht statt eines Inspect verwendet")
+assert(addon.GearAudit.status:find("über Addon%-Daten"),
+    "Die Oberfläche nennt die automatisch verwendeten Ausrüstungsdaten nicht")
 
 -- Die Verzauberung wird aus dem Tooltip gelesen, nicht aus einer eigenen
 -- Datenbank: die Zeile, die ohne Verzauberung fehlt, ist der Name.
@@ -1690,6 +1759,9 @@ assert(gearPage.gearSlotRows[1].verdict.value == "Solide",
 GuildCopilotDB.settings.editorRecoveryAvailable = false
 GuildCopilotDB.guilds["Altgilde@Realm"] = {}
 addon.DB:Initialize()
+assert(addon.DB:GetSettings().gearAudit.auditSelf == nil
+    and addon.GearAudit:AuditsSelfAutomatically() == true,
+    "Eine alte lokale Einstellung kann den festen Hintergrundabgleich noch abschalten")
 assert(GuildCopilotDB.guilds["Altgilde@Realm"].editorRecoveryAvailable == false,
     "Bereits verbrauchte Wiederherstellung wurde bei der Migration nicht übernommen")
 assert(GuildCopilotDB.settings.editorRecoveryAvailable == nil,
