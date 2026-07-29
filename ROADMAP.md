@@ -130,7 +130,7 @@ Offen und bewusst noch nicht umgesetzt:
 - Live- und WCL-Daten werden getrennt gekennzeichnet und nicht doppelt gezählt;
 - private Reports nur nach einer späteren ausdrücklichen OAuth-Benutzerfreigabe.
 
-Umgesetzt: Der Companion liest je Report Kampfabschnitte, Teilnahme, Anwesenheitszeit, Tode, Interrupts, Dispels und Verbrauchsgegenstände und exportiert sie im Format `GCPWCL2`. Das Addon legt jede Nachanalyse als eigene Auswertung mit der Quelle **Warcraft Logs** ab. Live-, Sync- und Logs-Daten tragen unterschiedliche Kennungen und können sich gegenseitig nicht überschreiben – eine Auswertung anderer Quelle wird beim Speichern abgelehnt statt vermischt.
+Umgesetzt: Der Companion liest je Report Kampfabschnitte, Teilnahme, Anwesenheitszeit, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände und exportiert sie im Format `GCPWCL3`. Das Addon legt jede Nachanalyse als eigene Auswertung mit der Quelle **Warcraft Logs** ab. Live-, Sync- und Logs-Daten tragen unterschiedliche Kennungen und können sich gegenseitig nicht überschreiben – eine Auswertung anderer Quelle wird beim Speichern abgelehnt statt vermischt.
 
 Verbrauchsgegenstände überträgt der Companion als reine `Spell-ID:Anzahl`-Paare. Die Zuordnung zur Kategorie trifft ausschließlich `GC.Consumables` im Addon, damit es nur eine maßgebliche Tabelle gibt; unbekannte IDs werden ignoriert. Dauerhafte Buffs zählen wie in der Livesitzung einmal je Spieler und Sitzung.
 
@@ -179,13 +179,17 @@ Offen: Private Reports bleiben bewusst ausgeschlossen; dafür wäre die ausdrüc
 
 Umgesetzt: Erfassung über die Inspect-API mit Warteschlange, Reichweiten- und Erreichbarkeitsprüfung, Auswertung je Slot aus dem Item-Link, Zählung fehlender Verzauberungen und leerer Sockel, eigene Ausrüstung auch ohne Gruppe, versionierter Regelsatz mit Regel, Quelle und Datenalter je Einstufung sowie eine eigene Seite ohne Gesamtnote.
 
-Offen und bewusst noch nicht umgesetzt:
+Zusätzlich umgesetzt:
 
 - Der Name jeder vorhandenen Verzauberung wird inzwischen aus dem WoW-Tooltip gelesen: das Addon baut den Tooltip einmal mit und einmal mit auf 0 gesetzter Verzauberung auf und nimmt die Zeile, die nur in der ersten Fassung vorkommt. Das ist sprachunabhängig und braucht keine ID-Datenbank. Lässt sich die Vergleichsfassung nicht aufbauen, wird bewusst nichts gemeldet, damit nie der Gegenstandsname als Verzauberung erscheint.
 - Der Regelsatz wird jetzt in der Gilde selbst gepflegt: Ein Klick auf eine Slotzeile stuft die erkannte Verzauberung ein, gespeichert wird die ID mit ihrer Stufe, geteilt wird sie gildenweit über das Gildenprofil. Damit sind Empfehlungen wie von wowtbc.gg als IDs und eigene Regeln versioniert statt als abgeschriebener Guide-Text – der externe Guide bleibt die menschliche Vorlage, die Daten entstehen im Client.
-- Der mitgelieferte statische Regelsatz für **Optimal**, **Solide** und **Verbesserbar** ist weiterhin leer. Die Enchant-IDs müssen aus einer belegbaren Quelle übernommen werden; bis dahin werden vorhandene Verzauberungen als **Unbekannt** ausgewiesen und nie als schlecht gewertet. Fehlende Verzauberungen und leere Sockel erkennt der Audit auch ohne Regeln exakt.
+- Bewertungen lassen sich je Spec pflegen. Fehlt dort eine Regel, greift die allgemeine Bewertung derselben Enchant-ID für alle Specs.
+
+Offen und bewusst noch nicht umgesetzt:
+
+- Der mitgelieferte statische Regelsatz für **Optimal**, **Solide** und **Verbesserbar** ist weiterhin leer. Die Enchant-IDs müssen aus einer belegbaren Quelle übernommen werden. Standardmäßig gilt eine vorhandene, aber unbewertete Verzauberung lediglich als „in Ordnung“; diese lokale Automatik lässt sich abschalten, dann erscheint **Unbekannt**. Fehlende Verzauberungen und leere Sockel erkennt der Audit in beiden Fällen exakt.
 - Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets fehlen noch.
-- Regeln nach Spec und Content-Phase sind vorbereitet (Rolle und Slot werden bereits ausgewertet), aber ohne Regeldaten noch nicht wirksam.
+- Content-Phasen sowie zusätzliche Ausnahmen nach Slot oder Rolle sind für gildeneigene Regeln noch nicht abgebildet.
 - Die Ergebnisse bleiben lokal bei dem, der geprüft hat. Ob sie zusätzlich wie die Raidauswertung über den Addon-Kanal an Offiziere verteilt werden sollen, ist weiterhin offen.
 
 Ergänzt: Die Funde werden als lesbare Sätze mit Slotnamen aufbereitet statt als nackte Zahlen, eine Kopfzeile fasst alle geprüften Spieler zusammen, und jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort selbst auslösen.
@@ -194,7 +198,7 @@ Die Guides von [wowtbc.gg](https://wowtbc.gg/) führen spec-spezifische Consumab
 
 ## 0.7 – Mitgliederpflege
 
-Grundlage seit 0.4.4 umgesetzt: Abmeldungen, Inaktivitätsgrenze, Rangschutz und vorsichtige Prüfvorschläge. Für dieses Ausbaustadium verbleiben:
+Grundlage seit 0.4.4 umgesetzt: Abmeldungen, Inaktivitätsgrenze, Rangschutz und vorsichtige Prüfvorschläge. Der vollständig umgesetzte Zielumfang:
 
 - frei wählbare Inaktivitätsgrenze, zum Beispiel 30, 60 oder 90 Tage;
 - letzte Onlinezeit aus dem Gildenroster;
@@ -256,18 +260,30 @@ Verworfen: Reiter im Fenster. Ein `TabControl` zeichnet seinen Rahmen in den Sys
 
 Offen: Der Live-Abruf gegen die WCL-API ist aus dem Installer heraus noch nicht gelaufen, nur die Auswertung ist belegt. Ein Dateisymbol für die .exe fehlt; das Fenstersymbol kommt aus dem eingebetteten Logo. `Start-WCL-Import.cmd` und der Companion bleiben vorerst als Rückfallebene erhalten.
 
-## Offene Punkte (Stand 0.9.17)
+## 0.9.18 – Stabilität und Abgleich
 
-Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und Erprobung im Spiel:
+- WCL-Links werden in Addon, Companion und Installer auf echte `warcraftlogs.com`-Hosts und vollständige Pfade begrenzt;
+- Ereignisse vom Trash bleiben für Kennzahlen erhalten, erzeugen aber keine zusätzlichen Teilnehmer ohne Encounter-Anwesenheit;
+- UTF-8-Kürzung, beschädigte SavedVariables, alte Postfacheinträge und unvollständige Sync-Transfers sind abgesichert;
+- abgelaufene Zurückstellungen blockieren die Mitgliederpflege nicht mehr;
+- Installer-Selbstupdate, Autostart, Laufwerkserkennung und Zwischenablage-Rückmeldung behandeln Fehler ohne falsche Erfolgsmeldung;
+- README, Roadmap, Ingame-Hilfe und beide Installationswege sind auf denselben Funktionsstand gebracht.
+
+## Offene Punkte (Stand 0.9.18)
+
+Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 
 - **Enchant-Regelsatz**: wird seit 0.8.1 in der Gilde selbst gepflegt; ausgeliefert wird eine leere Tabelle. wowtbc.gg und Wowhead lassen sich nicht automatisch auslesen (beide antworten mit HTTP 403), und die Guides nennen nur englische Namen, während der Item-Link eine Enchant-ID führt.
-- **Regelsatz ohne Klassenbezug**: Eine gildeneigene Bewertung hängt allein an der Enchant-ID – ohne Slot, ohne Rolle, ohne Klasse. Wer eine Verzauberung als Optimal einstuft, tut das für jeden in der Gilde. In der Praxis fällt das selten auf, weil die meisten Verzauberungen ohnehin nur von einer Rolle getragen werden; bei generischen Verzauberungen, die mehrere Rollen unterschiedlich bewerten, trifft es aber zu. Das Format der mitgelieferten Regelliste kennt `slots` und `roles` bereits, der gildeneigene Weg nutzt sie noch nicht. Klassen kennt bisher keiner von beiden.
-- **Consumable-Spell-IDs**: Ausgangsbestand aus dem Gedächtnis, nicht gegen echte Logs geprüft. Essen fehlt vollständig, weil die „Sattgegessen“-IDs je Gericht abweichen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
+- **Regelsatz ohne Phase und Ausnahmen**: Gildeneigene Bewertungen können je Spec oder allgemein gepflegt werden. Content-Phase, Farm-/Widerstandssets sowie zusätzliche Regeln nach Slot oder Rolle fehlen weiterhin.
+- **Consumable-Spell-IDs**: Der Kernbestand wurde gegen einen echten SSC/TK-Report geprüft, ist damit aber nicht vollständig. Essen fehlt in der WCL-Auswertung, weil die „Sattgegessen“-IDs je Gericht abweichen; live erkennt das Addon die Aura zusätzlich am Namen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
 - **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
 - **Companion-Abfragen für die WCL-Nachanalyse**: seit 0.9.17 gegen echte Reports gelaufen und dabei viermal korrigiert; Einzelheiten oben unter „Nachanalyse aus Warcraft Logs". Erprobt ist bislang ein einzelner SSC/TK-Report – Karazhan, Gruul und Magtheridon sind noch nicht gegengeprüft.
 - **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen; Ergebnisse bleiben lokal bei dem, der geprüft hat. Automatisch prüft sich seit 0.9.5 nur die eigene Ausrüstung – **Gruppe prüfen** bleibt ein Klick, weil ein selbsttätiger Raidscan für jeden Teilnehmer eine Inspect-Anfrage auslöst.
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
+- **Profilbestätigung**: Erfolg und Validierungsfehler erscheinen derzeit im Chat; ein dauerhaft sichtbarer Status direkt am Profil sowie ein eigener, vom Bewerberton getrennter Bestätigungssound fehlen.
+- **Postfach-Zeitstempel und Deduplizierung**: Empfangszeiten werden gespeichert und gleiche Namen/GUIDs grundlegend zusammengeführt. Datum/Uhrzeit werden noch nicht angezeigt; eine kanonische Realm-Zuordnung und eine einsehbare, zeitlich begrenzte Ignorierliste nach dem Löschen fehlen.
+- **Lokale Combat-Log-Nachanalyse**: Live-Sitzungen und der optionale WCL-Import sind vorhanden. Ein externer Offline-Import aus `_anniversary_/Logs/WoWCombatLog.txt`, ein gemeinsamer Sitzungsfingerabdruck zur Quell-Deduplizierung sowie `CombatantInfo` als zweite Gear-Quelle sind noch nicht umgesetzt.
 
 ## Datenschutz und Fairness
 
@@ -275,6 +291,6 @@ Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und E
 - Herkunft jeder Statistik anzeigen: **Live**, **Addon-Profil**, **Inspect** oder **Warcraft Logs**;
 - keine heimliche Chat-, Tastatur-, Speicher- oder Prozesseingabe;
 - keine automatische Werbung, Einladung oder Entfernung von Mitgliedern;
-- konfigurierbare Aufbewahrungszeit und Löschfunktion;
+- zeitlich begrenzte Aufbewahrung und gezielte Löschfunktionen;
 - keine Charakterbewertung ohne sichtbare Einzelkriterien;
 - Officersichten und sensible Notizen nicht über ungeschützte Gildenkanäle synchronisieren.

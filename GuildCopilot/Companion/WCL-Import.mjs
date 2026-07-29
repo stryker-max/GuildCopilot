@@ -176,7 +176,8 @@ export function collectPlayers(root, reportTime, players) {
         .filter(Boolean);
       if (specs.length) {
         const safeName = sanitize(value.name);
-        const player = players.get(safeName) || {
+        const playerKey = safeName.toLowerCase();
+        const player = players.get(playerKey) || {
           name: safeName,
           classFile,
           specs: new Map(),
@@ -184,7 +185,7 @@ export function collectPlayers(root, reportTime, players) {
         for (const specKey of specs) {
           player.specs.set(specKey, Math.max(player.specs.get(specKey) || 0, reportTime));
         }
-        players.set(safeName, player);
+        players.set(playerKey, player);
       }
     }
     Object.values(value).forEach(visit);
@@ -318,14 +319,11 @@ export function buildSessionLines(code, report, aggregates) {
   const dispels = countEventsByActor(aggregates.dispels, "sourceID", new Set(["dispel"]));
   const consumables = collectConsumables(aggregates.casts, aggregates.buffs);
 
-  const actorIDs = new Set([
-    ...seconds.keys(),
-    ...deaths.keys(),
-    ...resurrects.keys(),
-    ...interrupts.keys(),
-    ...dispels.keys(),
-    ...consumables.keys(),
-  ]);
+  // Ereignisse werden absichtlich über den ganzen Report gelesen. In die
+  // Sitzung gehören trotzdem nur Akteure, die an mindestens einem Encounter
+  // teilgenommen haben; sonst würden Trash-Helfer und Zuschauer als Spieler
+  // mit null Anwesenheit auftauchen.
+  const actorIDs = new Set(seconds.keys());
   if (!actorIDs.size) return [];
 
   const zone = sanitize(report.zone?.name);
@@ -390,28 +388,38 @@ export function parseTarget(input) {
     return { kind: "report", code: raw, origins: defaultOrigins("") };
   }
 
-  const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
-  if (!url.hostname.endsWith("warcraftlogs.com")) {
+  let url;
+  try {
+    url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    throw new Error("Der Warcraft-Logs-Link ist ungültig.");
+  }
+  if (!["http:", "https:"].includes(url.protocol)
+      || (url.hostname !== "warcraftlogs.com" && !url.hostname.endsWith(".warcraftlogs.com"))) {
     throw new Error("Der Link gehoert nicht zu Warcraft Logs.");
   }
   const origins = defaultOrigins(url.hostname);
 
-  const reportMatch = url.pathname.match(/\/reports\/([a-zA-Z0-9]+)/);
+  const reportMatch = url.pathname.match(/^\/reports\/([a-zA-Z0-9]+)\/?$/);
   if (reportMatch) {
     return { kind: "report", code: reportMatch[1], origins };
   }
 
-  const guildIDMatch = url.pathname.match(/\/guild\/id\/(\d+)/);
+  const guildIDMatch = url.pathname.match(/^\/guild\/id\/(\d+)\/?$/);
   if (guildIDMatch) {
     return { kind: "guild", guildID: Number(guildIDMatch[1]), origins };
   }
 
-  const guildMatch = url.pathname.match(/\/guild\/([^/]+)\/([^/]+)\/([^/]+)/);
+  const guildMatch = url.pathname.match(/^\/guild\/([^/]+)\/([^/]+)\/([^/]+)\/?$/);
   if (!guildMatch) {
     throw new Error("Der Link ist weder eine Warcraft-Logs-Gildenseite noch ein Report.");
   }
   const [, region, serverSlug, encodedName] = guildMatch;
   const decoded = decodeURIComponent(encodedName.replaceAll("+", " "));
+  if (!["eu", "us", "kr", "tw", "cn"].includes(region.toLowerCase())
+      || decoded === "" || /[\/\\\u0000-\u001f]/.test(decoded)) {
+    throw new Error("Der Warcraft-Logs-Gildenlink enthält ungültige Angaben.");
+  }
   const names = [decoded];
   if (decoded.includes("-")) names.push(decoded.replaceAll("-", " "));
   const titled = names[names.length - 1]

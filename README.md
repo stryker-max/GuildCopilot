@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.17
+# Guild Copilot 0.9.18
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -67,7 +67,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück;
 - gespeichert und geteilt wird nur die Verzauberungs-ID mit ihrer Stufe – den Namen löst jeder Client selbst in seiner Sprache auf;
 - den Regelsatz dürfen nur Ränge mit Einstellungsrecht ändern, er gilt gildenweit und wirkt sofort auf alle gespeicherten Prüfungen;
-- eine gildeneigene Bewertung hängt allein an der Enchant-ID – ohne Slot, ohne Rolle, ohne Klasse. Sie gilt damit für jeden in der Gilde gleich;
+- gildeneigene Bewertungen gelten wahlweise für eine konkrete Spec; fehlt dort eine Regel, greift die allgemeine Bewertung derselben Enchant-ID für alle Specs;
 - der Name der Verzauberung kommt aus dem WoW-Tooltip selbst und steht dadurch ohne gepflegte Datenbank im Klartext da („Verzaubert: Außergewöhnliche Gesundheit“), in der Sprache des Clients;
 - es gibt bewusst keine Gesamtnote je Spieler;
 - die Funde stehen als lesbare Sätze da statt als nackte Zahlen: „2 fehlende Verzauberungen: Kopf, Schulter“, „3 leere Sockel: Brust, Hände“;
@@ -87,7 +87,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 ## Installation
 
 0. Der einfachste Weg unter Windows: **`GuildCopilot-Installer.exe`** starten – zu finden unter [Installer/dist](Installer/dist). Sie erkennt die vorhandenen Spielversionen selbst, lädt das Addon direkt aus diesem Repository, aktualisiert eine vorhandene Fassung und hält sich auch selbst aktuell. Der Warcraft-Logs-Import steckt gleich mit drin.
-1. Ohne die .exe: `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation, ersetzt eine eventuell vorhandene ältere Version und legt das Addon an die richtige Stelle. Wird die Installation nicht gefunden, fragt es nach dem Pfad zum Ordner `_anniversary_`.
+1. Ohne die .exe: `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation und kopiert die neue Fassung über eine eventuell vorhandene, ohne den funktionierenden Ordner vorher zu löschen. Wird die Installation nicht gefunden, fragt es nach dem Pfad zum Ordner `_anniversary_`.
 2. Von Hand: den Ordner `GuildCopilot` in den Addon-Ordner der TBC-Anniversary-Installation kopieren:
    `World of Warcraft/_anniversary_/Interface/AddOns/`
    Danach muss `GuildCopilot.toc` direkt in `AddOns/GuildCopilot/` liegen – ein doppelt verschachtelter Ordner ist der häufigste Installationsfehler.
@@ -115,7 +115,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Der Installer beginnt bei 1.0.0, das Addon steht bei 0.9.17; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.2 und das Addon bei 0.9.18; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 
@@ -143,7 +143,7 @@ Der ältere Weg über `GuildCopilot/Companion/Start-WCL-Import.cmd` funktioniert
 - SucheNachGruppe, Handel und Allgemein müssen bewusst zugeschaltet werden;
 - jedes einzelne Ziel hat mindestens 120 Sekunden lokalen Cooldown;
 - der Text muss nach jeder Änderung erneut bestätigt werden;
-- Gildenprofile werden nur bei Login oder Änderung kompakt synchronisiert;
+- Gildenprofile werden nur bei Login, Änderung oder ausdrücklicher Abfrage kompakt synchronisiert;
 - keine Eingabesimulation, WoW-Speicherzugriffe oder Webzugriffe aus WoW;
 - keine kostenpflichtigen Funktionen, Spendenaufrufe oder Werbung für Waren und Dienstleistungen.
 
@@ -157,6 +157,6 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 
 ## Gespeicherte Daten
 
-Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter- und Werkstattprofile sowie das Gildenprofil mit seinen Berechtigungen und Antwortvorlagen ausschließlich innerhalb der eigenen Gilde synchronisiert.
+Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter- und Werkstattprofile sowie das Gildenprofil mit Berechtigungen, Antwortvorlagen, Pflegeentscheidungen und Verzauberungsregeln ausschließlich innerhalb der eigenen Gilde synchronisiert. Fertige Raidauswertungen laufen nur über Raid-, Gruppen- oder gezielte Flüsternachrichten.
 
-Die geplanten Module für Raidstatistik, Consumable-Auswertung, Gear-Audit und Mitgliederpflege stehen in [ROADMAP.md](ROADMAP.md).
+Raidstatistik, Consumable-Auswertung, Gear-Audit und Mitgliederpflege sind umgesetzt. Verbleibende Datenpflege, bekannte Grenzen und spätere Ausbaustufen stehen in [ROADMAP.md](ROADMAP.md).

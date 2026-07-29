@@ -20,6 +20,10 @@ local MAX_RECORD_BYTES = 165
 local SYNC_INTERVAL = 0.65
 local SYNC_RETRY_DELAY = 1.5
 local MAX_SEND_RETRIES = 5
+local MAX_TRANSFER_PARTS = 300
+local MAX_INCOMING_TRANSFERS = 20
+local INCOMING_TTL = 5 * 60
+local MIN_REQUEST_REPLY_INTERVAL = 30
 
 local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
@@ -417,6 +421,8 @@ function GC.Workshop:QueueProfessionSync(profession)
                 retries = 0,
             }
             self.syncStats.queued = self.syncStats.queued + 1
+        else
+            self.syncStats.failed = self.syncStats.failed + 1
         end
     end
     GC:FireCallback("WORKSHOP_UPDATED")
@@ -504,6 +510,15 @@ end
 function GC.Workshop:ReceiveSync(fields, sender)
     local operation = fields[3]
     if operation == "Q" then
+        local senderKey = GC.Util.NormalizeName(sender)
+        local now = GC.Util.Now()
+        self.requestReplies = self.requestReplies or {}
+        local lastReply = self.requestReplies[senderKey]
+        if senderKey == ""
+            or (lastReply and (now - lastReply) < MIN_REQUEST_REPLY_INTERVAL) then
+            return
+        end
+        self.requestReplies[senderKey] = now
         C_Timer.After(math.random() * 4.5, function()
             self:QueueAllProfessions()
         end)
@@ -516,23 +531,53 @@ function GC.Workshop:ReceiveSync(fields, sender)
     local token = fields[4]
     local part = tonumber(fields[5])
     local total = tonumber(fields[6])
-    local professionKey = fields[7]
-    local professionName = fields[8]
+    local professionKey = fields[7] or ""
+    local professionName = fields[8] or ""
     local payload = fields[9] or ""
     if not token or not part or not total or total < 1 or part < 1 or part > total
+        or total > MAX_TRANSFER_PARTS
+        or #token > 40 or #professionKey > 80 or #professionName > 80
+        or #payload > MAX_PAYLOAD_BYTES
         or professionKey == "" or professionName == "" then
         return
     end
 
     local senderKey = GC.Util.NormalizeName(sender)
+    if senderKey == "" then
+        return
+    end
+    local now = GC.Util.Now()
+    local incomingCount = 0
+    for key, transfer in pairs(self.incoming) do
+        if (now - (transfer.receivedAt or 0)) > INCOMING_TTL then
+            self.incoming[key] = nil
+        else
+            incomingCount = incomingCount + 1
+        end
+    end
+
     local incomingKey = senderKey .. "|" .. token .. "|" .. professionKey
-    local incoming = self.incoming[incomingKey] or {
-        parts = {},
-        received = 0,
-        total = total,
-        professionKey = professionKey,
-        professionName = professionName,
-    }
+    local incoming = self.incoming[incomingKey]
+    if incoming and (incoming.total ~= total
+        or incoming.professionKey ~= professionKey
+        or incoming.professionName ~= professionName) then
+        self.incoming[incomingKey] = nil
+        return
+    end
+    if not incoming then
+        if incomingCount >= MAX_INCOMING_TRANSFERS then
+            return
+        end
+        incoming = {
+            parts = {},
+            received = 0,
+            total = total,
+            professionKey = professionKey,
+            professionName = professionName,
+            receivedAt = now,
+        }
+    end
+    incoming.receivedAt = now
     if not incoming.parts[part] then
         incoming.parts[part] = payload
         incoming.received = incoming.received + 1

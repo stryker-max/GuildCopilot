@@ -49,6 +49,9 @@ const aggregates = {
   interrupts: [
     { type: "interrupt", sourceID: 2 },
     { type: "interrupt", sourceID: 2 },
+    // Dieser Akteur war nur auf Trash aktiv und darf keine Teilnehmerzeile
+    // mit null Encounter-Anwesenheit erzeugen.
+    { type: "interrupt", sourceID: 3 },
   ],
   dispels: [{ type: "dispel", sourceID: 1 }],
   casts: [
@@ -144,12 +147,15 @@ const playerDetails = {
 };
 
 const players = collectPlayers(playerDetails, report.endTime, new Map());
+collectPlayers({
+  dps: [{ name: "nexarius", type: "Mage", icon: "Mage-Arcane", specs: [{ spec: "Arcane" }] }],
+}, report.endTime + 1, players);
 const profileLines = buildProfileLines(players);
 
 assert.deepEqual(
   profileLines,
   [
-    "Nexarius;MAGE;MAGE:3;MAGE:2",
+    "Nexarius;MAGE;MAGE:1;MAGE:3",
     "Sanitas;PRIEST;PRIEST:2;",
     "Thulgor;WARRIOR;WARRIOR:3;",
   ],
@@ -179,6 +185,21 @@ const bareCode = parseTarget("aBcD1234efGH5678");
 assert.equal(bareCode.kind, "report");
 
 assert.throws(() => parseTarget("https://example.com/guild/eu/x/y"), /Warcraft Logs/);
+assert.throws(
+  () => parseTarget("https://evilwarcraftlogs.com/guild/eu/x/y"),
+  /Warcraft Logs/,
+  "Eine fremde Domain mit passendem Namensende wurde akzeptiert."
+);
+assert.throws(
+  () => parseTarget("https://fresh.warcraftlogs.com/guild/eu/x/y/extra"),
+  /weder|ungültig/,
+  "Ein Link mit zusätzlichem Pfad wurde als Gilde akzeptiert."
+);
+assert.throws(
+  () => parseTarget("https://fresh.warcraftlogs.com/guild/xx/x/y"),
+  /ungültige/,
+  "Eine unbekannte Region wurde akzeptiert."
+);
 assert.throws(() => parseTarget(""), /Reportcode/);
 
 assert.deepEqual(

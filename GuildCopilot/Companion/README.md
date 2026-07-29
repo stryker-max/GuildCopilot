@@ -33,7 +33,7 @@ $env:WCL_CLIENT_ID = "deine-client-id"
 $env:WCL_CLIENT_SECRET = "dein-client-secret"
 ```
 
-Node.js 18 oder neuer wird benötigt:
+Node.js 18 oder neuer wird benötigt; `Start-WCL-Import.cmd` prüft die Hauptversion vor dem Abruf:
 
 ```powershell
 node .\WCL-Import.mjs "https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath"
@@ -64,6 +64,8 @@ Mit `--debug` landen alle Rohantworten in `GuildCopilot-WCL-Debug.json` neben de
 ## Was abgefragt wird
 
 Je Report: Kampfabschnitte (nur Encounter, kein Trash), Teilnahme, Anwesenheitszeit, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände. Ausgewertet wird über die Ereignisliste (`events`) und nicht über die aufbereiteten Tabellen: dort steht je Ereignis eine Akteurs-ID und eine Spell-ID, das ist unabhängig von der Tabellenform und damit stabil.
+
+Interrupts, Dispels, Wiederbelebungen und Verbrauchsgegenstände werden über den ganzen Report gezählt, also auch zwischen Bosskämpfen und auf Trash. Als Teilnehmer erscheinen trotzdem ausschließlich Spieler, die in mindestens einem Encounter geführt wurden; Zuschauer oder reine Trash-Akteure erzeugen keine Zeile mit null Anwesenheit.
 
 Zwei Fallstricke der API sind der Grund, warum ältere Fassungen des Companions nie durchliefen:
 

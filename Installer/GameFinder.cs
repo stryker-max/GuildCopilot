@@ -62,12 +62,32 @@ public static class GameFinder
 
         // Viele Installationen liegen nicht unter Programme, sondern direkt auf
         // einer zweiten Platte. Nur vorhandene, feste Laufwerke werden angesehen.
-        foreach (var drive in DriveInfo.GetDrives())
+        DriveInfo[] drives;
+        try
         {
-            if (!drive.IsReady || drive.DriveType != DriveType.Fixed) continue;
+            drives = DriveInfo.GetDrives();
+        }
+        catch
+        {
+            drives = [];
+        }
+        foreach (var drive in drives)
+        {
+            string root;
+            try
+            {
+                if (!drive.IsReady || drive.DriveType != DriveType.Fixed) continue;
+                root = drive.RootDirectory.FullName;
+            }
+            catch
+            {
+                // Kartenleser, verschlüsselte oder gerade getrennte Laufwerke
+                // dürfen die Erkennung der übrigen Installationen nicht stoppen.
+                continue;
+            }
             foreach (var name in names)
             {
-                yield return Path.Combine(drive.RootDirectory.FullName, name);
+                yield return Path.Combine(root, name);
             }
         }
     }

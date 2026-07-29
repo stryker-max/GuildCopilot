@@ -71,9 +71,19 @@ end
 
 function GC.WarcraftLogs:ParseGuildURL(url)
     url = GC.Util.Trim(url)
-    local region, serverSlug, guildSlug = url:match("^https?://[^/]*warcraftlogs%.com/guild/([^/]+)/([^/]+)/([^?#]+)")
+    local region, serverSlug, guildSlug
+    local scheme, host, path = url:match("^([Hh][Tt][Tt][Pp][Ss]?)://([^/]+)(/.*)$")
+    if scheme then
+        host = host:lower()
+        if host ~= "warcraftlogs.com" and not host:match("%.warcraftlogs%.com$") then
+            return nil, "Bitte einen gültigen Warcraft-Logs-Gildenlink einfügen."
+        end
+        local cleanPath = path:match("^([^?#]*)") or ""
+        region, serverSlug, guildSlug =
+            cleanPath:match("^/guild/([^/]+)/([^/]+)/([^/]+)/?$")
+    end
     if not region then
-        region, serverSlug, guildSlug = url:match("^([^/]+)/([^/]+)/(.+)$")
+        region, serverSlug, guildSlug = url:match("^([^/]+)/([^/]+)/([^/?#]+)/?$")
     end
     if not region or not serverSlug or not guildSlug then
         return nil, "Bitte einen gültigen Warcraft-Logs-Gildenlink einfügen."
@@ -82,6 +92,9 @@ function GC.WarcraftLogs:ParseGuildURL(url)
     region = region:lower()
     serverSlug = serverSlug:lower()
     guildSlug = DecodePath(guildSlug:gsub("/$", ""))
+    if guildSlug == "" or guildSlug:find("[/%z\1-\31]") then
+        return nil, "Der Gildenname im Warcraft-Logs-Link ist ungültig."
+    end
     if region ~= "eu" and region ~= "us" and region ~= "kr" and region ~= "tw" and region ~= "cn" then
         return nil, "Die Region im Warcraft-Logs-Link wird nicht unterstützt."
     end
@@ -228,7 +241,6 @@ function GC.WarcraftLogs:Import(text)
     local headerSeen = false
     local importSource = "MANUAL"
     local imported = {}
-    local uniqueCount = 0
     local reportCount = 0
 
     local sessions = {}
@@ -288,9 +300,17 @@ function GC.WarcraftLogs:Import(text)
                         receivedAt = GC.Util.Now(),
                     }
                     PutImportedProfile(imported, name, profile)
-                    uniqueCount = uniqueCount + 1
                 end
             end
+        end
+    end
+
+    local uniqueCount = 0
+    local seenProfiles = {}
+    for _, profile in pairs(imported) do
+        if not seenProfiles[profile] then
+            seenProfiles[profile] = true
+            uniqueCount = uniqueCount + 1
         end
     end
 
@@ -324,17 +344,33 @@ function GC.WarcraftLogs:Import(text)
         data.members = imported
     end
     data.importedAt = GC.Util.Now()
-    data.reportCount = headerSeen and reportCount or 0
+    if headerSeen then
+        data.reportCount = reportCount
+    end
 
     -- Nachanalysen werden als eigene Auswertungen abgelegt und niemals mit
     -- einer Livesitzung verrechnet.
-    local storedSessions = 0
+    local storedSessionIDs = {}
     for _, session in ipairs(sessions) do
-        if #session.participants > 0 and GC.RaidMonitor:StoreSummary(session) then
-            storedSessions = storedSessions + 1
+        if #session.participants > 0 then
+            local stored = GC.RaidMonitor:StoreSummary(session)
+            local current = GC.RaidMonitor:GetSummary(session.id)
+            if stored or (current and current.source == "WCL") then
+                storedSessionIDs[session.id] = true
+            end
         end
     end
-    data.sessionCount = storedSessions
+    local storedSessions = 0
+    for _ in pairs(storedSessionIDs) do
+        storedSessions = storedSessions + 1
+    end
+    local knownWclSessions = 0
+    for _, summary in ipairs(GC.RaidMonitor:GetSummaries()) do
+        if summary.source == "WCL" then
+            knownWclSessions = knownWclSessions + 1
+        end
+    end
+    data.sessionCount = knownWclSessions
 
     GC:FireCallback("WCL_UPDATED")
     GC:FireCallback("ROSTER_UPDATED")

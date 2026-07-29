@@ -228,13 +228,20 @@ function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
     end
 
     local profile = self:Refresh()
-    if raidSpecKey and GC.SpecByKey[raidSpecKey] and GC.SpecByKey[raidSpecKey].classFile == profile.classFile then
-        profile.raidSpecKey = raidSpecKey
+    raidSpecKey = raidSpecKey or profile.raidSpecKey or profile.detectedSpecKey
+    local raidSpec = raidSpecKey and GC.SpecByKey[raidSpecKey]
+    if not raidSpec or raidSpec.classFile ~= profile.classFile then
+        return nil, "Bitte zuerst eine gültige Primär-Spec deiner Klasse auswählen."
     end
+    profile.raidSpecKey = raidSpecKey
+
     if secondarySpecKey
-        and secondarySpecKey ~= profile.raidSpecKey
-        and GC.SpecByKey[secondarySpecKey]
-        and GC.SpecByKey[secondarySpecKey].classFile == profile.classFile then
+        and (secondarySpecKey == profile.raidSpecKey
+            or not GC.SpecByKey[secondarySpecKey]
+            or GC.SpecByKey[secondarySpecKey].classFile ~= profile.classFile) then
+        return nil, "Die Dual-Spec muss zu deiner Klasse passen und sich von der Primär-Spec unterscheiden."
+    end
+    if secondarySpecKey then
         profile.secondarySpecKey = secondarySpecKey
     else
         profile.secondarySpecKey = nil

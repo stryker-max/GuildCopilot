@@ -178,33 +178,65 @@ function GC.Chat:MergeDuplicateLeads()
     local index = 1
     while index <= #inbox do
         local lead = inbox[index]
-        local compareIndex = index + 1
-        while compareIndex <= #inbox do
-            local duplicate = inbox[compareIndex]
-            if SameLead(lead.name, lead.guid, duplicate.name, duplicate.guid) then
-                for _, message in ipairs(duplicate.messages or {}) do
-                    lead.messages[#lead.messages + 1] = message
-                end
-                table.sort(lead.messages, function(left, right)
-                    return (left.receivedAt or 0) < (right.receivedAt or 0)
-                end)
-                while #lead.messages > 20 do
-                    table.remove(lead.messages, 1)
-                end
-                if not tostring(lead.name or ""):find("-", 1, true)
-                    and tostring(duplicate.name or ""):find("-", 1, true) then
-                    lead.name = duplicate.name
-                end
-                lead.guid = lead.guid or duplicate.guid
-                lead.firstSeenAt = math.min(lead.firstSeenAt or math.huge, duplicate.firstSeenAt or math.huge)
-                lead.lastSeenAt = math.max(lead.lastSeenAt or 0, duplicate.lastSeenAt or 0)
-                lead.unread = lead.unread or duplicate.unread
-                table.remove(inbox, compareIndex)
-            else
-                compareIndex = compareIndex + 1
+        if type(lead) ~= "table" then
+            table.remove(inbox, index)
+        else
+            if type(lead.messages) ~= "table" then
+                lead.messages = {}
             end
+            for messageIndex = #lead.messages, 1, -1 do
+                if type(lead.messages[messageIndex]) ~= "table" then
+                    table.remove(lead.messages, messageIndex)
+                end
+            end
+            local compareIndex = index + 1
+            while compareIndex <= #inbox do
+                local duplicate = inbox[compareIndex]
+                if type(duplicate) ~= "table" then
+                    table.remove(inbox, compareIndex)
+                elseif SameLead(lead.name, lead.guid, duplicate.name, duplicate.guid) then
+                    if type(duplicate.messages) ~= "table" then
+                        duplicate.messages = {}
+                    end
+                    for _, message in ipairs(duplicate.messages or {}) do
+                        if type(message) == "table" then
+                            lead.messages[#lead.messages + 1] = message
+                        end
+                    end
+                    table.sort(lead.messages, function(left, right)
+                        return (tonumber(left.receivedAt) or 0) < (tonumber(right.receivedAt) or 0)
+                    end)
+                    while #lead.messages > 20 do
+                        table.remove(lead.messages, 1)
+                    end
+                    if not tostring(lead.name or ""):find("-", 1, true)
+                        and tostring(duplicate.name or ""):find("-", 1, true) then
+                        lead.name = duplicate.name
+                    end
+                    lead.guid = lead.guid or duplicate.guid
+                    local firstSeenAt = tonumber(lead.firstSeenAt)
+                    local duplicateFirstSeenAt = tonumber(duplicate.firstSeenAt)
+                    lead.firstSeenAt = firstSeenAt and duplicateFirstSeenAt
+                        and math.min(firstSeenAt, duplicateFirstSeenAt)
+                        or firstSeenAt
+                        or duplicateFirstSeenAt
+                        or tonumber(lead.lastSeenAt)
+                        or tonumber(duplicate.lastSeenAt)
+                        or GC.Util.Now()
+                    lead.lastSeenAt = math.max(
+                        tonumber(lead.lastSeenAt) or 0,
+                        tonumber(duplicate.lastSeenAt) or 0)
+                    lead.unread = lead.unread or duplicate.unread
+                    table.remove(inbox, compareIndex)
+                else
+                    compareIndex = compareIndex + 1
+                end
+            end
+            if not tonumber(lead.firstSeenAt) then
+                lead.firstSeenAt = tonumber(lead.lastSeenAt) or GC.Util.Now()
+            end
+            index = index + 1
         end
-        index = index + 1
     end
 end
 

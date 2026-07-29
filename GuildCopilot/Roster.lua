@@ -415,6 +415,22 @@ local function DecisionKey(name)
     return GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
 end
 
+function GC.Roster:PruneMemberCareDecisions(today)
+    today = today or GC.Util.TodayISO()
+    local decisions = GC.DB:GetGuild().memberCare.decisions
+    local changed = false
+    for key, decision in pairs(decisions) do
+        if type(decision) ~= "table"
+            or not GC.MemberCareDecisions[decision.status]
+            or (decision.status == "POSTPONED"
+                and (not GC.Util.IsValidISODate(decision.until_) or today > decision.until_)) then
+            decisions[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
 function GC.Roster:GetMemberCareDecision(name, today)
     local key = DecisionKey(name)
     if key == "" then
@@ -446,6 +462,7 @@ function GC.Roster:SetMemberCareDecision(name, status, untilDate)
     end
 
     local decisions = GC.DB:GetGuild().memberCare.decisions
+    self:PruneMemberCareDecisions()
     local existingCount = 0
     for _ in pairs(decisions) do
         existingCount = existingCount + 1
@@ -483,6 +500,9 @@ function GC.Roster:ClearMemberCareDecision(name)
 end
 
 function GC.Roster:GetMemberCareDecisions()
+    if self:PruneMemberCareDecisions() then
+        MemberCareSettingsChanged()
+    end
     local entries = {}
     for _, decision in pairs(GC.DB:GetGuild().memberCare.decisions) do
         entries[#entries + 1] = decision

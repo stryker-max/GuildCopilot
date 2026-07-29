@@ -1330,12 +1330,15 @@ function GC.UI:BuildRosterPage()
     page.flexCheck:SetPoint("TOPLEFT", profileCard, "TOPLEFT", 18, -292)
 
     local confirm = CreateButton(profileCard, "Bestätigen", 190, 38, function()
-        GC.Profile:Confirm(
+        local profile, message = GC.Profile:Confirm(
             page.selectedProfileSpec,
             page.selectedSecondarySpec,
             page.selectedMainStatus,
             page.selectedFlex
         )
+        if not profile and message then
+            GC:Print(message)
+        end
         GC.UI:RefreshRoster()
     end, "PRIMARY")
     confirm:SetPoint("BOTTOMLEFT", profileCard, "BOTTOMLEFT", 18, 18)
@@ -2601,6 +2604,13 @@ function GC.UI:BuildPostPage()
     page.confirmAdButton = CreateButton(editorCard, "Text bestätigen", 152, 32, function()
         local text = GC.Util.SafeChatText(page.adEdit:GetText())
         page.adEdit:SetText(text)
+        if text == "" then
+            GC.DB:GetGuild().recruitment.confirmedText = nil
+            page.postResult:SetText("Ein leerer Werbetext kann nicht bestätigt werden.")
+            SetTextColor(page.postResult, THEME.danger)
+            GC.UI:RefreshPost()
+            return
+        end
         GC.DB:GetGuild().recruitment.confirmedText = text
         page.postResult:SetText("Werbetext bestätigt und bereit.")
         SetTextColor(page.postResult, THEME.success)
@@ -3189,11 +3199,11 @@ function GC.UI:BuildWarcraftLogsPage()
     page.wclResult = CreateLabel(sourceCard, "", { width = 385 })
     page.wclResult:SetPoint("LEFT", save, "RIGHT", 14, 0)
 
-    local importCard = CreateCard(page, "Import – manuell oder Companion")
+    local importCard = CreateCard(page, "Import – manuell oder Installer")
     importCard:SetSize(776, 238)
     importCard:SetPoint("TOPLEFT", sourceCard, "BOTTOMLEFT", 0, -10)
     local importHelp = CreateLabel(importCard,
-        "Ohne API: Name;Klasse;Primär-Spec;Dual-Spec – z. B. Nexarius;Magier;Arkan;Frost.\nAutomatisch: Außerhalb von WoW Companion\\Start-WCL-Import.cmd doppelklicken; danach hier mit Strg+V einfügen.",
+        "Ohne API: Name;Klasse;Primär-Spec;Dual-Spec – z. B. Nexarius;Magier;Arkan;Frost.\nAutomatisch: Im Guild-Copilot-Installer „Import erzeugen“; die Companion-CMD bleibt als Rückfall. Danach hier mit Strg+V einfügen.",
         { muted = true, width = 740, height = 44, vertical = "TOP" })
     importHelp:SetPoint("TOPLEFT", importCard, "TOPLEFT", 18, -46)
     -- Ein Companion-Export mit mehreren Reports ist schnell größer als das
@@ -3571,7 +3581,7 @@ function GC.UI:RefreshStatistics()
             .. "  •  " .. FormatDuration((selected.endedAt or 0) - (selected.startedAt or 0))
             .. "  •  " .. (selected.pulls or 0) .. " Versuche, " .. (selected.kills or 0) .. " Siege, "
             .. (selected.wipes or 0) .. " Wipes  •  Quelle: "
-            .. SESSION_SOURCE_LABEL[selected.source or "LIVE"])
+            .. (SESSION_SOURCE_LABEL[selected.source or "LIVE"] or tostring(selected.source or "Unbekannt")))
     else
         page.sessionHeadline:SetText("")
     end
@@ -3579,6 +3589,16 @@ function GC.UI:RefreshStatistics()
     local sessionSeconds = selected
         and math.max(0, (selected.endedAt or 0) - (selected.startedAt or 0))
         or 0
+    if selected and selected.source == "WCL" then
+        -- Bei Logs ist die Anwesenheit reine Encounter-Zeit, Beginn/Ende
+        -- beschreiben dagegen den ganzen Report inklusive Pausen und Trash.
+        -- Der Prozentwert muss deshalb gegen die längste Encounter-Anwesenheit
+        -- laufen, nicht gegen die deutlich längere Reportdauer.
+        sessionSeconds = 0
+        for _, participant in ipairs(selected.participants or {}) do
+            sessionSeconds = math.max(sessionSeconds, tonumber(participant.seconds) or 0)
+        end
+    end
 
     -- Sortiert wird eine Kopie: Die gespeicherte Reihenfolge der Sitzung
     -- bleibt unangetastet, sonst wuerde ein Klick auf die Kopfzeile die

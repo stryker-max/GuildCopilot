@@ -12,6 +12,7 @@ local MIN_SEGMENT_SECONDS = 15
 local WIPE_RATIO = 0.5
 local MAX_PAYLOAD_BYTES = 165
 local MIN_ANSWER_INTERVAL = 30
+local INCOMING_TTL = 5 * 60
 
 local function SanitizedText(value, maximumBytes)
     value = GC.Util.Trim(value)
@@ -614,10 +615,17 @@ function GC.RaidMonitor:ReceiveSummaryChunk(message, sender)
     local index = tonumber(indexText)
     local total = tonumber(totalText)
     if schemaVersion ~= GC.Constants.SCHEMA_VERSION
-        or not index or not total or index < 1 or index > total or total > 40 then
+        or not index or not total or index < 1 or index > total or total > 40
+        or #token > 40 or #chunk > MAX_PAYLOAD_BYTES then
         return false
     end
 
+    local cutoff = GC.Util.Now() - INCOMING_TTL
+    for key, transfer in pairs(self.incoming) do
+        if (tonumber(transfer.receivedAt) or 0) < cutoff then
+            self.incoming[key] = nil
+        end
+    end
     local incomingKey = GC.Util.NormalizeName(sender) .. "|" .. token
     local incoming = self.incoming[incomingKey]
     if not incoming or incoming.total ~= total then

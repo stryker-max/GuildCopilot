@@ -55,10 +55,10 @@ public static class AddonSource
     }
 
     /// <summary>
-    /// Laedt den Branch als ZIP und legt daraus den Addon-Ordner neu an.
-    /// Geschrieben wird erst, wenn der Download vollstaendig entpackt ist und
-    /// die TOC gefunden wurde - ein Abbruch mittendrin darf keine halbe
-    /// Installation hinterlassen.
+    /// Laedt den Branch als ZIP, entpackt und prueft ihn vollstaendig, bevor
+    /// der vorhandene Addon-Ordner beruehrt wird. Fehler beim anschliessenden
+    /// Ueberschreiben werden gemeldet; SavedVariables liegen ausserhalb dieses
+    /// Ordners und bleiben davon unberuehrt.
     /// </summary>
     public static async Task<string> InstallAsync(string addonsPath, IProgress<string> log, CancellationToken token = default)
     {

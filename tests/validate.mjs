@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const root = path.resolve("GuildCopilot");
+const repositoryRoot = path.resolve(".");
+const root = path.join(repositoryRoot, "GuildCopilot");
 const tocPath = path.join(root, "GuildCopilot.toc");
 const toc = fs.readFileSync(tocPath, "utf8");
+const constants = fs.readFileSync(path.join(root, "Constants.lua"), "utf8");
+const readme = fs.readFileSync(path.join(repositoryRoot, "README.md"), "utf8");
 const logoPath = path.join(root, "Media", "GuildCopilotLogo.tga");
 const wordmarkPath = path.join(root, "Media", "GuildCopilotWordmark.tga");
 
@@ -11,13 +14,43 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.17",
+  "## Version: 0.9.18",
 ];
 
 for (const entry of requiredMetadata) {
   if (!toc.includes(entry)) {
     throw new Error(`Fehlender TOC-Eintrag: ${entry}`);
   }
+}
+
+const tocVersion = toc.match(/^## Version:\s*(\S+)/m)?.[1];
+const constantsVersion = constants.match(/\bVERSION\s*=\s*"([^"]+)"/)?.[1];
+const readmeVersion = readme.match(/^# Guild Copilot\s+(\S+)/m)?.[1];
+if (!tocVersion || tocVersion !== constantsVersion || tocVersion !== readmeVersion) {
+  throw new Error(
+    `Addon-Versionen widersprechen sich: TOC=${tocVersion}, Constants=${constantsVersion}, README=${readmeVersion}`
+  );
+}
+
+const installerProject = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "GuildCopilot-Installer.csproj"),
+  "utf8"
+);
+const installerVersion = installerProject.match(/<Version>([^<]+)<\/Version>/)?.[1];
+const publishedVersion = fs
+  .readFileSync(path.join(repositoryRoot, "Installer", "dist", "version.txt"), "utf8")
+  .trim();
+const installerExe = path.join(repositoryRoot, "Installer", "dist", "GuildCopilot-Installer.exe");
+if (!installerVersion || installerVersion !== publishedVersion) {
+  throw new Error(
+    `Installer-Versionen widersprechen sich: Projekt=${installerVersion}, version.txt=${publishedVersion}`
+  );
+}
+if (!fs.existsSync(installerExe) || fs.statSync(installerExe).size < 1_000_000) {
+  throw new Error("Die veröffentlichte Installer-EXE fehlt oder ist offensichtlich unvollständig.");
+}
+if (!readme.includes(`Installer bei ${installerVersion}`) || !readme.includes(`Addon bei ${tocVersion}`)) {
+  throw new Error("README nennt nicht die tatsächlich veröffentlichten Addon- und Installer-Versionen.");
 }
 
 if (!fs.existsSync(logoPath)) {
@@ -144,7 +177,7 @@ const requiredImplementations = [
   ["Gear Audit über die Inspect-API", /function GC\.GearAudit:StartRaidScan/],
   ["Verzauberungen und Sockel je Slot", /function GC\.GearAudit:BuildAudit/],
   ["versionierter Regelsatz", /GC\.EnchantRuleSet/],
-  ["unbewertete Verzauberungen bleiben unbekannt", /UNKNOWN/],
+  ["umschaltbare Behandlung unbewerteter Verzauberungen", /AcceptsUnratedEnchants/],
   ["kein Gesamtscore im Gear Audit", /keine Gesamtnote/],
   ["Ausnahmen und zurückgestellte Vorschläge", /SetMemberCareDecision/],
   ["manuelle Ausnahmeliste", /GetMemberCareDecisions/],

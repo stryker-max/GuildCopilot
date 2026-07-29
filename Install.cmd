@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 title Guild Copilot - Installation
 
 echo.
@@ -53,14 +53,23 @@ if not exist "%ZIEL%\Interface" (
 
 set "ADDONS=%ZIEL%\Interface\AddOns"
 if not exist "%ADDONS%" mkdir "%ADDONS%"
+if not exist "%ADDONS%" (
+    echo.
+    echo   FEHLER: Der AddOns-Ordner konnte nicht angelegt werden.
+    echo   Bitte Install.cmd per Rechtsklick als Administrator ausfuehren.
+    echo.
+    pause
+    exit /b 1
+)
 
 echo   Ziel: %ADDONS%\GuildCopilot
 echo.
 
 if exist "%ADDONS%\GuildCopilot" (
-    echo   Eine aeltere Version wird ersetzt.
+    echo   Eine vorhandene Version wird aktualisiert.
     echo   Gespeicherte Einstellungen liegen im WTF-Ordner und bleiben erhalten.
-    rmdir /s /q "%ADDONS%\GuildCopilot"
+    echo   Der Ordner wird nicht vorab geloescht, damit ein Kopierfehler die
+    echo   funktionierende Installation nicht vollstaendig entfernt.
 )
 
 xcopy /E /I /Q /Y "%QUELLE%" "%ADDONS%\GuildCopilot" >nul

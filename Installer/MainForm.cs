@@ -306,8 +306,13 @@ public sealed class MainForm : Form
 
         if (await UpdateSelfAsync()) return;
 
-        var installed = GameFinder.ReadInstalledVersion(SelectedPath());
-        if (_availableVersion.Length > 0 && AddonSource.CompareVersions(installed, _availableVersion) < 0)
+        var selectedPath = SelectedPath();
+        var installed = selectedPath.Length > 0 && Directory.Exists(selectedPath)
+            ? GameFinder.ReadInstalledVersion(selectedPath)
+            : null;
+        if (selectedPath.Length > 0 && Directory.Exists(selectedPath)
+            && _availableVersion.Length > 0
+            && AddonSource.CompareVersions(installed, _availableVersion) < 0)
         {
             Log("Automatische Aktualisierung ist aktiv.");
             await InstallAsync();
@@ -342,7 +347,15 @@ public sealed class MainForm : Form
     {
         try
         {
-            return await SelfUpdate.UpdateAsync(new Progress<string>(Log));
+            var updated = await SelfUpdate.UpdateAsync(new Progress<string>(Log));
+            if (updated)
+            {
+                // Die neue Fassung läuft bereits. Die alte muss ihr Fenster
+                // schließen, damit die beim Update angelegte .old-Datei beim
+                // nächsten Start tatsächlich entfernt werden kann.
+                BeginInvoke(Close);
+            }
+            return updated;
         }
         catch (Exception error)
         {
@@ -490,16 +503,16 @@ public sealed class MainForm : Form
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(AutostartKey, writable: true);
-            if (key is null) return;
             if (_autoStart.Checked)
             {
+                using var key = Registry.CurrentUser.CreateSubKey(AutostartKey, writable: true);
                 var exe = Environment.ProcessPath;
-                if (exe is not null) key.SetValue(AutostartName, $"\"{exe}\"");
+                if (key is not null && exe is not null) key.SetValue(AutostartName, $"\"{exe}\"");
             }
             else
             {
-                key.DeleteValue(AutostartName, throwOnMissingValue: false);
+                using var key = Registry.CurrentUser.OpenSubKey(AutostartKey, writable: true);
+                key?.DeleteValue(AutostartName, throwOnMissingValue: false);
             }
         }
         catch (Exception error)

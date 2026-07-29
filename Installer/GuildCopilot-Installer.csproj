@@ -8,7 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>GuildCopilot-Installer</AssemblyName>
     <RootNamespace>GuildCopilot.Installer</RootNamespace>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Eigene Zaehlung: der Installer wird unabhaengig vom Addon versioniert. -->
     <SatelliteResourceLanguages>de</SatelliteResourceLanguages>
     <InvariantGlobalization>true</InvariantGlobalization>

@@ -17,6 +17,16 @@ local MIN_ANNOUNCE_INTERVAL = 60
 local MIN_REPLY_INTERVAL = 15
 local MIN_PROFILE_REPLY_INTERVAL = 30
 local MIN_MANUAL_SYNC_INTERVAL = 15
+local INCOMING_TTL = 5 * 60
+
+local function PruneIncoming(transfers)
+    local cutoff = GC.Util.Now() - INCOMING_TTL
+    for key, transfer in pairs(transfers) do
+        if (tonumber(transfer.receivedAt) or 0) < cutoff then
+            transfers[key] = nil
+        end
+    end
+end
 
 local function BoolField(value)
     return value and "1" or "0"
@@ -25,15 +35,27 @@ end
 local function SortedEnabledRanks(values)
     local ranks = {}
     for rankIndex, enabled in pairs(values or {}) do
-        if enabled then
-            ranks[#ranks + 1] = tonumber(rankIndex) or rankIndex
+        local rank = tonumber(rankIndex)
+        if enabled and rank and rank >= 0 and rank <= 9 and rank % 1 == 0 then
+            ranks[#ranks + 1] = rank
         end
     end
     table.sort(ranks, function(left, right)
-        return tonumber(left) < tonumber(right)
+        return left < right
     end)
     for index, rank in ipairs(ranks) do
         ranks[index] = tostring(rank)
+    end
+    return ranks
+end
+
+local function DecodeEnabledRanks(payload)
+    local ranks = {}
+    for rankIndex in tostring(payload or ""):gmatch("[^,]+") do
+        local rank = tonumber(rankIndex)
+        if rank and rank >= 0 and rank <= 9 and rank % 1 == 0 then
+            ranks[tostring(rank)] = true
+        end
     end
     return ranks
 end
@@ -379,10 +401,12 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     local index = tonumber(indexText)
     local total = tonumber(totalText)
     if schemaVersion ~= GC.Constants.SCHEMA_VERSION
-        or not index or not total or index < 1 or index > total or total > 30 then
+        or not index or not total or index < 1 or index > total or total > 30
+        or #token > 40 or #chunk > 175 then
         return
     end
 
+    PruneIncoming(self.guildProfileIncoming)
     local incomingKey = GC.Util.NormalizeName(sender) .. "|" .. token
     local incoming = self.guildProfileIncoming[incomingKey]
     if not incoming or incoming.total ~= total then
@@ -422,29 +446,17 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     guildData.profile.contact = fields[8] or ""
     guildData.profile.updatedAt = updatedAt
     guildData.profilePermissions.configured = fields[9] == "1"
-    guildData.profilePermissions.editorRanks = {}
-    for rankIndex in tostring(fields[10] or ""):gmatch("[^,]+") do
-        guildData.profilePermissions.editorRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
-    end
+    guildData.profilePermissions.editorRanks = DecodeEnabledRanks(fields[10])
     guildData.replyTemplates.THANKS = fields[11] or ""
     guildData.replyTemplates.INFO = fields[12] or ""
     guildData.replyTemplates.DISCORD = fields[13] or ""
     guildData.memberCare.inactivityDays = math.max(7, math.min(365, tonumber(fields[14]) or 60))
     guildData.memberCare.protectedRanksConfigured = fields[15] == "1"
-    guildData.memberCare.protectedRanks = {}
-    for rankIndex in tostring(fields[16] or ""):gmatch("[^,]+") do
-        guildData.memberCare.protectedRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
-    end
+    guildData.memberCare.protectedRanks = DecodeEnabledRanks(fields[16])
     guildData.memberCare.accessRanksConfigured = fields[17] == "1"
-    guildData.memberCare.accessRanks = {}
-    for rankIndex in tostring(fields[18] or ""):gmatch("[^,]+") do
-        guildData.memberCare.accessRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
-    end
+    guildData.memberCare.accessRanks = DecodeEnabledRanks(fields[18])
     guildData.roster.rankFilterConfigured = fields[19] == "1"
-    guildData.roster.activeRaiderRanks = {}
-    for rankIndex in tostring(fields[20] or ""):gmatch("[^,]+") do
-        guildData.roster.activeRaiderRanks[tostring(tonumber(rankIndex) or rankIndex)] = true
-    end
+    guildData.roster.activeRaiderRanks = DecodeEnabledRanks(fields[20])
     -- Ältere Absender senden das Feld nicht; dann bleiben die eigenen
     -- Entscheidungen unangetastet statt gelöscht zu werden.
     if fields[21] ~= nil then

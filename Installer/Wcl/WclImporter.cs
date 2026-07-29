@@ -45,7 +45,7 @@ public sealed class WclImporter
         ["druid:restoration"] = "DRUID:3",
     };
 
-    private readonly HttpClient _http;
+    private static readonly HttpClient Http = CreateHttpClient();
     private readonly IProgress<string> _log;
     private string _token = string.Empty;
     private string _origin = string.Empty;
@@ -53,8 +53,13 @@ public sealed class WclImporter
     public WclImporter(IProgress<string> log)
     {
         _log = log;
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GuildCopilot-Installer", "1.0"));
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GuildCopilot-Installer", "1.0"));
+        return client;
     }
 
     public async Task<ImportResult> RunAsync(
@@ -70,7 +75,7 @@ public sealed class WclImporter
         _log.Report("Schritt 2: Reports suchen");
         var reports = await ResolveReportsAsync(target, reportLimit, token);
 
-        var players = new Dictionary<string, PlayerProfile>(StringComparer.Ordinal);
+        var players = new Dictionary<string, PlayerProfile>(StringComparer.OrdinalIgnoreCase);
         var sessionBlocks = new List<List<string>>();
         var warnings = new List<string>();
 
@@ -488,12 +493,10 @@ public sealed class WclImporter
         var dispels = CountByActor(events["dispels"], "sourceID", "dispel");
         var consumables = CollectConsumables(events["casts"], events["buffs"]);
 
+        // Ereignisse kommen absichtlich aus dem ganzen Report. In die Sitzung
+        // gehören trotzdem nur Akteure, die an einem Encounter teilnahmen;
+        // sonst erscheinen Trash-Helfer und Zuschauer mit null Anwesenheit.
         var actorIds = new HashSet<int>(seconds.Keys);
-        actorIds.UnionWith(deaths.Keys);
-        actorIds.UnionWith(resurrects.Keys);
-        actorIds.UnionWith(interrupts.Keys);
-        actorIds.UnionWith(dispels.Keys);
-        actorIds.UnionWith(consumables.Keys);
         if (actorIds.Count == 0) return new List<string>();
 
         var zone = report.TryGetProperty("zone", out var zoneValue) && zoneValue.ValueKind == JsonValueKind.Object
@@ -553,7 +556,7 @@ public sealed class WclImporter
         request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
         request.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["grant_type"] = "client_credentials" });
 
-        using var response = await _http.SendAsync(request, token);
+        using var response = await Http.SendAsync(request, token);
         if (!response.IsSuccessStatusCode)
         {
             var hint = (int)response.StatusCode == 401 ? " Client ID oder Client Secret stimmen nicht." : string.Empty;
@@ -668,7 +671,7 @@ public sealed class WclImporter
             new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never });
         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-        using var response = await _http.SendAsync(request, token);
+        using var response = await Http.SendAsync(request, token);
         var text = await response.Content.ReadAsStringAsync(token);
 
         JsonDocument payload;

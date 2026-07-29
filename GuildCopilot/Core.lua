@@ -74,8 +74,14 @@ function GC.Util.MergeDefaults(target, defaults)
     for key, defaultValue in pairs(defaults) do
         if target[key] == nil then
             target[key] = GC.Util.DeepCopy(defaultValue)
-        elseif type(defaultValue) == "table" and type(target[key]) == "table" then
-            GC.Util.MergeDefaults(target[key], defaultValue)
+        elseif type(defaultValue) == "table" then
+            if type(target[key]) ~= "table" then
+                -- Alte oder von Hand bearbeitete SavedVariables dürfen einen
+                -- ganzen Einstellungszweig nicht unbenutzbar machen.
+                target[key] = GC.Util.DeepCopy(defaultValue)
+            else
+                GC.Util.MergeDefaults(target[key], defaultValue)
+            end
         end
     end
     return target
@@ -99,24 +105,48 @@ end
 
 function GC.Util.SafeChatText(text, maximumBytes)
     text = GC.Util.Trim(text)
-    maximumBytes = maximumBytes or GC.Constants.MAX_CHAT_BYTES
+    maximumBytes = math.max(0, math.floor(tonumber(maximumBytes) or GC.Constants.MAX_CHAT_BYTES))
     if #text <= maximumBytes then
         return text
     end
 
-    local clipped = text:sub(1, maximumBytes - 3)
-    while #clipped > 0 and clipped:byte(#clipped) >= 128 and clipped:byte(#clipped) < 192 do
-        clipped = clipped:sub(1, -2)
+    local suffix = maximumBytes >= 4 and "..." or ""
+    local contentBytes = maximumBytes - #suffix
+    if contentBytes <= 0 then
+        return suffix:sub(1, maximumBytes)
     end
-    if #clipped > 0 and clipped:byte(#clipped) >= 192 then
-        clipped = clipped:sub(1, -2)
+
+    local clipped = text:sub(1, contentBytes)
+    if #clipped > 0 and clipped:byte(#clipped) >= 128 then
+        local sequenceStart = #clipped
+        while sequenceStart > 1 do
+            local byte = clipped:byte(sequenceStart)
+            if byte < 128 or byte >= 192 then
+                break
+            end
+            sequenceStart = sequenceStart - 1
+        end
+
+        local lead = clipped:byte(sequenceStart)
+        local expectedBytes
+        if lead and lead >= 194 and lead <= 223 then
+            expectedBytes = 2
+        elseif lead and lead >= 224 and lead <= 239 then
+            expectedBytes = 3
+        elseif lead and lead >= 240 and lead <= 244 then
+            expectedBytes = 4
+        end
+        local availableBytes = #clipped - sequenceStart + 1
+        if not expectedBytes or availableBytes < expectedBytes then
+            clipped = clipped:sub(1, sequenceStart - 1)
+        end
     end
 
     local lastSpace = clipped:match("^.*()%s")
-    if lastSpace and lastSpace > maximumBytes * 0.7 then
+    if suffix ~= "" and lastSpace and lastSpace > contentBytes * 0.7 then
         clipped = clipped:sub(1, lastSpace - 1)
     end
-    return clipped .. "..."
+    return clipped .. suffix
 end
 
 function GC.Util.EscapeField(value)

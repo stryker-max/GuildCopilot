@@ -16,6 +16,10 @@ internal static class Program
         {
             return RunSelfTest(args[1]);
         }
+        if (args.Length == 1 && args[0] == "--selftest-core")
+        {
+            return RunCoreSelfTest();
+        }
 
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm());
@@ -82,5 +86,78 @@ internal static class Program
             Console.Error.WriteLine($"Selbsttest fehlgeschlagen: {error.Message}");
             return 1;
         }
+    }
+
+    private static int RunCoreSelfTest()
+    {
+        try
+        {
+            var reportTarget = WclTarget.Parse("HTTPS://fresh.warcraftlogs.com/reports/aBcD1234efGH5678");
+            if (reportTarget.Kind != TargetKind.Report || reportTarget.ReportCode != "aBcD1234efGH5678")
+            {
+                throw new InvalidOperationException("Ein gültiger Reportlink wurde falsch ausgewertet.");
+            }
+
+            AssertRejected("https://warcraftlogs.com.evil.example/reports/aBcD1234efGH5678");
+            AssertRejected("https://fresh.warcraftlogs.com/reports/aBcD1234efGH5678/extra");
+            AssertRejected("https://fresh.warcraftlogs.com/guild/moon/thunderstrike/aftermath");
+
+            using var reportDocument = JsonDocument.Parse("""
+                {
+                  "code": "aBcD1234efGH5678",
+                  "startTime": 100000,
+                  "endTime": 170000,
+                  "zone": { "name": "Karazhan" },
+                  "masterData": { "actors": [
+                    { "id": 1, "name": "Nexarius", "subType": "Mage" },
+                    { "id": 2, "name": "Unbeteiligt", "subType": "Priest" }
+                  ] },
+                  "fights": [
+                    { "id": 1, "name": "Attumen", "kill": true,
+                      "startTime": 1000, "endTime": 61000, "friendlyPlayers": [1] }
+                  ]
+                }
+                """);
+            using var outsiderEventDocument = JsonDocument.Parse(
+                """[{ "type": "interrupt", "sourceID": 2 }]""");
+            var events = new Dictionary<string, List<JsonElement>>
+            {
+                ["deaths"] = [],
+                ["resurrects"] = [],
+                ["interrupts"] = outsiderEventDocument.RootElement.EnumerateArray()
+                    .Select(row => row.Clone()).ToList(),
+                ["dispels"] = [],
+                ["casts"] = [],
+                ["buffs"] = [],
+            };
+            var lines = WclImporter.ReplayRecorded(reportDocument.RootElement, events);
+            if (lines.Count != 2
+                || !lines[1].StartsWith("P|Nexarius|MAGE|60|", StringComparison.Ordinal)
+                || lines.Any(line => line.Contains("Unbeteiligt", StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("Die Encounter-Teilnehmerauswahl ist fehlerhaft.");
+            }
+
+            Console.WriteLine("OK: Installer-Kernprüfungen bestanden.");
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Kernselbsttest fehlgeschlagen: {error.Message}");
+            return 1;
+        }
+    }
+
+    private static void AssertRejected(string link)
+    {
+        try
+        {
+            WclTarget.Parse(link);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        throw new InvalidOperationException($"Ungültiger Link wurde akzeptiert: {link}");
     }
 }

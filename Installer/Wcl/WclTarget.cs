@@ -55,26 +55,34 @@ public sealed class WclTarget
             return new WclTarget { Kind = TargetKind.Report, ReportCode = raw, Origins = DefaultOrigins(string.Empty) };
         }
 
-        var url = new Uri(raw.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? raw : "https://" + raw);
-        if (!url.Host.EndsWith("warcraftlogs.com", StringComparison.OrdinalIgnoreCase))
+        var candidate = Regex.IsMatch(raw, "^https?://", RegexOptions.IgnoreCase)
+            ? raw
+            : "https://" + raw;
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var url)
+            || (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("Der Warcraft-Logs-Link ist ungültig.");
+        }
+        if (!url.Host.Equals("warcraftlogs.com", StringComparison.OrdinalIgnoreCase)
+            && !url.Host.EndsWith(".warcraftlogs.com", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("Der Link gehört nicht zu Warcraft Logs.");
         }
         var origins = DefaultOrigins(url.Host);
 
-        var report = Regex.Match(url.AbsolutePath, @"/reports/([a-zA-Z0-9]+)");
+        var report = Regex.Match(url.AbsolutePath, @"^/reports/([a-zA-Z0-9]+)/?$");
         if (report.Success)
         {
             return new WclTarget { Kind = TargetKind.Report, ReportCode = report.Groups[1].Value, Origins = origins };
         }
 
-        var guildId = Regex.Match(url.AbsolutePath, @"/guild/id/(\d+)");
+        var guildId = Regex.Match(url.AbsolutePath, @"^/guild/id/(\d+)/?$");
         if (guildId.Success)
         {
             return new WclTarget { Kind = TargetKind.Guild, GuildId = int.Parse(guildId.Groups[1].Value), Origins = origins };
         }
 
-        var guild = Regex.Match(url.AbsolutePath, @"/guild/([^/]+)/([^/]+)/([^/]+)");
+        var guild = Regex.Match(url.AbsolutePath, @"^/guild/([^/]+)/([^/]+)/([^/]+)/?$");
         if (!guild.Success)
         {
             throw new ArgumentException("Der Link ist weder eine Warcraft-Logs-Gildenseite noch ein Report.");
@@ -84,6 +92,13 @@ public sealed class WclTarget
         // erwartet den echten Namen. Deshalb mehrere Schreibweisen anbieten und
         // spaeter die erste nehmen, die Reports liefert.
         var decoded = Uri.UnescapeDataString(guild.Groups[3].Value.Replace("+", " "));
+        var region = guild.Groups[1].Value.ToLowerInvariant();
+        if (region is not ("eu" or "us" or "kr" or "tw" or "cn")
+            || decoded.Length == 0
+            || decoded.Any(character => character is '/' or '\\' || char.IsControl(character)))
+        {
+            throw new ArgumentException("Der Warcraft-Logs-Gildenlink enthält ungültige Angaben.");
+        }
         var names = new List<string> { decoded };
         if (decoded.Contains('-')) names.Add(decoded.Replace('-', ' '));
         var titled = string.Join(' ', names[^1]
@@ -94,7 +109,7 @@ public sealed class WclTarget
         return new WclTarget
         {
             Kind = TargetKind.Guild,
-            Region = guild.Groups[1].Value.ToLowerInvariant(),
+            Region = region,
             ServerSlug = guild.Groups[2].Value.ToLowerInvariant(),
             GuildNames = names,
             Origins = origins,

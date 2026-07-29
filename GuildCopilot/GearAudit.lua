@@ -784,6 +784,9 @@ function GC.GearAudit:SetStatus(status)
 end
 
 function GC.GearAudit:FinishScan()
+    if ClearInspectPlayer then
+        ClearInspectPlayer()
+    end
     self.scanning = false
     self.active = nil
     self.queue = {}
@@ -827,6 +830,9 @@ function GC.GearAudit:ProcessQueue()
         if self.active and self.active.unit == target.unit then
             self.skipped = (self.skipped or 0) + 1
             self.active = nil
+            if ClearInspectPlayer then
+                ClearInspectPlayer()
+            end
             self:ProcessQueue()
         end
     end)

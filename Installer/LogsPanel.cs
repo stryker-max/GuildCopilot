@@ -164,11 +164,13 @@ public sealed class LogsPanel : UserControl
 
             _importText = result.Text;
             _copy.Enabled = true;
-            Copy(result.Text, null);
+            var copied = Copy(result.Text, null);
 
-            _status.ForeColor = Theme.Success;
+            _status.ForeColor = copied ? Theme.Success : Theme.Danger;
             _status.Text = $"{result.Profiles} Spieler und {result.Sessions} Raidauswertungen aus {result.Reports} Reports. "
-                         + "Der Importcode liegt in der Zwischenablage.\n"
+                         + (copied
+                             ? "Der Importcode liegt in der Zwischenablage.\n"
+                             : "Die Zwischenablage war nicht erreichbar; mit „Erneut kopieren“ noch einmal versuchen.\n")
                          + "In WoW: /reload, dann Guild Copilot → Warcraft Logs, Feld leeren, Strg+V, Daten importieren.";
             foreach (var warning in result.Warnings) _log($"Hinweis: {warning}");
             Persist();
@@ -191,9 +193,9 @@ public sealed class LogsPanel : UserControl
         _status.Text = message;
     }
 
-    private void Copy(string text, string? confirmation)
+    private bool Copy(string text, string? confirmation)
     {
-        if (text.Length == 0) return;
+        if (text.Length == 0) return false;
         try
         {
             Clipboard.SetText(text);
@@ -202,10 +204,14 @@ public sealed class LogsPanel : UserControl
                 _status.ForeColor = Theme.Success;
                 _status.Text = $"{confirmation} ({DateTime.Now:HH:mm:ss}).";
             }
+            return true;
         }
         catch (Exception error)
         {
             _log($"Zwischenablage nicht erreichbar: {error.Message}");
+            _status.ForeColor = Theme.Danger;
+            _status.Text = "Die Zwischenablage ist gerade nicht erreichbar. Bitte „Erneut kopieren“ versuchen.";
+            return false;
         }
     }
 

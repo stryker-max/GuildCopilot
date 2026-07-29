@@ -480,6 +480,20 @@ end
 addon:FireCallback("ADDON_LOADED")
 addon:FireCallback("PLAYER_LOGIN")
 
+local repairedDefaults = addon.Util.MergeDefaults({
+    settings = "beschädigt",
+}, {
+    settings = {
+        enabled = true,
+    },
+})
+assert(type(repairedDefaults.settings) == "table" and repairedDefaults.settings.enabled == true,
+    "Ein beschädigter SavedVariables-Zweig wurde nicht durch seine Standardwerte repariert")
+
+local utf8Clipped = addon.Util.SafeChatText("123äXYZQ", 8)
+assert(utf8Clipped == "123ä...", "Ein vollständiges UTF-8-Zeichen wurde beim Kürzen entfernt")
+assert(#utf8Clipped == 8, "Die UTF-8-Kürzung hält das Byte-Limit nicht ein")
+
 assert(addon.Profile:Get().detectedSpecKey == "HUNTER:2", "Talentbaum wurde nicht erkannt")
 assert(addon.Profile:Get().professions[1].name == "Ingenieurskunst", "Erster Beruf wurde nicht erkannt")
 assert(addon.Profile:Get().professions[2].name == "Bergbau", "Zweiter Beruf wurde nicht erkannt")
@@ -579,6 +593,13 @@ assert(addon.Roster:SetMemberCareRankProtected(5, false) == true, "Rangschutz ko
 addon.Profile:ClearAbsence()
 assert(addon.Profile:GetAbsenceState() == "NONE", "Abmeldung wurde nicht gelöscht")
 
+local raidSpecBeforeInvalidConfirm = addon.Profile:Get().raidSpecKey
+local invalidProfile, invalidProfileMessage = addon.Profile:Confirm("MAGE:1", nil, "MAIN", false)
+assert(invalidProfile == nil and invalidProfileMessage:find("Primär%-Spec"),
+    "Eine Primär-Spec der falschen Klasse wurde bestätigt")
+assert(addon.Profile:Get().raidSpecKey == raidSpecBeforeInvalidConfirm,
+    "Eine ungültige Bestätigung hat die bisherige Primär-Spec überschrieben")
+
 addon.Profile:Confirm("HUNTER:2", "HUNTER:3", "MAIN", true)
 assert(addon.Profile:Get().secondarySpecKey == "HUNTER:3", "Dual-Spec wurde nicht gespeichert")
 assert(addon.Sync:BuildProfileMessage():find("HUNTER:3", 1, true), "Dual-Spec fehlt in der Gildensynchronisierung")
@@ -586,13 +607,24 @@ assert(addon.Sync:BuildProfileMessage():find("Ingenieurskunst", 1, true), "Beruf
 
 local sourceSaved = addon.WarcraftLogs:SaveSource("https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath")
 assert(sourceSaved == true, "Warcraft-Logs-Link wurde nicht erkannt")
-local imported = addon.WarcraftLogs:Import(
-    "GCPWCL1|2\n"
+assert(addon.WarcraftLogs:SaveSource("HTTPS://fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath") == true,
+    "Ein Warcraft-Logs-Link mit großgeschriebenem Schema wurde nicht erkannt")
+assert(addon.WarcraftLogs:SaveSource("https://evilwarcraftlogs.com/guild/eu/x/y") == false,
+    "Eine fremde Domain mit passendem Namensende wurde als Warcraft Logs akzeptiert")
+assert(addon.WarcraftLogs:SaveSource(
+    "https://fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath/extra") == false,
+    "Ein Gildenlink mit zusätzlichem Pfad wurde akzeptiert")
+
+local imported, importedMessage = addon.WarcraftLogs:Import(
+    "GCPWCL1|3\n"
+    .. "Heiler-Realm;PRIEST;PRIEST:2;PRIEST:3\n"
     .. "Heiler-Realm;PRIEST;PRIEST:2;PRIEST:3\n"
     .. "Krieger-Realm;WARRIOR;WARRIOR:2;\n"
 )
 assert(imported == true, "Warcraft-Logs-Import ist fehlgeschlagen")
 assert(addon.WarcraftLogs:GetImportedCount() == 2, "Importierte WCL-Spielerzahl ist falsch")
+assert(importedMessage:find("2 Warcraft%-Logs%-Profile"),
+    "Doppelte Profilzeilen wurden in der Importmeldung mehrfach gezählt")
 assert(addon.Roster:GetProfile("Heiler-Realm").secondarySpecKey == "PRIEST:3", "Importierter Dual-Spec fehlt")
 local manuallyImported = addon.WarcraftLogs:Import(
     "Nexarius;Magier;Arkan;Frost\n"
@@ -691,6 +723,26 @@ assert(addon.DB:GetSettings().postBar.hidden == true, "Der ausgeblendete Zustand
 addon.DB:GetGuild().recruitment.confirmedText = advertisement
 addon.DB:GetGuild().lastPosts = {}
 
+addon.DB:GetGuild().inbox = {
+    { name = "Alt-Realm", messages = "beschädigt", lastSeenAt = 200 },
+    {
+        name = "Alt-Realm",
+        messages = {
+            { receivedAt = 150, text = "Hallo", source = "WHISPER" },
+            { receivedAt = "beschädigt", text = "Noch da", source = "WHISPER" },
+        },
+        firstSeenAt = 150,
+        lastSeenAt = 150,
+    },
+}
+addon.Chat:MergeDuplicateLeads()
+assert(#addon.DB:GetGuild().inbox == 1, "Alte doppelte Postfacheinträge wurden nicht zusammengeführt")
+assert(addon.DB:GetGuild().inbox[1].firstSeenAt == 150,
+    "Ein fehlender alter Zeitstempel wurde als unendlicher Wert gespeichert")
+assert(#addon.DB:GetGuild().inbox[1].messages == 2,
+    "Ein beschädigtes Nachrichtenfeld hat die gültige Unterhaltung zerstört")
+addon.Chat:ClearInbox()
+
 addon.Recruitment:Clear()
 for _, classFile in ipairs(addon.ClassOrder) do
     addon.Recruitment:SetClass(classFile, true)
@@ -768,11 +820,25 @@ assert(addon.Roster:CanAccessMemberCare("Tester-Realm") == true, "Offiziersrang 
 assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == false, "Nicht freigegebener Rang sieht die Mitgliederpflege")
 assert(addon.Roster:SetMemberCareAccessRank(5, true) == true, "Mitgliederpflege-Rang konnte nicht freigegeben werden")
 assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == true, "Gildenweite Mitgliederpflege-Freigabe greift nicht")
+local savedEditorRanks = addon.DB:GetGuild().profilePermissions.editorRanks
+addon.DB:GetGuild().profilePermissions.editorRanks = {
+    ["1"] = true,
+    ["1.5"] = true,
+    ["10"] = true,
+    ["beschädigt"] = true,
+}
 local guildProfileMessages = addon.Sync:BuildGuildProfileMessages()
 assert(#guildProfileMessages > 0, "Gildenprofil-Synchronisierung wurde nicht erzeugt")
 for _, guildProfileMessage in ipairs(guildProfileMessages) do
     assert(#guildProfileMessage <= 255, "Gildenprofil-Nachricht überschreitet das Addon-Limit")
 end
+local rankPayload = ""
+for _, guildProfileMessage in ipairs(guildProfileMessages) do
+    rankPayload = rankPayload .. guildProfileMessage:match("^G|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+assert(addon.Util.SplitFields(rankPayload)[10] == "1",
+    "Beschädigte oder ungültige Rangwerte wurden in die Gildensynchronisierung übernommen")
+addon.DB:GetGuild().profilePermissions.editorRanks = savedEditorRanks
 addon.DB:GetSettings().successSoundKey = "GROUP_FINDER"
 assert(addon.Chat:PlaySuccessSound() == true, "Ausgewählter Erfolgssound konnte nicht abgespielt werden")
 assert(playedSoundID == 3081, "Gruppensuche-Sound verwendet keinen TBC-kompatiblen Fallback")
@@ -955,7 +1021,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.17", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.18", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -989,9 +1055,20 @@ assert(addon.Sync:GetAddonUser("Heiler").capabilities:find("workshop", 1, true),
 currentTime = currentTime + 60
 local sentBeforeRequest = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|1", "GUILD", "Heiler-Realm")
-assert(#sentAddon == sentBeforeRequest + 1, "Auf eine Handshake-Anfrage wurde nicht geantwortet")
-assert(LastAddonMessage():sub(-2) == "|0",
+local handshakeReply
+local profileReply
+for messageIndex = sentBeforeRequest + 1, #sentAddon do
+    local reply = sentAddon[messageIndex][2]
+    if reply:sub(1, 2) == "V|" then
+        handshakeReply = reply
+    elseif reply:sub(1, 2) == "P|" then
+        profileReply = reply
+    end
+end
+assert(handshakeReply, "Auf eine Handshake-Anfrage wurde nicht geantwortet")
+assert(handshakeReply:sub(-2) == "|0",
     "Die Handshake-Antwort fordert selbst wieder eine Antwort an")
+assert(profileReply, "Auf eine Handshake-Anfrage wurde das eigene Profil nicht mitgesendet")
 
 -- Auf eine Antwort darf nie geantwortet werden, sonst schaukelt sich der
 -- Handshake zwischen allen Gildenmitgliedern auf.
@@ -1212,6 +1289,8 @@ assert(addon.Roster:GetMemberCareDecision("Heiler").status == "POSTPONED",
 addon.DB:GetGuild().memberCare.decisions[addon.Util.NormalizeName("Heiler")].until_ = "2020-01-01"
 assert(#addon.Roster:GetMemberCareCandidates() == 1,
     "Ein abgelaufenes Zurückstellen blendet den Vorschlag weiter aus")
+assert(#addon.Roster:GetMemberCareDecisions() == 0,
+    "Ein abgelaufenes Zurückstellen bleibt in der Entscheidungsliste und belegt dauerhaft Platz")
 
 assert(addon.Roster:SetMemberCareDecision("Heiler-Realm", "IGNORED") == true,
     "Die Ausnahme ließ sich nicht setzen")
@@ -1335,7 +1414,8 @@ assert(ownAudit ~= nil, "Die eigene Prüfung wurde nicht gespeichert")
 assert(ownAudit.source == "SELF", "Die eigene Prüfung ist nicht als solche gekennzeichnet")
 assert(ownAudit.missingEnchants == 1, "Die fehlende Verzauberung auf der Brust wurde nicht erkannt")
 assert(ownAudit.emptySockets == 2, "Die leeren Sockel fehlen in der Zusammenfassung")
-assert(ownAudit.unknownEnchants == 1, "Die unbewertete Verzauberung wurde nicht als unbekannt geführt")
+assert(ownAudit.unknownEnchants == 0,
+    "Die standardmäßig anerkannte vorhandene Verzauberung wurde als unbekannt geführt")
 assert(ownAudit.emptySlots == 7, "Leere Pflichtslots wurden falsch gezählt")
 assert(selfMessage:find("leere Sockel", 1, true), "Die Rückmeldung nennt die leeren Sockel nicht")
 
@@ -1349,9 +1429,25 @@ for _, entry in ipairs(ownAudit.slots) do
         neckEntry = entry
     end
 end
-assert(headEntry.verdict == "UNKNOWN", "Eine unbewertete Verzauberung wurde nicht als unbekannt gemeldet")
+assert(headEntry.verdict == "SOLID",
+    "Eine vorhandene unbewertete Verzauberung wurde nicht standardmäßig anerkannt")
 assert(chestEntry.verdict == "MISSING", "Die fehlende Verzauberung wurde nicht gemeldet")
 assert(neckEntry.verdict == "EMPTY", "Ein leerer Slot wurde nicht als leer gemeldet")
+
+-- Wer die lokale Automatik abschaltet, sieht unbewertete Verzauberungen
+-- ausdrücklich als unbekannt. Das ist die alternative, in den Einstellungen
+-- angebotene Sicht.
+addon.DB:GetSettings().gearAudit.acceptUnratedEnchants = false
+addon.GearAudit:AuditSelf()
+local strictAudit = addon.GearAudit:GetAudit("Tester")
+local strictHead
+for _, entry in ipairs(strictAudit.slots) do
+    if entry.key == "HEAD" then
+        strictHead = entry
+    end
+end
+assert(strictAudit.unknownEnchants == 1 and strictHead.verdict == "UNKNOWN",
+    "Die abgeschaltete Anerkennung lässt eine unbewertete Verzauberung nicht als unbekannt erscheinen")
 
 -- Ein gepflegter Regelsatz bewertet dieselbe Verzauberung.
 addon.EnchantRuleSet.rules[2564] = {
@@ -1375,6 +1471,8 @@ addon.EnchantRuleSet.rules[2564] = nil
 addon.GearAudit:AuditSelf()
 assert(addon.GearAudit:GetAudit("Tester").unknownEnchants == 1,
     "Ohne Regel gilt die Verzauberung nicht wieder als unbekannt")
+addon.DB:GetSettings().gearAudit.acceptUnratedEnchants = true
+addon.GearAudit:ReapplyEnchantRules()
 
 -- Inspect-Durchlauf: erreichbare Spieler werden geprüft, andere übersprungen.
 raidRoster = { { "Tester", 2, "HUNTER" }, { "Heiler", 1, "PRIEST" } }
@@ -1433,6 +1531,7 @@ assert(addon.GearAudit:ResolveEnchantName(LONELY, 1234) == nil,
     "Ohne Vergleichs-Tooltip wurde der Gegenstandsname als Verzauberung gemeldet")
 
 inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
+addon.DB:GetSettings().gearAudit.acceptUnratedEnchants = false
 addon.GearAudit:AuditSelf()
 local namedHead
 for _, entry in ipairs(addon.GearAudit:GetAudit("Tester").slots) do
@@ -1446,6 +1545,8 @@ assert(namedHead.reason == "Verzaubert: Außergewöhnliche Gesundheit",
     "Der Hinweis zeigt weiter die nackte Verzauberungs-ID")
 assert(namedHead.verdict == "UNKNOWN",
     "Ein gelesener Name darf noch keine Qualitätsbewertung bedeuten")
+addon.DB:GetSettings().gearAudit.acceptUnratedEnchants = true
+addon.GearAudit:ReapplyEnchantRules()
 
 -- Die Gilde bewertet eine erkannte Verzauberung selbst; die ID kommt aus dem
 -- Item-Link, den Namen liefert der Tooltip.
@@ -1464,7 +1565,8 @@ for _, entry in ipairs(addon.GearAudit:GetAudit("Tester").slots) do
 end
 assert(ratedHead.verdict == "OPTIMAL",
     "Bereits gespeicherte Prüfungen wurden nicht neu bewertet")
-assert(ratedHead.reason:find("Gildenregel", 1, true), "Die Herkunft der Bewertung fehlt")
+assert(ratedHead.reason:find("Regel für alle Specs", 1, true),
+    "Der Geltungsbereich der Bewertung fehlt")
 
 addon.GearAudit:CycleEnchantRule(2564, "Außergewöhnliche Gesundheit")
 assert(addon.GearAudit:GetGuildEnchantRule(2564).verdict == "SOLID", "Zweite Stufe ist nicht Solide")
@@ -1582,7 +1684,7 @@ assert(gearPage.gearSlotRows[1].shown == true, "Die Slot-Tabelle ist leer")
 addon.GearAudit.selectedName = "Tester"
 addon.UI:RefreshGear()
 assert(gearPage.gearSlotRows[1].slot.value == "Kopf", "Die Slot-Tabelle zeigt den falschen Slot")
-assert(gearPage.gearSlotRows[1].verdict.value == "Unbekannt",
+assert(gearPage.gearSlotRows[1].verdict.value == "Solide",
     "Die Bewertung wird nicht angezeigt")
 
 GuildCopilotDB.settings.editorRecoveryAvailable = false

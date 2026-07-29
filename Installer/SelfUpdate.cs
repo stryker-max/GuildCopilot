@@ -121,10 +121,28 @@ public static class SelfUpdate
         var stale = current + ".old";
         if (File.Exists(stale)) File.Delete(stale);
         File.Move(current, stale);
-        File.Move(incoming, current);
-
-        log.Report($"Installer auf {available} aktualisiert, Neustart …");
-        Process.Start(new ProcessStartInfo(current) { UseShellExecute = true });
+        try
+        {
+            File.Move(incoming, current);
+            log.Report($"Installer auf {available} aktualisiert, Neustart …");
+            Process.Start(new ProcessStartInfo(current) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Bleibt der zweite Schritt oder der Neustart hängen, muss die
+            // weiterhin laufende Fassung unter ihrem alten Namen zurück.
+            try
+            {
+                if (File.Exists(current)) File.Delete(current);
+                if (File.Exists(stale)) File.Move(stale, current);
+            }
+            catch
+            {
+                // Der ursprüngliche Fehler bleibt maßgeblich; der Nutzer sieht
+                // ihn im Verlauf und kann die .old-Datei notfalls umbenennen.
+            }
+            throw;
+        }
         return true;
     }
 }

@@ -40,10 +40,11 @@ Verbrauchsgegenstände werden als reine `Spell-ID:Anzahl`-Paare übertragen. In 
 ## Selbsttest ohne Zugangsdaten
 
 ```bash
+GuildCopilot-Installer.exe --selftest-core
 GuildCopilot-Installer.exe --selftest GuildCopilot-WCL-Debug.json
 ```
 
-Spielt eine mit `--debug` aufgezeichnete API-Antwort durch die Auswertung und gibt die Importzeilen aus. Damit lässt sich belegen, dass Änderungen an der Auswertung dieselben Zeilen erzeugen wie zuvor – ohne Netz und ohne API-Client.
+Der Kernselbsttest prüft Linkvalidierung und Encounter-Teilnehmerauswahl vollständig offline. Der dateibasierte Selbsttest spielt zusätzlich eine mit `--debug` aufgezeichnete API-Antwort durch die Auswertung und gibt die Importzeilen aus. Damit lässt sich belegen, dass Änderungen an der Auswertung dieselben Zeilen erzeugen wie zuvor – ohne Netz und ohne API-Client.
 
 ## Bauen
 
@@ -56,3 +57,5 @@ dotnet publish Installer -c Release -r win-x64 --self-contained false -p:Publish
 Danach `Installer/dist/version.txt` auf die neue Installer-Version setzen – daraus liest die laufende Fassung, ob es etwas Neueres gibt. **Installer und Addon werden getrennt gezählt**; die Installer-Version steht in `GuildCopilot-Installer.csproj`.
 
 Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wird die neue Fassung daneben abgelegt, die alte umbenannt und das Programm neu gestartet; beim nächsten Start verschwindet die umbenannte Datei.
+
+Aktueller Stand: Installer 1.0.2, Addon 0.9.18.
