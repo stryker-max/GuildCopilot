@@ -11,7 +11,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.16",
+  "## Version: 0.9.17",
 ];
 
 for (const entry of requiredMetadata) {
@@ -151,7 +151,14 @@ const requiredImplementations = [
   ["Ausschluss nur mit Berechtigungsprüfung", /function GC\.Roster:CanRemoveMember/],
   ["echte Blizzard-Prüfung vor dem Ausschluss", /HasBlizzardRemovePermission/],
   ["zweite Bestätigung vor dem Ausschluss", /removeArmed/],
-  ["Nachanalyse aus Warcraft Logs", /GCPWCL\[12\]/],
+  ["Nachanalyse aus Warcraft Logs", /GCPWCL%d\+/],
+  ["Companion-Zeilen werden tolerant zerlegt", /local function SplitFields/],
+  ["Wiederbelebungen aus Logs", /resurrects = tonumber\(fields\[9\]\)/],
+  ["Klick ins Importfeld setzt den Cursor", /container:SetScript\("OnMouseDown", FocusEdit\)/],
+  ["Bestätigung vor dem Überschreiben", /Wirklich ersetzen/],
+  ["Rückmeldung mit Uhrzeit", /date\("%H:%M:%S"\)/],
+  ["Hinweis auf verwaiste Teilnehmerzeilen", /ohne zugehörige Sitzungszeile/],
+  ["verlorene Zeilenumbrüche werden repariert", /local function RepairLineBreaks/],
   ["Logs-Auswertungen als eigene Quelle", /source = "WCL"/],
   ["Consumables aus Logs über die Addon-Tabelle", /DecodeConsumables/],
   ["Quellen werden nicht vermischt", /stored\.source ~= summary\.source/],
@@ -280,3 +287,7 @@ if (uiSource.includes("☆") || uiSource.includes("★")) {
 }
 
 console.log(`OK: ${luaFiles.length} Lua-Dateien und die TOC-Struktur wurden geprüft.`);
+
+// Die Auswertung des Warcraft-Logs-Companions wird gegen eine aufgezeichnete
+// Antwort geprüft, damit der Importcode ohne API-Zugang belegbar bleibt.
+await import("./companion.mjs");

@@ -336,6 +336,20 @@ local function CreateTextArea(parent, width, height, maxLetters)
     scroll:SetScrollChild(edit)
     edit.container = container
     edit.scrollFrame = scroll
+
+    -- Ein Klick neben den Text traf bisher ins Leere: die EditBox belegt nur
+    -- die Fläche innerhalb des Scrollbereichs, Rahmen und Rand gehören ihr
+    -- nicht. Man musste also eine passende Stelle treffen, um überhaupt einen
+    -- Cursor zu bekommen. Beide reichen den Klick jetzt weiter.
+    local function FocusEdit()
+        edit:SetFocus()
+        edit:SetCursorPosition(edit:GetNumLetters())
+    end
+    container:EnableMouse(true)
+    container:SetScript("OnMouseDown", FocusEdit)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", FocusEdit)
+
     edit:SetScript("OnCursorChanged", function(_, x, y, cursorWidth, cursorHeight)
         local offset = scroll:GetVerticalScroll()
         local visibleHeight = scroll:GetHeight()
@@ -3182,16 +3196,66 @@ function GC.UI:BuildWarcraftLogsPage()
         "Ohne API: Name;Klasse;Primär-Spec;Dual-Spec – z. B. Nexarius;Magier;Arkan;Frost.\nAutomatisch: Außerhalb von WoW Companion\\Start-WCL-Import.cmd doppelklicken; danach hier mit Strg+V einfügen.",
         { muted = true, width = 740, height = 44, vertical = "TOP" })
     importHelp:SetPoint("TOPLEFT", importCard, "TOPLEFT", 18, -46)
-    page.wclImport = CreateTextArea(importCard, 740, 82, 12000)
+    -- Ein Companion-Export mit mehreren Reports ist schnell größer als das
+    -- alte Limit von 12000 Zeichen; darüber schneidet WoW beim Einfügen
+    -- stillschweigend ab und der Import scheitert ohne erkennbaren Grund.
+    page.wclImport = CreateTextArea(importCard, 740, 82, 60000)
     page.wclImport.container:SetPoint("TOPLEFT", importCard, "TOPLEFT", 18, -92)
     page.wclImport:SetText("")
-    local import = CreateButton(importCard, "Daten importieren", 170, 36, function()
-        local success, message = GC.WarcraftLogs:Import(page.wclImport:GetText())
-        page.wclImportResult:SetText(message or "")
+
+    -- Der Import ersetzt die gespeicherten Profile vollständig. Solange die
+    -- Meldung nach einem Klick genauso aussehen kann wie vorher, weiß niemand,
+    -- ob überhaupt etwas passiert ist. Deshalb: erster Klick benennt die
+    -- Folgen, zweiter Klick führt aus - dasselbe Muster wie beim
+    -- Gildenausschluss. Jede Rückmeldung trägt die Uhrzeit, damit auch ein
+    -- gleichlautendes Ergebnis sichtbar neu ist.
+    local import
+    local function DisarmImport()
+        page.wclImportArmed = false
+        if import then
+            import:SetText("Daten importieren")
+        end
+    end
+
+    local function ShowImportResult(message, success)
+        page.wclImportResult:SetText((message or "") .. "  (" .. date("%H:%M:%S") .. ")")
         SetTextColor(page.wclImportResult, success and THEME.success or THEME.danger)
+    end
+
+    import = CreateButton(importCard, "Daten importieren", 170, 36, function()
+        local text = page.wclImport:GetText()
+        if GC.Util.Trim(text) == "" then
+            DisarmImport()
+            ShowImportResult("Das Importfeld ist leer.", false)
+            return
+        end
+
+        local stored = GC.WarcraftLogs:GetImportedCount()
+        if stored > 0 and not page.wclImportArmed then
+            page.wclImportArmed = true
+            import:SetText("Wirklich ersetzen")
+            ShowImportResult(stored .. " gespeicherte Profile werden ersetzt. "
+                .. "Zum Bestätigen erneut klicken.", false)
+            return
+        end
+
+        DisarmImport()
+        local success, message = GC.WarcraftLogs:Import(text)
+        ShowImportResult(message, success)
         GC.UI:RefreshWarcraftLogs()
     end, "PRIMARY")
     import:SetPoint("BOTTOMLEFT", importCard, "BOTTOMLEFT", 18, 14)
+    page.wclImportButton = import
+    page.wclImportDisarm = DisarmImport
+
+    -- Neuer Text heißt neue Absicht: alte Meldung weg, Bestätigung zurück.
+    page.wclImport:SetScript("OnTextChanged", function(_, userInput)
+        if not userInput then
+            return
+        end
+        DisarmImport()
+        page.wclImportResult:SetText("")
+    end)
     page.wclImportResult = CreateLabel(importCard, "", { width = 535 })
     page.wclImportResult:SetPoint("LEFT", import, "RIGHT", 14, 0)
 
@@ -3211,10 +3275,21 @@ function GC.UI:RefreshWarcraftLogs()
     if not page.wclURL:HasFocus() then
         page.wclURL:SetText(data.url ~= "" and data.url or GC.WarcraftLogs:GetSuggestedURL())
     end
+    -- Eine scharfgeschaltete Bestätigung darf einen Seitenwechsel nicht
+    -- überleben; sonst löst der nächste Klick unerwartet aus.
+    if page.wclImportDisarm then
+        page.wclImportDisarm()
+    end
     local imported = GC.WarcraftLogs:GetImportedCount()
     if imported > 0 then
+        -- Die Zahl der Nachanalysen gehört sichtbar daneben: sonst sieht ein
+        -- reiner Profilimport genauso aus wie einer mit Raidauswertungen.
+        local sessions = data.sessionCount or 0
         page.wclStatus:SetText("|cff59e695" .. imported .. " Spielerprofile verfügbar|r"
             .. (data.reportCount > 0 and ("  •  " .. data.reportCount .. " Reports") or "")
+            .. (sessions > 0
+                and ("  •  |cff59e695" .. sessions .. " Raidauswertungen|r")
+                or "  •  |cffe8b84bkeine Raidauswertung|r")
             .. "\nDiese Specs ergänzen jetzt automatisch die Roster- und Copilot-Auswertung.")
     else
         page.wclStatus:SetText("|cff91a3b8Noch keine Log-Daten importiert.|r\nDie gespeicherte URL ist für den Companion vorbereitet.")

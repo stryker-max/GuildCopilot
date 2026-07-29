@@ -144,10 +144,30 @@ local function DecodeConsumables(payload)
     return counters
 end
 
+-- Feste Suchmuster brechen, sobald das Format ein Feld dazubekommt. Deshalb
+-- werden die Zeilen zerlegt statt gematcht: fehlende Felder sind leer,
+-- zusätzliche Felder älterer oder neuerer Companion-Versionen stören nicht.
+local function SplitFields(line)
+    local fields = {}
+    local position = 1
+    while true do
+        local separator = line:find("|", position, true)
+        if not separator then
+            fields[#fields + 1] = line:sub(position)
+            break
+        end
+        fields[#fields + 1] = line:sub(position, separator - 1)
+        position = separator + 1
+    end
+    return fields
+end
+
 local function ParseSessionLine(line)
-    local code, startedAt, endedAt, zone, pulls, kills, wipes =
-        line:match("^S|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$")
-    if not code or code == "" then
+    local fields = SplitFields(line)
+    local code = GC.Util.Trim(fields[2] or "")
+    local startedAt, endedAt, zone, pulls, kills, wipes =
+        fields[3], fields[4], fields[5], fields[6], fields[7], fields[8]
+    if code == "" then
         return nil
     end
     return {
@@ -167,27 +187,44 @@ local function ParseSessionLine(line)
 end
 
 local function ParseParticipantLine(line)
-    local name, classFile, seconds, deaths, interrupts, dispels, consumables =
-        line:match("^P|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?([^|]*)$")
-    name = GC.Util.Trim(name)
+    local fields = SplitFields(line)
+    local name = GC.Util.Trim(fields[2] or "")
     if name == "" then
         return nil
     end
-    classFile = ResolveClass(classFile)
+    -- Feld 9 kam mit GCPWCL3 dazu; ältere Exporte lassen es weg.
     return {
         name = name,
-        classFile = classFile,
-        seconds = math.max(0, tonumber(seconds) or 0),
-        deaths = tonumber(deaths) or 0,
-        resurrects = 0,
-        interrupts = tonumber(interrupts) or 0,
-        dispels = tonumber(dispels) or 0,
-        consumables = DecodeConsumables(consumables),
+        classFile = ResolveClass(fields[3]),
+        seconds = math.max(0, tonumber(fields[4]) or 0),
+        deaths = tonumber(fields[5]) or 0,
+        resurrects = tonumber(fields[9]) or 0,
+        interrupts = tonumber(fields[6]) or 0,
+        dispels = tonumber(fields[7]) or 0,
+        consumables = DecodeConsumables(fields[8]),
     }
+end
+
+-- Beim Einfügen in WoW gehen einzelne Zeilenumbrüche verloren. Zwei Zeilen
+-- verschmelzen dann zu einer und beide sind unbrauchbar: die Kopfzeile klebte
+-- am ersten Profil, die Sitzungszeile am letzten - übrig blieben Profile und
+-- lauter Teilnehmerzeilen ohne Sitzung.
+--
+-- Reparieren lässt sich das, weil die Marker eindeutig sind: eine Pipe kommt
+-- nur als Feldtrenner vor, Namen werden davon befreit. Wo also mitten in einer
+-- Zeile ein Datensatz beginnt, gehört davor ein Umbruch. Zusätzliche Leerzeilen
+-- schaden nicht, die werden ohnehin übersprungen.
+local function RepairLineBreaks(text)
+    text = text:gsub("^(GCPWCL%d+|?%d*)", "%1\n")
+    text = text:gsub("([^\n])(GCPWCL%d)", "%1\n%2")
+    text = text:gsub("([^\n])(S|%w+|%d)", "%1\n%2")
+    text = text:gsub("([^\n])(P|[^|\n]+|)", "%1\n%2")
+    return text
 end
 
 function GC.WarcraftLogs:Import(text)
     text = tostring(text or ""):gsub("\r", "")
+    text = RepairLineBreaks(text)
     local headerSeen = false
     local importSource = "MANUAL"
     local imported = {}
@@ -197,10 +234,18 @@ function GC.WarcraftLogs:Import(text)
     local sessions = {}
     local currentSession
 
+    -- Mitgezählt wird, was hereinkam. Ohne diese Zahlen lässt sich ein
+    -- unvollständig eingefügter Export nicht von einem reinen Profilexport
+    -- unterscheiden - genau daran ging eine Nachanalyse stumm verloren.
+    local lineCount = 0
+    local participantLines = 0
+    local orphanParticipants = 0
+
     for line in (text .. "\n"):gmatch("(.-)\n") do
         line = GC.Util.Trim(line)
         if line ~= "" then
-            local marker, reports = line:match("^(GCPWCL[12])|?(%d*)$")
+            lineCount = lineCount + 1
+            local marker, reports = line:match("^(GCPWCL%d+)|?(%d*)$")
             if marker then
                 headerSeen = true
                 importSource = "WARCRAFT_LOGS"
@@ -211,9 +256,12 @@ function GC.WarcraftLogs:Import(text)
                     sessions[#sessions + 1] = currentSession
                 end
             elseif line:sub(1, 2) == "P|" then
+                participantLines = participantLines + 1
                 local participant = currentSession and ParseParticipantLine(line)
                 if participant then
                     currentSession.participants[#currentSession.participants + 1] = participant
+                elseif not currentSession then
+                    orphanParticipants = orphanParticipants + 1
                 end
             else
                 local name, classFile, primarySpecKey, secondarySpecKey = line:match("^([^;]+);([^;]+);([^;]*);?([^;]*)$")
@@ -246,7 +294,28 @@ function GC.WarcraftLogs:Import(text)
         end
     end
 
-    if uniqueCount == 0 and #sessions == 0 then
+    local usableSessions = 0
+    for _, session in ipairs(sessions) do
+        if #session.participants > 0 then
+            usableSessions = usableSessions + 1
+        end
+    end
+
+    if lineCount == 0 then
+        return false, "Das Importfeld ist leer."
+    end
+
+    if uniqueCount == 0 and usableSessions == 0 then
+        if orphanParticipants > 0 then
+            return false, orphanParticipants .. " Teilnehmerzeilen ohne zugehörige Sitzungszeile. "
+                .. "Der Anfang der Datei fehlt – bitte das Feld leeren und den kompletten Inhalt einfügen."
+        end
+        if headerSeen then
+            -- Die Kopfzeile kam an, der Rest nicht: typischerweise wurde beim
+            -- Einfügen abgeschnitten oder der Companion hat nur den Kopf
+            -- geschrieben.
+            return false, "Companion-Kopfzeile erkannt, aber keine Datenzeilen. Bitte den kompletten Inhalt der Importdatei einfügen."
+        end
         return false, "Keine gültigen Profile gefunden. Format: Name;Klasse;Primär-Spec;Dual-Spec"
     end
 
@@ -277,7 +346,25 @@ function GC.WarcraftLogs:Import(text)
     if storedSessions > 0 then
         parts[#parts + 1] = storedSessions .. " Raidauswertungen"
     end
-    return true, GC.Util.JoinGerman(parts) .. " importiert."
+    local message = GC.Util.JoinGerman(parts) .. " importiert."
+
+    -- Ein Teilerfolg muss als solcher dastehen. Ein Companion-Export bringt
+    -- immer eine Kopfzeile mit; fehlt sie, wurde unvollständig eingefügt und
+    -- die Raidauswertung geht still verloren.
+    local hints = {}
+    if not headerSeen then
+        hints[#hints + 1] = "ohne Companion-Kopfzeile"
+    end
+    if orphanParticipants > 0 then
+        hints[#hints + 1] = orphanParticipants .. " Teilnehmerzeilen ohne Sitzungszeile verworfen"
+    end
+    if headerSeen and storedSessions == 0 and participantLines == 0 then
+        hints[#hints + 1] = "keine Raidauswertung enthalten"
+    end
+    if #hints > 0 then
+        message = message .. " Hinweis: " .. GC.Util.JoinGerman(hints) .. "."
+    end
+    return true, message
 end
 
 function GC.WarcraftLogs:GetImportedCount()

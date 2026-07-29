@@ -955,7 +955,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.16", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.17", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -1099,6 +1099,89 @@ assert(addon.RaidMonitor:StoreSummary(collidingSummary) == false,
     "Eine Logs-Auswertung konnte eine Livesitzung überschreiben")
 assert(addon.RaidMonitor:GetSummary("live-1").zone == "Karazhan",
     "Die Livesitzung wurde doch verändert")
+
+-- GCPWCL3 hängt die Wiederbelebungen als neuntes Feld an. Ältere Zeilen ohne
+-- dieses Feld müssen weiterhin durchgehen, sonst bricht jeder Import, sobald
+-- Addon und Companion unterschiedlich alt sind.
+local wcl3Imported, wcl3Message = addon.WarcraftLogs:Import(
+    "GCPWCL3|1\n"
+    .. "S|def456|2000|9000|Karazhan|3|2|1\n"
+    .. "P|Neuling|MAGE|5400|2|1|0|28499:3|4\n"
+    .. "P|Altbestand|WARRIOR|5000|1|0|0|\n"
+)
+assert(wcl3Imported == true, wcl3Message or "Der GCPWCL3-Import schlug fehl")
+local wcl3Summary = addon.RaidMonitor:GetSummary("WCL:def456")
+assert(wcl3Summary ~= nil, "Die GCPWCL3-Auswertung wurde nicht gespeichert")
+assert(#wcl3Summary.participants == 2, "Nicht alle GCPWCL3-Teilnehmer wurden übernommen")
+assert(wcl3Summary.participants[1].resurrects == 4,
+    "Die Wiederbelebungen aus dem Companion fehlen")
+assert(wcl3Summary.participants[1].consumables.POTION == 3,
+    "Die Verbrauchsgegenstände im neuen Format wurden nicht gezählt")
+assert(wcl3Summary.participants[2].resurrects == 0,
+    "Eine Zeile ohne Wiederbelebungsfeld wurde nicht mit 0 ergänzt")
+assert(wcl3Summary.participants[2].seconds == 5000,
+    "Eine Zeile ohne Wiederbelebungsfeld wurde falsch zerlegt")
+
+-- Eine Kopfzeile ohne Datenzeilen ist der typische Abschneidefehler beim
+-- Einfügen und muss als solcher gemeldet werden.
+local truncated, truncatedMessage = addon.WarcraftLogs:Import("GCPWCL3|3\n")
+assert(truncated == false, "Ein leerer Companion-Export wurde als Erfolg gewertet")
+assert(truncatedMessage:find("Datenzeilen", 1, true),
+    "Der abgeschnittene Import nennt die Ursache nicht")
+
+-- Genau der Fall aus dem Spiel: Beim Einfügen ging der Anfang verloren, es
+-- kamen nur Teilnehmerzeilen an. Vorher wurden sie stillschweigend verworfen
+-- und die Rückmeldung sah aus wie ein gewöhnlicher Profilimport.
+local orphan, orphanMessage = addon.WarcraftLogs:Import(
+    "P|Neuling|MAGE|5400|2|1|0|28499:3|4\n"
+    .. "P|Altbestand|WARRIOR|5000|1|0|0|\n"
+)
+assert(orphan == false, "Teilnehmerzeilen ohne Sitzungszeile wurden als Erfolg gewertet")
+assert(orphanMessage:find("Sitzungszeile", 1, true),
+    "Die Meldung nennt die fehlende Sitzungszeile nicht")
+
+-- Der echte Fall aus dem Spiel: Beim Einfügen fielen zwei Zeilenumbrüche weg.
+-- Die Kopfzeile klebte am ersten Profil, die Sitzungszeile am letzten. Beide
+-- Datensätze gingen dadurch verloren, obwohl der Text vollständig war.
+addon.DB:GetGuild().raidSessions = {}
+local glued, gluedMessage = addon.WarcraftLogs:Import(
+    "GCPWCL3|1Klebstoff-Realm;WARRIOR;WARRIOR:2;\n"
+    .. "Zweiter-Realm;MAGE;MAGE:3;S|geklebt|1000|8200|Karazhan|5|4|1\n"
+    .. "P|Tester|HUNTER|7200|1|3|0|28495:2|0\n"
+)
+assert(glued == true, gluedMessage or "Der geklebte Import schlug fehl")
+assert(gluedMessage:find("Raidauswertung", 1, true),
+    "Die geklebte Sitzungszeile wurde nicht wiederhergestellt: " .. tostring(gluedMessage))
+local gluedSummary = addon.RaidMonitor:GetSummary("WCL:geklebt")
+assert(gluedSummary ~= nil, "Die Sitzung hinter der Profilzeile wurde nicht erkannt")
+assert(#gluedSummary.participants == 1, "Der Teilnehmer der geklebten Sitzung fehlt")
+assert(addon.Roster:GetProfile("Klebstoff-Realm") ~= nil,
+    "Das Profil hinter der Kopfzeile wurde nicht erkannt")
+assert(addon.Roster:GetProfile("Zweiter-Realm") ~= nil,
+    "Das Profil vor der Sitzungszeile ging verloren")
+addon.DB:GetGuild().raidSessions = {}
+
+-- Zwei aneinandergeklebte Teilnehmerzeilen müssen ebenfalls auseinandergehen.
+local gluedPair = addon.WarcraftLogs:Import(
+    "GCPWCL3|1\n"
+    .. "S|paar|1000|8200|Karazhan|2|2|0\n"
+    .. "P|Erster|MAGE|100|0|0|0||0P|Zweiter|ROGUE|200|1|0|0||0\n"
+)
+assert(gluedPair == true, "Der Import mit geklebten Teilnehmerzeilen schlug fehl")
+assert(#addon.RaidMonitor:GetSummary("WCL:paar").participants == 2,
+    "Zwei aneinandergeklebte Teilnehmerzeilen wurden nicht getrennt")
+addon.DB:GetGuild().raidSessions = {}
+
+local emptyImport, emptyMessage = addon.WarcraftLogs:Import("   \n\n")
+assert(emptyImport == false, "Ein leeres Importfeld wurde als Erfolg gewertet")
+assert(emptyMessage:find("leer", 1, true), "Das leere Importfeld wird nicht benannt")
+
+-- Ein Profilexport ohne Kopfzeile ist gültig, muss aber als unvollständig
+-- gekennzeichnet werden - sonst bleibt unklar, wo die Raidauswertung blieb.
+local plain, plainMessage = addon.WarcraftLogs:Import("Kopflos-Realm;WARRIOR;WARRIOR:2;\n")
+assert(plain == true, plainMessage or "Der Profilimport ohne Kopfzeile schlug fehl")
+assert(plainMessage:find("Kopfzeile", 1, true),
+    "Die fehlende Companion-Kopfzeile wird nicht gemeldet")
 
 -- Der alte Profilimport funktioniert unverändert weiter.
 local legacyImported = addon.WarcraftLogs:Import(

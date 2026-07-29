@@ -136,7 +136,31 @@ Verbrauchsgegenstände überträgt der Companion als reine `Spell-ID:Anzahl`-Paa
 
 Der alte Profilimport `GCPWCL1` funktioniert unverändert weiter.
 
-Offen: Private Reports bleiben bewusst ausgeschlossen; dafür wäre die ausdrückliche OAuth-Benutzerfreigabe nötig. Die Abfragen des Companions sind gegen die dokumentierte WCL-v2-API geschrieben, aber noch nicht gegen echte Reports erprobt.
+Nachgezogen in 0.9.17: Die ersten Abfragen waren gegen die Dokumentation geschrieben, liefen aber nie durch. Zwei Ursachen:
+
+- `playerDetails` und `table` brauchen ein echtes Zeitfenster. Mit `startTime = 0` und `endTime = 0` antwortet Warcraft Logs mit einem Fehler statt mit leeren Daten – der Abruf brach schon beim ersten Report ab, noch bevor irgendeine Datei entstand.
+- Die JSON-Form der `table`-Antworten hängt am Datentyp. Die Auswertung suchte nach Einträgen mit Namen und fand je nach Tabelle nichts.
+
+Ausgewertet wird jetzt über die Ereignisliste (`events`): dort steht je Ereignis eine Akteurs-ID und eine Spell-ID. Namen kommen aus `masterData`, Kategorien weiterhin aus `GC.Consumables`. Damit zählen Tode beim Gestorbenen und Wiederbelebungen beim Wirkenden, genau wie in der Livesitzung.
+
+Dazugekommen sind ein Einzelreport-Modus zum Ausprobieren, eine Schritt-für-Schritt-Ausgabe, ein `--debug`-Schalter für die Rohantworten und eine Suche über die Warcraft-Logs-Seiten `fresh`, `classic` und `www` samt mehrerer Schreibweisen des Gildennamens – der Link nennt ihn nur als Slug.
+
+Das Importformat heißt jetzt `GCPWCL3` und führt die Wiederbelebungen als zusätzliches Feld. Das Addon zerlegt die Zeilen feldweise statt über ein festes Suchmuster, damit ein Companion anderen Alters keinen Import mehr verhindert. `GCPWCL1` und `GCPWCL2` werden unverändert gelesen.
+
+### Was der erste Lauf gegen echte Reports ergeben hat
+
+Erprobt an einem SSC/TK-Report mit 10 Encountern, 26 Teilnehmern und 96 Toden. Vier Fehler, die keine Dokumentation gezeigt hätte:
+
+- **`Resurrects` gibt es im Enum `EventDataType` nicht.** Wiederbelebungen werden jetzt über den gewirkten Zauber gezählt.
+- **Ein Fehler riss alles mit.** Alle sechs Ereignisabfragen hingen in einem `try`-Block; der ungültige Enum-Wert vernichtete auch Tode, Interrupts, Dispels und Verbrauchsgegenstände, obwohl diese Abfragen davon unberührt waren. Jede Abfrage ist jetzt einzeln abgesichert und fällt für sich aus.
+- **Eine Spell-ID aus dem Gedächtnis war falsch.** `25235` ist nicht „Erlösung", sondern „Flash Heal" – drei Priester bekamen 349, 256 und 209 Wiederbelebungen zugeschrieben. Alle 31 IDs sind jetzt einzeln geprüft, ein Testfall hält die falsche fern.
+- **Buffs nennen den Beschenkten, nicht den Verursacher.** Trommeln buffen die ganze Gruppe. Das frühere „Maximum aus Zauber und Buff" machte aus vier Trommlern vierzehn und schrieb einem Krieger 19 Trommeln zu, die er nie benutzt hatte. Jetzt gilt je Spell-ID: gibt es Zauber, ist der Zauber maßgeblich; der Buff zählt nur für Gegenstände, die gar keinen Zauber erzeugen.
+
+Ebenfalls korrigiert: Abgefragt wurde zunächst nur innerhalb der Bosskämpfe. Wiederbelebt wird aber zwischen den Pulls, dispelt und unterbrochen wird auch auf Trash, getrunken wird vor dem Pull – aus 7 Interrupts und 10 Dispels für einen ganzen Raidabend wurden 22 und 146. Nur die Anwesenheitszeit bleibt kampfbasiert, sie misst genau das.
+
+Beobachtete Verbrauchs-IDs aus dem echten Report – 28017, 28491, 28495, 28497, 28499, 28502, 28503, 28507, 28508, 35476, 39625, 39627 – stehen alle in `GC.Consumables`. Essen tauchte erwartungsgemäß nicht auf.
+
+Offen: Private Reports bleiben bewusst ausgeschlossen; dafür wäre die ausdrückliche OAuth-Benutzerfreigabe nötig. Die Anwesenheitszeit meint bei Logs reine Bosskampfzeit und bei Livesitzungen die Sitzungsdauer – beides bleibt getrennt gekennzeichnet, ist aber nicht dasselbe Maß.
 
 ## 0.6 – Raid Readiness und Gear Audit
 
@@ -210,7 +234,7 @@ Danach folgten überwiegend Korrekturen an Stellen, die im Spiel auffielen:
 - **Aufklappmenüs**: Mehrere Seiten liegen in einem ScrollFrame, und ein ScrollFrame beschneidet alles, was über seinen Rand hinausragt. Als Kind der jeweiligen Karte wurde ein aufgeklapptes Menü oben abgeschnitten, unabhängig von seiner Höhe. Es hängt jetzt am Hauptfenster und wird nur noch am Knopf verankert; ab neun Einträgen scrollt es.
 - **Kleinigkeiten**: Der Werbebalken kappte seinen Text bei 110 Bytes statt bei den 255, die in den Chat gehen. Die Hinweisspalte der Slot-Tabelle brach um und lief in die Nachbarzeilen. In `GetPlayerFullName` kürzte ein `and`-Ausdruck die Zuweisung auf einen Wert, der Realm kam dadurch nie an.
 
-## Offene Punkte (Stand 0.9.16)
+## Offene Punkte (Stand 0.9.17)
 
 Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und Erprobung im Spiel:
 
@@ -218,7 +242,7 @@ Alle nummerierten Meilensteine sind umgesetzt. Was bleibt, ist Datenpflege und E
 - **Regelsatz ohne Klassenbezug**: Eine gildeneigene Bewertung hängt allein an der Enchant-ID – ohne Slot, ohne Rolle, ohne Klasse. Wer eine Verzauberung als Optimal einstuft, tut das für jeden in der Gilde. In der Praxis fällt das selten auf, weil die meisten Verzauberungen ohnehin nur von einer Rolle getragen werden; bei generischen Verzauberungen, die mehrere Rollen unterschiedlich bewerten, trifft es aber zu. Das Format der mitgelieferten Regelliste kennt `slots` und `roles` bereits, der gildeneigene Weg nutzt sie noch nicht. Klassen kennt bisher keiner von beiden.
 - **Consumable-Spell-IDs**: Ausgangsbestand aus dem Gedächtnis, nicht gegen echte Logs geprüft. Essen fehlt vollständig, weil die „Sattgegessen“-IDs je Gericht abweichen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
 - **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
-- **Companion-Abfragen für die WCL-Nachanalyse**: gegen die dokumentierte v2-API geschrieben, aber nie gegen echte Reports gelaufen.
+- **Companion-Abfragen für die WCL-Nachanalyse**: seit 0.9.17 gegen echte Reports gelaufen und dabei viermal korrigiert; Einzelheiten oben unter „Nachanalyse aus Warcraft Logs". Erprobt ist bislang ein einzelner SSC/TK-Report – Karazhan, Gruul und Magtheridon sind noch nicht gegengeprüft.
 - **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen; Ergebnisse bleiben lokal bei dem, der geprüft hat. Automatisch prüft sich seit 0.9.5 nur die eigene Ausrüstung – **Gruppe prüfen** bleibt ein Klick, weil ein selbsttätiger Raidscan für jeden Teilnehmer eine Inspect-Anfrage auslöst.
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
