@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.28",
+    VERSION = "0.9.29",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -15,7 +15,9 @@ GC.Constants = {
     -- verstehen die Platzhalter <host>, <region>, <realm> und <name>. Wer eine
     -- andere Seite bevorzugt oder ein Pfadschema sich aendert, tauscht nur
     -- diese Zeichenketten.
-    ARMORY_CHARACTER_URL = "https://classic-armory.org/character/<region>/<realm>/<name>",
+    -- Classic Armory fuehrt die Spielfassung als eigenes Pfadsegment; dieses
+    -- Addon ist ausschliesslich fuer TBC Anniversary gedacht.
+    ARMORY_CHARACTER_URL = "https://classic-armory.org/character/<region>/tbc-anniversary/<realm>/<name>",
     WCL_CHARACTER_URL = "https://<host>/character/<region>/<realm>/<name>",
     ADDON_USER_TTL = 30 * 24 * 60 * 60,
     DEFAULT_POST_COOLDOWN = 120,

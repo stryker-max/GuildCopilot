@@ -774,7 +774,7 @@ assert(addon.DB:GetGuild().warcraftLogs.url
 wclLinks = addon.WarcraftLogs:BuildCharacterLinks("Dotlordd")
 assert(wclLinks.logs == "https://de.fresh.warcraftlogs.com/character/eu/thunderstrike/dotlordd",
     "Der Warcraft-Logs-Charakterlink ist falsch: " .. tostring(wclLinks.logs))
-assert(wclLinks.armory == "https://classic-armory.org/character/eu/thunderstrike/dotlordd",
+assert(wclLinks.armory == "https://classic-armory.org/character/eu/tbc-anniversary/thunderstrike/dotlordd",
     "Der Armory-Charakterlink ist falsch: " .. tostring(wclLinks.armory))
 -- Ein Realm am Namen gewinnt gegen den Realm der Gildenquelle.
 assert(addon.WarcraftLogs:BuildCharacterLinks("Dotlordd-Pyrewood Village").logs
@@ -1097,7 +1097,7 @@ assert(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue
     "Der Warcraft-Logs-Link des Interessenten fehlt im Postfach: "
     .. tostring(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue))
 assert(addon.UI.pages.INBOX.leadLinkEdits.armory.linkValue
-    == "https://classic-armory.org/character/eu/realm/namenlos",
+    == "https://classic-armory.org/character/eu/tbc-anniversary/realm/namenlos",
     "Der Armory-Link des Interessenten fehlt im Postfach")
 -- Tippen in ein Linkfeld stellt den vollständigen Link wieder her, damit
 -- niemand einen halben Link kopiert.
