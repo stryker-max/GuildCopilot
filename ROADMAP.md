@@ -30,7 +30,7 @@ Guild Copilot soll ein modularer Gildenassistent werden. Rekrutierung bleibt ein
 - Datenquelle und letzten Aktualisierungszeitpunkt sichtbar machen;
 - Rezeptdaten kompakt und nur bei Änderungen innerhalb der Gilde synchronisieren.
 
-Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Damit ist 0.4.0 abgeschlossen.
+Umgesetzt: Rezeptscan über das geöffnete TBC-Berufsfenster, die damalige gedrosselte Gildensynchronisierung, Suche nach Rezept/Beruf/Crafter, Herstellerliste und Reagenzienanzeige. Die feste Drosselung wurde mit 0.9.20 wieder entfernt. Damit ist 0.4.0 abgeschlossen.
 
 Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Copilot-Vorschläge bis zum Posting, ein Filter für die als aktive Raider sichtbaren Gildenränge sowie gezielte Whisper-Erkennung und Löschfunktionen im Bewerber-Postfach.
 
@@ -83,7 +83,7 @@ Ebenfalls umgesetzt: geordneter Rekrutierungs-Workflow vom Gildenprofil über Co
 - Mitgliederpflege nur für ausgewählte, gildenweit synchronisierte Gildenränge sichtbar;
 - gildenweite Einstellungen nur für ausgewählte Bearbeiter-Ränge änderbar, lokale Komfortoptionen bleiben persönlich;
 - aktive Raider-Ränge ebenfalls gildenweit synchronisiert;
-- Werkstattpakete deutlich gedrosselt, bei Sendefehlern wiederholt und nicht mehr still verworfen;
+- Werkstattpakete damals deutlich gedrosselt, bei Sendefehlern wiederholt und nicht mehr still verworfen; seit 0.9.20 werden erfolgreiche Pakete ohne feste Pause gesendet;
 - sichtbarer Status für laufende, fehlgeschlagene und empfangene Rezeptübertragungen.
 
 ## 0.4.6 – Lockout-Schutz für Gildenrechte
@@ -279,7 +279,16 @@ Offen: Der Live-Abruf gegen die WCL-API ist aus dem Installer heraus noch nicht 
 
 Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstanzsperre: Beim Selbstupdate wartet die neue Fassung unsichtbar auf das Ende der alten, sodass nie zwei Installer-Fenster gleichzeitig offen sind.
 
-## Offene Punkte (Stand 0.9.19)
+## 0.9.20 – Sofortiger Rezeptabgleich
+
+- Berufsfenster werden unmittelbar beim Öffnen und anschließend in kurzen Bereitschaftsprüfungen gelesen; häufige `TRADE_SKILL_UPDATE`-Ereignisse können den Scan nicht mehr gegenseitig abbrechen;
+- klassische TBC-Rezeptfilter werden einmal pro geöffnetem Beruf zurückgesetzt und sämtliche eingeklappten Kategorien geöffnet, bevor der Bestand gespeichert wird;
+- spätere gefilterte Teilansichten löschen keine bereits vollständig eingelesenen Rezepte mehr;
+- das moderne TradeSkill-Fallback übernimmt die tatsächlich zurückgegebene gefilterte Rezeptliste korrekt;
+- Rezeptpakete verwenden zwischen aktuellen Clients ein kompakteres Format und werden in einem direkten Burst ohne feste Pause gesendet;
+- nur eine echte Ablehnung durch WoW unterbricht den Burst kurz für eine automatische Wiederholung; ältere Clients bekommen auf Anfrage weiterhin das bisherige Paketformat.
+
+## Offene Punkte (Stand 0.9.20)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 

@@ -58,4 +58,4 @@ Danach `Installer/dist/version.txt` auf die neue Installer-Version setzen – da
 
 Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wird die neue Fassung daneben abgelegt und die alte umbenannt. Die neue Instanz wartet unsichtbar, bis die alte vollständig beendet ist; dadurch sind nie zwei Installer-Fenster gleichzeitig offen. Beim nächsten Start verschwindet die umbenannte Datei.
 
-Aktueller Stand: Installer 1.0.3, Addon 0.9.19.
+Aktueller Stand: Installer 1.0.3, Addon 0.9.20.

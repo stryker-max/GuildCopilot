@@ -15,15 +15,16 @@ GC.Workshop = {
     },
 }
 
-local MAX_PAYLOAD_BYTES = 170
+local MAX_PAYLOAD_BYTES = 180
+local LEGACY_MAX_PAYLOAD_BYTES = 170
 local MAX_RECORD_BYTES = 165
-local SYNC_INTERVAL = 0.65
-local SYNC_RETRY_DELAY = 1.5
+local SYNC_RETRY_DELAY = 0.2
 local MAX_SEND_RETRIES = 5
 local MAX_TRANSFER_PARTS = 300
 local MAX_INCOMING_TRANSFERS = 20
 local INCOMING_TTL = 5 * 60
 local MIN_REQUEST_REPLY_INTERVAL = 30
+local SCAN_RETRY_DELAYS = { 0.15, 0.45, 1.0, 2.0 }
 
 local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
@@ -42,7 +43,7 @@ end
 
 local function SanitizedName(value)
     value = GC.Util.Trim(value)
-    value = value:gsub("[,;|]", " ")
+    value = value:gsub("[,;|%%]", " ")
     return GC.Util.SafeChatText(value, 52)
 end
 
@@ -103,6 +104,42 @@ local function BuildRecipeRecord(recipe)
     return record
 end
 
+local function BuildCompactRecipeRecord(recipe)
+    local recipeKey = GC.Util.SafeChatText(tostring(recipe.key or ""), 36)
+    if recipeKey == "" then
+        return nil
+    end
+
+    local name = ""
+    if not recipeKey:match("^I%d+$") then
+        name = SanitizedName(recipe.name)
+    end
+
+    local reagentTokens = {}
+    for _, reagent in ipairs(recipe.reagents or {}) do
+        local itemID = tonumber(reagent.itemID)
+        if itemID then
+            local count = math.max(1, math.floor(tonumber(reagent.count) or 1))
+            reagentTokens[#reagentTokens + 1] = tostring(itemID) .. ":" .. tostring(count)
+        end
+    end
+
+    local function Compose()
+        return table.concat({ recipeKey, name, table.concat(reagentTokens, ".") }, ",")
+    end
+
+    local record = Compose()
+    while #record > MAX_RECORD_BYTES and #reagentTokens > 0 do
+        table.remove(reagentTokens)
+        record = Compose()
+    end
+    while #record > MAX_RECORD_BYTES and #name > 8 do
+        name = GC.Util.SafeChatText(name, #name - 4)
+        record = Compose()
+    end
+    return record
+end
+
 local function BuildMessage(fields)
     local escaped = {}
     for index, value in ipairs(fields) do
@@ -121,6 +158,22 @@ local function ResolveItemName(itemID, fallback)
     return fallback or (tonumber(itemID) and ("Item #" .. itemID) or "Unbekannt")
 end
 
+local function ResolveRecipeName(recipeKey, fallback)
+    local itemID = tonumber(tostring(recipeKey or ""):match("^I(%d+)$"))
+    if itemID then
+        return ResolveItemName(itemID, fallback)
+    end
+
+    local spellID = tonumber(tostring(recipeKey or ""):match("^E(%d+)$"))
+    if spellID and type(GetSpellInfo) == "function" then
+        local ok, name = pcall(GetSpellInfo, spellID)
+        if ok and type(name) == "string" and name ~= "" then
+            return name
+        end
+    end
+    return fallback or tostring(recipeKey or "Unbekanntes Rezept")
+end
+
 function GC.Workshop:GetOwnData()
     local profile = GC.Profile:Get()
     profile.workshop = profile.workshop or { professions = {} }
@@ -129,14 +182,28 @@ function GC.Workshop:GetOwnData()
 end
 
 function GC.Workshop:ScheduleScan()
-    self.scanGeneration = (self.scanGeneration or 0) + 1
-    local generation = self.scanGeneration
-    for _, delay in ipairs({ 0.25, 0.75, 1.5, 2.5 }) do
-        C_Timer.After(delay, function()
-            if self.scanGeneration == generation then
-                self:ScanOpenProfession()
-            end
-        end)
+    self:ScanOpenProfession()
+    if self.scanPending then
+        return
+    end
+
+    self.scanPending = true
+    local attempt = 1
+    local function RetryScan()
+        GC.Workshop:ScanOpenProfession()
+        attempt = attempt + 1
+        local delay = SCAN_RETRY_DELAYS[attempt]
+        if delay and C_Timer and C_Timer.After then
+            C_Timer.After(delay, RetryScan)
+        else
+            GC.Workshop.scanPending = false
+        end
+    end
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(SCAN_RETRY_DELAYS[attempt], RetryScan)
+    else
+        self.scanPending = false
     end
 end
 
@@ -148,6 +215,15 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
     local professionKey = NormalizeKey(professionName)
     local workshop = self:GetOwnData()
     local previous = workshop.professions[professionKey]
+    if previous
+        and (tonumber(skillLevel) or 0) >= (tonumber(previous.skillLevel) or 0)
+        and (tonumber(maxSkillLevel) or 0) >= (tonumber(previous.maxSkillLevel) or 0) then
+        for recipeKey, previousRecipe in pairs(previous.recipes or {}) do
+            if not recipes[recipeKey] then
+                recipes[recipeKey] = previousRecipe
+            end
+        end
+    end
     local profession = {
         key = professionKey,
         name = professionName,
@@ -184,6 +260,45 @@ local function SafeAPICall(func, ...)
     return ok and result or nil
 end
 
+local function PrepareClassicTradeSkill(professionName)
+    if GC.Workshop.preparedProfession ~= professionName then
+        GC.Workshop.preparedProfession = professionName
+        if type(ExpandTradeSkillSubClass) == "function" then
+            SafeAPICall(ExpandTradeSkillSubClass, 0)
+        end
+        if type(SetTradeSkillInvSlotFilter) == "function" then
+            SafeAPICall(SetTradeSkillInvSlotFilter, 0, 1, 0)
+        end
+        if type(SetTradeSkillSubClassFilter) == "function" then
+            SafeAPICall(SetTradeSkillSubClassFilter, 0, 1, 0)
+        end
+        if type(SetTradeSkillItemNameFilter) == "function" then
+            SafeAPICall(SetTradeSkillItemNameFilter, nil)
+        end
+        if type(SetTradeSkillItemLevelFilter) == "function" then
+            SafeAPICall(SetTradeSkillItemLevelFilter, 0, 0)
+        end
+        if type(TradeSkillOnlyShowSkillUps) == "function" then
+            SafeAPICall(TradeSkillOnlyShowSkillUps, false)
+        end
+        if type(TradeSkillOnlyShowMakeable) == "function" then
+            SafeAPICall(TradeSkillOnlyShowMakeable, false)
+        end
+    end
+
+    if type(GetNumTradeSkills) ~= "function" or type(GetTradeSkillInfo) ~= "function"
+        or type(ExpandTradeSkillSubClass) ~= "function" then
+        return
+    end
+
+    for index = (tonumber(SafeAPICall(GetNumTradeSkills)) or 0), 1, -1 do
+        local ok, _, skillType, _, isExpanded = pcall(GetTradeSkillInfo, index)
+        if ok and (skillType == "header" or skillType == "subheader") and isExpanded == false then
+            SafeAPICall(ExpandTradeSkillSubClass, index)
+        end
+    end
+end
+
 function GC.Workshop:ScanModernProfession()
     local api = C_TradeSkillUI
     if not api or type(api.GetRecipeInfo) ~= "function" or type(api.GetRecipeSchematic) ~= "function" then
@@ -206,7 +321,7 @@ function GC.Workshop:ScanModernProfession()
     if type(api.GetAllRecipeIDs) == "function" then
         recipeIDs = SafeAPICall(api.GetAllRecipeIDs) or {}
     elseif type(api.GetFilteredRecipeIDs) == "function" then
-        SafeAPICall(api.GetFilteredRecipeIDs, recipeIDs)
+        recipeIDs = SafeAPICall(api.GetFilteredRecipeIDs) or {}
     end
     if #recipeIDs == 0 then
         return false
@@ -331,9 +446,7 @@ function GC.Workshop:ScanOpenProfession()
         return false
     end
 
-    if ExpandTradeSkillSubClass then
-        ExpandTradeSkillSubClass(0)
-    end
+    PrepareClassicTradeSkill(professionName)
 
     local recipes = {}
     local recipeCount = GetNumTradeSkills() or 0
@@ -373,17 +486,21 @@ function GC.Workshop:ScanOpenProfession()
     return self:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, recipeCount)
 end
 
-function GC.Workshop:BuildProfessionMessages(profession)
+function GC.Workshop:BuildProfessionMessages(profession, compact)
     local records = {}
     for _, recipeKey in ipairs(SortedKeys(profession.recipes)) do
-        records[#records + 1] = BuildRecipeRecord(profession.recipes[recipeKey])
+        local recipe = profession.recipes[recipeKey]
+        records[#records + 1] = compact == false
+            and BuildRecipeRecord(recipe)
+            or BuildCompactRecipeRecord(recipe)
     end
 
     local payloads = {}
     local current = ""
+    local payloadLimit = compact == false and LEGACY_MAX_PAYLOAD_BYTES or MAX_PAYLOAD_BYTES
     for _, record in ipairs(records) do
         local candidate = current == "" and record or (current .. ";" .. record)
-        if #candidate > MAX_PAYLOAD_BYTES and current ~= "" then
+        if #candidate > payloadLimit and current ~= "" then
             payloads[#payloads + 1] = current
             current = record
         else
@@ -394,11 +511,12 @@ function GC.Workshop:BuildProfessionMessages(profession)
 
     local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
     local messages = {}
+    local operation = compact == false and "D" or "C"
     for index, payload in ipairs(payloads) do
         messages[#messages + 1] = BuildMessage({
             "W",
             GC.Constants.SCHEMA_VERSION,
-            "D",
+            operation,
             token,
             index,
             #payloads,
@@ -410,15 +528,23 @@ function GC.Workshop:BuildProfessionMessages(profession)
     return messages
 end
 
-function GC.Workshop:QueueProfessionSync(profession)
+function GC.Workshop:QueueProfessionSync(profession, compact)
     if not profession then
         return
     end
-    for _, message in ipairs(self:BuildProfessionMessages(profession)) do
+
+    for index = #self.syncQueue, 1, -1 do
+        if self.syncQueue[index].professionKey == profession.key then
+            table.remove(self.syncQueue, index)
+        end
+    end
+
+    for _, message in ipairs(self:BuildProfessionMessages(profession, compact)) do
         if #message <= GC.Constants.MAX_CHAT_BYTES then
             self.syncQueue[#self.syncQueue + 1] = {
                 message = message,
                 retries = 0,
+                professionKey = profession.key,
             }
             self.syncStats.queued = self.syncStats.queued + 1
         else
@@ -429,14 +555,14 @@ function GC.Workshop:QueueProfessionSync(profession)
     self:PumpSyncQueue()
 end
 
-function GC.Workshop:QueueAllProfessions()
+function GC.Workshop:QueueAllProfessions(compact)
     if #self.syncQueue == 0 and not self.syncSending then
         self.syncStats.queued = 0
         self.syncStats.sent = 0
         self.syncStats.failed = 0
     end
     for _, profession in pairs(self:GetOwnData().professions) do
-        self:QueueProfessionSync(profession)
+        self:QueueProfessionSync(profession, compact)
     end
 end
 
@@ -445,25 +571,31 @@ function GC.Workshop:PumpSyncQueue()
         return
     end
     self.syncSending = true
-    local entry = self.syncQueue[1]
-    local sent = GC.Sync and GC.Sync:Send(entry.message)
-    local delay = SYNC_INTERVAL
-    if sent then
-        table.remove(self.syncQueue, 1)
-        self.syncStats.sent = self.syncStats.sent + 1
-    else
-        entry.retries = entry.retries + 1
-        delay = SYNC_RETRY_DELAY
-        if entry.retries >= MAX_SEND_RETRIES then
+    while #self.syncQueue > 0 do
+        local entry = self.syncQueue[1]
+        local sent = GC.Sync and GC.Sync:Send(entry.message)
+        if sent then
             table.remove(self.syncQueue, 1)
-            self.syncStats.failed = self.syncStats.failed + 1
+            self.syncStats.sent = self.syncStats.sent + 1
+        else
+            entry.retries = entry.retries + 1
+            if entry.retries >= MAX_SEND_RETRIES then
+                table.remove(self.syncQueue, 1)
+                self.syncStats.failed = self.syncStats.failed + 1
+            else
+                self.syncSending = false
+                GC:FireCallback("WORKSHOP_UPDATED")
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(SYNC_RETRY_DELAY, function()
+                        GC.Workshop:PumpSyncQueue()
+                    end)
+                end
+                return
+            end
         end
     end
+    self.syncSending = false
     GC:FireCallback("WORKSHOP_UPDATED")
-    C_Timer.After(delay, function()
-        self.syncSending = false
-        self:PumpSyncQueue()
-    end)
 end
 
 function GC.Workshop:RequestGuildData()
@@ -477,7 +609,7 @@ function GC.Workshop:RequestGuildData()
     self.syncStats.receivedRecipes = 0
     self.syncStats.lastSender = ""
     GC:FireCallback("WORKSHOP_UPDATED")
-    return true, "Anfrage gesendet. Große Rezeptlisten werden sicher und gedrosselt übertragen."
+    return true, "Anfrage gesendet. Rezeptlisten werden ohne künstliche Wartezeit übertragen."
 end
 
 local function DecodeRecipeRecord(record, professionName)
@@ -507,6 +639,42 @@ local function DecodeRecipeRecord(record, professionName)
     }
 end
 
+local function DecodeCompactRecipeRecord(record, professionName)
+    local recipeKey, recipeName, reagentText = record:match("^([^,]+),([^,]*),(.*)$")
+    if not recipeKey then
+        return nil
+    end
+
+    local itemID = tonumber(recipeKey:match("^I(%d+)$"))
+    local recipeID = tonumber(recipeKey:match("^E(%d+)$"))
+    local reagents = {}
+    for reagentToken in tostring(reagentText or ""):gmatch("[^.]+") do
+        local reagentID, count = reagentToken:match("^(%d+):(%d+)$")
+        if reagentID then
+            reagentID = tonumber(reagentID)
+            reagents[#reagents + 1] = {
+                itemID = reagentID,
+                name = ResolveItemName(reagentID),
+                count = tonumber(count) or 1,
+            }
+        end
+    end
+    return {
+        key = recipeKey,
+        recipeID = recipeID,
+        itemID = itemID,
+        name = ResolveRecipeName(recipeKey, recipeName ~= "" and recipeName or nil),
+        profession = professionName,
+        reagents = reagents,
+    }
+end
+
+local function SupportsCompactWorkshop(sender)
+    local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
+    local capabilities = user and tostring(user.capabilities or "") or ""
+    return ("," .. capabilities .. ","):find(",workshop2,", 1, true) ~= nil
+end
+
 function GC.Workshop:ReceiveSync(fields, sender)
     local operation = fields[3]
     if operation == "Q" then
@@ -519,12 +687,10 @@ function GC.Workshop:ReceiveSync(fields, sender)
             return
         end
         self.requestReplies[senderKey] = now
-        C_Timer.After(math.random() * 4.5, function()
-            self:QueueAllProfessions()
-        end)
+        self:QueueAllProfessions(SupportsCompactWorkshop(sender))
         return
     end
-    if operation ~= "D" then
+    if operation ~= "D" and operation ~= "C" then
         return
     end
 
@@ -560,7 +726,8 @@ function GC.Workshop:ReceiveSync(fields, sender)
     local incoming = self.incoming[incomingKey]
     if incoming and (incoming.total ~= total
         or incoming.professionKey ~= professionKey
-        or incoming.professionName ~= professionName) then
+        or incoming.professionName ~= professionName
+        or incoming.operation ~= operation) then
         self.incoming[incomingKey] = nil
         return
     end
@@ -574,6 +741,7 @@ function GC.Workshop:ReceiveSync(fields, sender)
             total = total,
             professionKey = professionKey,
             professionName = professionName,
+            operation = operation,
             receivedAt = now,
         }
     end
@@ -590,7 +758,9 @@ function GC.Workshop:ReceiveSync(fields, sender)
     local recipes = {}
     for partIndex = 1, incoming.total do
         for record in tostring(incoming.parts[partIndex] or ""):gmatch("[^;]+") do
-            local recipe = DecodeRecipeRecord(record, professionName)
+            local recipe = operation == "C"
+                and DecodeCompactRecipeRecord(record, professionName)
+                or DecodeRecipeRecord(record, professionName)
             if recipe then
                 recipes[recipe.key] = recipe
             end
@@ -629,7 +799,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
             if not entry then
                 entry = {
                     key = recipeKey,
-                    name = recipe.name or recipeKey,
+                    name = ResolveRecipeName(recipeKey, recipe.name),
                     itemID = recipe.itemID,
                     profession = profession.name or recipe.profession or "Unbekannt",
                     reagents = GC.Util.DeepCopy(recipe.reagents or {}),
@@ -637,6 +807,8 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
                     crafterKeys = {},
                 }
                 catalog[recipeKey] = entry
+            else
+                entry.name = ResolveRecipeName(recipeKey, entry.name or recipe.name)
             end
             local crafterKey = GC.Util.NormalizeName(crafterName)
             if not entry.crafterKeys[crafterKey] then
@@ -752,6 +924,9 @@ workshopEvents:SetScript("OnEvent", function(_, event)
     if event == "GET_ITEM_INFO_RECEIVED" then
         GC:FireCallback("WORKSHOP_UPDATED")
     else
+        if event == "TRADE_SKILL_SHOW" then
+            GC.Workshop.preparedProfession = nil
+        end
         GC.Workshop:ScheduleScan()
     end
 end)

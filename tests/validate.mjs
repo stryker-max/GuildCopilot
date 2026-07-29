@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.19",
+  "## Version: 0.9.20",
 ];
 
 for (const entry of requiredMetadata) {
@@ -175,7 +175,9 @@ const requiredImplementations = [
   ["Profil als erster Tab", /local TAB_DEFINITIONS = \{\s+\{ key = "ROSTER", section = "COPILOT", label = "Profil"/],
   ["Abmeldung im persönlichen Profil", /BuildRosterPage[\s\S]*Deine Abmeldung/],
   ["Mitgliederpflege-Rangfreigabe", /SetMemberCareAccessRank/],
-  ["sichere Werkstatt-Drosselung", /SYNC_INTERVAL = 0\.65/],
+  ["direkter Werkstatt-Sendeburst", /while #self\.syncQueue > 0 do/],
+  ["kompakte Werkstattpakete", /BuildCompactRecipeRecord/],
+  ["vollständiger klassischer Rezeptscan", /PrepareClassicTradeSkill[\s\S]*SetTradeSkillItemNameFilter[\s\S]*isExpanded == false/],
   ["Wiederholung fehlgeschlagener Werkstattpakete", /MAX_SEND_RETRIES/],
   ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],
   ["Einmalige Editor-Lockout-Reparatur", /CanUseEditorRecovery/],
@@ -232,6 +234,10 @@ for (const [name, pattern] of requiredImplementations) {
   if (!pattern.test(allSource)) {
     throw new Error(`Implementierung fehlt: ${name}`);
   }
+}
+
+if (/\bSYNC_INTERVAL\b/.test(allSource)) {
+  throw new Error("Die Werkstatt enthält noch eine künstliche Paketpause.");
 }
 
 if (allSource.includes("RefreshOverview")) {

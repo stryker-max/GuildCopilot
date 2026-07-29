@@ -196,16 +196,46 @@ function GetTradeSkillLine()
     return "Schneiderei", 375, 375
 end
 
-function ExpandTradeSkillSubClass()
+local tradeSkillExpanded = false
+local tradeSkillFilterResets = 0
+
+function ExpandTradeSkillSubClass(index)
+    if index == 1 then
+        tradeSkillExpanded = true
+    end
+end
+
+function SetTradeSkillInvSlotFilter()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
+end
+
+function SetTradeSkillSubClassFilter()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
+end
+
+function SetTradeSkillItemNameFilter()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
+end
+
+function SetTradeSkillItemLevelFilter()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
+end
+
+function TradeSkillOnlyShowSkillUps()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
+end
+
+function TradeSkillOnlyShowMakeable()
+    tradeSkillFilterResets = tradeSkillFilterResets + 1
 end
 
 function GetNumTradeSkills()
-    return 3
+    return tradeSkillExpanded and 3 or 1
 end
 
 function GetTradeSkillInfo(index)
     if index == 1 then
-        return "Taschen", "header"
+        return "Taschen", "header", nil, tradeSkillExpanded
     elseif index == 2 then
         return "Mondstofftasche", "optimal"
     elseif index == 3 then
@@ -529,17 +559,64 @@ assert(addon.UI.pages.RECRUITMENT.expandedClass == nil, "Klassenkarte wurde beim
 assert(addon.UI.pages.POST.channelChecks.RECRUITMENT.mark.shown == true, "Aktiver Chatkanal hat kein sichtbares Häkchen")
 local scannedProfession = addon.Workshop:ScanOpenProfession()
 assert(scannedProfession == true, "Geöffnetes Berufsfenster wurde nicht gescannt")
+assert(tradeSkillExpanded == true, "Eingeklappte Berufskategorie wurde nicht automatisch geöffnet")
+assert(tradeSkillFilterResets > 0, "Einschränkende Berufsfilter wurden nicht zurückgesetzt")
+local filterResetsAfterFirstScan = tradeSkillFilterResets
+addon.Workshop:ScanOpenProfession()
+assert(tradeSkillFilterResets == filterResetsAfterFirstScan,
+    "Berufsfilter wurden bei jedem Update erneut gesetzt und können eine Ereignisschleife auslösen")
 local ownWorkshop = addon.Workshop:GetOwnData()
 assert(ownWorkshop.professions.schneiderei ~= nil, "Beruf wurde nicht in der Werkstatt gespeichert")
 assert(ownWorkshop.professions.schneiderei.recipes.I14155 ~= nil, "Rezept wurde nicht gespeichert")
 assert(#ownWorkshop.professions.schneiderei.recipes.I14155.reagents == 2, "Reagenzien wurden nicht gespeichert")
+addon.Workshop:StoreProfession("Schneiderei", 375, 375, {
+    I14155 = addon.Util.DeepCopy(ownWorkshop.professions.schneiderei.recipes.I14155),
+}, 1)
+assert(ownWorkshop.professions.schneiderei.recipes.I14048 ~= nil,
+    "Ein gefiltertes Teilresultat hat bereits bekannte Rezepte gelöscht")
 local workshopMessages = addon.Workshop:BuildProfessionMessages(ownWorkshop.professions.schneiderei)
 assert(#workshopMessages > 0, "Werkstatt-Synchronisierung wurde nicht erzeugt")
 for _, workshopMessage in ipairs(workshopMessages) do
     assert(#workshopMessage <= 255, "Werkstatt-Nachricht überschreitet das Addon-Limit")
+    assert(addon.Util.SplitFields(workshopMessage)[3] == "C",
+        "Aktuelle Clients verwenden nicht das kompakte Werkstattformat")
     addon.Workshop:ReceiveSync(addon.Util.SplitFields(workshopMessage), "Crafter-Realm")
 end
 assert(addon.DB:GetGuild().workshop.crafters["crafter-realm"] ~= nil, "Remote-Crafter wurde nicht gespeichert")
+local legacyWorkshopMessages = addon.Workshop:BuildProfessionMessages(ownWorkshop.professions.schneiderei, false)
+for _, workshopMessage in ipairs(legacyWorkshopMessages) do
+    local legacyFields = addon.Util.SplitFields(workshopMessage)
+    assert(legacyFields[3] == "D",
+        "Das kompatible Werkstattformat für ältere Clients fehlt")
+    assert(#(legacyFields[9] or "") <= 170,
+        "Ein kompatibles Werkstattpaket überschreitet das Limit älterer Clients")
+    addon.Workshop:ReceiveSync(legacyFields, "Crafter-Realm")
+end
+
+local burstProfession = {
+    key = "schneiderei",
+    name = "Schneiderei",
+    recipes = {},
+}
+for recipeIndex = 1, 80 do
+    local itemID = 15000 + recipeIndex
+    burstProfession.recipes["I" .. itemID] = {
+        key = "I" .. itemID,
+        itemID = itemID,
+        name = "Testrezept " .. recipeIndex,
+        reagents = { { itemID = 14047, count = 5 } },
+    }
+end
+local burstMessages = addon.Workshop:BuildProfessionMessages(burstProfession)
+assert(#burstMessages > 1, "Der Werkstatt-Bursttest erzeugt nicht mehrere Pakete")
+local sentBeforeBurst = #sentAddon
+local pendingBeforeBurst = #pendingTimers
+addon.Workshop:QueueProfessionSync(burstProfession)
+assert(#sentAddon - sentBeforeBurst == #burstMessages,
+    "Werkstattpakete wurden nicht vollständig im direkten Burst gesendet")
+assert(#pendingTimers == pendingBeforeBurst, "Der erfolgreiche Werkstatt-Burst wartet noch auf einen Timer")
+assert(#addon.Workshop.syncQueue == 0, "Werkstatt-Warteschlange blieb nach dem Burst gefüllt")
+
 addonSendFailures = 1
 local sentBeforeRetry = #sentAddon
 addon.Workshop:QueueProfessionSync(ownWorkshop.professions.schneiderei)
@@ -1021,8 +1098,9 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.19", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.20", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
+assert(announcement:find("workshop2", 1, true), "Das kompakte Werkstattformat fehlt im Handshake")
 assert(announcement:find("gearsync", 1, true), "Der automatische Ausrüstungsabgleich fehlt im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
