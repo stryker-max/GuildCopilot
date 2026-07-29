@@ -98,9 +98,14 @@ public static class AddonSource
             if (Directory.Exists(target))
             {
                 log.Report("Ersetze die vorhandene Fassung. Gespeicherte Einstellungen liegen im WTF-Ordner und bleiben erhalten.");
-                Directory.Delete(target, recursive: true);
             }
+
+            // Der Ordner wird ueberschrieben statt geloescht. Ein geoeffnetes
+            // Explorer-Fenster oder eine laufende Datei im Companion-Ordner
+            // sperrt sonst das Loeschen und die Installation bricht ab - fuer
+            // ein offenes Fenster ist das kein akzeptabler Grund.
             CopyDirectory(source, target);
+            RemoveStaleEntries(source, target, log);
 
             if (!File.Exists(Path.Combine(target, "GuildCopilot.toc")))
             {
@@ -159,6 +164,54 @@ public static class AddonSource
             .Split('.', StringSplitOptions.RemoveEmptyEntries)
             .Select(part => int.TryParse(new string(part.TakeWhile(char.IsDigit).ToArray()), out var value) ? value : 0)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Entfernt, was es in der neuen Fassung nicht mehr gibt. Gesperrte
+    /// Eintraege werden benannt und uebersprungen - eine Altdatei mehr ist
+    /// harmlos, eine abgebrochene Installation nicht.
+    /// </summary>
+    private static void RemoveStaleEntries(string source, string target, IProgress<string> log)
+    {
+        var blocked = 0;
+
+        foreach (var file in Directory.EnumerateFiles(target))
+        {
+            if (File.Exists(Path.Combine(source, Path.GetFileName(file)))) continue;
+            try
+            {
+                File.Delete(file);
+            }
+            catch
+            {
+                blocked++;
+            }
+        }
+
+        foreach (var folder in Directory.EnumerateDirectories(target))
+        {
+            var name = Path.GetFileName(folder);
+            var counterpart = Path.Combine(source, name);
+            if (Directory.Exists(counterpart))
+            {
+                RemoveStaleEntries(counterpart, folder, log);
+                continue;
+            }
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                blocked++;
+            }
+        }
+
+        if (blocked > 0)
+        {
+            log.Report($"{blocked} veraltete Einträge waren gesperrt und bleiben liegen "
+                     + "(meist ein geöffnetes Explorer-Fenster). Das Addon selbst ist vollständig.");
+        }
     }
 
     private static void CopyDirectory(string source, string target)

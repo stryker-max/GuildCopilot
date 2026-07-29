@@ -66,7 +66,7 @@ public sealed class MainForm : Form
             BackColor = Theme.Background,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
 
@@ -87,9 +87,23 @@ public sealed class MainForm : Form
         return root;
     }
 
+    /// <summary>
+    /// Feste Pixelpositionen halten hier nicht: bei skalierter Anzeige werden
+    /// die Beschriftungen hoeher und die Unterzeile verschwindet hinter dem
+    /// Reiterstreifen. Deshalb waechst der Kopfbereich mit seinem Inhalt.
+    /// </summary>
     private static Control BuildHeader(Image? logo)
     {
-        var header = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Panel };
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Panel,
+            ColumnCount = 2,
+            RowCount = 1,
+            Padding = new Padding(20, 12, 20, 12),
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         if (logo is not null)
         {
@@ -97,26 +111,38 @@ public sealed class MainForm : Form
             {
                 Image = logo,
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Bounds = new Rectangle(22, 16, 62, 62),
+                Size = new Size(62, 62),
                 BackColor = Color.Transparent,
-            });
+                Margin = new Padding(0, 0, 14, 0),
+                Anchor = AnchorStyles.Left,
+            }, 0, 0);
         }
 
-        header.Controls.Add(new Label
+        var text = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Left,
+            BackColor = Color.Transparent,
+        };
+        text.Controls.Add(new Label
         {
             Text = "Guild Copilot",
             ForeColor = Theme.Accent,
-            Font = new Font("Segoe UI", 21f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 20f, FontStyle.Bold),
             AutoSize = true,
-            Location = new Point(98, 14),
+            Margin = new Padding(0),
         });
-        header.Controls.Add(new Label
+        text.Controls.Add(new Label
         {
             Text = $"Installiert und aktualisiert direkt aus GitHub – {AddonSource.Owner}/{AddonSource.Repo}",
             ForeColor = Theme.Muted,
             AutoSize = true,
-            Location = new Point(101, 56),
+            Margin = new Padding(3, 2, 0, 0),
         });
+        header.Controls.Add(text, 1, 0);
         header.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 2, BackColor = Theme.Accent });
         return header;
     }
@@ -268,7 +294,7 @@ public sealed class MainForm : Form
         {
             _addonsPath.SelectedIndex = 0;
         }
-        Log($"{found.Count} Spielversion(en) automatisch erkannt.  Installer {SelfUpdate.CurrentVersion}");
+        Log($"{found.Count} Spielversion(en) erkannt.  Installer {SelfUpdate.CurrentVersion} (eigene Zählung, unabhängig vom Addon).");
 
         _autoUpdate.Checked = _settings.AutoUpdate;
         _autoStart.Checked = IsAutostartEnabled();

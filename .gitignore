@@ -9,3 +9,6 @@ Thumbs.db
 Installer/bin/
 Installer/obj/
 !Installer/dist/
+
+# Zwischenordner des Publish-Laufs
+Installer/publish-tmp/
