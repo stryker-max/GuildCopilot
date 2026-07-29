@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>GuildCopilot-Installer</AssemblyName>
+    <RootNamespace>GuildCopilot.Installer</RootNamespace>
+    <Version>0.9.17</Version>
+    <SatelliteResourceLanguages>de</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\GuildCopilotLogo.png" />
+  </ItemGroup>
+
+</Project>

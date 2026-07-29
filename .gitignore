@@ -4,3 +4,7 @@ Thumbs.db
 .idea/
 .vscode/
 
+
+# Build-Ausgabe des Installers
+Installer/bin/
+Installer/obj/
