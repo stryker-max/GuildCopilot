@@ -588,16 +588,25 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
                 GC:FireCallback("WORKSHOP_UPDATED")
             end,
             function(entry)
-                -- Nur die tatsaechlich verlorenen Teilpakete zaehlen, nicht der
-                -- ganze Beruf. Bestaetigte Pakete bleiben erfasst.
+                -- Kommt der bestaetigte Fluestertransfer nicht durch (in manchen
+                -- Umgebungen erreichen Addon-Fluester den Empfaenger nicht,
+                -- waehrend der Gildenkanal laeuft), wird der Beruf ueber den
+                -- bewaehrten Gildenkanal nachgereicht. So bekommt der Anfragende
+                -- die Daten trotzdem, ohne dass ein Fehl-Banner stehen bleibt -
+                -- echte Verluste zaehlt die Gilden-Warteschlange selbst.
                 local lost = entry.failedCount
                     or math.max(1, #messages - (entry.acknowledgedCount or 0))
-                GC.Workshop.syncStats.failed = GC.Workshop.syncStats.failed + lost
-                GC:FireCallback("WORKSHOP_UPDATED")
+                if lost > 0 then
+                    GC.Workshop:QueueProfessionSync(profession, true)
+                else
+                    GC:FireCallback("WORKSHOP_UPDATED")
+                end
             end
         )
         if not queued then
-            self.syncStats.failed = self.syncStats.failed + #messages
+            -- Der Fluesterweg liess sich gar nicht erst starten: sofort ueber
+            -- den Gildenkanal senden.
+            self:QueueProfessionSync(profession, true)
         end
         GC:FireCallback("WORKSHOP_UPDATED")
         return queued
@@ -832,7 +841,11 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         end
         self.requestReplies[senderKey] = now
         if fields[4] == "3" or SupportsReliableWorkshop(sender) then
-            self:SendManifest(sender)
+            -- Lässt sich das Flüster-Manifest nicht senden, hilft der sichere
+            -- Gilden-Bulktransfer aus.
+            if not self:SendManifest(sender) then
+                self:QueueAllProfessions(SupportsCompactWorkshop(sender))
+            end
         else
             -- Clients bis 0.9.21 verwerfen Werkstattpakete im Flüsterkanal.
             -- Für sie bleibt daher der sichere Gilden-Bulktransfer erhalten.

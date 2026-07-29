@@ -1286,21 +1286,21 @@ assert(addon.Sync.reliableActive == nil,
 -- Ein einzelnes dauerhaft verlorenes Teilpaket darf nicht den ganzen Beruf
 -- scheitern lassen: die bestätigten Pakete bleiben erhalten, gezählt wird nur
 -- der echte Verlust, und der Transfer läuft trotzdem sauber aus.
-local partialToken = "partial12345"
-local partialMessages = {}
+partialToken = "partial12345"
+partialMessages = {}
 for partIndex = 1, 3 do
     partialMessages[partIndex] = table.concat({
         "W", "7", "C", partialToken, partIndex, 3, "schneiderei", "Schneiderei", "I1,,", "0", "1",
     }, "|")
 end
-local partialComplete = false
-local partialFailedCount = nil
+partialComplete = false
+partialFailedCount = nil
 timerDelayThreshold = 1
 addon.Sync.bulkAllowance = 4000
 addon.Sync.bulkQueue = {}
 addon.Sync.reliableActive = nil
 addon.Sync.reliableQueue = {}
-local partialPendingStart = #pendingTimers
+partialPendingStart = #pendingTimers
 assert(addon.Sync:QueueReliable(
     partialMessages,
     "Heiler-Realm",
@@ -1322,11 +1322,11 @@ for _, ackedPart in ipairs({ 1, 3 }) do
         "Heiler-Realm"
     )
 end
-local partialGuard = 0
-local partialCursor = partialPendingStart + 1
+partialGuard = 0
+partialCursor = partialPendingStart + 1
 while addon.Sync.reliableActive and partialGuard < 200 do
     partialGuard = partialGuard + 1
-    local partialTimer = pendingTimers[partialCursor]
+    partialTimer = pendingTimers[partialCursor]
     if not partialTimer then
         break
     end
@@ -1340,6 +1340,47 @@ assert(partialComplete == false,
     "Ein Transfer mit verlorenem Paket meldete fälschlich vollständigen Erfolg")
 assert(partialFailedCount == 1,
     "Es wurde nicht genau ein verlorenes Teilpaket gezählt")
+
+-- Scheitert der Flüstertransfer vollständig (Addon-Flüster erreichen den
+-- Empfänger in manchen Umgebungen nicht), wird der Beruf über den bewährten
+-- Gildenkanal nachgereicht, damit der Anfragende die Daten trotzdem bekommt.
+addon.Sync.reliableActive = nil
+addon.Sync.reliableQueue = {}
+addon.Sync.bulkQueue = {}
+addon.Sync.bulkAllowance = 4000
+addon.Workshop.syncQueue = {}
+timerDelayThreshold = 1
+fallbackSentStart = #sentAddon
+fallbackPendingStart = #pendingTimers
+assert(addon.Workshop:QueueProfessionSync(
+    ownWorkshop.professions.schneiderei, true, "Heiler-Realm", true) ~= false,
+    "Der bestätigte Transfer für den Gilden-Fallback ließ sich nicht starten")
+fallbackGuard = 0
+fallbackCursor = fallbackPendingStart + 1
+while addon.Sync.reliableActive and fallbackGuard < 500 do
+    fallbackGuard = fallbackGuard + 1
+    fallbackTimer = pendingTimers[fallbackCursor]
+    if not fallbackTimer then
+        break
+    end
+    fallbackCursor = fallbackCursor + 1
+    fallbackTimer()
+end
+timerDelayThreshold = math.huge
+addon.Sync:PumpBulk(10)
+guildFallbackFound = false
+for fallbackIndex = fallbackSentStart + 1, #sentAddon do
+    fallbackEntry = sentAddon[fallbackIndex]
+    if fallbackEntry[3] == "GUILD" and fallbackEntry[2]:sub(1, 2) == "W|" then
+        fallbackFields = addon.Util.SplitFields(fallbackEntry[2])
+        if fallbackFields[3] == "C" and fallbackFields[7] == "schneiderei" then
+            guildFallbackFound = true
+            break
+        end
+    end
+end
+assert(guildFallbackFound,
+    "Nach einem gescheiterten Flüstertransfer wurde der Beruf nicht über den Gildenkanal nachgereicht")
 
 for _, reliableMessage in ipairs(reliableMessages) do
     addon.Sync:OnMessage("GuildCopilot", reliableMessage, "WHISPER", "Heiler-Realm")
@@ -1627,7 +1668,7 @@ assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false,
     "Testannahme falsch: Heiler-Realm darf das Profil bearbeiten")
 addon.DB:GetGuild().profile.description = "Von einem Mitglied gepflegt"
 addon.DB:GetGuild().profile.updatedAt = 5000
-local relayMessages = addon.Sync:BuildGuildProfileMessages()
+relayMessages = addon.Sync:BuildGuildProfileMessages()
 addon.DB:GetGuild().profile.description = ""
 addon.DB:GetGuild().profile.updatedAt = 0
 for _, relayMessage in ipairs(relayMessages) do
@@ -1642,7 +1683,7 @@ assert(addon.DB:GetGuild().profile.updatedAt == 5000,
 -- überschreiben, egal von welchem Rang er kommt.
 addon.DB:GetGuild().profile.description = "Alter Stand"
 addon.DB:GetGuild().profile.updatedAt = 2000
-local staleMessages = addon.Sync:BuildGuildProfileMessages()
+staleMessages = addon.Sync:BuildGuildProfileMessages()
 addon.DB:GetGuild().profile.description = "Neuer Stand"
 addon.DB:GetGuild().profile.updatedAt = 8000
 for _, staleMessage in ipairs(staleMessages) do
@@ -1655,7 +1696,7 @@ assert(addon.DB:GetGuild().profile.description == "Neuer Stand",
 -- übernommen - auch nicht mit neuerem Zeitstempel.
 addon.DB:GetGuild().profile.description = "Von einem Fremden"
 addon.DB:GetGuild().profile.updatedAt = 999999
-local strangerMessages = addon.Sync:BuildGuildProfileMessages()
+strangerMessages = addon.Sync:BuildGuildProfileMessages()
 addon.DB:GetGuild().profile.description = "Neuer Stand"
 addon.DB:GetGuild().profile.updatedAt = 8000
 for _, strangerMessage in ipairs(strangerMessages) do
