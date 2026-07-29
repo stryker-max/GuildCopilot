@@ -56,6 +56,6 @@ dotnet publish Installer -c Release -r win-x64 --self-contained false -p:Publish
 
 Danach `Installer/dist/version.txt` auf die neue Installer-Version setzen – daraus liest die laufende Fassung, ob es etwas Neueres gibt. **Installer und Addon werden getrennt gezählt**; die Installer-Version steht in `GuildCopilot-Installer.csproj`.
 
-Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wird die neue Fassung daneben abgelegt, die alte umbenannt und das Programm neu gestartet; beim nächsten Start verschwindet die umbenannte Datei.
+Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wird die neue Fassung daneben abgelegt und die alte umbenannt. Die neue Instanz wartet unsichtbar, bis die alte vollständig beendet ist; dadurch sind nie zwei Installer-Fenster gleichzeitig offen. Beim nächsten Start verschwindet die umbenannte Datei.
 
-Aktueller Stand: Installer 1.0.2, Addon 0.9.19.
+Aktueller Stand: Installer 1.0.3, Addon 0.9.19.

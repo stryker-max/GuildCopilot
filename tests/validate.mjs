@@ -41,6 +41,14 @@ const publishedVersion = fs
   .readFileSync(path.join(repositoryRoot, "Installer", "dist", "version.txt"), "utf8")
   .trim();
 const installerExe = path.join(repositoryRoot, "Installer", "dist", "GuildCopilot-Installer.exe");
+const installerProgram = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "Program.cs"),
+  "utf8"
+);
+const installerSelfUpdate = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "SelfUpdate.cs"),
+  "utf8"
+);
 if (!installerVersion || installerVersion !== publishedVersion) {
   throw new Error(
     `Installer-Versionen widersprechen sich: Projekt=${installerVersion}, version.txt=${publishedVersion}`
@@ -51,6 +59,14 @@ if (!fs.existsSync(installerExe) || fs.statSync(installerExe).size < 1_000_000) 
 }
 if (!readme.includes(`Installer bei ${installerVersion}`) || !readme.includes(`Addon bei ${tocVersion}`)) {
   throw new Error("README nennt nicht die tatsächlich veröffentlichten Addon- und Installer-Versionen.");
+}
+if (
+  !installerProgram.includes("SingleInstanceMutex") ||
+  !installerProgram.includes("WaitForPreviousInstance") ||
+  !installerProgram.includes("WaitForLegacySelfUpdate") ||
+  !installerSelfUpdate.includes("--wait-for-pid")
+) {
+  throw new Error("Der Installer-Neustart verhindert doppelte Fenster nicht vollständig.");
 }
 
 if (!fs.existsSync(logoPath)) {

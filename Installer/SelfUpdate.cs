@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Reflection;
 
@@ -11,7 +12,8 @@ namespace GuildCopilot.Installer;
 ///
 /// Eine laufende .exe kann sich nicht selbst ueberschreiben. Deshalb wird die
 /// neue Fassung daneben abgelegt, die alte umbenannt und das Programm neu
-/// gestartet; beim naechsten Start wird die umbenannte Datei entfernt.
+/// gestartet. Die neue Instanz wartet unsichtbar auf das Ende der alten,
+/// damit niemals zwei Installer-Fenster gleichzeitig offen sind.
 /// </summary>
 public static class SelfUpdate
 {
@@ -125,7 +127,15 @@ public static class SelfUpdate
         {
             File.Move(incoming, current);
             log.Report($"Installer auf {available} aktualisiert, Neustart …");
-            Process.Start(new ProcessStartInfo(current) { UseShellExecute = true });
+            var restart = new ProcessStartInfo(current)
+            {
+                UseShellExecute = true,
+                Arguments = $"--wait-for-pid {Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}",
+            };
+            if (Process.Start(restart) is null)
+            {
+                throw new InvalidOperationException("Die neue Installer-Fassung konnte nicht gestartet werden.");
+            }
         }
         catch
         {
