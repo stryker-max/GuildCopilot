@@ -45,55 +45,51 @@ public static class Theme
     }
 
     /// <summary>
-    /// Ein TabControl zeichnet seine Reiter sonst in den Systemfarben - hell,
-    /// mitten im dunklen Fenster. Deshalb werden sie selbst gezeichnet.
+    /// Duenne Trennlinie zwischen zwei Bereichen - deutlich genug, um sie zu
+    /// gliedern, ohne einen Rahmen ins Fenster zu setzen.
     /// </summary>
-    public static TabControl MakeTabs()
+    public static Control Separator() => new Panel
     {
-        var tabs = new TabControl
+        Height = 1,
+        Dock = DockStyle.Fill,
+        BackColor = Color.FromArgb(52, 60, 70),
+        Margin = new Padding(22, 6, 22, 10),
+    };
+
+    /// <summary>Ueberschrift eines Bereichs.</summary>
+    public static Label SectionTitle(string text) => new()
+    {
+        Text = text,
+        ForeColor = Accent,
+        Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+        AutoSize = true,
+    };
+
+    /// <summary>
+    /// Knopfreihe, die die volle Breite ausnutzt: gleich breite Spalten statt
+    /// linksbuendiger Knoepfe mit viel totem Rand rechts daneben.
+    /// </summary>
+    public static Control ButtonRow(params Button[] buttons)
+    {
+        var row = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            DrawMode = TabDrawMode.OwnerDrawFixed,
-            SizeMode = TabSizeMode.Fixed,
-            ItemSize = new Size(190, 34),
-            Padding = new Point(0, 0),
-            BackColor = Background,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = buttons.Length,
+            RowCount = 1,
+            Margin = new Padding(0, 0, 0, 12),
         };
-
-        tabs.DrawItem += (sender, args) =>
+        for (var index = 0; index < buttons.Length; index++)
         {
-            var control = (TabControl)sender!;
-            var page = control.TabPages[args.Index];
-            var selected = control.SelectedIndex == args.Index;
-            var bounds = args.Bounds;
-
-            using var background = new SolidBrush(selected ? Background : Panel);
-            args.Graphics.FillRectangle(background, bounds);
-
-            if (selected)
-            {
-                using var underline = new SolidBrush(Accent);
-                args.Graphics.FillRectangle(underline, bounds.Left, bounds.Bottom - 3, bounds.Width, 3);
-            }
-
-            using var text = new SolidBrush(selected ? Accent : Muted);
-            using var format = new StringFormat
-            {
-                Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center,
-            };
-            using var font = new Font("Segoe UI", 10.5f, selected ? FontStyle.Bold : FontStyle.Regular);
-            args.Graphics.DrawString(page.Text, font, text, bounds, format);
-        };
-        return tabs;
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / buttons.Length));
+            var button = buttons[index];
+            button.Dock = DockStyle.Fill;
+            button.Margin = new Padding(index == 0 ? 0 : 6, 0, index == buttons.Length - 1 ? 0 : 6, 0);
+            row.Controls.Add(button, index, 0);
+        }
+        return row;
     }
-
-    public static TabPage MakePage(string title) => new(title)
-    {
-        BackColor = Background,
-        ForeColor = Text,
-        UseVisualStyleBackColor = false,
-    };
 
     public static TextBox MakeLogBox() => new()
     {

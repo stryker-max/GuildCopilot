@@ -3,8 +3,8 @@ using GuildCopilot.Installer.Wcl;
 namespace GuildCopilot.Installer;
 
 /// <summary>
-/// Der Warcraft-Logs-Import als Reiterinhalt. Der Verlauf gehoert dem
-/// Hauptfenster - beide Reiter schreiben in dasselbe Feld.
+/// Der Warcraft-Logs-Import als Abschnitt des Hauptfensters. Der Verlauf
+/// gehoert dem Hauptfenster - beide Abschnitte schreiben in dasselbe Feld.
 /// </summary>
 public sealed class LogsPanel : UserControl
 {
@@ -27,7 +27,11 @@ public sealed class LogsPanel : UserControl
         _settings = settings;
         _log = log;
 
-        Dock = DockStyle.Fill;
+        // Der Bereich waechst mit seinem Inhalt und steht als Ganzes unter
+        // dem Addon-Teil - kein eigener Rahmen, keine eigene Bildlaufleiste.
+        Dock = DockStyle.Top;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
         BackColor = Theme.Background;
         _copy.Enabled = false;
 
@@ -47,21 +51,25 @@ public sealed class LogsPanel : UserControl
     {
         var root = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(22, 16, 22, 8),
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(22, 2, 22, 8),
             ColumnCount = 1,
-            AutoScroll = true,
             BackColor = Theme.Background,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
+        var title = Theme.SectionTitle("Warcraft Logs");
+        title.Margin = new Padding(0, 0, 0, 2);
+        root.Controls.Add(title);
+
         root.Controls.Add(new Label
         {
-            Text = "Ein WoW-Addon darf nicht ins Netz. Dieser Bereich liest öffentliche Reports über die\n"
-                 + "offizielle Warcraft-Logs-API und legt den Importcode in die Zwischenablage.",
+            Text = "Liest öffentliche Reports über die offizielle API und legt den Importcode in die Zwischenablage.",
             ForeColor = Theme.Muted,
             AutoSize = true,
-            Margin = new Padding(0, 0, 0, 14),
+            Margin = new Padding(0, 0, 0, 10),
         });
 
         var fields = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 3 };
@@ -107,11 +115,7 @@ public sealed class LogsPanel : UserControl
         });
         root.Controls.Add(countRow);
 
-        var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 14) };
-        actions.Controls.Add(_run);
-        _copy.Margin = new Padding(12, 0, 0, 0);
-        actions.Controls.Add(_copy);
-        root.Controls.Add(actions);
+        root.Controls.Add(Theme.ButtonRow(_run, _copy));
 
         _status.AutoSize = true;
         _status.MaximumSize = new Size(880, 0);

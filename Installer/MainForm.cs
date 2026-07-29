@@ -4,9 +4,9 @@ using Microsoft.Win32;
 namespace GuildCopilot.Installer;
 
 /// <summary>
-/// Hauptfenster: Kopfbereich, zwei Reiter und darunter der gemeinsame Verlauf.
-/// Der Reiter "Addon" behaelt bewusst die schlanke Aufteilung der bisherigen
-/// Fassung - AddOns-Ordner, Status, drei Knoepfe, zwei Schalter.
+/// Hauptfenster: Kopfbereich, darunter Addon und Warcraft Logs in einem
+/// Stueck, ganz unten der gemeinsame Verlauf. Bewusst ohne Reiter - ein
+/// TabControl setzt einen hellen Systemrahmen ins dunkle Fenster.
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -33,8 +33,8 @@ public sealed class MainForm : Form
         BackColor = Theme.Background;
         ForeColor = Theme.Text;
         Font = new Font("Segoe UI", 9.75f);
-        ClientSize = new Size(1000, 700);
-        MinimumSize = new Size(880, 640);
+        ClientSize = new Size(960, 780);
+        MinimumSize = new Size(860, 700);
         StartPosition = FormStartPosition.CenterScreen;
 
         var logo = LoadLogo();
@@ -67,30 +67,37 @@ public sealed class MainForm : Form
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        var tabs = Theme.MakeTabs();
-
-        var addonPage = Theme.MakePage("Addon");
-        addonPage.Controls.Add(BuildControls());
-        tabs.TabPages.Add(addonPage);
+        // Bewusst ohne Reiter: ein TabControl zeichnet seinen Rahmen in den
+        // Systemfarben und setzt damit einen hellen Balken mitten ins dunkle
+        // Fenster. Beide Bereiche stehen deshalb untereinander in einem Stueck.
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            BackColor = Theme.Background,
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        content.Controls.Add(BuildControls());
+        content.Controls.Add(Theme.Separator());
 
         _logsPanel = new LogsPanel(_settings, Log);
-        var logsPage = Theme.MakePage("Warcraft Logs");
-        logsPage.Controls.Add(_logsPanel);
-        tabs.TabPages.Add(logsPage);
+        content.Controls.Add(_logsPanel);
 
         root.Controls.Add(BuildHeader(logo), 0, 0);
-        root.Controls.Add(tabs, 0, 1);
+        root.Controls.Add(content, 0, 1);
         root.Controls.Add(BuildLogPanel(), 0, 2);
         return root;
     }
 
     /// <summary>
     /// Feste Pixelpositionen halten hier nicht: bei skalierter Anzeige werden
-    /// die Beschriftungen hoeher und die Unterzeile verschwindet hinter dem
-    /// Reiterstreifen. Deshalb waechst der Kopfbereich mit seinem Inhalt.
+    /// die Beschriftungen hoeher und die Unterzeile wird am unteren Rand des
+    /// Kopfbereich abgeschnitten. Deshalb waechst er mit seinem Inhalt.
     /// </summary>
     private static Control BuildHeader(Image? logo)
     {
@@ -137,7 +144,7 @@ public sealed class MainForm : Form
         });
         text.Controls.Add(new Label
         {
-            Text = $"Installiert und aktualisiert direkt aus GitHub – {AddonSource.Owner}/{AddonSource.Repo}",
+            Text = "Installiert und aktualisiert automatisch  ·  Guild Copilot powered by Stryker",
             ForeColor = Theme.Muted,
             AutoSize = true,
             Margin = new Padding(3, 2, 0, 0),
@@ -155,7 +162,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            Padding = new Padding(22, 16, 22, 6),
+            Padding = new Padding(22, 12, 22, 4),
             BackColor = Theme.Background,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -195,16 +202,10 @@ public sealed class MainForm : Form
         _statusLabel.Margin = new Padding(0, 2, 0, 12);
         panel.Controls.Add(_statusLabel);
 
-        var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 14) };
         _installButton.Click += async (_, _) => await InstallAsync();
-        buttons.Controls.Add(_installButton);
-        _removeButton.Margin = new Padding(12, 0, 0, 0);
         _removeButton.Click += (_, _) => Remove();
-        buttons.Controls.Add(_removeButton);
-        _checkButton.Margin = new Padding(12, 0, 0, 0);
         _checkButton.Click += async (_, _) => await CheckForUpdatesAsync();
-        buttons.Controls.Add(_checkButton);
-        panel.Controls.Add(buttons);
+        panel.Controls.Add(Theme.ButtonRow(_installButton, _removeButton, _checkButton));
 
         var switches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
         _autoUpdate.Text = "Beim Öffnen automatisch aktualisieren";
@@ -229,7 +230,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 2,
-            Padding = new Padding(22, 0, 22, 18),
+            Padding = new Padding(22, 0, 22, 14),
             BackColor = Theme.Background,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
