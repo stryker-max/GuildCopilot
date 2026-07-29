@@ -42,6 +42,9 @@ public sealed class Settings
         set => Set("wcl_url", value);
     }
 
+    /// <summary>Von der alten Fassung uebernommener Gildenlink, falls vorhanden.</summary>
+    public string GuildUrl => Get("guild_url");
+
     public int ReportCount
     {
         get => int.TryParse(Get("wcl_reports"), out var value) ? Math.Clamp(value, 1, 12) : 1;

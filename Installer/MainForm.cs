@@ -1,79 +1,95 @@
 using System.Runtime.InteropServices;
-using GuildCopilot.Installer.Wcl;
 using Microsoft.Win32;
 
 namespace GuildCopilot.Installer;
 
+/// <summary>
+/// Hauptfenster: Kopfbereich, zwei Reiter und darunter der gemeinsame Verlauf.
+/// Der Reiter "Addon" behaelt bewusst die schlanke Aufteilung der bisherigen
+/// Fassung - AddOns-Ordner, Status, drei Knoepfe, zwei Schalter.
+/// </summary>
 public sealed class MainForm : Form
 {
-    private static readonly Color Background = Color.FromArgb(24, 28, 34);
-    private static readonly Color Panel = Color.FromArgb(32, 38, 46);
-    private static readonly Color Accent = Color.FromArgb(41, 182, 246);
-    private static readonly Color TextColor = Color.FromArgb(228, 233, 240);
-    private static readonly Color MutedColor = Color.FromArgb(145, 163, 184);
-    private static readonly Color DangerColor = Color.FromArgb(232, 90, 90);
-    private static readonly Color SuccessColor = Color.FromArgb(89, 230, 149);
-
     private const string AutostartKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string AutostartName = "GuildCopilotInstaller";
 
     private readonly Settings _settings = Settings.Load();
+    private LogsPanel? _logsPanel;
 
     private readonly ComboBox _addonsPath = new();
     private readonly Label _statusLabel = new();
-    private readonly Button _installButton = new();
-    private readonly Button _removeButton = new();
-    private readonly Button _checkButton = new();
+    private readonly Button _installButton = Theme.MakeButton("Installieren", 230, primary: true);
+    private readonly Button _removeButton = Theme.MakeButton("Entfernen", 160, primary: false);
+    private readonly Button _checkButton = Theme.MakeButton("Nach Updates suchen", 200, primary: false);
     private readonly CheckBox _autoUpdate = new();
     private readonly CheckBox _autoStart = new();
-    private readonly TextBox _log = new();
-
-    private readonly TextBox _clientId = new();
-    private readonly TextBox _clientSecret = new();
-    private readonly CheckBox _rememberSecret = new();
-    private readonly TextBox _logsUrl = new();
-    private readonly NumericUpDown _reportCount = new();
-    private readonly Button _importButton = new();
-    private readonly Button _copyButton = new();
-    private readonly Label _importStatus = new();
+    private readonly TextBox _log = Theme.MakeLogBox();
 
     private string _availableVersion = string.Empty;
-    private string _importText = string.Empty;
-    private bool _busy;
 
     public MainForm()
     {
         Text = "Guild Copilot Installer";
-        BackColor = Background;
-        ForeColor = TextColor;
+        BackColor = Theme.Background;
+        ForeColor = Theme.Text;
         Font = new Font("Segoe UI", 9.75f);
-        ClientSize = new Size(880, 720);
-        MinimumSize = new Size(760, 620);
+        ClientSize = new Size(1000, 700);
+        MinimumSize = new Size(880, 640);
         StartPosition = FormStartPosition.CenterScreen;
 
         var logo = LoadLogo();
         if (logo is Bitmap bitmap)
         {
             var handle = bitmap.GetHicon();
-            using var icon = Icon.FromHandle(handle);
-            Icon = (Icon)icon.Clone();
+            using var temporary = Icon.FromHandle(handle);
+            Icon = (Icon)temporary.Clone();
             DestroyIcon(handle);
         }
 
-        Controls.Add(BuildBody(logo));
-        Controls.Add(BuildHeader(logo));
+        Controls.Add(BuildLayout(logo));
 
         Load += async (_, _) => await InitializeAsync();
-        FormClosing += (_, _) => PersistSettings();
+        FormClosing += (_, _) => Persist();
     }
 
     // -----------------------------------------------------------------
     // Aufbau
     // -----------------------------------------------------------------
 
-    private Control BuildHeader(Image? logo)
+    private Control BuildLayout(Image? logo)
     {
-        var header = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Panel, Padding = new Padding(20, 14, 20, 14) };
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = Theme.Background,
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+
+        var tabs = Theme.MakeTabs();
+
+        var addonPage = Theme.MakePage("Addon");
+        addonPage.Controls.Add(BuildControls());
+        tabs.TabPages.Add(addonPage);
+
+        _logsPanel = new LogsPanel(_settings, Log);
+        var logsPage = Theme.MakePage("Warcraft Logs");
+        logsPage.Controls.Add(_logsPanel);
+        tabs.TabPages.Add(logsPage);
+
+        root.Controls.Add(BuildHeader(logo), 0, 0);
+        root.Controls.Add(tabs, 0, 1);
+        root.Controls.Add(BuildLogPanel(), 0, 2);
+        return root;
+    }
+
+    private static Control BuildHeader(Image? logo)
+    {
+        var header = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Panel };
 
         if (logo is not null)
         {
@@ -81,239 +97,124 @@ public sealed class MainForm : Form
             {
                 Image = logo,
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Bounds = new Rectangle(20, 14, 60, 60),
+                Bounds = new Rectangle(22, 16, 62, 62),
+                BackColor = Color.Transparent,
             });
         }
 
         header.Controls.Add(new Label
         {
             Text = "Guild Copilot",
-            ForeColor = Accent,
-            Font = new Font("Segoe UI", 20f, FontStyle.Bold),
+            ForeColor = Theme.Accent,
+            Font = new Font("Segoe UI", 21f, FontStyle.Bold),
             AutoSize = true,
-            Location = new Point(94, 14),
+            Location = new Point(98, 14),
         });
         header.Controls.Add(new Label
         {
             Text = $"Installiert und aktualisiert direkt aus GitHub – {AddonSource.Owner}/{AddonSource.Repo}",
-            ForeColor = MutedColor,
+            ForeColor = Theme.Muted,
             AutoSize = true,
-            Location = new Point(97, 54),
+            Location = new Point(101, 56),
         });
-        header.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 2, BackColor = Accent });
+        header.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 2, BackColor = Theme.Accent });
         return header;
     }
 
-    private Control BuildBody(Image? logo)
+    private Control BuildControls()
     {
-        var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 6) };
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            Padding = new Padding(22, 16, 22, 6),
+            BackColor = Theme.Background,
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        var addonTab = new TabPage("Addon") { BackColor = Background, Padding = new Padding(20) };
-        addonTab.Controls.Add(BuildAddonPage());
-        tabs.TabPages.Add(addonTab);
+        var caption = Theme.Caption("AddOns-Ordner");
+        caption.Margin = new Padding(0, 0, 0, 4);
+        panel.Controls.Add(caption);
 
-        var logsTab = new TabPage("Warcraft Logs") { BackColor = Background, Padding = new Padding(20) };
-        logsTab.Controls.Add(BuildLogsPage());
-        tabs.TabPages.Add(logsTab);
+        var pathRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0, 0, 0, 10),
+        };
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0) };
-        container.Controls.Add(tabs);
-        container.Controls.Add(BuildLogPanel());
-        return container;
+        _addonsPath.Dock = DockStyle.Fill;
+        _addonsPath.DropDownStyle = ComboBoxStyle.DropDown;
+        _addonsPath.FlatStyle = FlatStyle.Flat;
+        _addonsPath.BackColor = Theme.Input;
+        _addonsPath.ForeColor = Theme.Text;
+        _addonsPath.Font = new Font("Segoe UI", 10f);
+        _addonsPath.SelectedIndexChanged += async (_, _) => await RefreshStatusAsync(checkRemote: false);
+        pathRow.Controls.Add(_addonsPath, 0, 0);
+
+        var browse = Theme.MakeButton("Durchsuchen", 170, primary: false);
+        browse.Margin = new Padding(12, 0, 0, 0);
+        browse.Click += (_, _) => BrowseForFolder();
+        pathRow.Controls.Add(browse, 1, 0);
+        panel.Controls.Add(pathRow);
+
+        _statusLabel.AutoSize = true;
+        _statusLabel.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
+        _statusLabel.Margin = new Padding(0, 2, 0, 12);
+        panel.Controls.Add(_statusLabel);
+
+        var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 14) };
+        _installButton.Click += async (_, _) => await InstallAsync();
+        buttons.Controls.Add(_installButton);
+        _removeButton.Margin = new Padding(12, 0, 0, 0);
+        _removeButton.Click += (_, _) => Remove();
+        buttons.Controls.Add(_removeButton);
+        _checkButton.Margin = new Padding(12, 0, 0, 0);
+        _checkButton.Click += async (_, _) => await CheckForUpdatesAsync();
+        buttons.Controls.Add(_checkButton);
+        panel.Controls.Add(buttons);
+
+        var switches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
+        _autoUpdate.Text = "Beim Öffnen automatisch aktualisieren";
+        _autoUpdate.AutoSize = true;
+        _autoUpdate.ForeColor = Theme.Text;
+        switches.Controls.Add(_autoUpdate);
+        _autoStart.Text = "Mit Windows starten";
+        _autoStart.AutoSize = true;
+        _autoStart.ForeColor = Theme.Text;
+        _autoStart.Margin = new Padding(40, 0, 0, 0);
+        _autoStart.CheckedChanged += (_, _) => ApplyAutostart();
+        switches.Controls.Add(_autoStart);
+        panel.Controls.Add(switches);
+
+        return panel;
     }
 
     private Control BuildLogPanel()
     {
-        var panel = new Panel { Dock = DockStyle.Bottom, Height = 210, Padding = new Padding(20, 8, 20, 16) };
-        panel.Controls.Add(_log);
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Padding = new Padding(22, 0, 22, 18),
+            BackColor = Theme.Background,
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
+        panel.Controls.Add(Theme.Caption("Verlauf"), 0, 0);
         _log.Dock = DockStyle.Fill;
-        _log.Multiline = true;
-        _log.ReadOnly = true;
-        _log.ScrollBars = ScrollBars.Vertical;
-        _log.BackColor = Color.FromArgb(18, 21, 26);
-        _log.ForeColor = MutedColor;
-        _log.BorderStyle = BorderStyle.FixedSingle;
-        _log.Font = new Font("Consolas", 9f);
-
-        var caption = new Label { Text = "Verlauf", Dock = DockStyle.Top, Height = 22, ForeColor = MutedColor };
-        panel.Controls.Add(caption);
-        caption.BringToFront();
+        _log.Margin = new Padding(0, 4, 0, 0);
+        panel.Controls.Add(_log, 0, 1);
         return panel;
-    }
-
-    private Control BuildAddonPage()
-    {
-        var layout = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoScroll = true,
-        };
-
-        layout.Controls.Add(Caption("AddOns-Ordner"));
-
-        var pathRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
-        _addonsPath.Width = 610;
-        _addonsPath.DropDownStyle = ComboBoxStyle.DropDown;
-        _addonsPath.BackColor = Color.FromArgb(18, 21, 26);
-        _addonsPath.ForeColor = TextColor;
-        _addonsPath.FlatStyle = FlatStyle.Flat;
-        _addonsPath.SelectedIndexChanged += async (_, _) => await RefreshStatusAsync(checkRemote: false);
-        pathRow.Controls.Add(_addonsPath);
-
-        var browse = MakeButton("Durchsuchen", 150, secondary: true);
-        browse.Margin = new Padding(10, 0, 0, 0);
-        browse.Click += (_, _) => BrowseForFolder();
-        pathRow.Controls.Add(browse);
-        layout.Controls.Add(pathRow);
-
-        _statusLabel.AutoSize = true;
-        _statusLabel.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
-        _statusLabel.Margin = new Padding(0, 0, 0, 12);
-        layout.Controls.Add(_statusLabel);
-
-        var buttonRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 14) };
-        ConfigureButton(_installButton, "Installieren", 230, secondary: false);
-        _installButton.Click += async (_, _) => await InstallAsync();
-        buttonRow.Controls.Add(_installButton);
-
-        ConfigureButton(_removeButton, "Entfernen", 160, secondary: true);
-        _removeButton.Margin = new Padding(10, 0, 0, 0);
-        _removeButton.Click += (_, _) => Remove();
-        buttonRow.Controls.Add(_removeButton);
-
-        ConfigureButton(_checkButton, "Nach Updates suchen", 200, secondary: true);
-        _checkButton.Margin = new Padding(10, 0, 0, 0);
-        _checkButton.Click += async (_, _) => await RefreshStatusAsync(checkRemote: true);
-        buttonRow.Controls.Add(_checkButton);
-        layout.Controls.Add(buttonRow);
-
-        _autoUpdate.Text = "Beim Öffnen automatisch aktualisieren";
-        _autoUpdate.AutoSize = true;
-        _autoUpdate.ForeColor = TextColor;
-        layout.Controls.Add(_autoUpdate);
-
-        _autoStart.Text = "Mit Windows starten";
-        _autoStart.AutoSize = true;
-        _autoStart.ForeColor = TextColor;
-        _autoStart.CheckedChanged += (_, _) => ApplyAutostart();
-        layout.Controls.Add(_autoStart);
-
-        return layout;
-    }
-
-    private Control BuildLogsPage()
-    {
-        var layout = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoScroll = true,
-        };
-
-        layout.Controls.Add(new Label
-        {
-            Text = "Ein WoW-Addon darf nicht ins Netz. Dieser Bereich liest öffentliche Reports über die\n"
-                 + "offizielle Warcraft-Logs-API und legt den Importcode in die Zwischenablage.",
-            ForeColor = MutedColor,
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 14),
-        });
-
-        layout.Controls.Add(Caption("Client ID"));
-        ConfigureInput(_clientId, 610);
-        layout.Controls.Add(_clientId);
-
-        layout.Controls.Add(Caption("Client Secret"));
-        ConfigureInput(_clientSecret, 610);
-        _clientSecret.UseSystemPasswordChar = true;
-        layout.Controls.Add(_clientSecret);
-
-        _rememberSecret.Text = "Zugangsdaten merken (verschlüsselt für dieses Windows-Konto)";
-        _rememberSecret.AutoSize = true;
-        _rememberSecret.ForeColor = TextColor;
-        _rememberSecret.Margin = new Padding(0, 4, 0, 12);
-        layout.Controls.Add(_rememberSecret);
-
-        layout.Controls.Add(Caption("Gilden- oder Reportlink"));
-        ConfigureInput(_logsUrl, 610);
-        layout.Controls.Add(_logsUrl);
-
-        var countRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 10, 0, 12) };
-        countRow.Controls.Add(new Label { Text = "Reports:", ForeColor = MutedColor, AutoSize = true, Margin = new Padding(0, 6, 8, 0) });
-        _reportCount.Minimum = 1;
-        _reportCount.Maximum = 12;
-        _reportCount.Width = 60;
-        _reportCount.BackColor = Color.FromArgb(18, 21, 26);
-        _reportCount.ForeColor = TextColor;
-        countRow.Controls.Add(_reportCount);
-        countRow.Controls.Add(new Label
-        {
-            Text = "Bei einem Reportlink zählt nur dieser eine.",
-            ForeColor = MutedColor,
-            AutoSize = true,
-            Margin = new Padding(12, 6, 0, 0),
-        });
-        layout.Controls.Add(countRow);
-
-        var actionRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
-        ConfigureButton(_importButton, "Import erzeugen", 200, secondary: false);
-        _importButton.Click += async (_, _) => await RunImportAsync();
-        actionRow.Controls.Add(_importButton);
-
-        ConfigureButton(_copyButton, "In Zwischenablage", 190, secondary: true);
-        _copyButton.Margin = new Padding(10, 0, 0, 0);
-        _copyButton.Enabled = false;
-        _copyButton.Click += (_, _) => CopyImport();
-        actionRow.Controls.Add(_copyButton);
-        layout.Controls.Add(actionRow);
-
-        _importStatus.AutoSize = true;
-        _importStatus.MaximumSize = new Size(760, 0);
-        _importStatus.Margin = new Padding(0, 12, 0, 0);
-        _importStatus.ForeColor = MutedColor;
-        layout.Controls.Add(_importStatus);
-
-        return layout;
-    }
-
-    private static Label Caption(string text) => new()
-    {
-        Text = text,
-        ForeColor = MutedColor,
-        AutoSize = true,
-        Margin = new Padding(0, 6, 0, 4),
-    };
-
-    private static void ConfigureInput(TextBox box, int width)
-    {
-        box.Width = width;
-        box.BackColor = Color.FromArgb(18, 21, 26);
-        box.ForeColor = TextColor;
-        box.BorderStyle = BorderStyle.FixedSingle;
-    }
-
-    private Button MakeButton(string text, int width, bool secondary)
-    {
-        var button = new Button();
-        ConfigureButton(button, text, width, secondary);
-        return button;
-    }
-
-    private static void ConfigureButton(Button button, string text, int width, bool secondary)
-    {
-        button.Text = text;
-        button.Width = width;
-        button.Height = 40;
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderColor = secondary ? MutedColor : Accent;
-        button.BackColor = secondary ? Panel : Accent;
-        button.ForeColor = secondary ? TextColor : Color.Black;
-        button.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
-        button.Margin = new Padding(0);
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -341,16 +242,15 @@ public sealed class MainForm : Form
 
     private void Log(string message)
     {
-        void Append()
-        {
-            _log.AppendText($"{DateTime.Now:HH:mm:ss}  {message}{Environment.NewLine}");
-        }
+        void Append() => _log.AppendText($"{DateTime.Now:HH:mm:ss}  {message}{Environment.NewLine}");
         if (_log.InvokeRequired) _log.BeginInvoke(Append);
         else Append();
     }
 
     private async Task InitializeAsync()
     {
+        SelfUpdate.CleanUp();
+
         var found = GameFinder.FindAddonFolders();
         foreach (var folder in found) _addonsPath.Items.Add(folder);
 
@@ -359,28 +259,31 @@ public sealed class MainForm : Form
         {
             _addonsPath.Items.Insert(0, remembered);
         }
-        _addonsPath.SelectedItem = remembered.Length > 0 ? remembered : found.FirstOrDefault();
-        if (_addonsPath.SelectedItem is null && _addonsPath.Items.Count > 0) _addonsPath.SelectedIndex = 0;
-        Log($"{found.Count} Spielversion(en) automatisch erkannt.");
+        if (remembered.Length > 0)
+        {
+            _addonsPath.SelectedItem = remembered;
+            Log("Zuletzt genutzter Ordner wiederhergestellt.");
+        }
+        else if (_addonsPath.Items.Count > 0)
+        {
+            _addonsPath.SelectedIndex = 0;
+        }
+        Log($"{found.Count} Spielversion(en) automatisch erkannt.  Installer {SelfUpdate.CurrentVersion}");
 
         _autoUpdate.Checked = _settings.AutoUpdate;
         _autoStart.Checked = IsAutostartEnabled();
-        _clientId.Text = _settings.ClientId;
-        _logsUrl.Text = _settings.LogsUrl;
-        _reportCount.Value = _settings.ReportCount;
-        _rememberSecret.Checked = _settings.RememberSecret;
-        if (_settings.RememberSecret) _clientSecret.Text = _settings.LoadSecret();
 
         await RefreshStatusAsync(checkRemote: true);
 
-        if (_autoUpdate.Checked && _availableVersion.Length > 0)
+        if (!_autoUpdate.Checked) return;
+
+        if (await UpdateSelfAsync()) return;
+
+        var installed = GameFinder.ReadInstalledVersion(SelectedPath());
+        if (_availableVersion.Length > 0 && AddonSource.CompareVersions(installed, _availableVersion) < 0)
         {
-            var installed = GameFinder.ReadInstalledVersion(SelectedPath());
-            if (AddonSource.CompareVersions(installed, _availableVersion) < 0)
-            {
-                Log("Automatische Aktualisierung ist aktiv.");
-                await InstallAsync();
-            }
+            Log("Automatische Aktualisierung ist aktiv.");
+            await InstallAsync();
         }
     }
 
@@ -397,6 +300,28 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         _addonsPath.Text = dialog.SelectedPath;
         _ = RefreshStatusAsync(checkRemote: false);
+    }
+
+    /// <summary>
+    /// "Nach Updates suchen" prueft beides: das Addon und den Installer selbst.
+    /// </summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        await RefreshStatusAsync(checkRemote: true);
+        await UpdateSelfAsync();
+    }
+
+    private async Task<bool> UpdateSelfAsync()
+    {
+        try
+        {
+            return await SelfUpdate.UpdateAsync(new Progress<string>(Log));
+        }
+        catch (Exception error)
+        {
+            Log($"Selbstaktualisierung fehlgeschlagen: {error.Message}");
+            return false;
+        }
     }
 
     private async Task RefreshStatusAsync(bool checkRemote)
@@ -422,39 +347,40 @@ public sealed class MainForm : Form
         var comparison = AddonSource.CompareVersions(installed, _availableVersion);
         if (installed is null)
         {
-            _statusLabel.Text = $"Nicht installiert  –  verfügbar: {Display(_availableVersion)}";
-            _statusLabel.ForeColor = MutedColor;
+            SetStatus($"Nicht installiert  –  verfügbar: {Display(_availableVersion)}", Theme.Muted);
             _installButton.Text = _availableVersion.Length > 0 ? $"{_availableVersion} installieren" : "Installieren";
             _removeButton.Enabled = false;
         }
         else if (_availableVersion.Length == 0)
         {
-            _statusLabel.Text = $"Installiert: {installed}  –  verfügbare Version unbekannt";
-            _statusLabel.ForeColor = MutedColor;
+            SetStatus($"Installiert: {installed}  –  verfügbare Version unbekannt", Theme.Muted);
             _installButton.Text = "Neu installieren";
             _removeButton.Enabled = true;
         }
         else if (comparison < 0)
         {
-            _statusLabel.Text = $"Veraltet  –  installiert: {installed}   verfügbar: {_availableVersion}";
-            _statusLabel.ForeColor = DangerColor;
+            SetStatus($"Veraltet  –  installiert: {installed}   verfügbar: {_availableVersion}", Theme.Danger);
             _installButton.Text = $"Auf {_availableVersion} aktualisieren";
             _removeButton.Enabled = true;
         }
         else if (comparison > 0)
         {
-            _statusLabel.Text = $"Neuer als GitHub  –  installiert: {installed}   dort: {_availableVersion}";
-            _statusLabel.ForeColor = MutedColor;
+            SetStatus($"Neuer als GitHub  –  installiert: {installed}   dort: {_availableVersion}", Theme.Muted);
             _installButton.Text = $"Auf {_availableVersion} zurücksetzen";
             _removeButton.Enabled = true;
         }
         else
         {
-            _statusLabel.Text = $"Aktuell  –  {installed}";
-            _statusLabel.ForeColor = SuccessColor;
+            SetStatus($"Aktuell  –  Version {installed}", Theme.Success);
             _installButton.Text = "Neu installieren";
             _removeButton.Enabled = true;
         }
+    }
+
+    private void SetStatus(string text, Color color)
+    {
+        _statusLabel.Text = text;
+        _statusLabel.ForeColor = color;
     }
 
     private static string Display(string value) => value.Length > 0 ? value : "unbekannt";
@@ -475,7 +401,9 @@ public sealed class MainForm : Form
             var progress = new Progress<string>(Log);
             await Task.Run(() => AddonSource.InstallAsync(path, progress));
             _settings.AddonsPath = path;
+            _settings.Save();
             await RefreshStatusAsync(checkRemote: false);
+            Log("Fertig. In WoW /reload eingeben oder das Spiel neu starten.");
         }
         catch (Exception error)
         {
@@ -510,90 +438,11 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task RunImportAsync()
-    {
-        var clientId = _clientId.Text.Trim();
-        var secret = _clientSecret.Text.Trim();
-        var link = _logsUrl.Text.Trim();
-
-        if (clientId.Length == 0 || secret.Length == 0)
-        {
-            _importStatus.ForeColor = DangerColor;
-            _importStatus.Text = "Client ID und Client Secret werden gebraucht. Beides steht unter warcraftlogs.com/api/clients.";
-            return;
-        }
-        if (link.Length == 0)
-        {
-            _importStatus.ForeColor = DangerColor;
-            _importStatus.Text = "Bitte einen Gilden- oder Reportlink eintragen.";
-            return;
-        }
-
-        SetBusy(true);
-        _copyButton.Enabled = false;
-        _importStatus.ForeColor = MutedColor;
-        _importStatus.Text = "Läuft …";
-
-        try
-        {
-            var importer = new WclImporter(new Progress<string>(Log));
-            var result = await importer.RunAsync(clientId, secret, link, (int)_reportCount.Value, CancellationToken.None);
-
-            _importText = result.Text;
-            _copyButton.Enabled = true;
-            SetClipboard(result.Text);
-
-            _importStatus.ForeColor = SuccessColor;
-            _importStatus.Text = $"{result.Profiles} Spieler und {result.Sessions} Raidauswertungen aus {result.Reports} Reports. "
-                               + "Der Importcode liegt in der Zwischenablage – in WoW einfügen unter Guild Copilot → Warcraft Logs.";
-            foreach (var warning in result.Warnings) Log($"Hinweis: {warning}");
-
-            _settings.ClientId = clientId;
-            _settings.LogsUrl = link;
-            _settings.ReportCount = (int)_reportCount.Value;
-            _settings.RememberSecret = _rememberSecret.Checked;
-            _settings.SaveSecret(_rememberSecret.Checked ? secret : string.Empty);
-            _settings.Save();
-        }
-        catch (Exception error)
-        {
-            Log($"Import fehlgeschlagen: {error.Message}");
-            _importStatus.ForeColor = DangerColor;
-            _importStatus.Text = error.Message;
-        }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
-
-    private void CopyImport()
-    {
-        if (_importText.Length == 0) return;
-        SetClipboard(_importText);
-        _importStatus.ForeColor = SuccessColor;
-        _importStatus.Text = $"In die Zwischenablage kopiert ({DateTime.Now:HH:mm:ss}).";
-    }
-
-    private void SetClipboard(string text)
-    {
-        try
-        {
-            Clipboard.SetText(text);
-        }
-        catch (Exception error)
-        {
-            Log($"Zwischenablage nicht erreichbar: {error.Message}");
-        }
-    }
-
     private void SetBusy(bool busy)
     {
-        _busy = busy;
         _installButton.Enabled = !busy;
-        _removeButton.Enabled = !busy && GameFinder.ReadInstalledVersion(SelectedPath()) is not null;
         _checkButton.Enabled = !busy;
-        _importButton.Enabled = !busy;
+        _removeButton.Enabled = !busy && GameFinder.ReadInstalledVersion(SelectedPath()) is not null;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }
 
@@ -632,15 +481,11 @@ public sealed class MainForm : Form
         }
     }
 
-    private void PersistSettings()
+    private void Persist()
     {
         _settings.AddonsPath = SelectedPath();
         _settings.AutoUpdate = _autoUpdate.Checked;
-        _settings.ClientId = _clientId.Text.Trim();
-        _settings.LogsUrl = _logsUrl.Text.Trim();
-        _settings.ReportCount = (int)_reportCount.Value;
-        _settings.RememberSecret = _rememberSecret.Checked;
-        _settings.SaveSecret(_rememberSecret.Checked ? _clientSecret.Text.Trim() : string.Empty);
         _settings.Save();
+        _logsPanel?.Persist();
     }
 }
