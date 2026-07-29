@@ -214,6 +214,8 @@ function GC.Chat:MergeDuplicateLeads()
                         lead.name = duplicate.name
                     end
                     lead.guid = lead.guid or duplicate.guid
+                    lead.classFile = lead.classFile or duplicate.classFile
+                    lead.level = lead.level or duplicate.level
                     local firstSeenAt = tonumber(lead.firstSeenAt)
                     local duplicateFirstSeenAt = tonumber(duplicate.firstSeenAt)
                     lead.firstSeenAt = firstSeenAt and duplicateFirstSeenAt
@@ -338,6 +340,26 @@ function GC.Chat:StartSearch(text)
     return true, "Gepostet in: " .. table.concat(posted, ", ")
 end
 
+-- Die Klasse steckt in der bereits erfassten GUID des Absenders; es braucht
+-- also keine zusaetzliche Abfrage. Direkt nach dem Login ist der Namens-Cache
+-- des Clients aber noch kalt, deshalb ist der Aufruf idempotent und wird beim
+-- Anzeigen des Postfachs so lange wiederholt, bis er etwas liefert. Das
+-- ergaenzt auch Interessenten, die vor dieser Version gespeichert wurden.
+function GC.Chat:ResolveLeadClass(lead)
+    if type(lead) ~= "table" or GC.Util.Trim(lead.classFile) ~= "" then
+        return lead and lead.classFile or nil
+    end
+    if GC.Util.Trim(lead.guid) == "" or type(GetPlayerInfoByGUID) ~= "function" then
+        return nil
+    end
+    local ok, _, classFile = pcall(GetPlayerInfoByGUID, lead.guid)
+    if ok and classFile and GC.Classes[classFile] then
+        lead.classFile = classFile
+        return classFile
+    end
+    return nil
+end
+
 function GC.Chat:CaptureLead(message, sender, guid, source)
     local settings = GC.DB:GetSettings()
     if GC.Util.Trim(sender) == ""
@@ -375,6 +397,8 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
     lead.lastSeenAt = GC.Util.Now()
     lead.unread = true
     lead.source = source or lead.source
+    lead.guid = lead.guid or guid
+    self:ResolveLeadClass(lead)
     table.insert(lead.messages, {
         receivedAt = GC.Util.Now(),
         text = message,

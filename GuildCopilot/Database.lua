@@ -73,6 +73,9 @@ local GUILD_DEFAULTS = {
     lastPosts = {},
     warcraftLogs = {
         url = "",
+        -- Host der Gildenquelle, damit eine Sprachvariante wie
+        -- "de.fresh.warcraftlogs.com" erhalten bleibt.
+        host = "",
         region = "",
         serverSlug = "",
         guildSlug = "",
@@ -80,6 +83,8 @@ local GUILD_DEFAULTS = {
         members = {},
         reportCount = 0,
         sessionCount = 0,
+        -- Wer den zuletzt uebernommenen Rekrutierungsdatensatz geschickt hat.
+        lastSyncFrom = "",
     },
     workshop = {
         crafters = {},

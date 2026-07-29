@@ -59,6 +59,30 @@ local function SetTextureColor(texture, color)
     texture:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
 end
 
+-- Klassenfarben stehen als RGB in GC.Classes und entsprechen den Blizzard-
+-- Vorgaben. Fuer Inline-Text im Chat-Farbformat braucht es sie hexadezimal.
+local function ClassColorCode(classFile)
+    local classInfo = GC.Classes[classFile or ""]
+    if not classInfo or type(classInfo.color) ~= "table" then
+        return nil
+    end
+    return string.format("|cff%02x%02x%02x",
+        math.floor((classInfo.color[1] or 1) * 255 + 0.5),
+        math.floor((classInfo.color[2] or 1) * 255 + 0.5),
+        math.floor((classInfo.color[3] or 1) * 255 + 0.5))
+end
+
+-- Name in Klassenfarbe. Ist die Klasse unbekannt, bleibt der Name schlicht -
+-- lieber neutral als falsch gefaerbt.
+local function ClassColoredName(name, classFile)
+    name = tostring(name or "")
+    local colorCode = ClassColorCode(classFile)
+    if not colorCode then
+        return name
+    end
+    return colorCode .. name .. "|r"
+end
+
 local function CreatePanel(parent, color, borderColor, name)
     local panel = CreateFrame("Frame", name, parent, BACKDROP_TEMPLATE)
     panel:SetBackdrop({
@@ -2728,12 +2752,12 @@ function GC.UI:BuildInboxPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(966)
+    content:SetHeight(1030)
     scroll:SetScrollChild(content)
     page.inboxScroll = scroll
 
     local leadCard = CreateCard(content, "Interessenten")
-    leadCard:SetSize(224, 490)
+    leadCard:SetSize(224, 554)
     leadCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     page.leadButtons = {}
     page.leadDeleteButtons = {}
@@ -2784,25 +2808,57 @@ function GC.UI:BuildInboxPage()
     page.clearInboxButton:SetPoint("BOTTOMLEFT", leadCard, "BOTTOMLEFT", 18, 14)
 
     local detailCard = CreateCard(content, "Unterhaltung")
-    detailCard:SetSize(528, 490)
+    detailCard:SetSize(528, 554)
     detailCard:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
     page.leadTitle = CreateLabel(detailCard, "Kein Bewerber ausgewählt", { title = true })
     page.leadTitle:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -51)
     page.lastMessage = CreateLabel(detailCard, "", { width = 504, height = 52, vertical = "TOP" })
     page.lastMessage:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -86)
 
+    -- Zwei fertige Profil-Links zum Nachschlagen des Interessenten. WoW kann
+    -- keinen Browser oeffnen und nichts in die Zwischenablage legen, deshalb
+    -- sind es Textfelder: hineinklicken markiert den ganzen Link, Strg+C
+    -- kopiert ihn. Tippen stellt den Link wieder her, damit niemand versehentlich
+    -- einen halben Link kopiert.
+    page.leadLinkEdits = {}
+    local linkDefinitions = {
+        { key = "armory", label = "Armory", y = -142 },
+        { key = "logs", label = "Logs", y = -170 },
+    }
+    for _, definition in ipairs(linkDefinitions) do
+        local label = CreateLabel(detailCard, definition.label, { muted = true, width = 62 })
+        label:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, definition.y)
+        local edit = CreateEdit(detailCard, 424, 24)
+        edit.container:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 86, definition.y + 2)
+        edit:SetScript("OnEditFocusGained", function(self)
+            self:HighlightText()
+        end)
+        edit:SetScript("OnTextChanged", function(self, userInput)
+            if userInput then
+                self:SetText(self.linkValue or "")
+                self:HighlightText()
+            end
+        end)
+        edit:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+        end)
+        page.leadLinkEdits[definition.key] = edit
+    end
+    page.leadLinkNotice = CreateLabel(detailCard, "", { muted = true, width = 492, height = 14 })
+    page.leadLinkNotice:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -196)
+
     local previewLabel = CreateLabel(detailCard, "Antwortvorschau  •  editierbar", { muted = true })
-    previewLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -145)
+    previewLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -209)
 
     local markerLabel = CreateLabel(detailCard, "Symbole", { muted = true })
-    markerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -174)
+    markerLabel:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -238)
     page.replyMarkerOff = CreateButton(detailCard, "Aus", 45, 26, function()
         local recruitment = GC.DB:GetGuild().recruitment
         recruitment.replyMarker = 0
         page.replyEdit:SetText(GC.Recruitment:DecorateReply(page.replyEdit:GetText(), 0))
         GC.UI:RefreshInbox()
     end)
-    page.replyMarkerOff:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 92, -165)
+    page.replyMarkerOff:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 92, -229)
     page.replyMarkerButtons = {}
     for markerIndex = 1, 8 do
         local selectedMarker = markerIndex
@@ -2812,14 +2868,14 @@ function GC.UI:BuildInboxPage()
             page.replyEdit:SetText(GC.Recruitment:DecorateReply(page.replyEdit:GetText(), selectedMarker))
             GC.UI:RefreshInbox()
         end)
-        markerButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 146 + ((markerIndex - 1) * 30), -165)
+        markerButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 146 + ((markerIndex - 1) * 30), -229)
         page.replyMarkerButtons[markerIndex] = markerButton
     end
 
     page.replyEdit = CreateTextArea(detailCard, 504, 104, 500)
-    page.replyEdit.container:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -199)
+    page.replyEdit.container:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -263)
     page.replyByteCounter = CreateLabel(detailCard, "0/255 Bytes", { muted = true, align = "RIGHT", width = 110 })
-    page.replyByteCounter:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -18, -310)
+    page.replyByteCounter:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -18, -374)
     page.replyEdit:SetScript("OnTextChanged", function(edit)
         local bytes = #(edit:GetText() or "")
         page.replyByteCounter:SetText(bytes .. "/" .. GC.Constants.MAX_CHAT_BYTES .. " Bytes")
@@ -2832,7 +2888,7 @@ function GC.UI:BuildInboxPage()
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("THANKS", lead.name))
         end
     end)
-    thanks:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -322)
+    thanks:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -386)
     local info = CreateButton(detailCard, "Gildeninfos", 115, 30, function()
         local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
         if lead then
@@ -2859,7 +2915,7 @@ function GC.UI:BuildInboxPage()
         end
         GC.UI:RefreshInbox()
     end, "PRIMARY")
-    page.replyButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -366)
+    page.replyButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -430)
 
     page.inviteButton = CreateButton(detailCard, "In Gilde einladen", 248, 38, function()
         local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
@@ -2870,7 +2926,7 @@ function GC.UI:BuildInboxPage()
     end)
     page.inviteButton:SetPoint("LEFT", page.replyButton, "RIGHT", 8, 0)
     page.replyResult = CreateLabel(detailCard, "", { width = 492, height = 20, vertical = "TOP" })
-    page.replyResult:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -412)
+    page.replyResult:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -476)
 
     -- Wer immer wieder schreibt, ohne dass etwas daraus wird, laesst sich
     -- ausblenden. Befristet oder dauerhaft; zuruecknehmen geht in der Liste
@@ -2893,7 +2949,7 @@ function GC.UI:BuildInboxPage()
     page.hideTempButton = CreateButton(detailCard, "7 Tage ausblenden", 248, 34, function()
         FilterSelectedLead(7)
     end)
-    page.hideTempButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -438)
+    page.hideTempButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -502)
 
     page.hideForeverButton = CreateButton(detailCard, "Dauerhaft ignorieren", 248, 34, function()
         FilterSelectedLead(0)
@@ -2904,7 +2960,7 @@ function GC.UI:BuildInboxPage()
     -- benutzt werden, nicht in den Einstellungen.
     local templateCard = CreateCard(content, "Vorlagen für Danke, Gildeninfos und Discord")
     templateCard:SetSize(752, 244)
-    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -502)
+    templateCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -566)
     local templateHelp = CreateLabel(templateCard,
         "Diese Texte füllen die drei Knöpfe oben. Sie gelten gildenweit. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
         { muted = true, width = 716, height = 30, vertical = "TOP" })
@@ -2946,7 +3002,7 @@ function GC.UI:BuildInboxPage()
 
     local filterCard = CreateCard(content, "Ausgeblendete Spieler")
     filterCard:SetSize(752, 196)
-    filterCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -758)
+    filterCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -822)
     local filterHelp = CreateLabel(filterCard,
         "Von diesen Spielern landet nichts mehr im Postfach. Befristete Einträge verschwinden"
         .. " von selbst, sobald das Datum erreicht ist. Die Liste gilt nur für dich.",
@@ -3026,7 +3082,14 @@ function GC.UI:RefreshInbox()
             -- Mehrfaches Anschreiben landet bereits in einem Eintrag. Die Zahl
             -- macht sichtbar, dass dahinter mehr als eine Nachricht steckt.
             local count = #(lead.messages or {})
-            button:SetText((lead.unread and "•  " or "") .. GC.Util.PlayerShortName(lead.name)
+            -- Die Klasse steckt in der gespeicherten GUID. Der Aufruf hier holt
+            -- sie auch fuer Altbestaende nach, sobald der Namens-Cache des
+            -- Clients sie kennt.
+            GC.Chat:ResolveLeadClass(lead)
+            local level = tonumber(lead.level)
+            button:SetText((lead.unread and "•  " or "")
+                .. ClassColoredName(GC.Util.PlayerShortName(lead.name), lead.classFile)
+                .. (level and ("  |cff8b98a5" .. level .. "|r") or "")
                 .. (count > 1 and ("  |cff8b98a5(" .. count .. ")|r") or ""))
             button:SetActive(self.selectedLead == index)
         end
@@ -3067,17 +3130,50 @@ function GC.UI:RefreshInbox()
         if not page.replyEdit:HasFocus() then
             page.replyEdit:SetText("")
         end
+        self:SetLeadProfileLinks(nil)
         page.replyButton:Disable()
         page.inviteButton:Disable()
         return
     end
 
-    page.leadTitle:SetText(GC.Util.PlayerShortName(lead.name))
+    GC.Chat:ResolveLeadClass(lead)
+    local classInfo = GC.Classes[lead.classFile or ""]
+    local level = tonumber(lead.level)
+    page.leadTitle:SetText(ClassColoredName(GC.Util.PlayerShortName(lead.name), lead.classFile)
+        .. (classInfo and ("  |cff8b98a5" .. (level and (level .. "  ") or "")
+            .. classInfo.name .. "|r") or (level and ("  |cff8b98a5" .. level .. "|r") or "")))
     local latest = lead.messages[#lead.messages]
     local source = latest and latest.source and latest.source ~= "WHISPER" and ("  •  " .. latest.source) or ""
     page.lastMessage:SetText(latest and ("Letzte Nachricht" .. source .. "\n\"" .. latest.text .. "\"") or "")
+    self:SetLeadProfileLinks(lead)
     page.replyButton:Enable()
     page.inviteButton:Enable()
+end
+
+-- Die Linkfelder sind bewusst nur zum Kopieren da: WoW-Addons koennen weder
+-- einen Browser oeffnen noch in die Zwischenablage schreiben.
+function GC.UI:SetLeadProfileLinks(lead)
+    local page = self.pages.INBOX
+    if not page or not page.leadLinkEdits then
+        return
+    end
+    local links = lead and GC.WarcraftLogs:BuildCharacterLinks(lead.name) or {}
+    local missing = false
+    for key, edit in pairs(page.leadLinkEdits) do
+        local link = links[key] or ""
+        edit.linkValue = link
+        if not edit:HasFocus() then
+            edit:SetText(link)
+        end
+        if lead and link == "" then
+            missing = true
+        end
+    end
+    if missing then
+        page.leadLinkNotice:SetText("Für Links zuerst unter Warcraft Logs die Gildenquelle speichern.")
+    else
+        page.leadLinkNotice:SetText("")
+    end
 end
 
 function GC.UI:BuildGuildPage()
@@ -3170,17 +3266,27 @@ function GC.UI:BuildWarcraftLogsPage()
         "Profile manuell eingeben oder öffentliche Reports mit dem mitgelieferten Windows-Helfer auslesen.")
 
     local sourceCard = CreateCard(page, "Gildenquelle")
-    sourceCard:SetSize(776, 150)
+    sourceCard:SetSize(776, 186)
     sourceCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    -- Die häufige Frage lautet: warum die URL hier eintragen, wenn der Import
+    -- ohnehin von Hand kommt? Weil ein WoW-Addon selbst nichts aus dem Netz
+    -- laden darf. Die Antwort gehört sichtbar an die Stelle, an der die Frage
+    -- entsteht.
+    local sourceHelp = CreateLabel(sourceCard,
+        "Ein WoW-Addon darf selbst nichts aus dem Internet laden – deshalb übernimmt der Windows-Helfer den Abruf."
+        .. " Die hier gespeicherte Gilde erspart dir dort die Eingabe, liefert Region und Realm für die Profil-Links"
+        .. " im Postfach und wird an alle Gildenmitglieder synchronisiert.",
+        { muted = true, width = 740, height = 44, vertical = "TOP" })
+    sourceHelp:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -44)
     page.wclURL = CreateEdit(sourceCard, 740, 38)
-    page.wclURL.container:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -49)
+    page.wclURL.container:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -85)
 
     local detect = CreateButton(sourceCard, "Aus Gilde erkennen", 170, 34, function()
         page.wclURL:SetText(GC.WarcraftLogs:GetSuggestedURL())
         page.wclResult:SetText("Link aus Region, Realm und Gildenname vorbereitet.")
         SetTextColor(page.wclResult, THEME.muted)
     end)
-    detect:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -102)
+    detect:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -138)
     local save = CreateButton(sourceCard, "Quelle speichern", 160, 34, function()
         local success, message = GC.WarcraftLogs:SaveSource(page.wclURL:GetText())
         page.wclResult:SetText(message or "")
@@ -3287,14 +3393,28 @@ function GC.UI:RefreshWarcraftLogs()
         -- Die Zahl der Nachanalysen gehört sichtbar daneben: sonst sieht ein
         -- reiner Profilimport genauso aus wie einer mit Raidauswertungen.
         local sessions = data.sessionCount or 0
+        -- Stand und Herkunft machen sichtbar, dass Profile auch von anderen
+        -- Gildenmitgliedern hereinkommen und nicht jeder selbst importieren muss.
+        local stand = ""
+        local importedAt = tonumber(data.importedAt) or 0
+        if importedAt > 0 and date then
+            stand = "  •  Stand " .. date("%d.%m.%Y %H:%M", importedAt)
+        end
+        local from = GC.Util.Trim(data.lastSyncFrom) ~= ""
+            and ("  •  zuletzt von " .. data.lastSyncFrom)
+            or ""
         page.wclStatus:SetText("|cff59e695" .. imported .. " Spielerprofile verfügbar|r"
             .. (data.reportCount > 0 and ("  •  " .. data.reportCount .. " Reports") or "")
             .. (sessions > 0
                 and ("  •  |cff59e695" .. sessions .. " Raidauswertungen|r")
                 or "  •  |cffe8b84bkeine Raidauswertung|r")
-            .. "\nDiese Specs ergänzen jetzt automatisch die Roster- und Copilot-Auswertung.")
+            .. stand .. from
+            .. "\nDiese Specs ergänzen jetzt automatisch die Roster- und Copilot-Auswertung."
+            .. " Profile werden automatisch in der Gilde geteilt; vollständige Kampfauswertungen bleiben lokal.")
     else
-        page.wclStatus:SetText("|cff91a3b8Noch keine Log-Daten importiert.|r\nDie gespeicherte URL ist für den Companion vorbereitet.")
+        page.wclStatus:SetText("|cff91a3b8Noch keine Log-Daten importiert.|r"
+            .. "\nDie gespeicherte URL ist für den Companion vorbereitet."
+            .. " Importiert ein anderes Gildenmitglied, erscheinen die Profile auch hier von selbst.")
     end
 end
 
@@ -4471,6 +4591,10 @@ end)
 GC:RegisterCallback("WCL_UPDATED", GC.UI, function(self)
     self:RefreshWarcraftLogs()
     self:RefreshSuggestions()
+    -- Region und Realm der Gildenquelle stehen in den Profil-Links des
+    -- Postfachs. Ohne diese Auffrischung zeigen sie bis zum Seitenwechsel den
+    -- alten Stand.
+    self:RefreshInbox()
 end)
 
 GC:RegisterCallback("ROSTER_FILTER_UPDATED", GC.UI, function(self)

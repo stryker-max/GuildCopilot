@@ -197,6 +197,45 @@ local function DecodeEnchantRules(payload)
     return rules
 end
 
+-- Die Warcraft-Logs-Gildenquelle als "host,region,realm,gilde". Kommas kommen
+-- in Hosts und Slugs nicht vor, der Gildenname wird beim Lesen wieder
+-- zusammengesetzt. Das Feld haengt am Ende der Gildenprofil-Nutzlast, damit
+-- aeltere Clients es schlicht ignorieren.
+local function EncodeWarcraftLogsSource(data)
+    data = data or {}
+    local region = GC.Util.Trim(data.region)
+    local serverSlug = GC.Util.Trim(data.serverSlug)
+    if region == "" or serverSlug == "" then
+        return ""
+    end
+    -- Die Klammern sind nicht schmueckend: gsub liefert zwei Werte, und der
+    -- letzte Eintrag einer Tabellenliste wuerde beide aufnehmen.
+    return table.concat({
+        (GC.Util.Trim(data.host):gsub(",", "")),
+        (region:gsub(",", "")),
+        (serverSlug:gsub(",", "")),
+        (GC.Util.Trim(data.guildSlug):gsub(",", " ")),
+    }, ",")
+end
+
+local function DecodeWarcraftLogsSource(payload)
+    local host, region, serverSlug, guildSlug =
+        tostring(payload or ""):match("^([^,]*),([^,]+),([^,]+),(.*)$")
+    if not region or GC.Util.Trim(serverSlug) == "" then
+        return nil
+    end
+    host = GC.Util.Trim(host)
+    if host == "" then
+        host = GC.Constants.WCL_DEFAULT_HOST
+    end
+    return {
+        host = host,
+        region = region,
+        serverSlug = serverSlug,
+        guildSlug = GC.Util.Trim(guildSlug),
+    }
+end
+
 function GC.Sync:RegisterPrefix()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         self.registered = C_ChatInfo.RegisterAddonMessagePrefix(GC.Constants.COMM_PREFIX) == true
@@ -716,6 +755,7 @@ function GC.Sync:BuildGuildProfileMessages()
         EncodeMemberCareDecisions(memberCare.decisions),
         EncodeEnchantRules(guildData.enchantRules),
         EncodeSpecEnchantRules(guildData.enchantSpecRules),
+        EncodeWarcraftLogsSource(guildData.warcraftLogs),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -877,6 +917,13 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
         if GC.GearAudit then
             GC.GearAudit:ReapplyEnchantRules()
         end
+    end
+    -- Die Warcraft-Logs-Gildenquelle. Ein leeres oder fehlendes Feld laesst die
+    -- eigene Quelle stehen: wer sie noch nicht gesetzt hat, soll sie einem
+    -- anderen nicht loeschen.
+    local wclSource = fields[24] ~= nil and DecodeWarcraftLogsSource(fields[24]) or nil
+    if wclSource and GC.WarcraftLogs then
+        GC.WarcraftLogs:ApplySource(wclSource)
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")

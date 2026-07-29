@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.27
+# Guild Copilot 0.9.28
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -33,6 +33,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - Bewerber-Postfach mit Rekrutierungsfilter für eingehende Whispers und erkannte „Suche Gilde“-Chatnachrichten, auswählbarem Erfolgssound, editierbarer Antwortvorschau, optionalen Raid-Symbolen und Gildeneinladung;
 - die Standardtexte für **Danke**, **Gildeninfos** und **Discord** werden direkt im **Postfach** unter den zugehörigen Knöpfen gepflegt – dort, wo sie benutzt werden – und gelten gildenweit;
 - Interessenten lassen sich über ein **×** direkt neben ihrem Eintrag entfernen oder nach einem Bestätigungsklick vollständig aus dem Postfach löschen;
+- Interessenten erscheinen in ihrer **Klassenfarbe** samt Klassennamen; die Klasse stammt aus der GUID der eingegangenen Nachricht, ist die Klasse unbekannt, bleibt der Name neutral;
+- zu jedem Interessenten stehen zwei **kopierbare Profil-Links** bereit (classic-armory.org und Warcraft Logs): hineinklicken markiert den ganzen Link, Strg+C kopiert ihn. Region und Realm stammen aus der gespeicherten Warcraft-Logs-Gildenquelle, die dafür gildenweit synchronisiert wird;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Alt-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
 - ranggeschützte Mitgliederpflege mit aktiven Gildenabmeldungen und nach Inaktivität sortierten Prüfvorschlägen;
@@ -119,7 +121,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.27; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.28; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 

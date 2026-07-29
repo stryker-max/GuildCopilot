@@ -78,11 +78,16 @@ function GC.WarcraftLogs:ParseGuildURL(url)
     url = GC.Util.Trim(url)
     local region, serverSlug, guildSlug
     local scheme, host, path = url:match("^([Hh][Tt][Tt][Pp][Ss]?)://([^/]+)(/.*)$")
+    local sourceHost
     if scheme then
         host = host:lower()
         if host ~= "warcraftlogs.com" and not host:match("%.warcraftlogs%.com$") then
             return nil, "Bitte einen gültigen Warcraft-Logs-Gildenlink einfügen."
         end
+        -- Der eingegebene Host wird uebernommen, statt auf eine feste Variante
+        -- normalisiert zu werden. Sonst verliert eine gespeicherte Quelle wie
+        -- "de.fresh.warcraftlogs.com" beim Speichern ihre Sprachvariante.
+        sourceHost = host
         local cleanPath = path:match("^([^?#]*)") or ""
         region, serverSlug, guildSlug =
             cleanPath:match("^/guild/([^/]+)/([^/]+)/([^/]+)/?$")
@@ -103,12 +108,49 @@ function GC.WarcraftLogs:ParseGuildURL(url)
     if region ~= "eu" and region ~= "us" and region ~= "kr" and region ~= "tw" and region ~= "cn" then
         return nil, "Die Region im Warcraft-Logs-Link wird nicht unterstützt."
     end
+    sourceHost = sourceHost or GC.Constants.WCL_DEFAULT_HOST
     return {
-        url = "https://fresh.warcraftlogs.com/guild/" .. region .. "/" .. serverSlug .. "/" .. EncodePath(guildSlug),
+        url = "https://" .. sourceHost .. "/guild/"
+            .. region .. "/" .. serverSlug .. "/" .. EncodePath(guildSlug),
+        host = sourceHost,
         region = region,
         serverSlug = serverSlug,
         guildSlug = guildSlug,
     }
+end
+
+-- Uebernimmt eine Gildenquelle, die nicht aus einer eingegebenen URL stammt,
+-- sondern ueber das Gildenprofil aus der Gilde kam. Die anzeigbare URL entsteht
+-- hier, damit das Pfad-Encoding an einer Stelle bleibt.
+function GC.WarcraftLogs:ApplySource(source)
+    if type(source) ~= "table"
+        or GC.Util.Trim(source.region) == ""
+        or GC.Util.Trim(source.serverSlug) == "" then
+        return false
+    end
+    local data = GC.DB:GetGuild().warcraftLogs
+    local host = GC.Util.Trim(source.host)
+    if host == "" then
+        host = GC.Constants.WCL_DEFAULT_HOST
+    end
+    data.host = host
+    data.region = source.region
+    data.serverSlug = source.serverSlug
+    data.guildSlug = source.guildSlug or ""
+    data.url = "https://" .. host .. "/guild/" .. source.region .. "/"
+        .. source.serverSlug .. "/" .. EncodePath(data.guildSlug)
+    GC:FireCallback("WCL_UPDATED")
+    return true
+end
+
+-- Der Host der gespeicherten Gildenquelle. Bestandsdaten aus Versionen ohne
+-- dieses Feld fallen auf die Vorgabe zurueck.
+function GC.WarcraftLogs:GetHost()
+    local host = GC.Util.Trim(GC.DB:GetGuild().warcraftLogs.host)
+    if host == "" then
+        return GC.Constants.WCL_DEFAULT_HOST
+    end
+    return host
 end
 
 function GC.WarcraftLogs:GetSuggestedURL()
@@ -119,7 +161,65 @@ function GC.WarcraftLogs:GetSuggestedURL()
     if guildName == "" or realm == "" then
         return ""
     end
-    return "https://fresh.warcraftlogs.com/guild/" .. region .. "/" .. EncodePath(realm) .. "/" .. EncodePath(guildName)
+    return "https://" .. self:GetHost() .. "/guild/"
+        .. region .. "/" .. EncodePath(realm) .. "/" .. EncodePath(guildName)
+end
+
+-- Region und Realm-Slug fuer Charakter-Links. Die gespeicherte Gildenquelle ist
+-- die verlaesslichste Angabe: Interessenten schreiben in TBC vom selben Realm.
+-- Fehlt sie, wird aus Client-Region und eigenem Realm abgeleitet.
+function GC.WarcraftLogs:GetCharacterScope(playerName)
+    local data = GC.DB:GetGuild().warcraftLogs
+    local region = GC.Util.Trim(data.region)
+    if region == "" then
+        region = REGION_SLUGS[GetCurrentRegion and GetCurrentRegion() or 3] or "eu"
+    end
+
+    -- Steht am Namen ein Realm, gilt dieser - sonst der Realm der Gildenquelle
+    -- und zuletzt der eigene.
+    local realmFromName = tostring(playerName or ""):match("^[^-]+%-(.+)$")
+    local serverSlug = ""
+    if realmFromName and GC.Util.Trim(realmFromName) ~= "" then
+        serverSlug = EncodePath(realmFromName)
+    end
+    if serverSlug == "" then
+        serverSlug = GC.Util.Trim(data.serverSlug)
+    end
+    if serverSlug == "" then
+        local realm = GetNormalizedRealmName and GetNormalizedRealmName()
+            or GetRealmName and GetRealmName() or ""
+        serverSlug = EncodePath(realm)
+    end
+    return region, serverSlug
+end
+
+-- Kopierbare Profil-Links zu einem Interessenten. WoW-Addons duerfen weder
+-- Browser oeffnen noch in die Zwischenablage schreiben; der Nutzer markiert und
+-- kopiert selbst. Ohne ermittelbaren Realm entstehen bewusst keine halben
+-- Links, sondern leere Zeichenketten.
+function GC.WarcraftLogs:BuildCharacterLinks(playerName)
+    local characterName = GC.Util.PlayerShortName(GC.Util.Trim(playerName))
+    if characterName == "" then
+        return { armory = "", logs = "" }
+    end
+    local region, serverSlug = self:GetCharacterScope(playerName)
+    if serverSlug == "" then
+        return { armory = "", logs = "" }
+    end
+
+    local encodedName = EncodePath(characterName)
+    local function Fill(template)
+        local link = tostring(template or "")
+        link = link:gsub("<host>", self:GetHost())
+        link = link:gsub("<region>", region)
+        link = link:gsub("<realm>", serverSlug)
+        link = link:gsub("<name>", encodedName)
+        return link
+    end
+    return {
+        armory = Fill(GC.Constants.ARMORY_CHARACTER_URL),
+        logs = Fill(GC.Constants.WCL_CHARACTER_URL),
+    }
 end
 
 function GC.WarcraftLogs:SaveSource(url)
@@ -127,13 +227,22 @@ function GC.WarcraftLogs:SaveSource(url)
     if not source then
         return false, errorMessage
     end
-    local data = GC.DB:GetGuild().warcraftLogs
+    local guildData = GC.DB:GetGuild()
+    local data = guildData.warcraftLogs
     data.url = source.url
+    data.host = source.host
     data.region = source.region
     data.serverSlug = source.serverSlug
     data.guildSlug = source.guildSlug
+    -- Die Quelle gilt fuer die ganze Gilde: sie liefert auch Region und Realm
+    -- fuer die Profil-Links im Postfach. Deshalb wandert sie ueber das
+    -- Gildenprofil zu allen Mitgliedern, damit nur einer sie pflegen muss.
+    guildData.profile.updatedAt = GC.Util.Now()
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
     GC:FireCallback("WCL_UPDATED")
-    return true, "Warcraft-Logs-Gilde gespeichert."
+    return true, "Warcraft-Logs-Gilde gespeichert und für die Gilde synchronisiert."
 end
 
 -- Der Companion liefert Verbrauchsgegenstände als "Spell-ID:Anzahl". Welche
@@ -349,6 +458,8 @@ function GC.WarcraftLogs:Import(text)
         data.members = imported
     end
     data.importedAt = GC.Util.Now()
+    -- Ein eigener Import ersetzt einen zuvor empfangenen Stand.
+    data.lastSyncFrom = ""
     if headerSeen then
         data.reportCount = reportCount
     end
@@ -816,6 +927,9 @@ function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
         guildData.warcraftLogs.members = imported
         guildData.warcraftLogs.importedAt = importedAt
         guildData.warcraftLogs.reportCount = reportCount
+        -- Woher der uebernommene Stand kam, gehoert sichtbar in den Status:
+        -- sonst sieht ein empfangener Datensatz wie ein eigener Import aus.
+        guildData.warcraftLogs.lastSyncFrom = GC.Util.PlayerShortName(sender)
     end
 
     local ownKey = GC.Util.NormalizeName(GC:GetPlayerFullName())

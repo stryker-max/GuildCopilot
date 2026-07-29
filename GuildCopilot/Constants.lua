@@ -2,11 +2,21 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.27",
+    VERSION = "0.9.28",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
     MAX_CHAT_BYTES = 255,
+    -- Warcraft-Logs-Host, wenn die gespeicherte Gildenquelle keinen eigenen
+    -- nennt. Die deutsche Variante ist Vorgabe, weil das Addon deutschsprachig
+    -- ist; ein selbst eingetragener Host bleibt immer erhalten.
+    WCL_DEFAULT_HOST = "de.fresh.warcraftlogs.com",
+    -- Profil-Links zum Nachschlagen eines Interessenten. Beide Vorlagen
+    -- verstehen die Platzhalter <host>, <region>, <realm> und <name>. Wer eine
+    -- andere Seite bevorzugt oder ein Pfadschema sich aendert, tauscht nur
+    -- diese Zeichenketten.
+    ARMORY_CHARACTER_URL = "https://classic-armory.org/character/<region>/<realm>/<name>",
+    WCL_CHARACTER_URL = "https://<host>/character/<region>/<realm>/<name>",
     ADDON_USER_TTL = 30 * 24 * 60 * 60,
     DEFAULT_POST_COOLDOWN = 120,
     DEFAULT_LFG_COOLDOWN = 120,

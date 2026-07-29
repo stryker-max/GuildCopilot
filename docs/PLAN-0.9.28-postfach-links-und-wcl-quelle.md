@@ -1,11 +1,23 @@
 # Plan 0.9.28 – Postfach-Aufwertung und Warcraft-Logs-Quelle
 
-> **Status: NICHT umgesetzt – reines Architektur- und Übergabedokument.**
-> Dieses Dokument ist so geschrieben, dass eine andere Session/ein anderes Modell
-> es ohne weiteren Chat-Kontext umsetzen kann. Alle Datei- und Zeilenangaben
-> beziehen sich auf den Stand von Addon-Version **0.9.27**
-> (Commit `ca0c569`, Branch `main`). Zeilennummern vor der Umsetzung erneut
-> prüfen – sie verschieben sich mit jedem Commit.
+> **Status: umgesetzt in Addon-Version 0.9.28.** Dieses Dokument bleibt als
+> Entwurfs- und Begründungsprotokoll erhalten; der ausgelieferte Stand steht im
+> ROADMAP-Abschnitt „0.9.28“.
+>
+> Abweichungen von diesem Entwurf bei der Umsetzung:
+> - **Klassenfarben** kommen aus `GC.Classes[classFile].color` statt aus
+>   `RAID_CLASS_COLORS`. Die Tabelle enthält bereits exakt die Blizzard-Farben,
+>   ist ohne WoW-Umgebung testbar und wird im übrigen UI schon verwendet.
+> - **A2 (Stufe)** wurde bewusst nicht gebaut (Begründung im ROADMAP-Eintrag).
+>   Datenmodell (`lead.level`) und Anzeige sind vorbereitet.
+> - Die URL-Erzeugung für eine empfangene Gildenquelle liegt in
+>   `GC.WarcraftLogs:ApplySource`, damit das Pfad-Encoding an einer Stelle bleibt
+>   und `Sync.lua` keine URLs zusammenbaut.
+> - Zusätzlich nötig: `WCL_UPDATED` frischt jetzt auch das Postfach auf, sonst
+>   zeigen die Profil-Links bis zum Seitenwechsel den alten Realm.
+>
+> Alle Datei- und Zeilenangaben unten beziehen sich auf den Stand **vor** der
+> Umsetzung (Addon **0.9.27**, Commit `ca0c569`).
 
 ## Auftrag des Repository-Owners (Zusammenfassung)
 

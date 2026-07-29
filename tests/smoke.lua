@@ -166,6 +166,19 @@ function GetNumGuildMembers()
     return 2
 end
 
+-- Der Client loest Klassen ueber die GUID auf. Direkt nach dem Login ist der
+-- Cache leer, deshalb kann der Aufruf auch nichts liefern.
+playerInfoByGUID = {
+    ["Player-4"] = { "Paladin", "PALADIN" },
+}
+function GetPlayerInfoByGUID(guid)
+    local entry = playerInfoByGUID[guid or ""]
+    if not entry then
+        return nil
+    end
+    return entry[1], entry[2], "Mensch", "Human", "male", "Interessent", "Realm"
+end
+
 function GetGuildRosterInfo(index)
     if index == 1 then
         return "Tester-Realm", "Offizier", 1, 70, "Jäger", "Shattrath", "", "", true, 0, "HUNTER", 0, 0, false, false, 0, "Player-1"
@@ -749,6 +762,30 @@ assert(addon.Sync:BuildProfileMessage():find("Ingenieurskunst", 1, true), "Beruf
 
 local sourceSaved = addon.WarcraftLogs:SaveSource("https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath")
 assert(sourceSaved == true, "Warcraft-Logs-Link wurde nicht erkannt")
+-- Der eingegebene Host bleibt erhalten. Zuvor wurde jede Eingabe auf
+-- "fresh.warcraftlogs.com" normalisiert und die Sprachvariante ging verloren.
+assert(addon.DB:GetGuild().warcraftLogs.host == "de.fresh.warcraftlogs.com",
+    "Der eingegebene Warcraft-Logs-Host wurde nicht gespeichert")
+assert(addon.DB:GetGuild().warcraftLogs.url
+    == "https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath",
+    "Die gespeicherte Gildenquelle verlor ihre Sprachvariante")
+-- Charakter-Links entstehen aus der gespeicherten Quelle; ohne Realm gibt es
+-- bewusst keine halben Links.
+wclLinks = addon.WarcraftLogs:BuildCharacterLinks("Dotlordd")
+assert(wclLinks.logs == "https://de.fresh.warcraftlogs.com/character/eu/thunderstrike/dotlordd",
+    "Der Warcraft-Logs-Charakterlink ist falsch: " .. tostring(wclLinks.logs))
+assert(wclLinks.armory == "https://classic-armory.org/character/eu/thunderstrike/dotlordd",
+    "Der Armory-Charakterlink ist falsch: " .. tostring(wclLinks.armory))
+-- Ein Realm am Namen gewinnt gegen den Realm der Gildenquelle.
+assert(addon.WarcraftLogs:BuildCharacterLinks("Dotlordd-Pyrewood Village").logs
+    == "https://de.fresh.warcraftlogs.com/character/eu/pyrewood-village/dotlordd",
+    "Der Realm aus dem Spielernamen wurde nicht verwendet")
+-- Umlaute werden wie bei der Gildenquelle vereinfacht.
+assert(addon.WarcraftLogs:BuildCharacterLinks("Frostäxte").logs:find("frostaxte", 1, true) ~= nil,
+    "Ein Name mit Umlaut wurde nicht für die URL vereinfacht")
+assert(addon.WarcraftLogs:BuildCharacterLinks("").logs == "",
+    "Ohne Spielernamen wurde ein Link erzeugt")
+
 assert(addon.WarcraftLogs:SaveSource("HTTPS://fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath") == true,
     "Ein Warcraft-Logs-Link mit großgeschriebenem Schema wurde nicht erkannt")
 assert(addon.WarcraftLogs:SaveSource("https://evilwarcraftlogs.com/guild/eu/x/y") == false,
@@ -1021,8 +1058,56 @@ assert(playedSoundID == 3081, "Gruppensuche-Sound verwendet keinen TBC-kompatibl
 
 addon.Chat:CaptureLead("Suche Gilde für TBC-Raids", "Interessent-Realm", "Player-4", "SucheNachGruppe")
 assert(#addon.DB:GetGuild().inbox == 2, "Chat-Trigger wurde nicht im Postfach gespeichert")
+-- Die Klasse kommt aus der ohnehin erfassten GUID; es braucht keine eigene
+-- Abfrage.
+interessentLead = nil
+for _, candidate in ipairs(addon.DB:GetGuild().inbox) do
+    if candidate.guid == "Player-4" then
+        interessentLead = candidate
+    end
+end
+assert(interessentLead ~= nil, "Der Interessent mit GUID fehlt im Postfach")
+assert(interessentLead.classFile == "PALADIN",
+    "Die Klasse wurde nicht aus der GUID des Interessenten aufgelöst")
 addon.Chat:CaptureLead("Noch eine Nachricht", "Interessent", nil, "Handel")
 assert(#addon.DB:GetGuild().inbox == 2, "Spieler mit und ohne Realmnamen wurde doppelt angelegt")
+
+-- Ein Interessent ohne bekannte GUID bleibt ohne Klasse, statt zu scheitern
+-- oder falsch gefärbt zu werden.
+addon.Chat:CaptureLead("Auch ich suche", "Namenlos-Realm", nil, "SucheNachGruppe")
+namelessLead = addon.DB:GetGuild().inbox[1]
+assert(namelessLead.classFile == nil,
+    "Ohne auflösbare GUID wurde eine Klasse erfunden")
+-- Ein Altbestand ohne classFile wird beim Anzeigen nachgetragen, sobald der
+-- Client-Cache die GUID kennt.
+namelessLead.guid = "Player-4"
+assert(addon.Chat:ResolveLeadClass(namelessLead) == "PALADIN",
+    "Die Klasse eines Altbestands wurde nicht nachgetragen")
+addon.UI:ShowPage("INBOX")
+addon.UI.selectedLead = 1
+addon.UI:RefreshInbox()
+assert(addon.UI.pages.INBOX.leadButtons[1].label.value:find("|cfff58cba", 1, true) ~= nil,
+    "Der Interessent wird nicht in seiner Klassenfarbe angezeigt: "
+    .. tostring(addon.UI.pages.INBOX.leadButtons[1].label.value))
+assert(addon.UI.pages.INBOX.leadTitle.value:find("|cfff58cba", 1, true) ~= nil,
+    "Der Kopf der Unterhaltung zeigt den Namen nicht in Klassenfarbe")
+-- Für den ausgewählten Interessenten stehen beide Profil-Links bereit.
+assert(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue
+    == "https://fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    "Der Warcraft-Logs-Link des Interessenten fehlt im Postfach: "
+    .. tostring(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue))
+assert(addon.UI.pages.INBOX.leadLinkEdits.armory.linkValue
+    == "https://classic-armory.org/character/eu/realm/namenlos",
+    "Der Armory-Link des Interessenten fehlt im Postfach")
+-- Tippen in ein Linkfeld stellt den vollständigen Link wieder her, damit
+-- niemand einen halben Link kopiert.
+addon.UI.pages.INBOX.leadLinkEdits.logs:SetText("kaputt")
+addon.UI.pages.INBOX.leadLinkEdits.logs.scripts.OnTextChanged(
+    addon.UI.pages.INBOX.leadLinkEdits.logs, true)
+assert(addon.UI.pages.INBOX.leadLinkEdits.logs.value
+    == "https://fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    "Ein überschriebenes Linkfeld wurde nicht wiederhergestellt")
+assert(addon.Chat:RemoveLead(1) == true, "Der Testinteressent ließ sich nicht entfernen")
 assert(addon.Chat:RemoveLead(1) == true, "Einzelner Interessent konnte nicht gelöscht werden")
 assert(#addon.DB:GetGuild().inbox == 1, "Einzellöschung hat nicht genau einen Interessenten entfernt")
 assert(addon.Chat:ClearInbox() == true, "Postfach konnte nicht vollständig geleert werden")
@@ -1770,6 +1855,41 @@ assert(#addon.Util.SplitFields(legacyPayload) == 20, "Das Alt-Paket hat die fals
 addon.Sync:ReceiveGuildProfileChunk("G|7|legacy1|1|1|" .. legacyPayload, "Tester-Realm")
 assert(addon.Roster:GetMemberCareDecision("Heiler") ~= nil,
     "Ein Paket ohne Entscheidungsfeld hat die Einträge gelöscht")
+
+-- Die Warcraft-Logs-Gildenquelle reist im Gildenprofil mit, damit sie nur
+-- einer pflegen muss. Ein Alt-Paket ohne das Feld darf sie nicht löschen.
+addon.WarcraftLogs:SaveSource("https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath")
+sourceMessages = addon.Sync:BuildGuildProfileMessages()
+sourcePayload = ""
+for _, sourceMessage in ipairs(sourceMessages) do
+    assert(#sourceMessage <= 255, "Ein Gildenprofil-Paket mit Gildenquelle ist zu lang")
+    sourcePayload = sourcePayload .. sourceMessage:match("^G|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+sourceFields = addon.Util.SplitFields(sourcePayload)
+assert(sourceFields[24] == "de.fresh.warcraftlogs.com,eu,thunderstrike,aftermath",
+    "Die Gildenquelle fehlt in der Gildenprofil-Nutzlast: " .. tostring(sourceFields[24]))
+-- Empfang: eine fremde Quelle wird übernommen.
+addon.DB:GetGuild().warcraftLogs.host = ""
+addon.DB:GetGuild().warcraftLogs.region = ""
+addon.DB:GetGuild().warcraftLogs.serverSlug = ""
+addon.DB:GetGuild().warcraftLogs.guildSlug = ""
+addon.DB:GetGuild().warcraftLogs.url = ""
+addon.DB:GetGuild().profile.updatedAt = 0
+for _, sourceMessage in ipairs(sourceMessages) do
+    addon.Sync:ReceiveGuildProfileChunk(sourceMessage, "Tester-Realm")
+end
+assert(addon.DB:GetGuild().warcraftLogs.serverSlug == "thunderstrike",
+    "Eine empfangene Gildenquelle wurde nicht übernommen")
+assert(addon.DB:GetGuild().warcraftLogs.host == "de.fresh.warcraftlogs.com",
+    "Der Host der empfangenen Gildenquelle fehlt")
+assert(addon.DB:GetGuild().warcraftLogs.url
+    == "https://de.fresh.warcraftlogs.com/guild/eu/thunderstrike/aftermath",
+    "Die URL der empfangenen Gildenquelle ist falsch: "
+    .. tostring(addon.DB:GetGuild().warcraftLogs.url))
+-- Ein Alt-Paket ohne Feld 24 lässt die vorhandene Quelle stehen.
+addon.Sync:ReceiveGuildProfileChunk("G|7|legacy2|1|1|" .. legacyPayload, "Tester-Realm")
+assert(addon.DB:GetGuild().warcraftLogs.serverSlug == "thunderstrike",
+    "Ein Gildenprofil ohne Quellenfeld hat die gespeicherte Gildenquelle gelöscht")
 
 -- Rangunabhängiger Abgleich: das Gildenprofil darf auch von einem einfachen
 -- Mitglied kommen, damit ein Offizier auf einem frischen Rechner nachgereicht
