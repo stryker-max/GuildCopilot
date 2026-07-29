@@ -74,39 +74,66 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - eine Kopfzeile fasst alle geprüften Spieler zusammen, etwa „8 geprüft, davon 5 ohne Funde • 6 fehlende Verzauberungen • 4 leere Sockel“;
 - jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort jederzeit selbst auslösen;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
-- Companion-fähiger Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen;
-- **Nachanalyse aus Warcraft Logs**: der Companion liest öffentliche Reports und liefert Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände;
-- der Companion lässt sich zuerst mit einem einzelnen Report ausprobieren, protokolliert jeden Schritt einzeln und schreibt auf Wunsch alle Rohantworten in eine Diagnosedatei ohne Zugangsdaten;
+- Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen;
+- **Nachanalyse aus Warcraft Logs**: öffentliche Reports liefern Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände;
+- der Abruf steckt im **Installer** – ein Fenster für Zugangsdaten, Link und Anzahl der Reports; der fertige Importcode landet in der Zwischenablage. Node.js wird dafür nicht gebraucht;
+- der Import lässt sich zuerst mit einem einzelnen Report ausprobieren und protokolliert jeden Schritt einzeln;
+- **beim Einfügen verlorene Zeilenumbrüche werden repariert**: WoW lässt gelegentlich einen Umbruch fallen, zwei Zeilen verschmelzen und beide Datensätze gehen verloren. Das Addon setzt den Umbruch selbst, wo mitten in einer Zeile ein neuer Datensatz beginnt;
+- der Import ersetzt die gespeicherten Profile erst nach einer zweiten, ausdrücklichen Bestätigung; jede Rückmeldung trägt die Uhrzeit, und eine fehlende Kopf- oder Sitzungszeile wird benannt statt still verworfen;
 - Logs-Auswertungen erscheinen als eigene Einträge mit der Quelle **Warcraft Logs** neben den Livesitzungen; beide werden getrennt gehalten und niemals miteinander verrechnet;
 - welche Spell-ID welcher Verbrauchskategorie entspricht, entscheidet allein das Addon – unbekannte IDs aus dem Companion werden ignoriert statt falsch einsortiert.
 - manueller Profilimport ohne API im lesbaren Format `Name;Klasse;Primär-Spec;Dual-Spec`.
 
 ## Installation
 
-0. Der einfachste Weg unter Windows: `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation, ersetzt eine eventuell vorhandene ältere Version und legt das Addon an die richtige Stelle. Wird die Installation nicht gefunden, fragt es nach dem Pfad zum Ordner `_anniversary_`.
-1. Von Hand: den Ordner `GuildCopilot` in den Addon-Ordner der TBC-Anniversary-Installation kopieren:
+0. Der einfachste Weg unter Windows: **`GuildCopilot-Installer.exe`** starten – zu finden unter [Installer/dist](Installer/dist). Sie erkennt die vorhandenen Spielversionen selbst, lädt das Addon direkt aus diesem Repository, aktualisiert eine vorhandene Fassung und hält sich auch selbst aktuell. Der Warcraft-Logs-Import steckt gleich mit drin.
+1. Ohne die .exe: `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation, ersetzt eine eventuell vorhandene ältere Version und legt das Addon an die richtige Stelle. Wird die Installation nicht gefunden, fragt es nach dem Pfad zum Ordner `_anniversary_`.
+2. Von Hand: den Ordner `GuildCopilot` in den Addon-Ordner der TBC-Anniversary-Installation kopieren:
    `World of Warcraft/_anniversary_/Interface/AddOns/`
    Danach muss `GuildCopilot.toc` direkt in `AddOns/GuildCopilot/` liegen – ein doppelt verschachtelter Ordner ist der häufigste Installationsfehler.
-2. WoW neu starten oder am Charakterbildschirm **AddOns** öffnen.
-3. **Guild Copilot** aktivieren und im Spiel `/gcp` eingeben.
-4. Im Rekrutierungs-Workflow zuerst das **Gildenprofil** ausfüllen und danach die **Copilot-Vorschläge** prüfen.
-5. Unter **Profil** das eigene Raidprofil mit **Bestätigen** speichern, Berufe übernehmen und bei Bedarf eine Abmeldung eintragen.
-6. Unter **Einstellungen** festlegen, welche Gildenränge als aktive Raider erscheinen, die Mitgliederpflege öffnen und gildenweite Einstellungen bearbeiten dürfen.
-7. Optional unter **Warcraft Logs** die Gildenseite speichern und einen Companion-Export importieren.
-8. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
-9. Unter **Mitgliederpflege** – mit freigegebenem Gildenrang – Abmeldungen und Inaktivitätsvorschläge prüfen sowie Inaktivitätsgrenze und geschützte Ränge festlegen.
-10. Unter **Raidauswertung** vor dem Raid **Sitzung starten** und danach **Sitzung beenden**. Offiziere außerhalb des Raids holen sich die Auswertung über **Auswertung anfordern**.
-11. Unter **Ausrüstung** vor dem Raid **Gruppe prüfen**, um fehlende Verzauberungen und leere Sockel zu finden. Die eigene Ausrüstung prüft sich von selbst; **Gruppe prüfen** bleibt bewusst ein Klick, weil dabei für jeden Teilnehmer eine Inspect-Anfrage anfällt.
+3. WoW neu starten oder am Charakterbildschirm **AddOns** öffnen.
+4. **Guild Copilot** aktivieren und im Spiel `/gcp` eingeben.
+5. Im Rekrutierungs-Workflow zuerst das **Gildenprofil** ausfüllen und danach die **Copilot-Vorschläge** prüfen.
+6. Unter **Profil** das eigene Raidprofil mit **Bestätigen** speichern, Berufe übernehmen und bei Bedarf eine Abmeldung eintragen.
+7. Unter **Einstellungen** festlegen, welche Gildenränge als aktive Raider erscheinen, die Mitgliederpflege öffnen und gildenweite Einstellungen bearbeiten dürfen.
+8. Optional unter **Warcraft Logs** die Gildenseite speichern und einen Import aus dem Installer einfügen.
+9. Unter **Gildenwerkstatt** einen Beruf auswählen, einen Rezept-/Spielernamen suchen oder Favoriten öffnen. Jeder Nutzer öffnet seine Berufsfenster mindestens einmal, damit Rezepte erfasst werden.
+10. Unter **Mitgliederpflege** – mit freigegebenem Gildenrang – Abmeldungen und Inaktivitätsvorschläge prüfen sowie Inaktivitätsgrenze und geschützte Ränge festlegen.
+11. Unter **Raidauswertung** vor dem Raid **Sitzung starten** und danach **Sitzung beenden**. Offiziere außerhalb des Raids holen sich die Auswertung über **Auswertung anfordern**.
+12. Unter **Ausrüstung** vor dem Raid **Gruppe prüfen**, um fehlende Verzauberungen und leere Sockel zu finden. Die eigene Ausrüstung prüft sich von selbst; **Gruppe prüfen** bleibt bewusst ein Klick, weil dabei für jeden Teilnehmer eine Inspect-Anfrage anfällt.
 
 Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fenstertitel, und abweichende Datenversionen werden in der Gildenübersicht ausgewiesen.
+
+## Installer
+
+`GuildCopilot-Installer.exe` liegt unter [Installer/dist](Installer/dist), der Quellcode daneben unter [Installer/](Installer). Sie gehört **nicht** ins Addon-Verzeichnis – installiert wird ausschließlich der Ordner `GuildCopilot`.
+
+- erkennt vorhandene WoW-Installationen selbst und merkt sich die gewählte;
+- lädt das Addon direkt aus diesem Repository, aktualisiert und entfernt es;
+- vergleicht Versionen stellenweise, nicht auf ungleich: eine ältere Fassung im Repository wird ausdrücklich als Rückstufung ausgewiesen und nie als Aktualisierung angeboten;
+- überschreibt beim Aktualisieren, statt vorher zu löschen. Ein geöffnetes Explorer-Fenster hat sonst gereicht, um die Installation abzubrechen;
+- hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
+- enthält den Warcraft-Logs-Import.
+
+Installer und Addon werden **getrennt gezählt**. Der Installer beginnt bei 1.0.0, das Addon steht bei 0.9.17; beide Nummern stehen im Verlauf.
+
+Zum Bauen wird das .NET SDK gebraucht:
+
+```bash
+dotnet publish Installer -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o Installer/dist
+```
+
+`Installer/dist/version.txt` muss dabei auf die neue Installer-Version gesetzt werden – daraus liest die laufende Fassung, ob es etwas Neueres gibt.
 
 ## Wichtige WoW-Grenzen
 
 WoW erlaubt Addons nicht, Chatwerbung zeitgesteuert oder ohne echten Tastendruck zu versenden. Darum ist **Suche starten** bewusst ein manueller Klick; dieser eine Klick bedient alle ausgewählten Kanäle. Ein Ingame-Addon besitzt außerdem keinen Webzugriff. Deshalb speichert Guild Copilot den Warcraft-Logs-Link und nimmt Daten über einen kontrollierten Import entgegen. Ein echter Abruf muss außerhalb von WoW über die offizielle Warcraft-Logs-API und OAuth erfolgen.
 
-Der mitgelieferte Helfer befindet sich unter `GuildCopilot/Companion/Start-WCL-Import.cmd`. Für den WCL-Client wird `http://localhost/callback` als technisch verlangte Redirect-URL eingetragen; der Companion verwendet sie nicht. Der Client-Secret wird nur für den laufenden Import abgefragt und nicht gespeichert.
+Den Abruf übernimmt der **Installer** im Bereich **Warcraft Logs**: Client ID, Client Secret, ein Gilden- oder Reportlink, ein Klick – der Importcode landet in der Zwischenablage und wird im Addon eingefügt. Für den WCL-Client wird `http://localhost/callback` als technisch verlangte Redirect-URL eingetragen; verwendet wird sie nicht. Das Client Secret wird nur auf Wunsch gespeichert, dann über die Windows-eigene DPAPI verschlüsselt und an das Windows-Konto gebunden – nie im Klartext.
 
-Für den ersten Versuch lohnt sich der Weg über einen einzelnen Report: die Adresse eines Reports (`https://…/reports/…`) statt des Gildenlinks eingeben und als Anzahl `1` wählen. Bleibt der Import leer, nennt die Ausgabe den Schritt, an dem es aufhört; `--debug` schreibt zusätzlich alle Rohantworten in `GuildCopilot-WCL-Debug.json`. Einzelheiten stehen in [Companion/README.md](GuildCopilot/Companion/README.md).
+Beim Gildenlink werden die jüngsten Reports genommen, sortiert nach Endzeit; bei „Reports: 1" also der letzte Raid. Ein Reportlink holt gezielt genau diesen einen.
+
+Der ältere Weg über `GuildCopilot/Companion/Start-WCL-Import.cmd` funktioniert unverändert weiter und braucht Node.js. Er bleibt vorerst als Rückfallebene erhalten; Einzelheiten und Fehlersuche stehen in [Companion/README.md](GuildCopilot/Companion/README.md).
 
 ## Blizzard-Compliance
 
