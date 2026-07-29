@@ -14,6 +14,7 @@ local INSPECT_TIMEOUT = 4
 local AUDIT_TTL = 7 * 24 * 60 * 60
 local AUTO_SELF_DELAY = 3
 local AUTO_SELF_LOGIN_DELAY = 8
+local MAX_SELF_READ_RETRIES = 5
 local EQUIPMENT_CHUNK_BYTES = 165
 local EQUIPMENT_MAX_PARTS = 10
 local EQUIPMENT_MAX_INCOMING = 40
@@ -489,7 +490,7 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKe
     return rule.verdict or "UNKNOWN", reason
 end
 
-function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
+function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readItemID)
     local profile = GC.Roster:GetProfile(playerName)
     local role = self:GetRoleForProfile(profile)
     -- Die Spec entscheidet ueber die Bewertung und wandert deshalb mit in die
@@ -509,6 +510,7 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
         emptySockets = 0,
         unknownEnchants = 0,
         emptySlots = 0,
+        unreadableSlots = 0,
     }
 
     for _, slot in ipairs(GC.GearSlots) do
@@ -522,10 +524,25 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source)
 
         entry.required = slot.enchantRequired == true
         if not parsed then
-            entry.verdict = "EMPTY"
-            entry.reason = "Kein Gegenstand angelegt."
-            if slot.enchantRequired then
-                audit.emptySlots = audit.emptySlots + 1
+            local knownItemID
+            if type(readItemID) == "function" then
+                local ok, itemID = pcall(readItemID, slot.id)
+                if ok then
+                    knownItemID = WholeNumber(itemID, 1, 99999999)
+                end
+            end
+            if knownItemID then
+                entry.itemID = knownItemID
+                entry.unreadable = true
+                entry.verdict = "UNKNOWN"
+                entry.reason = "Gegenstandsdaten noch nicht vollständig geladen."
+                audit.unreadableSlots = audit.unreadableSlots + 1
+            else
+                entry.verdict = "EMPTY"
+                entry.reason = "Kein Gegenstand angelegt."
+                if slot.enchantRequired then
+                    audit.emptySlots = audit.emptySlots + 1
+                end
             end
         else
             entry.itemID = parsed.itemID
@@ -561,7 +578,7 @@ end
 function GC.GearAudit:BuildEquipmentMessages(audit)
     audit = audit or self:GetAudit(GC:GetPlayerFullName())
     local classFile = audit and audit.classFile
-    if not audit or not GC.Classes[classFile] then
+    if not audit or not GC.Classes[classFile] or (tonumber(audit.unreadableSlots) or 0) > 0 then
         return {}, nil
     end
 
@@ -712,10 +729,10 @@ function GC.GearAudit:ReplyWithEquipmentSnapshot()
     end
     self.lastEquipmentReplyAt = now
     C_Timer.After(0.5 + math.random() * 2.5, function()
-        -- Bis die gestreute Antwort gesendet wird, kann ein Umziehen bereits
-        -- einen neueren SELF-Audit erzeugt haben. Deshalb hier noch einmal den
-        -- aktuellen Stand lesen und nie den alten Closure-Wert zurücksenden.
-        self:QueueEquipmentSnapshot(nil, true)
+        -- Bis die gestreute Antwort gesendet wird, kann sich die Ausrüstung
+        -- geändert haben. Deshalb die echten Slots erneut lesen und nicht nur
+        -- den zuletzt gespeicherten Snapshot wiederholen.
+        self:AuditSelf(true, true)
     end)
     return true
 end
@@ -736,6 +753,7 @@ function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, 
         emptySockets = 0,
         unknownEnchants = 0,
         emptySlots = 0,
+        unreadableSlots = 0,
     }
 
     for _, slot in ipairs(GC.GearSlots) do
@@ -907,14 +925,22 @@ function GC.GearAudit:StoreAudit(audit)
     return true
 end
 
+function GC.GearAudit:GetIssueCount(audit)
+    audit = audit or {}
+    return (tonumber(audit.missingEnchants) or 0)
+        + (tonumber(audit.emptySockets) or 0)
+        + (tonumber(audit.emptySlots) or 0)
+        + (tonumber(audit.unreadableSlots) or 0)
+end
+
 function GC.GearAudit:GetAudits()
     local audits = {}
     for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
         audits[#audits + 1] = audit
     end
     table.sort(audits, function(left, right)
-        local leftIssues = (left.missingEnchants or 0) + (left.emptySockets or 0)
-        local rightIssues = (right.missingEnchants or 0) + (right.emptySockets or 0)
+        local leftIssues = self:GetIssueCount(left)
+        local rightIssues = self:GetIssueCount(right)
         if leftIssues ~= rightIssues then
             return leftIssues > rightIssues
         end
@@ -940,17 +966,32 @@ function GC.GearAudit:Prune()
     end
 end
 
-function GC.GearAudit:AuditSelf(automatic)
+function GC.GearAudit:AuditSelf(automatic, forceSnapshot)
     if type(GetInventoryItemLink) ~= "function" then
         return false, "Die Ausrüstung konnte nicht gelesen werden."
     end
     local _, classFile = UnitClass("player")
     local audit = self:BuildAudit(GC:GetPlayerFullName(), classFile, function(slotID)
         return GetInventoryItemLink("player", slotID)
-    end, "SELF")
+    end, "SELF", function(slotID)
+        if type(GetInventoryItemID) == "function" then
+            return GetInventoryItemID("player", slotID)
+        end
+    end)
     self:StoreAudit(audit)
-    self:QueueEquipmentSnapshot(audit)
     self.selectedName = audit.name
+    if (audit.unreadableSlots or 0) > 0 then
+        self.unreadableRetryCount = (self.unreadableRetryCount or 0) + 1
+        if self.unreadableRetryCount <= MAX_SELF_READ_RETRIES then
+            self:QueueSelfAudit(1)
+            self:SetStatus("Eigene Gegenstandsdaten werden noch geladen; Prüfung wird wiederholt.")
+            return false, "Ausrüstung noch nicht vollständig lesbar; die Prüfung wird automatisch wiederholt."
+        end
+        self:SetStatus("Eigene Gegenstandsdaten sind noch nicht vollständig lesbar.")
+        return false, "Unvollständige Ausrüstung wurde nicht an die Gilde übertragen."
+    end
+    self.unreadableRetryCount = 0
+    self:QueueEquipmentSnapshot(audit, forceSnapshot)
     self:SetStatus(automatic and "Eigene Ausrüstung automatisch geprüft." or "Eigene Ausrüstung geprüft.")
     return true, "Eigene Ausrüstung geprüft: " .. self:DescribeFindings(audit)
 end
@@ -989,17 +1030,21 @@ function GC.GearAudit:GetFindings(audit)
     local missingEnchants = {}
     local socketSlots = {}
     local emptySlots = {}
+    local unreadableSlots = {}
     local unknownEnchants = 0
     for _, entry in ipairs(audit.slots or {}) do
         if entry.verdict == "MISSING" then
             missingEnchants[#missingEnchants + 1] = entry.label
         elseif entry.verdict == "EMPTY" and entry.required then
             emptySlots[#emptySlots + 1] = entry.label
-        elseif entry.verdict == "UNKNOWN" then
+        elseif entry.verdict == "UNKNOWN" and not entry.unreadable then
             unknownEnchants = unknownEnchants + 1
         end
         if (entry.emptySockets or 0) > 0 then
             socketSlots[#socketSlots + 1] = entry.label
+        end
+        if entry.unreadable then
+            unreadableSlots[#unreadableSlots + 1] = entry.label
         end
     end
 
@@ -1032,6 +1077,16 @@ function GC.GearAudit:GetFindings(audit)
         }
     end
 
+    if #unreadableSlots > 0 then
+        findings[#findings + 1] = {
+            severity = "WARNING",
+            text = (#unreadableSlots == 1
+                and "1 Ausrüstungsplatz noch nicht lesbar"
+                or (#unreadableSlots .. " Ausrüstungsplätze noch nicht lesbar"))
+                .. ": " .. table.concat(unreadableSlots, ", "),
+        }
+    end
+
     if #findings == 0 then
         findings[#findings + 1] = {
             severity = "OK",
@@ -1060,6 +1115,7 @@ function GC.GearAudit:GetOverview()
         missingEnchants = 0,
         emptySockets = 0,
         emptySlots = 0,
+        unreadableSlots = 0,
         clean = 0,
     }
     for _, audit in ipairs(self:GetAudits()) do
@@ -1067,7 +1123,8 @@ function GC.GearAudit:GetOverview()
         overview.missingEnchants = overview.missingEnchants + (audit.missingEnchants or 0)
         overview.emptySockets = overview.emptySockets + (audit.emptySockets or 0)
         overview.emptySlots = overview.emptySlots + (audit.emptySlots or 0)
-        if (audit.missingEnchants or 0) == 0 and (audit.emptySockets or 0) == 0 then
+        overview.unreadableSlots = overview.unreadableSlots + (audit.unreadableSlots or 0)
+        if self:GetIssueCount(audit) == 0 then
             overview.clean = overview.clean + 1
         end
     end
@@ -1084,6 +1141,9 @@ function GC.GearAudit:DescribeFindings(audit)
     end
     if (audit.emptySlots or 0) > 0 then
         parts[#parts + 1] = audit.emptySlots .. " leere Slots"
+    end
+    if (audit.unreadableSlots or 0) > 0 then
+        parts[#parts + 1] = audit.unreadableSlots .. " noch nicht lesbare Slots"
     end
     if #parts == 0 then
         return "keine fehlenden Verzauberungen oder leeren Sockel."
@@ -1149,9 +1209,11 @@ function GC.GearAudit:StartRaidScan()
 
     local inspectTargets = {}
     local shared = 0
+    local firstSharedName
     for _, target in ipairs(targets) do
         if self:HasFreshSyncedAudit(target.name) then
             shared = shared + 1
+            firstSharedName = firstSharedName or target.name
         else
             inspectTargets[#inspectTargets + 1] = target
         end
@@ -1162,6 +1224,9 @@ function GC.GearAudit:StartRaidScan()
     self.skipped = 0
     self.completed = 0
     self.shared = shared
+    if firstSharedName then
+        self.selectedName = GC.Util.PlayerShortName(firstSharedName)
+    end
     self:SetStatus("Prüfe " .. #inspectTargets .. " Spieler"
         .. (shared > 0 and (", " .. shared .. " bereits per Addon-Abgleich") or "") .. " …")
     self:ProcessQueue()
@@ -1246,7 +1311,11 @@ function GC.GearAudit:OnInspectReady(guid)
     local _, classFile = UnitClass(unit)
     local audit = self:BuildAudit(active.name or UnitName(unit), classFile, function(slotID)
         return GetInventoryItemLink(unit, slotID)
-    end, "INSPECT")
+    end, "INSPECT", function(slotID)
+        if type(GetInventoryItemID) == "function" then
+            return GetInventoryItemID(unit, slotID)
+        end
+    end)
     self:StoreAudit(audit)
     self.completed = (self.completed or 0) + 1
     self.active = nil
@@ -1265,11 +1334,22 @@ end
 local gearEvents = CreateFrame("Frame")
 gearEvents:RegisterEvent("INSPECT_READY")
 gearEvents:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-gearEvents:SetScript("OnEvent", function(_, event, guid)
+gearEvents:RegisterEvent("UNIT_INVENTORY_CHANGED")
+gearEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+gearEvents:SetScript("OnEvent", function(_, event, value)
     if event == "INSPECT_READY" then
-        GC.GearAudit:OnInspectReady(guid)
+        GC.GearAudit:OnInspectReady(value)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        GC.GearAudit.unreadableRetryCount = 0
         GC.GearAudit:QueueSelfAudit()
+    elseif event == "UNIT_INVENTORY_CHANGED" and value == "player" then
+        GC.GearAudit.unreadableRetryCount = 0
+        GC.GearAudit:QueueSelfAudit()
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+        local own = GC.GearAudit:GetAudit(GC:GetPlayerFullName())
+        if own and (own.unreadableSlots or 0) > 0 then
+            GC.GearAudit:QueueSelfAudit(0.5)
+        end
     end
 end)
 

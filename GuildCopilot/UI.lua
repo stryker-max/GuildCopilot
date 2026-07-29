@@ -3720,7 +3720,7 @@ end
 function GC.UI:BuildGearPage()
     local page = self.pages.GEAR
     CreatePageTitle(page, "Ausrüstung",
-        "Fehlende Verzauberungen und leere Sockel je Slot. Geprüft wird per Inspect, also nur wer in Reichweite und erreichbar ist. Es gibt bewusst keine Gesamtnote.")
+        "Fehlende Verzauberungen, leere Pflichtslots und Sockel je Slot. Addon-Nutzer liefern aktuelle Eigendaten; Inspect bleibt der Rückfall für erreichbare Gruppenmitglieder. Es gibt bewusst keine Gesamtnote.")
 
     local controlCard = CreateCard(page)
     controlCard:SetSize(776, 96)
@@ -3756,9 +3756,23 @@ function GC.UI:BuildGearPage()
     local listCard = CreateCard(page, "Geprüfte Spieler")
     listCard:SetSize(238, 358)
     listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
+
+    local playerScroll = CreateModernScrollFrame(listCard)
+    playerScroll:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -44)
+    playerScroll:SetPoint("BOTTOMRIGHT", listCard, "BOTTOMRIGHT", -12, 12)
+    local playerContent = CreateFrame("Frame", nil, playerScroll)
+    playerContent:SetWidth(202)
+    playerContent:SetHeight(1)
+    playerScroll:SetScrollChild(playerContent)
+    page.gearPlayerScroll = playerScroll
+    page.gearPlayerContent = playerContent
     page.gearRows = {}
-    for index = 1, 12 do
-        local row = CreateButton(listCard, "", 206, 23, function()
+
+    function page:EnsureGearPlayerRow(index)
+        if self.gearRows[index] then
+            return self.gearRows[index]
+        end
+        local row = CreateButton(playerContent, "", 198, 23, function()
             local audit = GC.GearAudit:GetAudits()[index]
             if audit then
                 GC.GearAudit.selectedName = audit.name
@@ -3771,12 +3785,13 @@ function GC.UI:BuildGearPage()
                 GC.UI:RefreshGear()
             end
         end)
-        row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -50 - ((index - 1) * 25))
+        row:SetPoint("TOPLEFT", playerContent, "TOPLEFT", 0, -((index - 1) * 25))
         row.label:ClearAllPoints()
         row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
         row.label:SetPoint("RIGHT", row, "RIGHT", -6, 0)
         row.label:SetJustifyH("LEFT")
-        page.gearRows[index] = row
+        self.gearRows[index] = row
+        return row
     end
     page.gearEmpty = CreateLabel(listCard, "Noch niemand geprüft.", { muted = true, width = 200, height = 40, vertical = "TOP" })
     page.gearEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
@@ -3912,6 +3927,13 @@ function GC.UI:RefreshGear()
         if overview.emptySockets > 0 then
             statusText = statusText .. "  •  |cffff6166" .. overview.emptySockets .. " leere Sockel|r"
         end
+        if overview.emptySlots > 0 then
+            statusText = statusText .. "  •  |cffffb840" .. overview.emptySlots .. " leere Pflichtslots|r"
+        end
+        if overview.unreadableSlots > 0 then
+            statusText = statusText .. "  •  |cffffb840" .. overview.unreadableSlots
+                .. " noch nicht lesbare Slots|r"
+        end
     end
     local ruleParts = {}
     if shippedRules > 0 then
@@ -3945,11 +3967,25 @@ function GC.UI:RefreshGear()
         GC.GearAudit.selectedName = selectedName
     end
 
+    local selectedIndex
+    for index = 1, #audits do
+        page:EnsureGearPlayerRow(index)
+        if audits[index].name == selectedName then
+            selectedIndex = index
+        end
+    end
+    page.gearPlayerContent:SetHeight(math.max(1, #audits * 25))
+    if selectedIndex and page.lastGearSelectedName ~= selectedName then
+        page.gearPlayerScroll:SetVerticalScroll(math.max(0, (selectedIndex - 2) * 25))
+        page.lastGearSelectedName = selectedName
+    end
+    page.gearPlayerScroll:UpdateModernThumb()
+
     for index, row in ipairs(page.gearRows) do
         local audit = audits[index]
         row:SetShown(audit ~= nil)
         if audit then
-            local issues = (audit.missingEnchants or 0) + (audit.emptySockets or 0)
+            local issues = GC.GearAudit:GetIssueCount(audit)
             row:SetText(audit.name .. (issues > 0
             and ("  •  " .. issues .. (issues == 1 and " Fund" or " Funde"))
             or "  •  ok"))

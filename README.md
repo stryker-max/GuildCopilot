@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.20
+# Guild Copilot 0.9.21
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -63,7 +63,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - geprüft wird nur, wer in Reichweite und erreichbar ist; nicht erreichbare Spieler werden ausdrücklich als übersprungen ausgewiesen;
 - Bewertungen stammen aus einem versionierten Regelsatz und zeigen Regel, Quelle und Alter der Daten; unbewertete Verzauberungen werden nie als schlecht gewertet;
 - **ohne hinterlegte Bewertung** gilt eine vorhandene Verzauberung standardmäßig als in Ordnung, damit als Fund übrig bleibt, was objektiv aus dem Item-Link hervorgeht: fehlende Verzauberungen und leere Sockel. Das behauptet keine Qualität, es unterscheidet nur verzaubert von nicht verzaubert. Wer stattdessen **Unbekannt** sehen will, schaltet es in den Einstellungen ab;
-- die eigene Ausrüstung prüft sich beim Login und nach jedem Umziehen automatisch, entprellt, damit ein kompletter Ausrüstungswechsel nur eine Prüfung auslöst;
+- die eigene Ausrüstung prüft sich beim Login sowie nach Ausrüstungs- und Inventaränderungen automatisch, entprellt, damit ein kompletter Wechsel nur eine Prüfung auslöst;
+- noch nicht geladene Item-Links werden anhand der angelegten Gegenstands-ID erkannt, erneut gelesen und niemals als vollständiger Gildensnapshot verteilt;
 - jeder Addon-Client stellt diesen kompakten Rohdaten-Snapshot ohne Schalter im Hintergrund der Gilde bereit. Andere Clients bewerten ihn mit dem aktuellen Regelsatz und müssen diesen Spieler nicht zusätzlich inspecten;
 - synchronisiert werden ausschließlich Slot, Gegenstands-ID, Verzauberungs-ID und Zahl leerer Sockel. Fertige Bewertungen, Tooltiptexte und Inventarinhalte werden nicht übertragen;
 - **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück;
@@ -72,7 +73,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - gildeneigene Bewertungen gelten wahlweise für eine konkrete Spec; fehlt dort eine Regel, greift die allgemeine Bewertung derselben Enchant-ID für alle Specs;
 - der Name der Verzauberung kommt aus dem WoW-Tooltip selbst und steht dadurch ohne gepflegte Datenbank im Klartext da („Verzaubert: Außergewöhnliche Gesundheit“), in der Sprache des Clients;
 - es gibt bewusst keine Gesamtnote je Spieler;
-- die Funde stehen als lesbare Sätze da statt als nackte Zahlen: „2 fehlende Verzauberungen: Kopf, Schulter“, „3 leere Sockel: Brust, Hände“;
+- die Funde stehen als lesbare Sätze da statt als nackte Zahlen: „2 fehlende Verzauberungen: Kopf, Schulter“, „3 leere Sockel: Brust, Hände“; leere Pflichtslots zählen ebenfalls als Fund;
+- die Liste geprüfter Spieler ist vollständig scrollbar; ein per Addon-Daten geprüftes aktuelles Gruppenmitglied wird automatisch ausgewählt und bleibt auch bei mehr als zwölf gespeicherten Prüfungen erreichbar;
 - eine Kopfzeile fasst alle geprüften Spieler zusammen, etwa „8 geprüft, davon 5 ohne Funde • 6 fehlende Verzauberungen • 4 leere Sockel“;
 - jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort jederzeit selbst auslösen;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
@@ -117,7 +119,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.20; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.21; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 

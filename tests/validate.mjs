@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.20",
+  "## Version: 0.9.21",
 ];
 
 for (const entry of requiredMetadata) {
@@ -196,6 +196,9 @@ const requiredImplementations = [
   ["automatischer Ausrüstungsabgleich", /function GC\.GearAudit:QueueEquipmentSnapshot/],
   ["Ausrüstungs-Rohdaten statt synchronisierter Bewertung", /function GC\.GearAudit:BuildSyncedAudit/],
   ["Inspect-Rückfall überspringt synchronisierte Daten", /function GC\.GearAudit:HasFreshSyncedAudit/],
+  ["unvollständige Eigendaten werden nicht synchronisiert", /audit\.unreadableSlots/],
+  ["vollständige scrollbare Gear-Spielerliste", /EnsureGearPlayerRow/],
+  ["Inventaränderung erneuert Eigendaten", /UNIT_INVENTORY_CHANGED/],
   ["Verzauberungen und Sockel je Slot", /function GC\.GearAudit:BuildAudit/],
   ["versionierter Regelsatz", /GC\.EnchantRuleSet/],
   ["umschaltbare Behandlung unbewerteter Verzauberungen", /AcceptsUnratedEnchants/],

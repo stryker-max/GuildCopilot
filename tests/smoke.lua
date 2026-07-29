@@ -379,9 +379,18 @@ end
 
 -- Ausrüstung je Slot-ID und Einheit für den Gear Audit.
 inspectGear = {}
+inspectGearItemIDs = {}
 
 function GetInventoryItemLink(unit, slotID)
     return (inspectGear[unit] or {})[slotID]
+end
+
+function GetInventoryItemID(unit, slotID)
+    local explicit = (inspectGearItemIDs[unit] or {})[slotID]
+    if explicit then
+        return explicit
+    end
+    return tonumber(tostring(GetInventoryItemLink(unit, slotID) or ""):match("item:(%d+)"))
 end
 
 function GetItemStats(link)
@@ -1098,7 +1107,7 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.20", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.21", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(announcement:find("workshop2", 1, true), "Das kompakte Werkstattformat fehlt im Handshake")
 assert(announcement:find("gearsync", 1, true), "Der automatische Ausrüstungsabgleich fehlt im Handshake")
@@ -1484,6 +1493,16 @@ tooltipLines[TOOLTIP_SOCKETS] = { "Sockelteil", "Rüstung 200" }
 assert(addon.GearAudit:CountEmptySockets(TOOLTIP_SOCKETS, 0) == 0,
     "Ein Gegenstand ohne Sockel meldet trotzdem leere Sockel")
 
+local unreadableAudit = addon.GearAudit:BuildAudit("Tester", "HUNTER", function()
+    return nil
+end, "SELF", function(slotID)
+    return slotID == 15 and 9999 or nil
+end)
+assert(unreadableAudit.unreadableSlots == 1,
+    "Ein angelegter, aber noch nicht geladener Rücken-Slot gilt fälschlich als leer")
+assert(#addon.GearAudit:BuildEquipmentMessages(unreadableAudit) == 0,
+    "Ein unvollständig gelesener Ausrüstungsstand wurde an die Gilde übertragen")
+
 inspectGear.player = { [1] = ENCHANTED_HEAD, [5] = SOCKETED_CHEST }
 local sentBeforeOwnGear = #sentAddon
 local selfAudited, selfMessage = addon.GearAudit:AuditSelf()
@@ -1517,6 +1536,8 @@ assert(ownAudit.emptySockets == 2, "Die leeren Sockel fehlen in der Zusammenfass
 assert(ownAudit.unknownEnchants == 0,
     "Die standardmäßig anerkannte vorhandene Verzauberung wurde als unbekannt geführt")
 assert(ownAudit.emptySlots == 7, "Leere Pflichtslots wurden falsch gezählt")
+assert(addon.GearAudit:GetIssueCount(ownAudit) == 10,
+    "Leere Pflichtslots werden in der Fundzahl des Spielers nicht berücksichtigt")
 assert(selfMessage:find("leere Sockel", 1, true), "Die Rückmeldung nennt die leeren Sockel nicht")
 
 local headEntry, chestEntry, neckEntry
@@ -1610,6 +1631,13 @@ remoteSnapshot.name = "Heiler"
 remoteSnapshot.classFile = "PRIEST"
 remoteSnapshot.specKey = "PRIEST:2"
 remoteSnapshot.inspectedAt = currentTime
+for _, entry in ipairs(remoteSnapshot.slots) do
+    if entry.key == "BACK" then
+        entry.itemID = 9999
+        entry.enchantID = 0
+        entry.emptySockets = 0
+    end
+end
 local remoteMessages = addon.GearAudit:BuildEquipmentMessages(remoteSnapshot)
 assert(#remoteMessages > 0, "Der kompakte Ausrüstungs-Snapshot wurde nicht erzeugt")
 local remotePayloadParts = {}
@@ -1626,6 +1654,14 @@ assert(syncedHealer.specKey == "PRIEST:2",
     "Die Spec des bereitgestellten Ausrüstungs-Snapshots fehlt")
 assert(syncedHealer.slots[1].itemID == 1000 and syncedHealer.slots[1].enchantID == 2564,
     "Die kompakten Slot-Messwerte wurden beim Empfang verändert")
+local syncedBack
+for _, entry in ipairs(syncedHealer.slots) do
+    if entry.key == "BACK" then
+        syncedBack = entry
+    end
+end
+assert(syncedBack and syncedBack.verdict == "MISSING",
+    "Ein selbst bereitgestellter, unverzauberter Rücken wird nicht als Fund erkannt")
 
 local syncedAt = syncedHealer.inspectedAt
 local malformedAccepted = addon.GearAudit:ReceiveEquipmentChunk(
@@ -1646,6 +1682,8 @@ local fallbackStarted = addon.GearAudit:StartRaidScan()
 assert(fallbackStarted == true, "Der Inspect-Rückfall ließ sich nicht starten")
 assert(addon.GearAudit.shared == 1 and addon.GearAudit.completed == 0 and addon.GearAudit.skipped == 1,
     "Frische Addon-Daten wurden im Gruppenlauf nicht statt eines Inspect verwendet")
+assert(addon.GearAudit.selectedName == "Heiler",
+    "Der per Addon-Daten geprüfte Gruppenspieler wird nicht automatisch ausgewählt")
 assert(addon.GearAudit.status:find("über Addon%-Daten"),
     "Die Oberfläche nennt die automatisch verwendeten Ausrüstungsdaten nicht")
 
@@ -1822,11 +1860,20 @@ assert(gearOverview.players >= 1, "Die Übersicht zählt keine geprüften Spiele
 assert(gearOverview.emptySockets >= 2, "Die Übersicht summiert die leeren Sockel nicht")
 assert(gearOverview.missingEnchants >= 1, "Die Übersicht summiert die fehlenden Verzauberungen nicht")
 
+local listTemplate = addon.Util.DeepCopy(addon.GearAudit:GetAudit("Tester"))
+for listIndex = 1, 14 do
+    local listAudit = addon.Util.DeepCopy(listTemplate)
+    listAudit.name = "Listenmitglied" .. listIndex
+    addon.GearAudit:StoreAudit(listAudit)
+end
+
 -- Die Prüfung erscheint in der Oberfläche, sortiert nach Anzahl der Funde.
 addon.UI:ShowPage("GEAR")
 local gearPage = addon.UI.pages.GEAR
 assert(gearPage.gearRows[1].shown == true, "Der geprüfte Spieler fehlt in der Liste")
-assert(gearPage.gearRows[3].shown == false, "Es werden mehr Spieler angezeigt als geprüft")
+assert(gearPage.gearPlayerScroll ~= nil, "Die Spielerliste besitzt keinen Scrollbereich")
+assert(gearPage.gearRows[13] and gearPage.gearRows[13].shown == true,
+    "Mehr als zwölf geprüfte Spieler bleiben weiterhin unsichtbar")
 assert(gearPage.gearSlotRows[1].shown == true, "Die Slot-Tabelle ist leer")
 addon.GearAudit.selectedName = "Tester"
 addon.UI:RefreshGear()
