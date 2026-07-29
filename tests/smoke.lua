@@ -1283,6 +1283,64 @@ timerDelayThreshold = math.huge
 assert(addon.Sync.reliableActive == nil,
     "Der wiederholte Transfer wurde nach der Bestätigung nicht abgeschlossen")
 
+-- Ein einzelnes dauerhaft verlorenes Teilpaket darf nicht den ganzen Beruf
+-- scheitern lassen: die bestätigten Pakete bleiben erhalten, gezählt wird nur
+-- der echte Verlust, und der Transfer läuft trotzdem sauber aus.
+local partialToken = "partial12345"
+local partialMessages = {}
+for partIndex = 1, 3 do
+    partialMessages[partIndex] = table.concat({
+        "W", "7", "C", partialToken, partIndex, 3, "schneiderei", "Schneiderei", "I1,,", "0", "1",
+    }, "|")
+end
+local partialComplete = false
+local partialFailedCount = nil
+timerDelayThreshold = 1
+addon.Sync.bulkAllowance = 4000
+addon.Sync.bulkQueue = {}
+addon.Sync.reliableActive = nil
+addon.Sync.reliableQueue = {}
+local partialPendingStart = #pendingTimers
+assert(addon.Sync:QueueReliable(
+    partialMessages,
+    "Heiler-Realm",
+    "W",
+    partialToken,
+    function()
+        partialComplete = true
+    end,
+    function(entry)
+        partialFailedCount = entry.failedCount
+    end
+) == true, "Der Transfer mit Teilverlust ließ sich nicht starten")
+-- Teil 1 und 3 bestätigen, Teil 2 bewusst nie.
+for _, ackedPart in ipairs({ 1, 3 }) do
+    addon.Sync:OnMessage(
+        "GuildCopilot",
+        table.concat({ "A", "7", "W", partialToken, ackedPart }, "|"),
+        "WHISPER",
+        "Heiler-Realm"
+    )
+end
+local partialGuard = 0
+local partialCursor = partialPendingStart + 1
+while addon.Sync.reliableActive and partialGuard < 200 do
+    partialGuard = partialGuard + 1
+    local partialTimer = pendingTimers[partialCursor]
+    if not partialTimer then
+        break
+    end
+    partialCursor = partialCursor + 1
+    partialTimer()
+end
+timerDelayThreshold = math.huge
+assert(addon.Sync.reliableActive == nil,
+    "Ein Transfer mit einem verlorenen Paket blieb hängen statt auszulaufen")
+assert(partialComplete == false,
+    "Ein Transfer mit verlorenem Paket meldete fälschlich vollständigen Erfolg")
+assert(partialFailedCount == 1,
+    "Es wurde nicht genau ein verlorenes Teilpaket gezählt")
+
 for _, reliableMessage in ipairs(reliableMessages) do
     addon.Sync:OnMessage("GuildCopilot", reliableMessage, "WHISPER", "Heiler-Realm")
 end
@@ -1561,6 +1619,50 @@ assert(#addon.Util.SplitFields(legacyPayload) == 20, "Das Alt-Paket hat die fals
 addon.Sync:ReceiveGuildProfileChunk("G|7|legacy1|1|1|" .. legacyPayload, "Tester-Realm")
 assert(addon.Roster:GetMemberCareDecision("Heiler") ~= nil,
     "Ein Paket ohne Entscheidungsfeld hat die Einträge gelöscht")
+
+-- Rangunabhängiger Abgleich: das Gildenprofil darf auch von einem einfachen
+-- Mitglied kommen, damit ein Offizier auf einem frischen Rechner nachgereicht
+-- bekommt, was ein Mitglied zwischengespeichert hat. Der neuere Stand gewinnt.
+assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false,
+    "Testannahme falsch: Heiler-Realm darf das Profil bearbeiten")
+addon.DB:GetGuild().profile.description = "Von einem Mitglied gepflegt"
+addon.DB:GetGuild().profile.updatedAt = 5000
+local relayMessages = addon.Sync:BuildGuildProfileMessages()
+addon.DB:GetGuild().profile.description = ""
+addon.DB:GetGuild().profile.updatedAt = 0
+for _, relayMessage in ipairs(relayMessages) do
+    addon.Sync:ReceiveGuildProfileChunk(relayMessage, "Heiler-Realm")
+end
+assert(addon.DB:GetGuild().profile.description == "Von einem Mitglied gepflegt",
+    "Ein Gildenprofil von einem einfachen Mitglied wurde nicht übernommen")
+assert(addon.DB:GetGuild().profile.updatedAt == 5000,
+    "Der Zeitstempel des übernommenen Mitglieds-Gildenprofils stimmt nicht")
+
+-- Der Zeitstempel schützt weiterhin: ein älterer Stand darf den neueren nicht
+-- überschreiben, egal von welchem Rang er kommt.
+addon.DB:GetGuild().profile.description = "Alter Stand"
+addon.DB:GetGuild().profile.updatedAt = 2000
+local staleMessages = addon.Sync:BuildGuildProfileMessages()
+addon.DB:GetGuild().profile.description = "Neuer Stand"
+addon.DB:GetGuild().profile.updatedAt = 8000
+for _, staleMessage in ipairs(staleMessages) do
+    addon.Sync:ReceiveGuildProfileChunk(staleMessage, "Heiler-Realm")
+end
+assert(addon.DB:GetGuild().profile.description == "Neuer Stand",
+    "Ein älterer Gildenprofil-Stand hat den neueren überschrieben")
+
+-- Von jemandem, der nachweislich kein Gildenmitglied ist, wird nichts
+-- übernommen - auch nicht mit neuerem Zeitstempel.
+addon.DB:GetGuild().profile.description = "Von einem Fremden"
+addon.DB:GetGuild().profile.updatedAt = 999999
+local strangerMessages = addon.Sync:BuildGuildProfileMessages()
+addon.DB:GetGuild().profile.description = "Neuer Stand"
+addon.DB:GetGuild().profile.updatedAt = 8000
+for _, strangerMessage in ipairs(strangerMessages) do
+    addon.Sync:ReceiveGuildProfileChunk(strangerMessage, "Fremder-Realm")
+end
+assert(addon.DB:GetGuild().profile.description == "Neuer Stand",
+    "Ein Gildenprofil von einem Nicht-Gildenmitglied wurde übernommen")
 
 -- Ausschluss: jede einzelne Sperre muss halten.
 canRemoveFromGuild = false

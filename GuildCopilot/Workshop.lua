@@ -588,8 +588,11 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
                 GC:FireCallback("WORKSHOP_UPDATED")
             end,
             function(entry)
-                GC.Workshop.syncStats.failed = GC.Workshop.syncStats.failed
-                    + math.max(1, #messages - (entry.acknowledgedCount or 0))
+                -- Nur die tatsaechlich verlorenen Teilpakete zaehlen, nicht der
+                -- ganze Beruf. Bestaetigte Pakete bleiben erfasst.
+                local lost = entry.failedCount
+                    or math.max(1, #messages - (entry.acknowledgedCount or 0))
+                GC.Workshop.syncStats.failed = GC.Workshop.syncStats.failed + lost
                 GC:FireCallback("WORKSHOP_UPDATED")
             end
         )
@@ -677,6 +680,11 @@ function GC.Workshop:RequestGuildData()
     self.syncStats.receivedProfessions = 0
     self.syncStats.receivedRecipes = 0
     self.syncStats.lastSender = ""
+    -- Eine neue Anfrage startet einen frischen Abgleichzyklus. Ein alter
+    -- Fehlschlag-Zaehler aus einem frueheren Zyklus darf den Statushinweis nicht
+    -- dauerhaft blockieren, sonst bleibt "Uebertragung unvollstaendig" stehen,
+    -- obwohl der neue Durchlauf laeuft.
+    self.syncStats.failed = 0
     GC:FireCallback("WORKSHOP_UPDATED")
     return true, "Anfrage gesendet. Rezeptlisten werden ohne künstliche Wartezeit übertragen."
 end

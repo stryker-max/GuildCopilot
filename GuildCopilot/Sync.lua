@@ -32,7 +32,12 @@ local BULK_MESSAGE_OVERHEAD = 40
 local BULK_MAX_RETRIES = 5
 local RELIABLE_WINDOW = 4
 local RELIABLE_RETRY_DELAY = 1.5
-local RELIABLE_MAX_ATTEMPTS = 5
+-- Der Whisper-Transfer teilt sich das Kanalbudget mit ChatThrottleLib und dem
+-- Verkehr anderer Addons. Ein einzelnes Paket darf deshalb mehrfach und mit
+-- wachsendem Abstand erneut anlaufen, bevor es als verloren gilt; sonst meldet
+-- ein kurzzeitig ueberlasteter Kanal faelschlich einen Fehlschlag.
+local RELIABLE_MAX_ATTEMPTS = 8
+local RELIABLE_MAX_RETRY_DELAY = 6
 
 local function PruneIncoming(transfers)
     local cutoff = GC.Util.Now() - INCOMING_TTL
@@ -360,6 +365,8 @@ function GC.Sync:QueueReliable(messages, target, kind, token, onComplete, onFail
         messages = messages,
         acknowledged = {},
         acknowledgedCount = 0,
+        failed = {},
+        failedCount = 0,
         pending = {},
         attempts = {},
         retryParts = {},
@@ -390,9 +397,36 @@ function GC.Sync:FinishReliable(success)
     end
 end
 
+-- Der Transfer ist fertig, sobald jedes Teilpaket entweder bestaetigt oder
+-- endgueltig aufgegeben wurde. Erfolg meldet nur, wer kein einziges Paket
+-- verloren hat; sonst geht die tatsaechliche Zahl verlorener Pakete in den
+-- Fehlschlag-Rueckruf ein.
+function GC.Sync:MaybeFinishReliable()
+    local entry = self.reliableActive
+    if not entry then
+        return false
+    end
+    if (entry.acknowledgedCount + (entry.failedCount or 0)) >= #entry.messages then
+        self:FinishReliable((entry.failedCount or 0) == 0)
+        return true
+    end
+    return false
+end
+
+local function GiveUpReliablePart(self, entry, part)
+    if entry.acknowledged[part] or entry.failed[part] then
+        return
+    end
+    entry.failed[part] = true
+    entry.failedCount = (entry.failedCount or 0) + 1
+    if not self:MaybeFinishReliable() and self.reliableActive == entry then
+        self:PumpReliable()
+    end
+end
+
 function GC.Sync:ReliablePartDispatched(entryID, part, success)
     local entry = self.reliableActive
-    if not entry or entry.id ~= entryID or entry.acknowledged[part] then
+    if not entry or entry.id ~= entryID or entry.acknowledged[part] or entry.failed[part] then
         return
     end
     if not success then
@@ -400,7 +434,7 @@ function GC.Sync:ReliablePartDispatched(entryID, part, success)
         entry.pending[part] = nil
         entry.inFlight = math.max(0, entry.inFlight - 1)
         if entry.attempts[part] >= RELIABLE_MAX_ATTEMPTS then
-            self:FinishReliable(false)
+            GiveUpReliablePart(self, entry, part)
             return
         end
         entry.retryParts[#entry.retryParts + 1] = part
@@ -413,16 +447,20 @@ function GC.Sync:ReliablePartDispatched(entryID, part, success)
     if not C_Timer or type(C_Timer.After) ~= "function" then
         return
     end
-    C_Timer.After(RELIABLE_RETRY_DELAY, function()
+    -- Wachsender Abstand: ein ueberlasteter Kanal bekommt mehr Zeit, das ACK
+    -- doch noch zu liefern, bevor erneut gesendet wird.
+    local delay = math.min(RELIABLE_RETRY_DELAY * attempt, RELIABLE_MAX_RETRY_DELAY)
+    C_Timer.After(delay, function()
         local active = GC.Sync.reliableActive
         if not active or active.id ~= entryID or active.acknowledged[part]
+            or active.failed[part]
             or active.attempts[part] ~= attempt or not active.pending[part] then
             return
         end
         active.pending[part] = nil
         active.inFlight = math.max(0, active.inFlight - 1)
         if attempt >= RELIABLE_MAX_ATTEMPTS then
-            GC.Sync:FinishReliable(false)
+            GiveUpReliablePart(GC.Sync, active, part)
             return
         end
         active.retryParts[#active.retryParts + 1] = part
@@ -452,7 +490,7 @@ function GC.Sync:PumpReliable()
         if not part or part > #entry.messages then
             break
         end
-        if not entry.acknowledged[part] and not entry.pending[part] then
+        if not entry.acknowledged[part] and not entry.pending[part] and not entry.failed[part] then
             local queuedPart = part
             entry.pending[part] = true
             entry.inFlight = entry.inFlight + 1
@@ -460,9 +498,12 @@ function GC.Sync:PumpReliable()
                 GC.Sync:ReliablePartDispatched(entry.id, queuedPart, success)
             end)
             if not queued then
+                -- Ein abgelehnter Sendeversuch (kein gueltiges Ziel, nicht in der
+                -- Gilde) ist dauerhaft. Das Paket gilt als verloren, statt die
+                -- Warteschlange ohne Fortschritt kreisen zu lassen.
                 entry.pending[queuedPart] = nil
                 entry.inFlight = math.max(0, entry.inFlight - 1)
-                entry.retryParts[#entry.retryParts + 1] = queuedPart
+                GiveUpReliablePart(self, entry, queuedPart)
                 break
             end
         end
@@ -503,14 +544,20 @@ function GC.Sync:ReceiveReliableAck(fields, sender)
         return false
     end
 
+    -- Trifft doch noch ein spaetes ACK fuer ein bereits aufgegebenes Paket ein,
+    -- zaehlt es wieder als zugestellt.
+    if entry.failed[part] then
+        entry.failed[part] = nil
+        entry.failedCount = math.max(0, (entry.failedCount or 0) - 1)
+    end
     entry.acknowledged[part] = true
     entry.acknowledgedCount = entry.acknowledgedCount + 1
     if entry.pending[part] then
         entry.pending[part] = nil
         entry.inFlight = math.max(0, entry.inFlight - 1)
     end
-    if entry.acknowledgedCount >= #entry.messages then
-        self:FinishReliable(true)
+    if (entry.acknowledgedCount + (entry.failedCount or 0)) >= #entry.messages then
+        self:FinishReliable((entry.failedCount or 0) == 0)
     else
         self:PumpReliable()
     end
@@ -701,7 +748,15 @@ function GC.Sync:QueueGuildProfile(force)
 end
 
 function GC.Sync:ReceiveGuildProfileChunk(message, sender)
-    if not GC.Roster:CanEditGuildProfile(sender) then
+    -- Der Abgleich ist rangunabhaengig: die neuesten Daten gewinnen. Jeder
+    -- Client haelt eine Kopie des Gildenprofils, also darf sie auch von einem
+    -- einfachen Mitglied kommen - etwa wenn ein Offizier frisch auf einem
+    -- anderen Rechner einsteigt und nur ein Mitglied gerade online ist. Vor dem
+    -- Ueberschreiben schuetzt weiter unten der Zeitstempelvergleich: ein
+    -- aelterer Stand wird verworfen, nur ein neuerer uebernommen. Gesperrt bleibt
+    -- lediglich, wer nachweislich kein Gildenmitglied ist.
+    if #GC.Roster.members > 0 and not GC.Roster:IsGuildMember(sender)
+        and not GC.Roster:CanEditGuildProfile(sender) then
         return
     end
     local schemaText, token, indexText, totalText, chunk =
@@ -791,6 +846,52 @@ end
 
 function GC.Sync:RequestGuildProfile()
     self:Send("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION))
+end
+
+-- Antwort auf eine Gildenprofil-Anfrage. Offiziere schicken ihren Stand immer.
+-- Einfache Mitglieder geben ihre zwischengespeicherte Kopie nur weiter, wenn
+-- sie ueberhaupt eine gepflegte Fassung haben - so bekommt ein frisch
+-- eingestiegener Client die Infos auch dann, wenn gerade kein Offizier online
+-- ist. Der Zeitstempelvergleich beim Empfaenger sorgt dafuer, dass niemand
+-- einen neueren Stand mit einer alten Kopie ueberschreibt.
+function GC.Sync:ReplyToGuildProfileRequest()
+    local canEdit = GC.Roster:CanEditGuildProfile()
+    local hasProfile = (tonumber(GC.DB:GetGuild().profile.updatedAt) or 0) > 0
+    if not canEdit and not hasProfile then
+        return false
+    end
+    local now = GC.Util.Now()
+    if (now - (self.lastGuildProfileReplyAt or 0)) < MIN_PROFILE_REPLY_INTERVAL then
+        return false
+    end
+    self.lastGuildProfileReplyAt = now
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:SendGuildProfile(true)
+        return true
+    end
+    C_Timer.After(0.5 + math.random(), function()
+        GC.Sync:SendGuildProfile(true)
+    end)
+    return true
+end
+
+-- Direkt nach dem Login ist der Gildenroster oft noch leer; dann steht der
+-- eigene Rang noch nicht fest. Ein paar Versuche warten darauf, damit ein
+-- Offizier nicht faelschlich als einfaches Mitglied startet. Anschliessend wird
+-- immer der aktuellste Stand erfragt (Annahme regelt der Zeitstempel), und wer
+-- selbst pflegen darf, schickt seinen Stand zusaetzlich aktiv in die Gilde.
+function GC.Sync:PrimeGuildProfileSync(attempt)
+    attempt = tonumber(attempt) or 1
+    if #GC.Roster.members == 0 and attempt < 5 and C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(2, function()
+            GC.Sync:PrimeGuildProfileSync(attempt + 1)
+        end)
+        return
+    end
+    self:RequestGuildProfile()
+    if GC.Roster:CanEditGuildProfile() then
+        self:QueueGuildProfile()
+    end
 end
 
 function GC.Sync:ReceiveProfile(fields, sender)
@@ -1127,11 +1228,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         end
         return
     elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
-        if GC.Roster:CanEditGuildProfile() then
-            C_Timer.After(0.5 + math.random(), function()
-                self:SendGuildProfile()
-            end)
-        end
+        self:ReplyToGuildProfileRequest()
         return
     end
 
@@ -1185,11 +1282,7 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
         self:QueueProfile()
     end)
     C_Timer.After(5, function()
-        if GC.Roster:CanEditGuildProfile() then
-            self:QueueGuildProfile()
-        else
-            self:RequestGuildProfile()
-        end
+        self:PrimeGuildProfileSync()
     end)
     C_Timer.After(7, function()
         self.wasInGroup = IsInGroup and IsInGroup() == true
