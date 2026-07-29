@@ -29,7 +29,12 @@ local INCOMING_TTL = 5 * 60
 local BULK_BYTES_PER_SECOND = 800
 local BULK_BURST_BYTES = 4000
 local BULK_MESSAGE_OVERHEAD = 40
-local BULK_MAX_RETRIES = 5
+local BULK_MAX_RETRIES = 8
+-- Lehnt der Client eine Nachricht ab (eingebautes Addon-Ratenlimit), braucht der
+-- Kanal echte Zeit zum Erholen. Die Wiederholungen bekommen deshalb einen
+-- wachsenden zeitlichen Abstand, statt im selben Frame zu verbrennen.
+local BULK_RETRY_BACKOFF = 0.75
+local BULK_MAX_RETRY_DELAY = 4
 local RELIABLE_WINDOW = 4
 local RELIABLE_RETRY_DELAY = 1.5
 -- Der Whisper-Transfer teilt sich das Kanalbudget mit ChatThrottleLib und dem
@@ -295,6 +300,17 @@ function GC.Sync:PumpBulk(elapsed)
         (tonumber(self.bulkAllowance) or BULK_BURST_BYTES) + (elapsed * BULK_BYTES_PER_SECOND)
     )
 
+    -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten
+    -- Wartezeit erneut senden. Ohne diese Pause verbraucht ein Ratenlimit alle
+    -- Wiederholungen im selben Sekundenbruchteil, und Pakete gelten faelschlich
+    -- als verloren, obwohl der Kanal nur kurz dicht war.
+    if (self.bulkCooldown or 0) > 0 then
+        self.bulkCooldown = math.max(0, self.bulkCooldown - elapsed)
+        if self.bulkCooldown > 0 then
+            return
+        end
+    end
+
     while #self.bulkQueue > 0 do
         local entry = self.bulkQueue[1]
         local cost = #entry.payload + BULK_MESSAGE_OVERHEAD
@@ -313,9 +329,15 @@ function GC.Sync:PumpBulk(elapsed)
                 table.remove(self.bulkQueue, 1)
                 FinishBulkEntry(entry, false)
             else
-                -- Ein lokaler Sendefehler verbraucht kein Kanalbudget. Die
-                -- naechste Wiederholung darf daher unmittelbar folgen.
+                -- Der Kanal hat abgelehnt (Client-Ratenlimit). Kein Kanalbudget
+                -- verbraucht, aber mit wachsendem zeitlichem Abstand erneut
+                -- versuchen, damit sich das Limit erholen kann.
                 self.bulkAllowance = math.max(cost, self.bulkAllowance)
+                self.bulkCooldown = math.min(
+                    BULK_MAX_RETRY_DELAY,
+                    BULK_RETRY_BACKOFF * entry.retries
+                )
+                return
             end
         end
     end

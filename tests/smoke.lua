@@ -629,6 +629,9 @@ assert(#addon.Workshop.syncQueue == 0, "Werkstatt-Warteschlange blieb nach dem B
 addonSendFailures = 1
 local sentBeforeRetry = #sentAddon
 addon.Workshop:QueueProfessionSync(ownWorkshop.professions.schneiderei)
+-- Der abgelehnte Sendeversuch wartet jetzt eine echte Kanalpause ab; nach dem
+-- Vorspulen der Zeit läuft die Wiederholung.
+addon.Sync:PumpBulk(2)
 assert(#sentAddon > sentBeforeRetry, "Werkstattpaket wurde nach einem Sendefehler nicht wiederholt")
 assert(#addon.Workshop.syncQueue == 0, "Werkstatt-Warteschlange wurde nach erfolgreicher Wiederholung nicht geleert")
 assert(addon.Workshop.syncStats.failed == 0, "Ein einmalig fehlgeschlagenes Paket wurde endgültig verworfen")
@@ -677,6 +680,40 @@ assert(addon.Workshop:IsFavorite("E27926") == true, "Rezeptfavorit wurde nicht g
 addon.UI.pages.WORKSHOP.workshopFavorites.scripts.OnClick()
 addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
 assert(addon.UI.pages.WORKSHOP.workshopRows[1].shown == true, "Favoritenfilter zeigt das gespeicherte Rezept nicht")
+
+-- Berufe anderer eigener Charaktere desselben Accounts erscheinen lokal im
+-- Katalog, ohne auf eine Netzwerksynchronisierung zu warten - das Addon kennt
+-- die Daten ja bereits aus der gemeinsamen SavedVariables.
+twinkCharacter = addon.DB:GetCharacter("Zwergenschmied-Realm")
+twinkCharacter.fullName = "Zwergenschmied-Realm"
+twinkCharacter.workshop = {
+    professions = {
+        schmiedekunst = {
+            key = "schmiedekunst",
+            name = "Schmiedekunst",
+            updatedAt = 100,
+            recipes = {
+                I88001 = {
+                    key = "I88001",
+                    itemID = 88001,
+                    name = "Twink-Klinge",
+                    profession = "Schmiedekunst",
+                    reagents = {},
+                },
+            },
+        },
+    },
+}
+twinkCatalog = addon.Workshop:GetCatalog("", "Schmiedekunst")
+assert(#twinkCatalog == 1,
+    "Der Beruf eines eigenen Twinks erscheint nicht im Werkstattkatalog")
+twinkCrafterFound = false
+for _, twinkCrafter in ipairs(twinkCatalog[1].crafters) do
+    if twinkCrafter == "Zwergenschmied" then
+        twinkCrafterFound = true
+    end
+end
+assert(twinkCrafterFound, "Der eigene Twink wird nicht als Hersteller geführt")
 
 assert(addon.Util.IsValidISODate("2026-02-28") == true, "Gültiges Abmeldedatum wurde abgelehnt")
 assert(addon.Util.IsValidISODate("2026-02-30") == false, "Ungültiges Abmeldedatum wurde akzeptiert")

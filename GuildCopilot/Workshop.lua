@@ -1057,7 +1057,22 @@ end
 
 function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
     local catalog = {}
-    AddCrafterToCatalog(catalog, GC:GetPlayerFullName(), self:GetOwnData().professions)
+    local ownName = GC:GetPlayerFullName()
+    AddCrafterToCatalog(catalog, ownName, self:GetOwnData().professions)
+    -- Weitere Charaktere desselben Accounts: ihre Berufe liegen lokal in der
+    -- gemeinsamen SavedVariables. So sieht jeder eigene Charakter auch die
+    -- Berufe der anderen eigenen Charaktere (z. B. die Verzauberkunst des
+    -- Magier-Twinks auf dem Main), ohne auf eine Netzwerksynchronisierung zu
+    -- warten - das Addon kennt die Daten ja bereits.
+    local ownKey = GC.Util.NormalizeName(ownName)
+    for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
+        local workshop = type(character) == "table" and character.workshop
+        local characterName = (type(character) == "table" and character.fullName) or characterKey
+        if workshop and workshop.professions
+            and GC.Util.NormalizeName(characterName) ~= ownKey then
+            AddCrafterToCatalog(catalog, characterName, workshop.professions)
+        end
+    end
     for _, crafter in pairs(GC.DB:GetGuild().workshop.crafters or {}) do
         AddCrafterToCatalog(catalog, crafter.name, crafter.professions)
     end
