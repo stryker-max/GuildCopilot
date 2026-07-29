@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.29
+# Guild Copilot 0.9.30
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -45,6 +45,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - zwei manuell wählbare Berufe oder automatische Übernahme aus dem WoW-Berufsfenster, synchronisiert mit anderen Addon-Nutzern;
 - Gildenwerkstatt mit sofortigem, vollständigem Rezeptscan beim Öffnen des Berufsfensters: aktive Filter werden zurückgesetzt, eingeklappte Kategorien automatisch geöffnet und die separate TBC-Verzauberkunst-Schnittstelle unterstützt;
 - kompakte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern: große Datenmengen werden sofort eingereiht und mit dem maximal sicheren Addon-Kanal-Durchsatz gesendet; aktuelle Clients bestätigen jedes direkte Teilpaket, verlorene Pakete werden automatisch wiederholt und ältere Guild-Copilot-Versionen erhalten weiterhin das bisherige Datenformat;
+- der gildenweite Bestand besteht aus einem **Rezeptkatalog**, in dem jedes Rezept genau einmal steht, und einem **Herstellerindex**, der nur die Schlüssel dessen führt, was wer kann. Über den Kanal geht deshalb im Regelfall nur eine kurze Schlüsselliste – ein Spieler mit drei vollen Berufen kostet 14 statt 331 Pakete. Fehlt einem Client ein gemeldetes Rezept, fordert er genau dieses gestreut und nur einmal nach;
+- wer die Gilde verlässt, verschwindet mit seinen Rezepten aus der Werkstatt; Twinks von Gildenmitgliedern bleiben erhalten, weil sie nie im Gildenroster stehen;
 - suchbasierte Gildenwerkstatt: Statt hunderte Rezepte ungefiltert zu laden, werden Ergebnisse erst nach Suchbegriff, Berufsauswahl oder über gespeicherte Favoriten angezeigt;
 - bebilderter Berufsfilter, Berufssymbole in der Rezeptliste und lokale Rezeptfavoriten;
 - Einstellungsseite für aktive Raider-Ränge, berechtigte Einstellungs-Editoren, Mitgliederpflege-Zugriff, Postfach-Erkennung, TBC-kompatible Erfolgssounds und das Minimap-Symbol;
@@ -121,7 +123,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.29; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.30; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 

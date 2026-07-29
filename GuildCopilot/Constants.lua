@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.29",
+    VERSION = "0.9.30",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -33,6 +33,9 @@ GC.Capabilities = {
     "workshop",
     "workshop2",
     "workshop3",
+    -- workshop4: getrennter Rezeptkatalog und Herstellerindex. Wer das meldet,
+    -- versteht Schluessellisten und braucht keine Vollkopie aller Rezepte.
+    "workshop4",
     "recruitmentsync",
     "membercare",
     "raidmonitor",

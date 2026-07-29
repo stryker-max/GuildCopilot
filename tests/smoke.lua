@@ -1511,7 +1511,7 @@ whisperedCrafter = addon.DB:GetGuild().workshop.crafters["heiler-realm"]
 assert(whisperedCrafter and whisperedCrafter.professions.schneiderei,
     "Werkstattdaten aus dem Flüsterkanal wurden fälschlich nur an die Raidauswertung geleitet")
 whisperedRecipeCount = 0
-for _ in pairs(whisperedCrafter.professions.schneiderei.recipes) do
+for _ in pairs(whisperedCrafter.professions.schneiderei.recipeKeys) do
     whisperedRecipeCount = whisperedRecipeCount + 1
 end
 assert(whisperedRecipeCount == 80,
@@ -1532,6 +1532,123 @@ assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions
     "Der geteilte Twink-Beruf fehlt beim Twink")
 assert(addon.DB:GetGuild().workshop.crafters["mainchar-realm"] == nil,
     "Ein geteilter Twink-Beruf wurde fälschlich dem absendenden Charakter zugeordnet")
+
+-- === Katalog und Herstellerindex ===========================================
+-- Rezeptdaten sind für alle identisch, also reicht es, sie einmal zu
+-- übertragen. Danach genügt die Schlüsselliste: "wer kann was".
+keyRoundtrip = addon.Workshop:EncodeRecipeKeys({ "I15003", "I15001", "E27926", "Nmondstoff", "I15002" })
+assert(keyRoundtrip:find("I=15001.1.1", 1, true) ~= nil,
+    "Aufeinanderfolgende Item-IDs wurden nicht als Differenzen kodiert: " .. keyRoundtrip)
+decodedKeys = {}
+for _, decodedKey in ipairs(addon.Workshop:DecodeRecipeKeys(keyRoundtrip)) do
+    decodedKeys[decodedKey] = true
+end
+for _, expectedKey in ipairs({ "I15001", "I15002", "I15003", "E27926", "Nmondstoff" }) do
+    assert(decodedKeys[expectedKey], "Schlüssel " .. expectedKey .. " ging beim Kodieren verloren")
+end
+
+-- Eine Schlüsselliste ist ein Bruchteil eines vollen Transfers.
+keyListMessages = addon.Workshop:BuildKeyListMessages(burstProfession, "Schlüsselschmied-Realm")
+fullMessages = addon.Workshop:BuildProfessionMessages(burstProfession, true, "Schlüsselschmied-Realm")
+assert(#keyListMessages < #fullMessages,
+    "Die Schlüsselliste ist nicht kürzer als der volle Transfer")
+for _, keyListMessage in ipairs(keyListMessages) do
+    assert(#keyListMessage <= 255, "Ein Schlüssellisten-Paket überschreitet das Chatlimit")
+end
+
+-- Der Empfänger kennt die Rezepte aus dem Katalog schon: der Hersteller wird
+-- eingetragen, ohne dass ein einziges Rezept erneut übertragen wurde.
+for _, fullMessage in ipairs(fullMessages) do
+    addon.Sync:OnMessage("GuildCopilot", fullMessage, "GUILD", "Katalogfüller-Realm")
+end
+catalogSize = 0
+for _ in pairs(addon.DB:GetGuild().workshop.catalog) do
+    catalogSize = catalogSize + 1
+end
+assert(catalogSize >= 80, "Der Rezeptkatalog wurde nicht gefüllt: " .. catalogSize)
+for _, keyListMessage in ipairs(keyListMessages) do
+    addon.Sync:OnMessage("GuildCopilot", keyListMessage, "GUILD", "Schlüsselschmied-Realm")
+end
+keyOnlyCrafter = addon.DB:GetGuild().workshop.crafters["schlusselschmied-realm"]
+    or addon.DB:GetGuild().workshop.crafters["schlüsselschmied-realm"]
+assert(keyOnlyCrafter ~= nil, "Der Hersteller aus der Schlüsselliste fehlt")
+keyOnlyCount = 0
+for _ in pairs(keyOnlyCrafter.professions.schneiderei.recipeKeys) do
+    keyOnlyCount = keyOnlyCount + 1
+end
+assert(keyOnlyCount == 80,
+    "Die Schlüsselliste hat nicht alle Rezepte zugeordnet: " .. keyOnlyCount)
+-- Beide Hersteller stehen am selben Rezept, das nur einmal im Katalog liegt.
+keySharedEntry = nil
+-- Bei Gegenstandsrezepten wandert der Name nicht durch die Gilde; ihn löst
+-- jeder Client aus der Item-ID selbst auf. Gesucht wird deshalb über die ID.
+for _, entry in ipairs(addon.Workshop:GetCatalog("15005")) do
+    if entry.key == "I15005" then
+        keySharedEntry = entry
+    end
+end
+assert(keySharedEntry ~= nil, "Das geteilte Rezept fehlt im Katalog")
+assert(#keySharedEntry.crafters == 2,
+    "Nicht beide Hersteller wurden am geteilten Rezept geführt: " .. #keySharedEntry.crafters)
+assert(#keySharedEntry.reagents > 0,
+    "Die Reagenzien aus dem Katalog fehlen am Eintrag der Schlüsselliste")
+
+-- Ein Rezept, das der Katalog nicht kennt, wird beim Hersteller nachgefordert.
+missingKeyMessages = addon.Workshop:BuildKeyListMessages({
+    key = "schneiderei",
+    name = "Schneiderei",
+    updatedAt = 4242,
+    recipes = { I19999 = { key = "I19999", itemID = 19999, name = "Unbekanntes Rezept", reagents = {} } },
+}, "Unbekanntling-Realm")
+addon.Workshop.suppressedRequests = {}
+-- Die Nachforderung läuft mit Streuung; unterhalb der Schwelle würde der
+-- Test-Timer sofort feuern statt in die Warteliste zu wandern.
+timerDelayThreshold = 0.5
+missingRequestBefore = #pendingTimers
+for _, missingKeyMessage in ipairs(missingKeyMessages) do
+    addon.Sync:OnMessage("GuildCopilot", missingKeyMessage, "GUILD", "Unbekanntling-Realm")
+end
+assert(#pendingTimers > missingRequestBefore,
+    "Für ein unbekanntes Rezept wurde keine Nachforderung geplant")
+missingSentBefore = #sentAddon
+pendingTimers[missingRequestBefore + 1]()
+addon.Sync:PumpBulk(10)
+missingRequestFound = false
+for missingIndex = missingSentBefore + 1, #sentAddon do
+    if sentAddon[missingIndex][2]:find("|N|", 1, true) then
+        missingRequestFound = true
+        assert(sentAddon[missingIndex][2]:find("Unbekanntling", 1, true) ~= nil,
+            "Die Nachforderung nennt den falschen Hersteller")
+    end
+end
+assert(missingRequestFound, "Die Nachforderung wurde nicht gesendet")
+timerDelayThreshold = math.huge
+-- Dasselbe Rezept wird nicht ein zweites Mal nachgefordert.
+assert(addon.Workshop:SendMissingRecipeRequest("Unbekanntling-Realm", { "I19999" }) == false,
+    "Ein bereits angefragtes Rezept wurde erneut nachgefordert")
+
+-- Ausgetretene Mitglieder verschwinden mit ihren Rezepten; Twinks nicht.
+addon.Workshop:ClaimRecipes({
+    crafter = "Ausgetreten-Realm",
+    sharedBy = "Ausgetreten-Realm",
+    professionKey = "schneiderei",
+    professionName = "Schneiderei",
+    recipeKeys = { "I15001" },
+})
+addon.Workshop:ClaimRecipes({
+    crafter = "Fremdtwink-Realm",
+    sharedBy = "Heiler-Realm",
+    professionKey = "schneiderei",
+    professionName = "Schneiderei",
+    recipeKeys = { "I15002" },
+})
+assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] ~= nil,
+    "Der Testeintrag für den Ausgetretenen fehlt")
+addon.Workshop:PruneDepartedCrafters()
+assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] == nil,
+    "Ein ausgetretenes Gildenmitglied blieb mit seinen Rezepten in der Werkstatt")
+assert(addon.DB:GetGuild().workshop.crafters["fremdtwink-realm"] ~= nil,
+    "Der Twink eines Gildenmitglieds wurde fälschlich als ausgetreten entfernt")
 
 -- Lange Berufs- und Herstellernamen dürfen das 255-Byte-Chatlimit nie
 -- sprengen: das Nutzlast-Budget richtet sich nach der echten Kopfzeile.
@@ -1567,7 +1684,7 @@ end
 longReceived = addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions.ingenieurskunst
 assert(longReceived ~= nil, "Der Beruf mit langem Namen wurde nicht gespeichert")
 longReceivedCount = 0
-for _ in pairs(longReceived.recipes) do
+for _ in pairs(longReceived.recipeKeys) do
     longReceivedCount = longReceivedCount + 1
 end
 assert(longReceivedCount == 80,

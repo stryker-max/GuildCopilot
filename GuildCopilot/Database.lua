@@ -87,6 +87,9 @@ local GUILD_DEFAULTS = {
         lastSyncFrom = "",
     },
     workshop = {
+        -- Jedes Rezept steht genau einmal im Katalog; die Crafter halten nur
+        -- noch die Schluessel dessen, was sie koennen.
+        catalog = {},
         crafters = {},
     },
     raidSessions = {},

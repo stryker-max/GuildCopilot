@@ -25,6 +25,84 @@ local MAX_INCOMING_TRANSFERS = 20
 local INCOMING_TTL = 5 * 60
 local MIN_REQUEST_REPLY_INTERVAL = 30
 local SCAN_RETRY_DELAYS = { 0.15, 0.45, 1.0, 2.0 }
+-- Fehlende Rezepte werden gesammelt und mit Streuung nachgefordert, damit bei
+-- vielen Mitgliedern nicht alle gleichzeitig dasselbe Rezept anfragen.
+local MISSING_REQUEST_DELAY = 8
+local MISSING_REQUEST_SUPPRESS = 60
+local MAX_KEYS_PER_REQUEST = 40
+local DEPARTED_PRUNE_INTERVAL = 60
+
+-- Rezeptschluessel sind Item- oder Zauber-IDs. Nach Typ gruppiert und als
+-- Differenzen aufsteigender Zahlen kosten 294 Schluessel rund 590 Bytes statt
+-- 34 KB voller Rezeptdaten - der Grund, weshalb ein Beruf beim Zweiten und
+-- allen Folgenden nur noch aus Schluesseln besteht.
+local function EncodeRecipeKeys(keys)
+    local numeric = { I = {}, E = {} }
+    local literal = {}
+    for _, recipeKey in ipairs(keys) do
+        local prefix, digits = tostring(recipeKey):match("^([IE])(%d+)$")
+        if prefix and #digits <= 12 then
+            local group = numeric[prefix]
+            group[#group + 1] = tonumber(digits)
+        elseif tostring(recipeKey):match("^N[%w]+$") then
+            literal[#literal + 1] = tostring(recipeKey):sub(2)
+        end
+    end
+
+    local parts = {}
+    for _, prefix in ipairs({ "I", "E" }) do
+        local group = numeric[prefix]
+        if #group > 0 then
+            table.sort(group)
+            local deltas, previous = {}, 0
+            for _, id in ipairs(group) do
+                if id ~= previous then
+                    deltas[#deltas + 1] = tostring(id - previous)
+                    previous = id
+                end
+            end
+            parts[#parts + 1] = prefix .. "=" .. table.concat(deltas, ".")
+        end
+    end
+    if #literal > 0 then
+        table.sort(literal)
+        parts[#parts + 1] = "N=" .. table.concat(literal, ".")
+    end
+    return table.concat(parts, ";")
+end
+
+local function DecodeRecipeKeys(payload)
+    local keys = {}
+    for group in tostring(payload or ""):gmatch("[^;]+") do
+        local prefix, values = group:match("^([IEN])=(.*)$")
+        if prefix == "N" then
+            for name in tostring(values):gmatch("[^.]+") do
+                keys[#keys + 1] = "N" .. name
+            end
+        elseif prefix then
+            local current = 0
+            for delta in tostring(values):gmatch("[^.]+") do
+                local step = tonumber(delta)
+                if not step or step < 0 then
+                    break
+                end
+                current = current + step
+                if current > 0 then
+                    keys[#keys + 1] = prefix .. tostring(current)
+                end
+            end
+        end
+    end
+    return keys
+end
+
+-- Nach aussen sichtbar, damit die Tests die Kodierung direkt pruefen koennen.
+GC.Workshop.EncodeRecipeKeys = function(_, keys)
+    return EncodeRecipeKeys(keys)
+end
+GC.Workshop.DecodeRecipeKeys = function(_, payload)
+    return DecodeRecipeKeys(payload)
+end
 
 local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
@@ -93,6 +171,14 @@ end
 local function RecipeCount(profession)
     local count = 0
     for _ in pairs(profession and profession.recipes or {}) do
+        count = count + 1
+    end
+    return count
+end
+
+local function RecipeKeyCount(profession)
+    local count = 0
+    for _ in pairs(profession and profession.recipeKeys or {}) do
         count = count + 1
     end
     return count
@@ -228,6 +314,195 @@ function GC.Workshop:GetOwnData()
         professions.alchemie = nil
     end
     return profile.workshop
+end
+
+-- Der gildenweite Bestand besteht aus zwei getrennten Teilen: einem
+-- Rezeptkatalog, in dem jedes Rezept genau einmal steht, und einem Index, wer
+-- welches Rezept kann. Vor dieser Trennung hielt jeder Crafter eine eigene
+-- Vollkopie aller Rezepte - bei hundert Mitgliedern ein Vielfaches an
+-- Uebertragung und Speicher fuer immer dieselben Daten.
+function GC.Workshop:GetGuildWorkshop()
+    local workshop = GC.DB:GetGuild().workshop
+    workshop.crafters = workshop.crafters or {}
+    workshop.catalog = workshop.catalog or {}
+    if not workshop.catalogMigrated then
+        workshop.catalogMigrated = true
+        for _, crafter in pairs(workshop.crafters) do
+            for professionKey, profession in pairs((type(crafter) == "table" and crafter.professions) or {}) do
+                if type(profession) == "table" and type(profession.recipes) == "table" then
+                    profession.recipeKeys = profession.recipeKeys or {}
+                    for recipeKey, recipe in pairs(profession.recipes) do
+                        profession.recipeKeys[recipeKey] = true
+                        if not workshop.catalog[recipeKey] and type(recipe) == "table" then
+                            workshop.catalog[recipeKey] = {
+                                key = recipeKey,
+                                itemID = recipe.itemID,
+                                recipeID = recipe.recipeID,
+                                name = recipe.name,
+                                professionKey = professionKey,
+                                profession = profession.name or recipe.profession,
+                                reagents = recipe.reagents or {},
+                            }
+                        end
+                    end
+                    profession.recipes = nil
+                end
+            end
+        end
+    end
+    return workshop
+end
+
+-- Ein Rezept wandert nur dann in den Katalog, wenn es dort fehlt oder bisher
+-- ohne Reagenzien steckt. Rezeptdaten sind fuer alle identisch: der Schluessel
+-- ist die Item- beziehungsweise Zauber-ID, die Reagenzien haengen nicht am
+-- Spieler. Deshalb gibt es nichts abzuwaegen, wenn zwei Absender dasselbe
+-- Rezept melden.
+function GC.Workshop:StoreCatalogRecipe(recipe, professionKey, professionName)
+    if type(recipe) ~= "table" or GC.Util.Trim(recipe.key) == "" then
+        return false
+    end
+    local catalog = self:GetGuildWorkshop().catalog
+    local existing = catalog[recipe.key]
+    if existing and #(existing.reagents or {}) > 0 and #(recipe.reagents or {}) == 0 then
+        return false
+    end
+    catalog[recipe.key] = {
+        key = recipe.key,
+        itemID = recipe.itemID,
+        recipeID = recipe.recipeID,
+        name = recipe.name,
+        professionKey = professionKey or (existing and existing.professionKey),
+        profession = professionName or (existing and existing.profession),
+        reagents = recipe.reagents or (existing and existing.reagents) or {},
+    }
+    return true
+end
+
+-- Traegt ein, wer einen Beruf mit welchen Rezepten kann. "sharedBy" haelt fest,
+-- welches Gildenmitglied den Eintrag eingebracht hat: Twinks stehen nicht im
+-- Gildenroster und duerfen beim Aufraeumen nicht mit Ausgetretenen verwechselt
+-- werden.
+function GC.Workshop:ClaimRecipes(info)
+    local crafterKey = GC.Util.NormalizeName(info.crafter)
+    if crafterKey == "" or GC.Util.Trim(info.professionKey) == "" then
+        return nil
+    end
+    local workshop = self:GetGuildWorkshop()
+    local crafter = workshop.crafters[crafterKey] or { professions = {} }
+    crafter.name = info.crafter
+    crafter.professions = crafter.professions or {}
+    crafter.updatedAt = GC.Util.Now()
+    if GC.Util.Trim(info.sharedBy) ~= "" then
+        crafter.sharedBy = info.sharedBy
+    end
+
+    local recipeKeys = {}
+    for _, recipeKey in ipairs(info.recipeKeys or {}) do
+        recipeKeys[recipeKey] = true
+    end
+    crafter.professions[info.professionKey] = {
+        key = info.professionKey,
+        name = info.professionName,
+        updatedAt = tonumber(info.updatedAt) or GC.Util.Now(),
+        fingerprintHash = info.fingerprintHash,
+        recipeKeys = recipeKeys,
+    }
+    workshop.crafters[crafterKey] = crafter
+    return crafter
+end
+
+-- Welche der gemeldeten Rezepte kennt dieser Client noch gar nicht? Nur fuer
+-- die lohnt eine Nachforderung der vollen Daten - und zwar einmal gildenweit,
+-- nicht einmal je Spieler.
+function GC.Workshop:GetUnknownRecipeKeys(recipeKeys)
+    local catalog = self:GetGuildWorkshop().catalog
+    local own = self:GetOwnData().professions
+    local missing = {}
+    for _, recipeKey in ipairs(recipeKeys or {}) do
+        local known = catalog[recipeKey] and #(catalog[recipeKey].reagents or {}) > 0
+        if not known then
+            for _, profession in pairs(own) do
+                if (profession.recipes or {})[recipeKey] then
+                    known = true
+                    break
+                end
+            end
+        end
+        if not known then
+            missing[#missing + 1] = recipeKey
+        end
+    end
+    return missing
+end
+
+-- Fehlt zu einem gemeldeten Rezept die Datenzeile, wird sie beim Hersteller
+-- nachgefordert - aber mit Streuung und nur einmal je Rezept. Sieht dieser
+-- Client in der Zwischenzeit die Anfrage eines anderen oder trifft das Rezept
+-- ein, entfaellt die eigene Anfrage. So bleibt es bei hundert Mitgliedern bei
+-- wenigen Anfragen statt hundert gleichlautenden.
+function GC.Workshop:ScheduleMissingRecipeRequest(crafterName, recipeKeys)
+    local missing = self:GetUnknownRecipeKeys(recipeKeys)
+    if #missing == 0 or GC.Util.Trim(crafterName) == "" then
+        return false
+    end
+    self.suppressedRequests = self.suppressedRequests or {}
+    local now = GC.Util.Now()
+    local pending = {}
+    for _, recipeKey in ipairs(missing) do
+        local suppressedAt = self.suppressedRequests[recipeKey]
+        if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
+            pending[#pending + 1] = recipeKey
+        end
+    end
+    if #pending == 0 then
+        return false
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:SendMissingRecipeRequest(crafterName, pending)
+    end
+    C_Timer.After(1 + math.random() * MISSING_REQUEST_DELAY, function()
+        GC.Workshop:SendMissingRecipeRequest(crafterName, pending)
+    end)
+    return true
+end
+
+function GC.Workshop:SendMissingRecipeRequest(crafterName, recipeKeys)
+    if not GC.Sync then
+        return false
+    end
+    -- Zwischen Planung und Absenden kann das Rezept eingetroffen sein oder ein
+    -- anderer die Anfrage gestellt haben.
+    local stillMissing = self:GetUnknownRecipeKeys(recipeKeys)
+    self.suppressedRequests = self.suppressedRequests or {}
+    local now = GC.Util.Now()
+    local wanted = {}
+    for _, recipeKey in ipairs(stillMissing) do
+        local suppressedAt = self.suppressedRequests[recipeKey]
+        if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
+            wanted[#wanted + 1] = recipeKey
+            if #wanted >= MAX_KEYS_PER_REQUEST then
+                break
+            end
+        end
+    end
+    if #wanted == 0 then
+        return false
+    end
+    for _, recipeKey in ipairs(wanted) do
+        self.suppressedRequests[recipeKey] = now
+    end
+    local message = BuildMessage({
+        "W",
+        GC.Constants.SCHEMA_VERSION,
+        "N",
+        GC.Util.SafeChatText(GC.Util.Trim(crafterName), 40),
+        EncodeRecipeKeys(wanted),
+    })
+    if #message > GC.Constants.MAX_CHAT_BYTES then
+        return false
+    end
+    return GC.Sync:SendBulk(message, "GUILD")
 end
 
 function GC.Workshop:ScheduleScan()
@@ -536,7 +811,10 @@ function GC.Workshop:ScanOpenProfession()
     return self:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, recipeCount)
 end
 
-function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
+-- "recipeKeyFilter" schraenkt die Nutzlast auf einzelne Rezepte ein. Damit
+-- werden nachgeforderte Rezepte gezielt nachgeliefert, statt den ganzen Beruf
+-- erneut zu senden.
+function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName, recipeKeyFilter)
     local operation = compact == false and "D" or "C"
     local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
     -- Der Herstellername wird als zusaetzliches Feld angehaengt, damit auch die
@@ -574,13 +852,18 @@ function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
 
     local records = {}
     for _, recipeKey in ipairs(SortedKeys(profession.recipes)) do
-        local recipe = profession.recipes[recipeKey]
-        local record = compact == false
-            and BuildRecipeRecord(recipe, payloadLimit)
-            or BuildCompactRecipeRecord(recipe, payloadLimit)
-        if record then
-            records[#records + 1] = record
+        if not recipeKeyFilter or recipeKeyFilter[recipeKey] then
+            local recipe = profession.recipes[recipeKey]
+            local record = compact == false
+                and BuildRecipeRecord(recipe, payloadLimit)
+                or BuildCompactRecipeRecord(recipe, payloadLimit)
+            if record then
+                records[#records + 1] = record
+            end
         end
+    end
+    if recipeKeyFilter and #records == 0 then
+        return {}, token
     end
 
     local payloads = {}
@@ -616,12 +899,52 @@ function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
     return messages, token
 end
 
-function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable, crafterName)
+-- Die Schluesselliste eines Berufs: nur "wer kann was", ohne Rezeptdaten. Sie
+-- nutzt dieselbe Kopfzeile und damit dieselbe Zusammensetzung beim Empfaenger
+-- wie ein voller Transfer - nur die Nutzlast ist eine andere.
+function GC.Workshop:BuildKeyListMessages(profession, crafterName)
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+    local crafterField = GC.Util.SafeChatText(GC.Util.Trim(crafterName or ""), 40)
+    local fingerprintHash = profession.fingerprintHash
+        or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession))
+    local header = BuildMessage({
+        "W", GC.Constants.SCHEMA_VERSION, "K", token, "000", "000",
+        profession.key, profession.name, "",
+        tostring(profession.updatedAt or 0), fingerprintHash, crafterField,
+    })
+    local payloadLimit = math.min(
+        MAX_PAYLOAD_BYTES,
+        GC.Constants.MAX_CHAT_BYTES - #header
+    )
+
+    local payload = EncodeRecipeKeys(SortedKeys(profession.recipes))
+    -- Wie beim Gildenprofil wird stumpf nach Bytes geschnitten; gelesen wird
+    -- erst die wieder zusammengesetzte Nutzlast.
+    local chunks = {}
+    for offset = 1, math.max(1, #payload), payloadLimit do
+        chunks[#chunks + 1] = payload:sub(offset, offset + payloadLimit - 1)
+    end
+
+    local messages = {}
+    for index, chunk in ipairs(chunks) do
+        messages[#messages + 1] = BuildMessage({
+            "W", GC.Constants.SCHEMA_VERSION, "K", token, index, #chunks,
+            profession.key, profession.name, chunk,
+            tostring(profession.updatedAt or 0), fingerprintHash, crafterField,
+        })
+    end
+    return messages, token
+end
+
+function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable, crafterName, recipeKeyFilter)
     if not profession then
         return
     end
 
-    local messages, token = self:BuildProfessionMessages(profession, compact, crafterName)
+    local messages, token = self:BuildProfessionMessages(profession, compact, crafterName, recipeKeyFilter)
+    if #messages == 0 then
+        return false
+    end
     if reliable and target and compact ~= false and GC.Sync and GC.Sync.QueueReliable then
         self.syncStats.queued = self.syncStats.queued + #messages
         local queued = GC.Sync:QueueReliable(
@@ -713,14 +1036,82 @@ function GC.Workshop:GetAccountProfessions()
     return entries
 end
 
+-- Reiht eine Schluesselliste in dieselbe Warteschlange ein wie volle Transfers.
+function GC.Workshop:QueueKeyList(profession, crafterName)
+    if not profession then
+        return false
+    end
+    local messages = self:BuildKeyListMessages(profession, crafterName)
+    local crafterKey = GC.Util.NormalizeName(crafterName or "")
+    for index = #self.syncQueue, 1, -1 do
+        local queued = self.syncQueue[index]
+        if queued.professionKey == profession.key and queued.keyList
+            and (queued.crafterKey or "") == crafterKey then
+            table.remove(self.syncQueue, index)
+        end
+    end
+    for _, message in ipairs(messages) do
+        if #message <= GC.Constants.MAX_CHAT_BYTES then
+            self.syncQueue[#self.syncQueue + 1] = {
+                message = message,
+                retries = 0,
+                professionKey = profession.key,
+                crafterKey = crafterKey,
+                keyList = true,
+                distribution = "GUILD",
+            }
+            self.syncStats.queued = self.syncStats.queued + 1
+        else
+            self.syncStats.failed = self.syncStats.failed + 1
+        end
+    end
+    GC:FireCallback("WORKSHOP_UPDATED")
+    self:PumpSyncQueue()
+    return true
+end
+
+-- Kennt die Gilde noch Clients ohne Schluesselliste, muessen sie weiterhin die
+-- vollen Rezeptdaten bekommen; sonst saehen sie gar nichts mehr. Wer sich noch
+-- nicht vorgestellt hat, gilt vorsichtshalber als alt.
+function GC.Workshop:GuildNeedsFullRecipeData()
+    local addonUsers = GC.DB:GetGuild().addonUsers or {}
+    local seen = {}
+    for _, entry in pairs(addonUsers) do
+        if type(entry) == "table" and not seen[entry] then
+            seen[entry] = true
+            local isMember = #GC.Roster.members == 0 or GC.Roster:IsGuildMember(entry.name)
+            local capabilities = "," .. tostring(entry.capabilities or "") .. ","
+            if isMember and not capabilities:find(",workshop4,", 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function GC.Workshop:QueueAllProfessions(compact, target, reliable)
     if #self.syncQueue == 0 and not self.syncSending then
         self.syncStats.queued = 0
         self.syncStats.sent = 0
         self.syncStats.failed = 0
     end
+    -- Der Regelfall ist die kurze Schluesselliste: die Rezeptdaten selbst sind
+    -- in der Gilde langst bekannt, weil jedes Rezept fuer alle identisch ist.
+    -- Volle Daten gehen nur an gezielte Empfaenger oder solange noch ein Client
+    -- ohne Schluesselliste in der Gilde ist.
+    local keyListOnly = not target and compact ~= false and not self:GuildNeedsFullRecipeData()
     for _, entry in ipairs(self:GetAccountProfessions()) do
-        self:QueueProfessionSync(entry.profession, compact, target, reliable, entry.crafter)
+        if keyListOnly then
+            self:QueueKeyList(entry.profession, entry.crafter)
+        else
+            self:QueueProfessionSync(entry.profession, compact, target, reliable, entry.crafter)
+            if not target then
+                -- Zusammen mit den vollen Daten geht die Schluesselliste raus,
+                -- damit aktuelle Clients den Herstellerindex auch dann sauber
+                -- fuehren, wenn einzelne Rezeptpakete verloren gehen.
+                self:QueueKeyList(entry.profession, entry.crafter)
+            end
+        end
     end
 end
 
@@ -964,8 +1355,36 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             self:QueueProfessionSync(profession, true, sender, true)
         end
         return
+    elseif operation == "N" then
+        -- Jemandem fehlen Rezeptdaten. Angesprochen ist genau der genannte
+        -- Hersteller; die Antwort geht dennoch ueber den Gildenkanal, weil in
+        -- der Regel mehreren dasselbe Rezept fehlt.
+        local wantedCrafter = GC.Util.Trim(fields[4] or "")
+        local requestedKeys = DecodeRecipeKeys(fields[5])
+        self.suppressedRequests = self.suppressedRequests or {}
+        local now = GC.Util.Now()
+        for _, recipeKey in ipairs(requestedKeys) do
+            -- Wer dieselbe Anfrage schon unterwegs sieht, stellt sie nicht
+            -- erneut. Sonst fragen bei hundert Mitgliedern hundert Clients
+            -- dasselbe Rezept nach.
+            self.suppressedRequests[recipeKey] = now
+        end
+        local wantedKey = GC.Util.NormalizeName(wantedCrafter)
+        if wantedKey == "" or #requestedKeys == 0 then
+            return
+        end
+        local filter = {}
+        for _, recipeKey in ipairs(requestedKeys) do
+            filter[recipeKey] = true
+        end
+        for _, entry in ipairs(self:GetAccountProfessions()) do
+            if GC.Util.NormalizeName(entry.crafter) == wantedKey then
+                self:QueueProfessionSync(entry.profession, true, nil, nil, entry.crafter, filter)
+            end
+        end
+        return
     end
-    if operation ~= "D" and operation ~= "C" then
+    if operation ~= "D" and operation ~= "C" and operation ~= "K" then
         return
     end
 
@@ -1065,40 +1484,68 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         return
     end
 
-    local recipes = {}
-    for partIndex = 1, incoming.total do
-        for record in tostring(incoming.parts[partIndex] or ""):gmatch("[^;]+") do
-            local recipe = operation == "C"
-                and DecodeCompactRecipeRecord(record, professionName)
-                or DecodeRecipeRecord(record, professionName)
-            if recipe then
-                recipes[recipe.key] = recipe
+    self.incoming[incomingKey] = nil
+    self.completedIncoming[incomingKey] = now
+
+    local receivedKeys = {}
+    local receivedRecipeCount = 0
+    if operation == "K" then
+        -- Nur "wer kann was". Die Schluesselliste ist byteweise geteilt und wird
+        -- deshalb erst zusammengesetzt und dann gelesen. Die Rezeptdaten selbst
+        -- stehen im Katalog, weil sie fuer alle identisch sind.
+        local assembled = {}
+        for partIndex = 1, incoming.total do
+            assembled[partIndex] = incoming.parts[partIndex] or ""
+        end
+        receivedKeys = DecodeRecipeKeys(table.concat(assembled))
+        -- Auch ohne uebertragene Rezeptdaten sind das die Rezepte, die dieser
+        -- Hersteller ab jetzt nachweislich kann - der Status soll sie nennen.
+        receivedRecipeCount = #receivedKeys
+    else
+        -- Rezeptpakete sind an Datensatzgrenzen geteilt, ohne das Trennzeichen
+        -- mitzunehmen. Sie werden deshalb Paket fuer Paket gelesen; ein
+        -- Zusammensetzen wuerde den letzten Datensatz eines Pakets mit dem
+        -- ersten des naechsten verschmelzen.
+        for partIndex = 1, incoming.total do
+            for record in tostring(incoming.parts[partIndex] or ""):gmatch("[^;]+") do
+                local recipe = operation == "C"
+                    and DecodeCompactRecipeRecord(record, professionName)
+                    or DecodeRecipeRecord(record, professionName)
+                if recipe then
+                    self:StoreCatalogRecipe(recipe, professionKey, professionName)
+                    receivedKeys[#receivedKeys + 1] = recipe.key
+                    receivedRecipeCount = receivedRecipeCount + 1
+                end
             end
         end
     end
 
-    local crafters = GC.DB:GetGuild().workshop.crafters
-    local crafter = crafters[crafterKey] or {
-        name = crafterName,
-        professions = {},
-    }
-    crafter.name = crafterName
-    crafter.updatedAt = GC.Util.Now()
-    crafter.professions[professionKey] = {
-        key = professionKey,
-        name = professionName,
+    -- Eine gezielte Nachlieferung enthaelt nur einzelne Rezepte und darf den
+    -- vollstaendigen Herstellerindex nicht auf diese wenigen zusammenstreichen.
+    local existing = self:GetGuildWorkshop().crafters[crafterKey]
+    local existingProfession = existing and existing.professions
+        and existing.professions[professionKey]
+    local isPartialDelivery = operation ~= "K" and existingProfession
+        and existingProfession.recipeKeys
+        and RecipeKeyCount(existingProfession) > #receivedKeys
+    if isPartialDelivery then
+        for recipeKey in pairs(existingProfession.recipeKeys) do
+            receivedKeys[#receivedKeys + 1] = recipeKey
+        end
+    end
+
+    self:ClaimRecipes({
+        crafter = crafterName,
+        sharedBy = sender,
+        professionKey = professionKey,
+        professionName = professionName,
+        recipeKeys = receivedKeys,
         updatedAt = incoming.updatedAt,
-        fingerprintHash = incoming.fingerprintHash ~= ""
-            and incoming.fingerprintHash
-            or FingerprintHash(RecipeFingerprint({ recipes = recipes })),
-        recipes = recipes,
-    }
-    crafters[crafterKey] = crafter
-    self.incoming[incomingKey] = nil
-    self.completedIncoming[incomingKey] = now
-    local receivedRecipeCount = 0
-    for _ in pairs(recipes) do
-        receivedRecipeCount = receivedRecipeCount + 1
+        fingerprintHash = incoming.fingerprintHash ~= "" and incoming.fingerprintHash or nil,
+    })
+
+    if operation == "K" then
+        self:ScheduleMissingRecipeRequest(crafterName, receivedKeys)
     end
     self.syncStats.receivedProfessions = self.syncStats.receivedProfessions + 1
     self.syncStats.receivedRecipes = self.syncStats.receivedRecipes + receivedRecipeCount
@@ -1154,8 +1601,39 @@ function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
             AddCrafterToCatalog(catalog, characterName, workshop.professions)
         end
     end
-    for _, crafter in pairs(GC.DB:GetGuild().workshop.crafters or {}) do
-        AddCrafterToCatalog(catalog, crafter.name, crafter.professions)
+    -- Der gildenweite Teil: der Katalog liefert die Rezeptdaten, der
+    -- Herstellerindex nur noch die Namen. Fehlt zu einem gemeldeten Rezept die
+    -- Datenzeile noch, entsteht der Eintrag trotzdem - Name und Beruf loest der
+    -- Client aus der Item- beziehungsweise Zauber-ID selbst auf, allein die
+    -- Reagenzien bleiben leer, bis die Nachlieferung eintrifft.
+    local guildWorkshop = self:GetGuildWorkshop()
+    for _, crafter in pairs(guildWorkshop.crafters) do
+        local crafterKey = GC.Util.NormalizeName(crafter.name)
+        for _, profession in pairs(crafter.professions or {}) do
+            for recipeKey in pairs(profession.recipeKeys or {}) do
+                local known = guildWorkshop.catalog[recipeKey]
+                local entry = catalog[recipeKey]
+                if not entry then
+                    entry = {
+                        key = recipeKey,
+                        name = ResolveRecipeName(recipeKey, known and known.name),
+                        itemID = known and known.itemID,
+                        profession = (known and known.profession)
+                            or profession.name or "Unbekannt",
+                        reagents = GC.Util.DeepCopy((known and known.reagents) or {}),
+                        crafters = {},
+                        crafterKeys = {},
+                    }
+                    catalog[recipeKey] = entry
+                elseif #entry.reagents == 0 and known and #(known.reagents or {}) > 0 then
+                    entry.reagents = GC.Util.DeepCopy(known.reagents)
+                end
+                if not entry.crafterKeys[crafterKey] then
+                    entry.crafterKeys[crafterKey] = true
+                    entry.crafters[#entry.crafters + 1] = GC.Util.PlayerShortName(crafter.name)
+                end
+            end
+        end
     end
 
     query = NormalizeKey(query)
@@ -1178,6 +1656,62 @@ function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
         return left.name < right.name
     end)
     return entries
+end
+
+-- Wer die Gilde verlaesst, verschwindet mit seinen Rezepten aus der Werkstatt.
+-- Der Roster allein reicht als Maßstab aber nicht: Twinks stehen nie im
+-- Gildenroster, und ihre Berufe werden seit 0.9.26 bewusst geteilt. Ein Eintrag
+-- faellt deshalb nur, wenn weder der Hersteller selbst noch das Gildenmitglied,
+-- das ihn eingebracht hat, noch im Roster steht. Solange der Roster nach dem
+-- Login leer ist, wird gar nichts entfernt.
+function GC.Workshop:PruneDepartedCrafters()
+    if #GC.Roster.members == 0 then
+        return 0
+    end
+    local workshop = self:GetGuildWorkshop()
+    local ownKeys = {}
+    for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
+        local characterName = (type(character) == "table" and character.fullName) or characterKey
+        ownKeys[GC.Util.NormalizeName(characterName)] = true
+    end
+    ownKeys[GC.Util.NormalizeName(GC:GetPlayerFullName())] = true
+
+    local removed = 0
+    for crafterKey, crafter in pairs(workshop.crafters) do
+        local name = type(crafter) == "table" and crafter.name or crafterKey
+        local sharedBy = type(crafter) == "table" and crafter.sharedBy or nil
+        local keep = ownKeys[crafterKey]
+            or GC.Roster:IsGuildMember(name)
+            or (sharedBy and GC.Roster:IsGuildMember(sharedBy))
+        if not keep then
+            workshop.crafters[crafterKey] = nil
+            removed = removed + 1
+        end
+    end
+
+    -- Rezepte, die niemand mehr kann, muellen den Katalog nicht zu.
+    if removed > 0 then
+        local stillClaimed = {}
+        for _, crafter in pairs(workshop.crafters) do
+            for _, profession in pairs((type(crafter) == "table" and crafter.professions) or {}) do
+                for recipeKey in pairs(profession.recipeKeys or {}) do
+                    stillClaimed[recipeKey] = true
+                end
+            end
+        end
+        for _, profession in pairs(self:GetOwnData().professions) do
+            for recipeKey in pairs(profession.recipes or {}) do
+                stillClaimed[recipeKey] = true
+            end
+        end
+        for recipeKey in pairs(workshop.catalog) do
+            if not stillClaimed[recipeKey] then
+                workshop.catalog[recipeKey] = nil
+            end
+        end
+        GC:FireCallback("WORKSHOP_UPDATED")
+    end
+    return removed
 end
 
 function GC.Workshop:IsFavorite(recipeKey)
@@ -1258,6 +1792,17 @@ workshopEvents:SetScript("OnEvent", function(_, event)
         end
         GC.Workshop:ScheduleScan()
     end
+end)
+
+-- Der Roster wird nach jeder Gildenaktualisierung neu gelesen; das Aufraeumen
+-- haengt sich dort an, bleibt aber gedrosselt, weil das Ereignis oft feuert.
+GC:RegisterCallback("ROSTER_UPDATED", GC.Workshop, function(self)
+    local now = GC.Util.Now()
+    if (now - (self.lastDepartedPruneAt or 0)) < DEPARTED_PRUNE_INTERVAL then
+        return
+    end
+    self.lastDepartedPruneAt = now
+    self:PruneDepartedCrafters()
 end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
