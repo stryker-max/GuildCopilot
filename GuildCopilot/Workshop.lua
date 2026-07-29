@@ -526,7 +526,7 @@ function GC.Workshop:ScanOpenProfession()
     return self:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, recipeCount)
 end
 
-function GC.Workshop:BuildProfessionMessages(profession, compact)
+function GC.Workshop:BuildProfessionMessages(profession, compact, crafterName)
     local records = {}
     for _, recipeKey in ipairs(SortedKeys(profession.recipes)) do
         local recipe = profession.recipes[recipeKey]
@@ -552,6 +552,11 @@ function GC.Workshop:BuildProfessionMessages(profession, compact)
     local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
     local messages = {}
     local operation = compact == false and "D" or "C"
+    -- Der Herstellername wird als zusaetzliches Feld angehaengt, damit auch die
+    -- Berufe der eigenen Twinks korrekt dem jeweiligen Charakter zugeordnet
+    -- werden. Aeltere Clients ignorieren das Feld schlicht und schreiben die
+    -- Daten wie bisher dem Absender zu.
+    local crafterField = GC.Util.SafeChatText(GC.Util.Trim(crafterName or ""), 60)
     for index, payload in ipairs(payloads) do
         messages[#messages + 1] = BuildMessage({
             "W",
@@ -565,17 +570,18 @@ function GC.Workshop:BuildProfessionMessages(profession, compact)
             payload,
             tostring(profession.updatedAt or 0),
             profession.fingerprintHash or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession)),
+            crafterField,
         })
     end
     return messages, token
 end
 
-function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
+function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable, crafterName)
     if not profession then
         return
     end
 
-    local messages, token = self:BuildProfessionMessages(profession, compact)
+    local messages, token = self:BuildProfessionMessages(profession, compact, crafterName)
     if reliable and target and compact ~= false and GC.Sync and GC.Sync.QueueReliable then
         self.syncStats.queued = self.syncStats.queued + #messages
         local queued = GC.Sync:QueueReliable(
@@ -597,7 +603,7 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
                 local lost = entry.failedCount
                     or math.max(1, #messages - (entry.acknowledgedCount or 0))
                 if lost > 0 then
-                    GC.Workshop:QueueProfessionSync(profession, true)
+                    GC.Workshop:QueueProfessionSync(profession, true, nil, nil, crafterName)
                 else
                     GC:FireCallback("WORKSHOP_UPDATED")
                 end
@@ -606,15 +612,20 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
         if not queued then
             -- Der Fluesterweg liess sich gar nicht erst starten: sofort ueber
             -- den Gildenkanal senden.
-            self:QueueProfessionSync(profession, true)
+            self:QueueProfessionSync(profession, true, nil, nil, crafterName)
         end
         GC:FireCallback("WORKSHOP_UPDATED")
         return queued
     end
 
+    -- Zusammen mit dem Beruf identifiziert der Herstellername ein Paket
+    -- eindeutig, damit zwei eigene Charaktere mit demselben Beruf sich beim
+    -- Einreihen nicht gegenseitig verdraengen.
+    local crafterKey = GC.Util.NormalizeName(crafterName or "")
     for index = #self.syncQueue, 1, -1 do
         if self.syncQueue[index].professionKey == profession.key
-            and self.syncQueue[index].target == target then
+            and self.syncQueue[index].target == target
+            and (self.syncQueue[index].crafterKey or "") == crafterKey then
             table.remove(self.syncQueue, index)
         end
     end
@@ -625,6 +636,7 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
                 message = message,
                 retries = 0,
                 professionKey = profession.key,
+                crafterKey = crafterKey,
                 distribution = target and "WHISPER" or "GUILD",
                 target = target,
             }
@@ -637,14 +649,38 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
     self:PumpSyncQueue()
 end
 
+-- Alle Berufe aller eigenen Charaktere desselben Accounts, jeweils mit dem
+-- richtigen Charakternamen. So teilt jeder eingeloggte Charakter der Gilde auch
+-- die Berufe seiner Twinks mit - das Addon kennt sie ja lokal aus der
+-- gemeinsamen SavedVariables und muss sie nicht erneut erlernen.
+function GC.Workshop:GetAccountProfessions()
+    local entries = {}
+    local ownName = GC:GetPlayerFullName()
+    local ownKey = GC.Util.NormalizeName(ownName)
+    for _, profession in pairs(self:GetOwnData().professions) do
+        entries[#entries + 1] = { crafter = ownName, profession = profession }
+    end
+    for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
+        local characterName = (type(character) == "table" and character.fullName) or characterKey
+        local workshop = type(character) == "table" and character.workshop
+        if workshop and workshop.professions
+            and GC.Util.NormalizeName(characterName) ~= ownKey then
+            for _, profession in pairs(workshop.professions) do
+                entries[#entries + 1] = { crafter = characterName, profession = profession }
+            end
+        end
+    end
+    return entries
+end
+
 function GC.Workshop:QueueAllProfessions(compact, target, reliable)
     if #self.syncQueue == 0 and not self.syncSending then
         self.syncStats.queued = 0
         self.syncStats.sent = 0
         self.syncStats.failed = 0
     end
-    for _, profession in pairs(self:GetOwnData().professions) do
-        self:QueueProfessionSync(profession, compact, target, reliable)
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        self:QueueProfessionSync(entry.profession, compact, target, reliable, entry.crafter)
     end
 end
 
@@ -840,17 +876,12 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             return
         end
         self.requestReplies[senderKey] = now
-        if fields[4] == "3" or SupportsReliableWorkshop(sender) then
-            -- Lässt sich das Flüster-Manifest nicht senden, hilft der sichere
-            -- Gilden-Bulktransfer aus.
-            if not self:SendManifest(sender) then
-                self:QueueAllProfessions(SupportsCompactWorkshop(sender))
-            end
-        else
-            -- Clients bis 0.9.21 verwerfen Werkstattpakete im Flüsterkanal.
-            -- Für sie bleibt daher der sichere Gilden-Bulktransfer erhalten.
-            self:QueueAllProfessions(SupportsCompactWorkshop(sender))
-        end
+        -- Der Abgleich läuft bewusst über den schnellen, zuverlässigen
+        -- Gildenkanal statt über Flüsternachrichten: in manchen Umgebungen
+        -- erreichen Addon-Flüster den Empfänger nicht, der Gildenkanal aber
+        -- schon. Gesendet werden alle Berufe des gesamten Accounts (inklusive
+        -- der eigenen Twinks), jeweils dem richtigen Charakter zugeordnet.
+        self:QueueAllProfessions(SupportsCompactWorkshop(sender))
         return
     elseif operation == "M" then
         local senderKey = GC.Util.NormalizeName(sender)
@@ -906,11 +937,15 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     local payload = fields[9] or ""
     local updatedAt = tonumber(fields[10]) or GC.Util.Now()
     local fingerprintHash = tostring(fields[11] or "")
+    -- Feld 12 (optional): der eigentliche Hersteller. Fehlt es (aeltere Clients
+    -- oder eigener Charakter), wird der Beruf wie bisher dem Absender
+    -- zugeschrieben. So teilt ein Spieler auch die Berufe seiner Twinks mit.
+    local craftedBy = GC.Util.Trim(fields[12] or "")
     if not token or not part or not total or total < 1 or part < 1 or part > total
         or total > MAX_TRANSFER_PARTS
         or #token > 40 or #professionKey > 80 or #professionName > 80
         or #payload > MAX_PAYLOAD_BYTES
-        or #fingerprintHash > 20
+        or #fingerprintHash > 20 or #craftedBy > 60
         or professionKey == "" or professionName == "" then
         return
     end
@@ -918,6 +953,12 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     local senderKey = GC.Util.NormalizeName(sender)
     if senderKey == "" then
         return
+    end
+    local crafterName = craftedBy ~= "" and craftedBy or sender
+    local crafterKey = GC.Util.NormalizeName(crafterName)
+    if crafterKey == "" then
+        crafterName = sender
+        crafterKey = senderKey
     end
     local now = GC.Util.Now()
     local incomingCount = 0
@@ -929,7 +970,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         end
     end
 
-    local incomingKey = senderKey .. "|" .. token .. "|" .. professionKey
+    local incomingKey = senderKey .. "|" .. token .. "|" .. professionKey .. "|" .. crafterKey
     for key, completedAt in pairs(self.completedIncoming) do
         if (now - (tonumber(completedAt) or 0)) > INCOMING_TTL then
             self.completedIncoming[key] = nil
@@ -997,11 +1038,11 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     end
 
     local crafters = GC.DB:GetGuild().workshop.crafters
-    local crafter = crafters[senderKey] or {
-        name = sender,
+    local crafter = crafters[crafterKey] or {
+        name = crafterName,
         professions = {},
     }
-    crafter.name = sender
+    crafter.name = crafterName
     crafter.updatedAt = GC.Util.Now()
     crafter.professions[professionKey] = {
         key = professionKey,
@@ -1012,7 +1053,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             or FingerprintHash(RecipeFingerprint({ recipes = recipes })),
         recipes = recipes,
     }
-    crafters[senderKey] = crafter
+    crafters[crafterKey] = crafter
     self.incoming[incomingKey] = nil
     self.completedIncoming[incomingKey] = now
     local receivedRecipeCount = 0
@@ -1021,7 +1062,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     end
     self.syncStats.receivedProfessions = self.syncStats.receivedProfessions + 1
     self.syncStats.receivedRecipes = self.syncStats.receivedRecipes + receivedRecipeCount
-    self.syncStats.lastSender = GC.Util.PlayerShortName(sender)
+    self.syncStats.lastSender = GC.Util.PlayerShortName(crafterName)
     GC:FireCallback("WORKSHOP_UPDATED")
 end
 
@@ -1183,10 +1224,19 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
     self:GetOwnData()
     if C_Timer and C_Timer.After then
         C_Timer.After(10, function()
-            -- Der Abgleich ist fester Hintergrunddienst. Aktuelle Clients
-            -- tauschen zuerst nur kleine Manifeste aus und übertragen danach
-            -- ausschließlich fehlende oder geänderte Berufe.
+            -- Der Abgleich ist fester Hintergrunddienst und läuft über den
+            -- schnellen, zuverlässigen Gildenkanal. Erst den Bestand der Gilde
+            -- anfragen ...
             GC.Workshop:RequestGuildData()
+        end)
+        C_Timer.After(16, function()
+            -- ... und die eigenen Berufe (inklusive der Twinks aus dem lokalen
+            -- Cache) aktiv in die Gilde geben, damit andere sie bekommen, ohne
+            -- selbst anfragen zu müssen. Der Zeitstempel sorgt beim Empfänger
+            -- dafür, dass neuere Daten alte ersetzen.
+            if IsInGuild and IsInGuild() then
+                GC.Workshop:QueueAllProfessions()
+            end
         end)
     end
 end)

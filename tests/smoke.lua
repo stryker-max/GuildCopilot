@@ -1431,6 +1431,23 @@ for _ in pairs(whisperedCrafter.professions.schneiderei.recipes) do
 end
 assert(whisperedRecipeCount == 80,
     "Der bestätigte Flüstertransfer hat nicht alle Werkstattrezepte gespeichert")
+
+-- Berufe eines eigenen Twinks werden über den Gildenkanal mit angehängtem
+-- Herstellernamen geteilt und dem richtigen Charakter zugeordnet - nicht dem
+-- absendenden Charakter. So bekommt die Gilde auch die Berufe eines Twinks,
+-- ohne dass man auf ihm eingeloggt sein muss.
+twinkShareMessages = addon.Workshop:BuildProfessionMessages(
+    ownWorkshop.professions.schneiderei, true, "Twinkschneider-Realm")
+for _, twinkShareMessage in ipairs(twinkShareMessages) do
+    addon.Sync:OnMessage("GuildCopilot", twinkShareMessage, "GUILD", "Mainchar-Realm")
+end
+assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"] ~= nil,
+    "Ein über den Gildenkanal geteilter Twink-Beruf wurde nicht dem Twink zugeordnet")
+assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions.schneiderei ~= nil,
+    "Der geteilte Twink-Beruf fehlt beim Twink")
+assert(addon.DB:GetGuild().workshop.crafters["mainchar-realm"] == nil,
+    "Ein geteilter Twink-Beruf wurde fälschlich dem absendenden Charakter zugeordnet")
+
 ackBeforeRecruitmentWhisper = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", recruitmentMessages[1], "WHISPER", "Heiler-Realm")
 assert(#sentAddon == ackBeforeRecruitmentWhisper + 1
