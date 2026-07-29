@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.21",
+    VERSION = "0.9.22",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -20,6 +20,8 @@ GC.Capabilities = {
     "guildprofile",
     "workshop",
     "workshop2",
+    "workshop3",
+    "recruitmentsync",
     "membercare",
     "raidmonitor",
     "gearaudit",
@@ -29,7 +31,7 @@ GC.Capabilities = {
 
 GC.ProfessionOptions = {
     "",
-    "Alchemie",
+    "Alchimie",
     "Bergbau",
     "Ingenieurskunst",
     "Juwelenschleifen",
@@ -43,6 +45,7 @@ GC.ProfessionOptions = {
 
 GC.ProfessionIcons = {
     [""] = "Interface\\Icons\\INV_Misc_Book_09",
+    ["Alchimie"] = "Interface\\Icons\\Trade_Alchemy",
     ["Alchemie"] = "Interface\\Icons\\Trade_Alchemy",
     ["Bergbau"] = "Interface\\Icons\\Trade_Mining",
     ["Ingenieurskunst"] = "Interface\\Icons\\Trade_Engineering",

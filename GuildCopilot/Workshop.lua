@@ -2,7 +2,9 @@ local _, GC = ...
 
 GC.Workshop = {
     incoming = {},
+    completedIncoming = {},
     syncQueue = {},
+    bulkPending = 0,
     syncSending = false,
     scanPending = false,
     syncStats = {
@@ -18,8 +20,6 @@ GC.Workshop = {
 local MAX_PAYLOAD_BYTES = 180
 local LEGACY_MAX_PAYLOAD_BYTES = 170
 local MAX_RECORD_BYTES = 165
-local SYNC_RETRY_DELAY = 0.2
-local MAX_SEND_RETRIES = 5
 local MAX_TRANSFER_PARTS = 300
 local MAX_INCOMING_TRANSFERS = 20
 local INCOMING_TTL = 5 * 60
@@ -29,7 +29,15 @@ local SCAN_RETRY_DELAYS = { 0.15, 0.45, 1.0, 2.0 }
 local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
     value = value:gsub("ä", "a"):gsub("ö", "o"):gsub("ü", "u"):gsub("ß", "ss")
-    return (value:gsub("[^%w]", ""))
+    value = value:gsub("[^%w]", "")
+    -- Der deutsche TBC-Client nennt den Beruf "Alchimie", waehrend in
+    -- Alltagssprache und alten Guild-Copilot-Versionen "Alchemie" steht.
+    -- Beide Schreibweisen muessen denselben Filter- und Speicherschluessel
+    -- ergeben.
+    if value == "alchemie" then
+        return "alchimie"
+    end
+    return value
 end
 
 local function ItemIDFromLink(link)
@@ -72,6 +80,22 @@ local function RecipeFingerprint(profession)
         }, ",")
     end
     return table.concat(records, ";")
+end
+
+local function FingerprintHash(value)
+    local hash = 5381
+    for index = 1, #tostring(value or "") do
+        hash = ((hash * 33) + tostring(value):byte(index)) % 2147483647
+    end
+    return tostring(hash)
+end
+
+local function RecipeCount(profession)
+    local count = 0
+    for _ in pairs(profession and profession.recipes or {}) do
+        count = count + 1
+    end
+    return count
 end
 
 local function BuildRecipeRecord(recipe)
@@ -178,6 +202,21 @@ function GC.Workshop:GetOwnData()
     local profile = GC.Profile:Get()
     profile.workshop = profile.workshop or { professions = {} }
     profile.workshop.professions = profile.workshop.professions or {}
+    local professions = profile.workshop.professions
+    local legacyAlchemy = professions.alchemie
+    local clientAlchemy = professions.alchimie
+    if legacyAlchemy and not clientAlchemy then
+        legacyAlchemy.key = "alchimie"
+        professions.alchimie = legacyAlchemy
+        professions.alchemie = nil
+    elseif legacyAlchemy and clientAlchemy and legacyAlchemy ~= clientAlchemy then
+        for recipeKey, recipe in pairs(legacyAlchemy.recipes or {}) do
+            clientAlchemy.recipes[recipeKey] = clientAlchemy.recipes[recipeKey] or recipe
+        end
+        clientAlchemy.fingerprint = RecipeFingerprint(clientAlchemy)
+        clientAlchemy.fingerprintHash = FingerprintHash(clientAlchemy.fingerprint)
+        professions.alchemie = nil
+    end
     return profile.workshop
 end
 
@@ -233,6 +272,7 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
         recipes = recipes,
     }
     profession.fingerprint = RecipeFingerprint(profession)
+    profession.fingerprintHash = FingerprintHash(profession.fingerprint)
     workshop.professions[professionKey] = profession
     self.lastScan = {
         name = professionName,
@@ -523,28 +563,58 @@ function GC.Workshop:BuildProfessionMessages(profession, compact)
             profession.key,
             profession.name,
             payload,
+            tostring(profession.updatedAt or 0),
+            profession.fingerprintHash or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession)),
         })
     end
-    return messages
+    return messages, token
 end
 
-function GC.Workshop:QueueProfessionSync(profession, compact)
+function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable)
     if not profession then
         return
     end
 
+    local messages, token = self:BuildProfessionMessages(profession, compact)
+    if reliable and target and compact ~= false and GC.Sync and GC.Sync.QueueReliable then
+        self.syncStats.queued = self.syncStats.queued + #messages
+        local queued = GC.Sync:QueueReliable(
+            messages,
+            target,
+            "W",
+            token,
+            function()
+                GC.Workshop.syncStats.sent = GC.Workshop.syncStats.sent + #messages
+                GC:FireCallback("WORKSHOP_UPDATED")
+            end,
+            function(entry)
+                GC.Workshop.syncStats.failed = GC.Workshop.syncStats.failed
+                    + math.max(1, #messages - (entry.acknowledgedCount or 0))
+                GC:FireCallback("WORKSHOP_UPDATED")
+            end
+        )
+        if not queued then
+            self.syncStats.failed = self.syncStats.failed + #messages
+        end
+        GC:FireCallback("WORKSHOP_UPDATED")
+        return queued
+    end
+
     for index = #self.syncQueue, 1, -1 do
-        if self.syncQueue[index].professionKey == profession.key then
+        if self.syncQueue[index].professionKey == profession.key
+            and self.syncQueue[index].target == target then
             table.remove(self.syncQueue, index)
         end
     end
 
-    for _, message in ipairs(self:BuildProfessionMessages(profession, compact)) do
+    for _, message in ipairs(messages) do
         if #message <= GC.Constants.MAX_CHAT_BYTES then
             self.syncQueue[#self.syncQueue + 1] = {
                 message = message,
                 retries = 0,
                 professionKey = profession.key,
+                distribution = target and "WHISPER" or "GUILD",
+                target = target,
             }
             self.syncStats.queued = self.syncStats.queued + 1
         else
@@ -555,14 +625,14 @@ function GC.Workshop:QueueProfessionSync(profession, compact)
     self:PumpSyncQueue()
 end
 
-function GC.Workshop:QueueAllProfessions(compact)
+function GC.Workshop:QueueAllProfessions(compact, target, reliable)
     if #self.syncQueue == 0 and not self.syncSending then
         self.syncStats.queued = 0
         self.syncStats.sent = 0
         self.syncStats.failed = 0
     end
     for _, profession in pairs(self:GetOwnData().professions) do
-        self:QueueProfessionSync(profession, compact)
+        self:QueueProfessionSync(profession, compact, target, reliable)
     end
 end
 
@@ -572,26 +642,25 @@ function GC.Workshop:PumpSyncQueue()
     end
     self.syncSending = true
     while #self.syncQueue > 0 do
-        local entry = self.syncQueue[1]
-        local sent = GC.Sync and GC.Sync:Send(entry.message)
-        if sent then
-            table.remove(self.syncQueue, 1)
-            self.syncStats.sent = self.syncStats.sent + 1
-        else
-            entry.retries = entry.retries + 1
-            if entry.retries >= MAX_SEND_RETRIES then
-                table.remove(self.syncQueue, 1)
-                self.syncStats.failed = self.syncStats.failed + 1
-            else
-                self.syncSending = false
-                GC:FireCallback("WORKSHOP_UPDATED")
-                if C_Timer and C_Timer.After then
-                    C_Timer.After(SYNC_RETRY_DELAY, function()
-                        GC.Workshop:PumpSyncQueue()
-                    end)
+        local entry = table.remove(self.syncQueue, 1)
+        self.bulkPending = (self.bulkPending or 0) + 1
+        local queued = GC.Sync and GC.Sync:SendBulk(
+            entry.message,
+            entry.distribution,
+            entry.target,
+            function(success)
+                GC.Workshop.bulkPending = math.max(0, (GC.Workshop.bulkPending or 1) - 1)
+                if success then
+                    GC.Workshop.syncStats.sent = GC.Workshop.syncStats.sent + 1
+                else
+                    GC.Workshop.syncStats.failed = GC.Workshop.syncStats.failed + 1
                 end
-                return
+                GC:FireCallback("WORKSHOP_UPDATED")
             end
+        )
+        if not queued then
+            self.bulkPending = math.max(0, (self.bulkPending or 1) - 1)
+            self.syncStats.failed = self.syncStats.failed + 1
         end
     end
     self.syncSending = false
@@ -602,7 +671,7 @@ function GC.Workshop:RequestGuildData()
     if not IsInGuild or not IsInGuild() then
         return false, "Du bist in keiner Gilde."
     end
-    if not GC.Sync or not GC.Sync:Send(BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "Q" })) then
+    if not GC.Sync or not GC.Sync:Send(BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "Q", "3" })) then
         return false, "Werkstatt-Anfrage konnte nicht gesendet werden."
     end
     self.syncStats.receivedProfessions = 0
@@ -610,6 +679,67 @@ function GC.Workshop:RequestGuildData()
     self.syncStats.lastSender = ""
     GC:FireCallback("WORKSHOP_UPDATED")
     return true, "Anfrage gesendet. Rezeptlisten werden ohne künstliche Wartezeit übertragen."
+end
+
+function GC.Workshop:GetPendingPacketCount()
+    local reliable = GC.Sync and GC.Sync.GetReliablePendingCount
+        and GC.Sync:GetReliablePendingCount("W") or 0
+    return #self.syncQueue + (self.bulkPending or 0) + reliable
+end
+
+function GC.Workshop:BuildManifestMessages()
+    local records = {}
+    for _, professionKey in ipairs(SortedKeys(self:GetOwnData().professions)) do
+        local profession = self:GetOwnData().professions[professionKey]
+        local fingerprintHash = profession.fingerprintHash
+            or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession))
+        records[#records + 1] = table.concat({
+            profession.key,
+            tostring(profession.updatedAt or 0),
+            tostring(RecipeCount(profession)),
+            fingerprintHash,
+        }, ",")
+    end
+    local messages = {}
+    local current = ""
+    for _, record in ipairs(records) do
+        local candidate = current == "" and record or (current .. ";" .. record)
+        if #candidate > MAX_PAYLOAD_BYTES and current ~= "" then
+            messages[#messages + 1] = BuildMessage({
+                "W",
+                GC.Constants.SCHEMA_VERSION,
+                "M",
+                current,
+            })
+            current = record
+        else
+            current = candidate
+        end
+    end
+    if current ~= "" then
+        messages[#messages + 1] = BuildMessage({
+            "W",
+            GC.Constants.SCHEMA_VERSION,
+            "M",
+            current,
+        })
+    end
+    return messages
+end
+
+function GC.Workshop:SendManifest(target)
+    if GC.Util.Trim(target) == "" or not GC.Sync then
+        return false
+    end
+    local messages = self:BuildManifestMessages()
+    if #messages == 0 then
+        return false
+    end
+    local queued = true
+    for _, message in ipairs(messages) do
+        queued = GC.Sync:SendBulk(message, "WHISPER", target) and queued
+    end
+    return queued
 end
 
 local function DecodeRecipeRecord(record, professionName)
@@ -675,7 +805,13 @@ local function SupportsCompactWorkshop(sender)
     return ("," .. capabilities .. ","):find(",workshop2,", 1, true) ~= nil
 end
 
-function GC.Workshop:ReceiveSync(fields, sender)
+local function SupportsReliableWorkshop(sender)
+    local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
+    local capabilities = user and tostring(user.capabilities or "") or ""
+    return ("," .. capabilities .. ","):find(",workshop3,", 1, true) ~= nil
+end
+
+function GC.Workshop:ReceiveSync(fields, sender, distribution)
     local operation = fields[3]
     if operation == "Q" then
         local senderKey = GC.Util.NormalizeName(sender)
@@ -687,7 +823,54 @@ function GC.Workshop:ReceiveSync(fields, sender)
             return
         end
         self.requestReplies[senderKey] = now
-        self:QueueAllProfessions(SupportsCompactWorkshop(sender))
+        if fields[4] == "3" or SupportsReliableWorkshop(sender) then
+            self:SendManifest(sender)
+        else
+            -- Clients bis 0.9.21 verwerfen Werkstattpakete im Flüsterkanal.
+            -- Für sie bleibt daher der sichere Gilden-Bulktransfer erhalten.
+            self:QueueAllProfessions(SupportsCompactWorkshop(sender))
+        end
+        return
+    elseif operation == "M" then
+        local senderKey = GC.Util.NormalizeName(sender)
+        if senderKey == "" or distribution ~= "WHISPER" then
+            return
+        end
+        local crafter = GC.DB:GetGuild().workshop.crafters[senderKey]
+        local requested = {}
+        for record in tostring(fields[4] or ""):gmatch("[^;]+") do
+            local professionKey, updatedText, countText, fingerprintHash =
+                record:match("^([^,]+),(%d+),(%d+),(%d+)$")
+            local updatedAt = tonumber(updatedText)
+            local recipeCount = tonumber(countText)
+            local known = crafter and crafter.professions and crafter.professions[professionKey]
+            if professionKey and #professionKey <= 80 and updatedAt and recipeCount
+                and #fingerprintHash <= 20
+                and (not known
+                    or tonumber(known.updatedAt) ~= updatedAt
+                    or RecipeCount(known) ~= recipeCount
+                    or tostring(known.fingerprintHash or "") ~= fingerprintHash) then
+                requested[#requested + 1] = professionKey
+            end
+        end
+        for _, professionKey in ipairs(requested) do
+            GC.Sync:Send(BuildMessage({
+                "W",
+                GC.Constants.SCHEMA_VERSION,
+                "R",
+                professionKey,
+            }), "WHISPER", sender)
+        end
+        return
+    elseif operation == "R" then
+        if distribution ~= "WHISPER" then
+            return
+        end
+        local professionKey = NormalizeKey(fields[4])
+        local profession = self:GetOwnData().professions[professionKey]
+        if profession then
+            self:QueueProfessionSync(profession, true, sender, true)
+        end
         return
     end
     if operation ~= "D" and operation ~= "C" then
@@ -700,10 +883,13 @@ function GC.Workshop:ReceiveSync(fields, sender)
     local professionKey = fields[7] or ""
     local professionName = fields[8] or ""
     local payload = fields[9] or ""
+    local updatedAt = tonumber(fields[10]) or GC.Util.Now()
+    local fingerprintHash = tostring(fields[11] or "")
     if not token or not part or not total or total < 1 or part < 1 or part > total
         or total > MAX_TRANSFER_PARTS
         or #token > 40 or #professionKey > 80 or #professionName > 80
         or #payload > MAX_PAYLOAD_BYTES
+        or #fingerprintHash > 20
         or professionKey == "" or professionName == "" then
         return
     end
@@ -723,11 +909,25 @@ function GC.Workshop:ReceiveSync(fields, sender)
     end
 
     local incomingKey = senderKey .. "|" .. token .. "|" .. professionKey
+    for key, completedAt in pairs(self.completedIncoming) do
+        if (now - (tonumber(completedAt) or 0)) > INCOMING_TTL then
+            self.completedIncoming[key] = nil
+        end
+    end
+    if self.completedIncoming[incomingKey] then
+        if operation == "C" and distribution == "WHISPER" and GC.Sync then
+            GC.Sync:SendReliableAck("W", token, part, sender)
+        end
+        return
+    end
+
     local incoming = self.incoming[incomingKey]
     if incoming and (incoming.total ~= total
         or incoming.professionKey ~= professionKey
         or incoming.professionName ~= professionName
-        or incoming.operation ~= operation) then
+        or incoming.operation ~= operation
+        or incoming.updatedAt ~= updatedAt
+        or incoming.fingerprintHash ~= fingerprintHash) then
         self.incoming[incomingKey] = nil
         return
     end
@@ -742,15 +942,23 @@ function GC.Workshop:ReceiveSync(fields, sender)
             professionKey = professionKey,
             professionName = professionName,
             operation = operation,
+            updatedAt = updatedAt,
+            fingerprintHash = fingerprintHash,
             receivedAt = now,
         }
     end
     incoming.receivedAt = now
-    if not incoming.parts[part] then
+    if incoming.parts[part] and incoming.parts[part] ~= payload then
+        self.incoming[incomingKey] = nil
+        return
+    elseif not incoming.parts[part] then
         incoming.parts[part] = payload
         incoming.received = incoming.received + 1
     end
     self.incoming[incomingKey] = incoming
+    if operation == "C" and distribution == "WHISPER" and GC.Sync then
+        GC.Sync:SendReliableAck("W", token, part, sender)
+    end
     if incoming.received < incoming.total then
         return
     end
@@ -777,11 +985,15 @@ function GC.Workshop:ReceiveSync(fields, sender)
     crafter.professions[professionKey] = {
         key = professionKey,
         name = professionName,
-        updatedAt = GC.Util.Now(),
+        updatedAt = incoming.updatedAt,
+        fingerprintHash = incoming.fingerprintHash ~= ""
+            and incoming.fingerprintHash
+            or FingerprintHash(RecipeFingerprint({ recipes = recipes })),
         recipes = recipes,
     }
     crafters[senderKey] = crafter
     self.incoming[incomingKey] = nil
+    self.completedIncoming[incomingKey] = now
     local receivedRecipeCount = 0
     for _ in pairs(recipes) do
         receivedRecipeCount = receivedRecipeCount + 1
@@ -933,4 +1145,12 @@ end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
     self:GetOwnData()
+    if C_Timer and C_Timer.After then
+        C_Timer.After(10, function()
+            -- Der Abgleich ist fester Hintergrunddienst. Aktuelle Clients
+            -- tauschen zuerst nur kleine Manifeste aus und übertragen danach
+            -- ausschließlich fehlende oder geänderte Berufe.
+            GC.Workshop:RequestGuildData()
+        end)
+    end
 end)

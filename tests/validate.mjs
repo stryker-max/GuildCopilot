@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.21",
+  "## Version: 0.9.22",
 ];
 
 for (const entry of requiredMetadata) {
@@ -178,7 +178,10 @@ const requiredImplementations = [
   ["direkter Werkstatt-Sendeburst", /while #self\.syncQueue > 0 do/],
   ["kompakte Werkstattpakete", /BuildCompactRecipeRecord/],
   ["vollständiger klassischer Rezeptscan", /PrepareClassicTradeSkill[\s\S]*SetTradeSkillItemNameFilter[\s\S]*isExpanded == false/],
-  ["Wiederholung fehlgeschlagener Werkstattpakete", /MAX_SEND_RETRIES/],
+  ["Wiederholung fehlgeschlagener Werkstattpakete", /RELIABLE_MAX_ATTEMPTS/],
+  ["bestätigte Werkstatt-Teilpakete", /SendReliableAck\("W"/],
+  ["gildenweiter Rekrutierungs-Datensatz", /BuildRecruitmentSyncMessages/],
+  ["TBC-Schreibweise Alchimie", /value == "alchemie"/],
   ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],
   ["Einmalige Editor-Lockout-Reparatur", /CanUseEditorRecovery/],
   ["Blizzard-Offiziersprüfung für Lockout-Reparatur", /HasBlizzardOfficerAuthority/],

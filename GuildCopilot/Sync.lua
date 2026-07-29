@@ -6,6 +6,9 @@ GC.Sync = {
     guildProfileSendPending = false,
     guildProfileForceSend = false,
     guildProfileIncoming = {},
+    bulkQueue = {},
+    bulkAllowance = 4000,
+    reliableQueue = {},
     lastAnnounceAt = 0,
 }
 
@@ -18,6 +21,18 @@ local MIN_REPLY_INTERVAL = 15
 local MIN_PROFILE_REPLY_INTERVAL = 30
 local MIN_MANUAL_SYNC_INTERVAL = 15
 local INCOMING_TTL = 5 * 60
+-- ChatThrottleLib nutzt dieselben konservativen Grenzwerte. Ist die Bibliothek
+-- bereits durch ein anderes Addon geladen, reihen wir uns dort ein. Andernfalls
+-- stellt diese kleine lokale Warteschlange denselben Schutz bereit: bis zu 4 KB
+-- Burst und danach 800 Bytes pro Sekunde. Alle Pakete werden sofort eingereiht;
+-- es gibt keine feste Pause pro Rezept.
+local BULK_BYTES_PER_SECOND = 800
+local BULK_BURST_BYTES = 4000
+local BULK_MESSAGE_OVERHEAD = 40
+local BULK_MAX_RETRIES = 5
+local RELIABLE_WINDOW = 4
+local RELIABLE_RETRY_DELAY = 1.5
+local RELIABLE_MAX_ATTEMPTS = 5
 
 local function PruneIncoming(transfers)
     local cutoff = GC.Util.Now() - INCOMING_TTL
@@ -214,6 +229,294 @@ function GC.Sync:Send(payload, distribution, target)
     return false
 end
 
+local function FinishBulkEntry(entry, success)
+    if type(entry.callback) == "function" then
+        pcall(entry.callback, success == true)
+    end
+end
+
+-- Grosse Datenmengen landen in einer gemeinsamen, durchsatzorientierten
+-- Warteschlange. Ein vorhandenes ChatThrottleLib kennt auch den Verkehr
+-- anderer Addons; der eingebaute Fallback macht Guild Copilot eigenstaendig.
+function GC.Sync:SendBulk(payload, distribution, target, callback)
+    distribution = distribution or "GUILD"
+    if not payload or #payload > GC.Constants.MAX_CHAT_BYTES then
+        return false
+    end
+    if distribution == "GUILD" and (not IsInGuild or not IsInGuild()) then
+        return false
+    end
+    if distribution == "WHISPER" and GC.Util.Trim(target) == "" then
+        return false
+    end
+
+    local throttle = _G and _G.ChatThrottleLib
+    if throttle and type(throttle.SendAddonMessage) == "function" then
+        local queueName = GC.Constants.COMM_PREFIX .. ":" .. distribution .. ":" .. (target or "")
+        local ok = pcall(
+            throttle.SendAddonMessage,
+            throttle,
+            "BULK",
+            GC.Constants.COMM_PREFIX,
+            payload,
+            distribution,
+            target,
+            queueName,
+            function(_, sent)
+                FinishBulkEntry({ callback = callback }, sent ~= false)
+            end,
+            nil
+        )
+        if ok then
+            return true
+        end
+    end
+
+    self.bulkQueue[#self.bulkQueue + 1] = {
+        payload = payload,
+        distribution = distribution,
+        target = target,
+        callback = callback,
+        retries = 0,
+    }
+    self:PumpBulk(0)
+    return true
+end
+
+function GC.Sync:PumpBulk(elapsed)
+    elapsed = math.max(0, tonumber(elapsed) or 0)
+    self.bulkAllowance = math.min(
+        BULK_BURST_BYTES,
+        (tonumber(self.bulkAllowance) or BULK_BURST_BYTES) + (elapsed * BULK_BYTES_PER_SECOND)
+    )
+
+    while #self.bulkQueue > 0 do
+        local entry = self.bulkQueue[1]
+        local cost = #entry.payload + BULK_MESSAGE_OVERHEAD
+        if self.bulkAllowance < cost then
+            return
+        end
+
+        local sent = self:Send(entry.payload, entry.distribution, entry.target)
+        if sent then
+            self.bulkAllowance = self.bulkAllowance - cost
+            table.remove(self.bulkQueue, 1)
+            FinishBulkEntry(entry, true)
+        else
+            entry.retries = entry.retries + 1
+            if entry.retries >= BULK_MAX_RETRIES then
+                table.remove(self.bulkQueue, 1)
+                FinishBulkEntry(entry, false)
+            else
+                -- Ein lokaler Sendefehler verbraucht kein Kanalbudget. Die
+                -- naechste Wiederholung darf daher unmittelbar folgen.
+                self.bulkAllowance = math.max(cost, self.bulkAllowance)
+            end
+        end
+    end
+end
+
+local function ReliableEntryID(kind, token, target)
+    return table.concat({
+        tostring(kind or ""),
+        tostring(token or ""),
+        GC.Util.NormalizeName(target),
+    }, "|")
+end
+
+function GC.Sync:GetReliablePendingCount(kind)
+    local count = 0
+    local function AddEntry(entry)
+        if not kind or entry.kind == kind then
+            count = count + math.max(0, #entry.messages - (entry.acknowledgedCount or 0))
+        end
+    end
+    if self.reliableActive then
+        AddEntry(self.reliableActive)
+    end
+    for _, entry in ipairs(self.reliableQueue) do
+        AddEntry(entry)
+    end
+    return count
+end
+
+function GC.Sync:QueueReliable(messages, target, kind, token, onComplete, onFailure)
+    if type(messages) ~= "table" or #messages == 0
+        or GC.Util.Trim(target) == "" or GC.Util.Trim(kind) == ""
+        or GC.Util.Trim(token) == "" then
+        return false
+    end
+    for _, message in ipairs(messages) do
+        if type(message) ~= "string" or #message > GC.Constants.MAX_CHAT_BYTES then
+            return false
+        end
+    end
+
+    local entry = {
+        id = ReliableEntryID(kind, token, target),
+        kind = kind,
+        token = token,
+        target = target,
+        messages = messages,
+        acknowledged = {},
+        acknowledgedCount = 0,
+        pending = {},
+        attempts = {},
+        retryParts = {},
+        nextPart = 1,
+        inFlight = 0,
+        onComplete = onComplete,
+        onFailure = onFailure,
+    }
+    self.reliableQueue[#self.reliableQueue + 1] = entry
+    self:PumpReliable()
+    return true
+end
+
+function GC.Sync:FinishReliable(success)
+    local entry = self.reliableActive
+    if not entry then
+        return
+    end
+    self.reliableActive = nil
+    local callback = success and entry.onComplete or entry.onFailure
+    if type(callback) == "function" then
+        pcall(callback, entry)
+    end
+    if self.reliablePumping then
+        self.reliablePumpPending = true
+    else
+        self:PumpReliable()
+    end
+end
+
+function GC.Sync:ReliablePartDispatched(entryID, part, success)
+    local entry = self.reliableActive
+    if not entry or entry.id ~= entryID or entry.acknowledged[part] then
+        return
+    end
+    if not success then
+        entry.attempts[part] = (entry.attempts[part] or 0) + 1
+        entry.pending[part] = nil
+        entry.inFlight = math.max(0, entry.inFlight - 1)
+        if entry.attempts[part] >= RELIABLE_MAX_ATTEMPTS then
+            self:FinishReliable(false)
+            return
+        end
+        entry.retryParts[#entry.retryParts + 1] = part
+        self:PumpReliable()
+        return
+    end
+
+    entry.attempts[part] = (entry.attempts[part] or 0) + 1
+    local attempt = entry.attempts[part]
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return
+    end
+    C_Timer.After(RELIABLE_RETRY_DELAY, function()
+        local active = GC.Sync.reliableActive
+        if not active or active.id ~= entryID or active.acknowledged[part]
+            or active.attempts[part] ~= attempt or not active.pending[part] then
+            return
+        end
+        active.pending[part] = nil
+        active.inFlight = math.max(0, active.inFlight - 1)
+        if attempt >= RELIABLE_MAX_ATTEMPTS then
+            GC.Sync:FinishReliable(false)
+            return
+        end
+        active.retryParts[#active.retryParts + 1] = part
+        GC.Sync:PumpReliable()
+    end)
+end
+
+function GC.Sync:PumpReliable()
+    if self.reliablePumping then
+        return
+    end
+    if not self.reliableActive then
+        self.reliableActive = table.remove(self.reliableQueue, 1)
+    end
+    local entry = self.reliableActive
+    if not entry then
+        return
+    end
+
+    self.reliablePumping = true
+    while self.reliableActive == entry and entry.inFlight < RELIABLE_WINDOW do
+        local part = table.remove(entry.retryParts, 1)
+        if not part then
+            part = entry.nextPart
+            entry.nextPart = entry.nextPart + 1
+        end
+        if not part or part > #entry.messages then
+            break
+        end
+        if not entry.acknowledged[part] and not entry.pending[part] then
+            local queuedPart = part
+            entry.pending[part] = true
+            entry.inFlight = entry.inFlight + 1
+            local queued = self:SendBulk(entry.messages[queuedPart], "WHISPER", entry.target, function(success)
+                GC.Sync:ReliablePartDispatched(entry.id, queuedPart, success)
+            end)
+            if not queued then
+                entry.pending[queuedPart] = nil
+                entry.inFlight = math.max(0, entry.inFlight - 1)
+                entry.retryParts[#entry.retryParts + 1] = queuedPart
+                break
+            end
+        end
+    end
+    self.reliablePumping = false
+    if self.reliablePumpPending or (not self.reliableActive and #self.reliableQueue > 0) then
+        self.reliablePumpPending = false
+        self:PumpReliable()
+    end
+end
+
+function GC.Sync:SendReliableAck(kind, token, part, target)
+    if GC.Util.Trim(kind) == "" or GC.Util.Trim(token) == ""
+        or not tonumber(part) or GC.Util.Trim(target) == "" then
+        return false
+    end
+    return self:Send(table.concat({
+        "A",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        GC.Util.EscapeField(kind),
+        GC.Util.EscapeField(token),
+        tostring(part),
+    }, "|"), "WHISPER", target)
+end
+
+function GC.Sync:ReceiveReliableAck(fields, sender)
+    if tonumber(fields[2]) ~= GC.Constants.SCHEMA_VERSION then
+        return false
+    end
+    local kind = fields[3]
+    local token = fields[4]
+    local part = tonumber(fields[5])
+    local entry = self.reliableActive
+    if not entry or entry.kind ~= kind or entry.token ~= token
+        or GC.Util.NormalizeName(entry.target) ~= GC.Util.NormalizeName(sender)
+        or not part or part < 1 or part > #entry.messages
+        or entry.acknowledged[part] then
+        return false
+    end
+
+    entry.acknowledged[part] = true
+    entry.acknowledgedCount = entry.acknowledgedCount + 1
+    if entry.pending[part] then
+        entry.pending[part] = nil
+        entry.inFlight = math.max(0, entry.inFlight - 1)
+    end
+    if entry.acknowledgedCount >= #entry.messages then
+        self:FinishReliable(true)
+    else
+        self:PumpReliable()
+    end
+    return true
+end
+
 function GC.Sync:BuildProfileMessage()
     local profile = GC.Profile:Get()
     local professions = profile.professions or {}
@@ -274,6 +577,12 @@ function GC.Sync:RequestSync()
     self:AnnounceVersion(true)
     self:QueueProfile()
     self:RequestGuildProfile()
+    if GC.Workshop then
+        GC.Workshop:RequestGuildData()
+    end
+    if GC.WarcraftLogs then
+        GC.WarcraftLogs:RequestRecruitmentData()
+    end
     return true, "Abgleich angefragt."
 end
 
@@ -766,15 +1075,8 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         return
     end
 
-    -- Raidauswertungen laufen über den Raid- und den Flüsterkanal, damit sie
-    -- nicht über den offenen Gildenkanal gehen.
-    if distribution == "RAID" or distribution == "PARTY" or distribution == "WHISPER" then
-        if GC.RaidMonitor then
-            GC.RaidMonitor:OnMessage(message, sender, distribution)
-        end
-        return
-    end
-    if distribution ~= "GUILD" then
+    if distribution ~= "GUILD" and distribution ~= "WHISPER"
+        and distribution ~= "RAID" and distribution ~= "PARTY" then
         return
     end
 
@@ -783,28 +1085,62 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- mit abweichender Version sichtbar werden.
     local messageType, messageSchema = message:match("^(%a+)|(%d+)")
     if messageType == "P" or messageType == "W" or messageType == "G"
-        or messageType == "GQ" or messageType == "E" then
+        or messageType == "GQ" or messageType == "E" or messageType == "L" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
-    if message:sub(1, 2) == "G|" then
+    -- Direkte Datentransfers duerfen nur von Gildenmitgliedern kommen. Direkt
+    -- nach dem Login ist der Roster noch leer; dann greift diese Zusatzpruefung
+    -- bewusst noch nicht.
+    if distribution == "WHISPER" and #GC.Roster.members > 0
+        and (messageType == "A" or messageType == "W" or messageType == "L" or messageType == "E")
+        and not GC.Roster:IsGuildMember(sender) then
+        return
+    end
+
+    if messageType == "A" and distribution == "WHISPER" then
+        self:ReceiveReliableAck(GC.Util.SplitFields(message), sender)
+        return
+    elseif message:sub(1, 2) == "W|" and (distribution == "GUILD" or distribution == "WHISPER") then
+        local fields = GC.Util.SplitFields(message)
+        if tonumber(fields[2]) == GC.Constants.SCHEMA_VERSION and GC.Workshop then
+            GC.Workshop:ReceiveSync(fields, sender, distribution)
+        end
+        return
+    elseif message:sub(1, 2) == "L|" and (distribution == "GUILD" or distribution == "WHISPER") then
+        local fields = GC.Util.SplitFields(message)
+        if tonumber(fields[2]) == GC.Constants.SCHEMA_VERSION and GC.WarcraftLogs then
+            GC.WarcraftLogs:ReceiveSync(fields, sender, distribution)
+        end
+        return
+    elseif message:sub(1, 2) == "G|" and distribution == "GUILD" then
         self:ReceiveGuildProfileChunk(message, sender)
         return
-    elseif message:sub(1, 2) == "E|" then
+    elseif message:sub(1, 2) == "E|" and (distribution == "GUILD" or distribution == "WHISPER") then
         if GC.GearAudit then
             GC.GearAudit:ReceiveEquipmentChunk(message, sender)
         end
         return
-    elseif message == ("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) then
+    elseif message == ("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
         if GC.RaidMonitor then
             GC.RaidMonitor:OnMessage(message, sender, distribution)
         end
         return
-    elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) then
+    elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
         if GC.Roster:CanEditGuildProfile() then
             C_Timer.After(0.5 + math.random(), function()
                 self:SendGuildProfile()
             end)
+        end
+        return
+    end
+
+    -- Raidauswertungen verwenden RAID/PARTY sowie gezielte WHISPER-Antworten.
+    -- Erst nachdem die gildenweiten Direkttransfers oben geroutet wurden,
+    -- landet der restliche Verkehr beim Raidmodul.
+    if distribution == "RAID" or distribution == "PARTY" or distribution == "WHISPER" then
+        if GC.RaidMonitor then
+            GC.RaidMonitor:OnMessage(message, sender, distribution)
         end
         return
     end
@@ -816,8 +1152,6 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
             or schemaVersion == 5 or schemaVersion == 6
             or schemaVersion == GC.Constants.SCHEMA_VERSION) then
         self:ReceiveProfile(fields, sender)
-    elseif fields[1] == "W" and schemaVersion == GC.Constants.SCHEMA_VERSION and GC.Workshop then
-        GC.Workshop:ReceiveSync(fields, sender)
     elseif fields[1] == "V" then
         -- Bewusst ohne Schemaprüfung: gerade abweichende Versionen sollen
         -- erkannt werden.
@@ -840,6 +1174,11 @@ syncEvents:SetScript("OnEvent", function(_, event, prefix, message, distribution
     GC.Sync:OnMessage(prefix, message, distribution, sender)
 end)
 
+local bulkFrame = CreateFrame("Frame")
+bulkFrame:SetScript("OnUpdate", function(_, elapsed)
+    GC.Sync:PumpBulk(elapsed)
+end)
+
 GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
     self:RegisterPrefix()
     C_Timer.After(3, function()
@@ -855,6 +1194,11 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
     C_Timer.After(7, function()
         self.wasInGroup = IsInGroup and IsInGroup() == true
         self:AnnounceVersion(true)
+    end)
+    C_Timer.After(9, function()
+        if GC.WarcraftLogs then
+            GC.WarcraftLogs:RequestRecruitmentData()
+        end
     end)
 end)
 

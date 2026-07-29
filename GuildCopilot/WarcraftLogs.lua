@@ -1,6 +1,11 @@
 local _, GC = ...
 
-GC.WarcraftLogs = {}
+GC.WarcraftLogs = {
+    syncIncoming = {},
+    syncCompleted = {},
+    syncDiscoveries = {},
+    syncRequestReplies = {},
+}
 
 local REGION_SLUGS = {
     [1] = "us",
@@ -374,6 +379,9 @@ function GC.WarcraftLogs:Import(text)
 
     GC:FireCallback("WCL_UPDATED")
     GC:FireCallback("ROSTER_UPDATED")
+    if GC.Sync and GC.Sync.Send then
+        self:AnnounceRecruitmentData()
+    end
 
     local parts = {}
     if uniqueCount > 0 then
@@ -414,4 +422,496 @@ function GC.WarcraftLogs:GetImportedCount()
         end
     end
     return count
+end
+
+-- === Gildenweiter Rekrutierungs-Datensatz ================================
+-- Die Copilot-Vorschläge hängen sowohl an importierten Log-Profilen als auch
+-- an bereits bekannten Addon-Profilen. Bis 0.9.21 blieben beide Caches auf dem
+-- Rechner, der sie zuerst gesehen hatte. Der folgende Transfer verteilt die
+-- Profile selbst (keine kompletten Kampfprotokolle) und führt Addon-Profile
+-- anhand ihres Zeitstempels zusammen.
+
+local RECRUITMENT_PAYLOAD_BYTES = 160
+local RECRUITMENT_MAX_PARTS = 100
+local RECRUITMENT_INCOMING_TTL = 5 * 60
+local RECRUITMENT_DISCOVERY_WAIT = 0.9
+local RECRUITMENT_REPLY_INTERVAL = 15
+
+local function SanitizedSyncField(value, maximumBytes)
+    value = GC.Util.Trim(value):gsub("[,;|%%]", " ")
+    return GC.Util.SafeChatText(value, maximumBytes or 48)
+end
+
+local function ValidSpecForClass(specKey, classFile)
+    return specKey == "" or (GC.SpecByKey[specKey] and GC.SpecByKey[specKey].classFile == classFile)
+end
+
+local function SplitRecord(record)
+    local fields = {}
+    for field in (tostring(record or "") .. ","):gmatch("(.-),") do
+        fields[#fields + 1] = field
+    end
+    return fields
+end
+
+local function AddProfileRecord(records, profile, fallbackName)
+    local name = SanitizedSyncField(profile.fullName or fallbackName, 48)
+    local classFile = tostring(profile.classFile or "")
+    local detectedSpecKey = tostring(profile.detectedSpecKey or "")
+    local raidSpecKey = tostring(profile.raidSpecKey or "")
+    local secondarySpecKey = tostring(profile.secondarySpecKey or "")
+    if name == "" or not GC.Classes[classFile]
+        or not ValidSpecForClass(detectedSpecKey, classFile)
+        or not ValidSpecForClass(raidSpecKey, classFile)
+        or not ValidSpecForClass(secondarySpecKey, classFile) then
+        return false
+    end
+    if detectedSpecKey == "" and raidSpecKey == "" then
+        return false
+    end
+    records[#records + 1] = table.concat({
+        "P",
+        name,
+        classFile,
+        detectedSpecKey,
+        raidSpecKey,
+        secondarySpecKey,
+        profile.mainStatus == "ALT" and "A" or "M",
+        profile.flex and "1" or "0",
+        profile.confirmed and "1" or "0",
+        tostring(tonumber(profile.updatedAt) or 0),
+    }, ",")
+    return true
+end
+
+function GC.WarcraftLogs:BuildRecruitmentSyncRecords()
+    local guildData = GC.DB:GetGuild()
+    local records = {}
+    local logCount = 0
+    local addonCount = 0
+    local revision = tonumber(guildData.warcraftLogs.importedAt) or 0
+
+    local seenLogs = {}
+    for key, profile in pairs(guildData.warcraftLogs.members or {}) do
+        if type(profile) == "table" and not seenLogs[profile] then
+            seenLogs[profile] = true
+            local name = SanitizedSyncField(profile.fullName or key, 48)
+            local classFile = tostring(profile.classFile or "")
+            local raidSpecKey = tostring(profile.raidSpecKey or "")
+            local secondarySpecKey = tostring(profile.secondarySpecKey or "")
+            if name ~= "" and GC.Classes[classFile]
+                and raidSpecKey ~= "" and ValidSpecForClass(raidSpecKey, classFile)
+                and ValidSpecForClass(secondarySpecKey, classFile) then
+                records[#records + 1] = table.concat({
+                    "L",
+                    name,
+                    classFile,
+                    raidSpecKey,
+                    secondarySpecKey,
+                }, ",")
+                logCount = logCount + 1
+            end
+        end
+    end
+
+    local profilesByName = {}
+    local ownProfile = GC.Profile:Get()
+    profilesByName[GC.Util.NormalizeName(GC:GetPlayerFullName())] = {
+        profile = ownProfile,
+        name = GC:GetPlayerFullName(),
+    }
+    for key, profile in pairs(guildData.remoteProfiles or {}) do
+        if type(profile) == "table" then
+            local name = profile.fullName or key
+            local normalized = GC.Util.NormalizeName(name)
+            local previous = profilesByName[normalized]
+            if normalized ~= "" and (not previous
+                or (tonumber(profile.updatedAt) or 0) > (tonumber(previous.profile.updatedAt) or 0)) then
+                profilesByName[normalized] = { profile = profile, name = name }
+            end
+        end
+    end
+    local profileNames = {}
+    for normalized in pairs(profilesByName) do
+        profileNames[#profileNames + 1] = normalized
+    end
+    table.sort(profileNames)
+    for _, normalized in ipairs(profileNames) do
+        local entry = profilesByName[normalized]
+        if AddProfileRecord(records, entry.profile, entry.name) then
+            addonCount = addonCount + 1
+            revision = math.max(revision, tonumber(entry.profile.updatedAt) or 0)
+        end
+    end
+
+    table.sort(records)
+    return records, {
+        logCount = logCount,
+        addonCount = addonCount,
+        -- Logprofile erhalten hoehere Gewichtung, weil sie in einem Import
+        -- typischerweise den groessten Teil der Gilde auf einmal abdecken.
+        score = (logCount * 1000) + addonCount,
+        revision = revision,
+        importedAt = tonumber(guildData.warcraftLogs.importedAt) or 0,
+        reportCount = tonumber(guildData.warcraftLogs.reportCount) or 0,
+    }
+end
+
+function GC.WarcraftLogs:GetRecruitmentSyncStats()
+    local _, stats = self:BuildRecruitmentSyncRecords()
+    return stats
+end
+
+function GC.WarcraftLogs:BuildRecruitmentSyncMessages()
+    local records, stats = self:BuildRecruitmentSyncRecords()
+    if #records == 0 then
+        return {}, nil, stats
+    end
+
+    local payloads = {}
+    local current = ""
+    for _, record in ipairs(records) do
+        local candidate = current == "" and record or (current .. ";" .. record)
+        if #candidate > RECRUITMENT_PAYLOAD_BYTES and current ~= "" then
+            payloads[#payloads + 1] = current
+            current = record
+        else
+            current = candidate
+        end
+    end
+    payloads[#payloads + 1] = current
+    if #payloads > RECRUITMENT_MAX_PARTS then
+        return {}, nil, stats
+    end
+
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
+    local messages = {}
+    for index, payload in ipairs(payloads) do
+        messages[index] = table.concat({
+            "L",
+            tostring(GC.Constants.SCHEMA_VERSION),
+            "D",
+            token,
+            tostring(index),
+            tostring(#payloads),
+            tostring(stats.importedAt),
+            tostring(stats.reportCount),
+            payload,
+        }, "|")
+    end
+    return messages, token, stats
+end
+
+local function IsBetterRecruitmentDataset(candidateScore, candidateRevision, localStats)
+    candidateScore = tonumber(candidateScore) or 0
+    candidateRevision = tonumber(candidateRevision) or 0
+    return candidateScore > (localStats.score or 0)
+        or (candidateScore == (localStats.score or 0)
+            and candidateRevision > (localStats.revision or 0))
+end
+
+function GC.WarcraftLogs:RequestRecruitmentData()
+    if not GC.Sync or not IsInGuild or not IsInGuild() then
+        return false
+    end
+    local stats = self:GetRecruitmentSyncStats()
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+    self.syncDiscoveries[token] = {
+        offers = {},
+        requestedAt = GC.Util.Now(),
+    }
+    local sent = GC.Sync:Send(table.concat({
+        "L",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        "R",
+        token,
+        tostring(stats.score),
+        tostring(stats.revision),
+    }, "|"))
+    if not sent then
+        self.syncDiscoveries[token] = nil
+        return false
+    end
+    if C_Timer and C_Timer.After then
+        C_Timer.After(RECRUITMENT_DISCOVERY_WAIT, function()
+            GC.WarcraftLogs:ChooseRecruitmentOffer(token)
+        end)
+    end
+    return true
+end
+
+function GC.WarcraftLogs:ChooseRecruitmentOffer(token)
+    local discovery = self.syncDiscoveries[token]
+    if not discovery then
+        return false
+    end
+    self.syncDiscoveries[token] = nil
+    local best
+    for _, offer in pairs(discovery.offers) do
+        if not best or offer.score > best.score
+            or (offer.score == best.score and offer.revision > best.revision)
+            or (offer.score == best.score and offer.revision == best.revision
+                and GC.Util.NormalizeName(offer.sender) < GC.Util.NormalizeName(best.sender)) then
+            best = offer
+        end
+    end
+    if not best then
+        return false
+    end
+    return GC.Sync:Send(table.concat({
+        "L",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        "Q",
+        token,
+    }, "|"), "WHISPER", best.sender)
+end
+
+function GC.WarcraftLogs:AnnounceRecruitmentData()
+    if not GC.Sync then
+        return false
+    end
+    local stats = self:GetRecruitmentSyncStats()
+    if stats.score <= 0 then
+        return false
+    end
+    return GC.Sync:Send(table.concat({
+        "L",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        "U",
+        tostring(stats.score),
+        tostring(stats.revision),
+    }, "|"))
+end
+
+function GC.WarcraftLogs:QueueRecruitmentTransfer(target)
+    local messages, token = self:BuildRecruitmentSyncMessages()
+    if #messages == 0 or not token or not GC.Sync then
+        return false
+    end
+    return GC.Sync:QueueReliable(messages, target, "L", token)
+end
+
+function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
+    local token = fields[4]
+    local part = tonumber(fields[5])
+    local total = tonumber(fields[6])
+    local importedAt = tonumber(fields[7]) or 0
+    local reportCount = tonumber(fields[8]) or 0
+    local payload = fields[9] or ""
+    local senderKey = GC.Util.NormalizeName(sender)
+    if distribution ~= "WHISPER" or senderKey == "" or not token
+        or #token > 40 or not part or not total or part < 1 or part > total
+        or total > RECRUITMENT_MAX_PARTS or #payload > RECRUITMENT_PAYLOAD_BYTES then
+        return false
+    end
+
+    local now = GC.Util.Now()
+    local incomingKey = senderKey .. "|" .. token
+    for key, completedAt in pairs(self.syncCompleted) do
+        if (now - (tonumber(completedAt) or 0)) > RECRUITMENT_INCOMING_TTL then
+            self.syncCompleted[key] = nil
+        end
+    end
+    if self.syncCompleted[incomingKey] then
+        GC.Sync:SendReliableAck("L", token, part, sender)
+        return true
+    end
+    for key, incoming in pairs(self.syncIncoming) do
+        if (now - (tonumber(incoming.receivedAt) or 0)) > RECRUITMENT_INCOMING_TTL then
+            self.syncIncoming[key] = nil
+        end
+    end
+
+    local incoming = self.syncIncoming[incomingKey]
+    if incoming and (incoming.total ~= total or incoming.importedAt ~= importedAt
+        or incoming.reportCount ~= reportCount) then
+        self.syncIncoming[incomingKey] = nil
+        return false
+    end
+    if not incoming then
+        incoming = {
+            total = total,
+            importedAt = importedAt,
+            reportCount = reportCount,
+            parts = {},
+            received = 0,
+            receivedAt = now,
+        }
+        self.syncIncoming[incomingKey] = incoming
+    end
+    if incoming.parts[part] and incoming.parts[part] ~= payload then
+        self.syncIncoming[incomingKey] = nil
+        return false
+    elseif not incoming.parts[part] then
+        incoming.parts[part] = payload
+        incoming.received = incoming.received + 1
+    end
+    incoming.receivedAt = now
+    GC.Sync:SendReliableAck("L", token, part, sender)
+    if incoming.received < total then
+        return true
+    end
+
+    local imported = {}
+    local importedCount = 0
+    local addonProfiles = {}
+    for chunkIndex = 1, total do
+        for record in tostring(incoming.parts[chunkIndex] or ""):gmatch("[^;]+") do
+            local recordFields = SplitRecord(record)
+            if recordFields[1] == "L" and #recordFields == 5 then
+                local name = recordFields[2]
+                local classFile = recordFields[3]
+                local raidSpecKey = recordFields[4]
+                local secondarySpecKey = recordFields[5]
+                if GC.Util.Trim(name) ~= "" and GC.Classes[classFile]
+                    and raidSpecKey ~= "" and ValidSpecForClass(raidSpecKey, classFile)
+                    and ValidSpecForClass(secondarySpecKey, classFile) then
+                    local profile = {
+                        fullName = name,
+                        classFile = classFile,
+                        raidSpecKey = raidSpecKey,
+                        secondarySpecKey = secondarySpecKey ~= "" and secondarySpecKey or nil,
+                        confirmed = false,
+                        source = "WARCRAFT_LOGS",
+                        updatedAt = importedAt,
+                        receivedAt = now,
+                    }
+                    PutImportedProfile(imported, name, profile)
+                    importedCount = importedCount + 1
+                end
+            elseif recordFields[1] == "P" and #recordFields == 10 then
+                local name = recordFields[2]
+                local classFile = recordFields[3]
+                local detectedSpecKey = recordFields[4]
+                local raidSpecKey = recordFields[5]
+                local secondarySpecKey = recordFields[6]
+                local updatedAt = tonumber(recordFields[10]) or 0
+                if GC.Util.Trim(name) ~= "" and GC.Classes[classFile]
+                    and ValidSpecForClass(detectedSpecKey, classFile)
+                    and ValidSpecForClass(raidSpecKey, classFile)
+                    and ValidSpecForClass(secondarySpecKey, classFile) then
+                    addonProfiles[#addonProfiles + 1] = {
+                        fullName = name,
+                        classFile = classFile,
+                        detectedSpecKey = detectedSpecKey ~= "" and detectedSpecKey or nil,
+                        raidSpecKey = raidSpecKey ~= "" and raidSpecKey or nil,
+                        secondarySpecKey = secondarySpecKey ~= "" and secondarySpecKey or nil,
+                        mainStatus = recordFields[7] == "A" and "ALT" or "MAIN",
+                        flex = recordFields[8] == "1",
+                        confirmed = recordFields[9] == "1",
+                        updatedAt = updatedAt,
+                        receivedAt = now,
+                    }
+                end
+            end
+        end
+    end
+
+    local guildData = GC.DB:GetGuild()
+    local currentLogCount = self:GetImportedCount()
+    if importedCount > 0 and (importedAt > (tonumber(guildData.warcraftLogs.importedAt) or 0)
+        or (importedAt == (tonumber(guildData.warcraftLogs.importedAt) or 0)
+            and importedCount >= currentLogCount)
+        or currentLogCount == 0) then
+        guildData.warcraftLogs.members = imported
+        guildData.warcraftLogs.importedAt = importedAt
+        guildData.warcraftLogs.reportCount = reportCount
+    end
+
+    local ownKey = GC.Util.NormalizeName(GC:GetPlayerFullName())
+    for _, profile in ipairs(addonProfiles) do
+        local fullKey = GC.Util.NormalizeName(profile.fullName)
+        local shortKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(profile.fullName))
+        local member = GC.Roster and GC.Roster:GetMember(profile.fullName)
+        local classMatches = not member or not member.classFile or member.classFile == profile.classFile
+        if fullKey ~= "" and fullKey ~= ownKey and classMatches then
+            local existing = guildData.remoteProfiles[fullKey] or guildData.remoteProfiles[shortKey]
+            if not existing or (tonumber(profile.updatedAt) or 0) >= (tonumber(existing.updatedAt) or 0) then
+                guildData.remoteProfiles[fullKey] = profile
+                guildData.remoteProfiles[shortKey] = profile
+            end
+        end
+    end
+
+    self.syncIncoming[incomingKey] = nil
+    self.syncCompleted[incomingKey] = now
+    GC:FireCallback("WCL_UPDATED")
+    GC:FireCallback("ROSTER_UPDATED")
+    return true
+end
+
+function GC.WarcraftLogs:ReceiveSync(fields, sender, distribution)
+    local operation = fields[3]
+    if operation == "D" then
+        return self:ReceiveRecruitmentData(fields, sender, distribution)
+    elseif operation == "R" then
+        local token = fields[4]
+        local requesterScore = tonumber(fields[5]) or 0
+        local requesterRevision = tonumber(fields[6]) or 0
+        local stats = self:GetRecruitmentSyncStats()
+        if distribution ~= "GUILD" or not token or #token > 40
+            or not IsBetterRecruitmentDataset(stats.score, stats.revision, {
+                score = requesterScore,
+                revision = requesterRevision,
+            }) then
+            return false
+        end
+        local function Offer()
+            GC.Sync:Send(table.concat({
+                "L",
+                tostring(GC.Constants.SCHEMA_VERSION),
+                "N",
+                token,
+                tostring(stats.score),
+                tostring(stats.revision),
+            }, "|"), "WHISPER", sender)
+        end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.05 + (math.random() * 0.45), Offer)
+        else
+            Offer()
+        end
+        return true
+    elseif operation == "N" then
+        local discovery = self.syncDiscoveries[fields[4]]
+        local score = tonumber(fields[5])
+        local revision = tonumber(fields[6])
+        if distribution ~= "WHISPER" or not discovery or not score or not revision then
+            return false
+        end
+        discovery.offers[GC.Util.NormalizeName(sender)] = {
+            sender = sender,
+            score = score,
+            revision = revision,
+        }
+        return true
+    elseif operation == "Q" then
+        if distribution ~= "WHISPER" then
+            return false
+        end
+        local senderKey = GC.Util.NormalizeName(sender)
+        local now = GC.Util.Now()
+        if senderKey == "" or (self.syncRequestReplies[senderKey]
+            and (now - self.syncRequestReplies[senderKey]) < RECRUITMENT_REPLY_INTERVAL) then
+            return false
+        end
+        self.syncRequestReplies[senderKey] = now
+        return self:QueueRecruitmentTransfer(sender)
+    elseif operation == "U" then
+        local score = tonumber(fields[4])
+        local revision = tonumber(fields[5])
+        local stats = self:GetRecruitmentSyncStats()
+        if distribution ~= "GUILD" or not score or not revision
+            or not IsBetterRecruitmentDataset(score, revision, stats) then
+            return false
+        end
+        local requestToken = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+        return GC.Sync:Send(table.concat({
+            "L",
+            tostring(GC.Constants.SCHEMA_VERSION),
+            "Q",
+            requestToken,
+        }, "|"), "WHISPER", sender)
+    end
+    return false
 end

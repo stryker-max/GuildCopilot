@@ -2319,9 +2319,10 @@ function GC.UI:RefreshWorkshop()
 
     local missingProfessions = GC.Workshop:GetMissingOwnProfessions()
     local syncStats = GC.Workshop.syncStats or {}
-    if #(GC.Workshop.syncQueue or {}) > 0 then
+    local pendingPackets = GC.Workshop:GetPendingPacketCount()
+    if pendingPackets > 0 then
         page.workshopStatus:SetText("|cff2ed9e6Synchronisierung läuft:|r "
-            .. #GC.Workshop.syncQueue .. " Pakete verbleiben. Das Fenster kann geschlossen werden.")
+            .. pendingPackets .. " Pakete verbleiben. Das Fenster kann geschlossen werden.")
         SetTextColor(page.workshopStatus, THEME.accent)
     elseif (syncStats.failed or 0) > 0 then
         page.workshopStatus:SetText("|cffff6266Übertragung unvollständig:|r "

@@ -638,6 +638,25 @@ assert(#workshopCatalog[1].crafters == 2, "Lokaler und synchronisierter Crafter 
 local tailoringCatalog = addon.Workshop:GetCatalog("", "Schneiderei")
 assert(#tailoringCatalog >= 1, "Berufsfilter findet Schneiderei nicht")
 assert(#addon.Workshop:GetCatalog("", "Verzauberkunst") == 0, "Berufsfilter zeigt den falschen Beruf")
+ownWorkshop.professions.alchimie = {
+    key = "alchimie",
+    name = "Alchimie",
+    updatedAt = currentTime,
+    recipes = {
+        I99991 = {
+            key = "I99991",
+            itemID = 99991,
+            name = "Testelixier",
+            profession = "Alchimie",
+            reagents = {},
+        },
+    },
+}
+assert(#addon.Workshop:GetCatalog("", "Alchemie") == 1,
+    "Die alte Schreibweise Alchemie findet die TBC-Berufsbezeichnung Alchimie nicht")
+assert(#addon.Workshop:GetCatalog("", "Alchimie") == 1,
+    "Der TBC-Berufsfilter Alchimie findet den eingelesenen Beruf nicht")
+ownWorkshop.professions.alchimie = nil
 
 local regularTradeSkillLine = GetTradeSkillLine
 GetTradeSkillLine = function()
@@ -720,6 +739,40 @@ assert(manuallyImported == true, "Manueller Import ohne API ist fehlgeschlagen")
 assert(addon.WarcraftLogs:GetImportedCount() == 2, "Manuelle Profilanzahl ist falsch")
 assert(addon.Roster:GetProfile("Nexarius").secondarySpecKey == "MAGE:3", "Manueller Dual-Spec wurde nicht erkannt")
 assert(addon.Roster:GetProfile("Druide-Realm").raidSpecKey == "DRUID:3", "Deutscher Specname wurde nicht erkannt")
+
+-- Logprofile und bereits bekannte Addon-Profile bilden gemeinsam die
+-- Datengrundlage der Copilot-Vorschläge und müssen auf einem zweiten Client
+-- vollständig wiederherstellbar sein.
+addon.DB:GetGuild().remoteProfiles["archiv-realm"] = {
+    fullName = "Archiv-Realm",
+    classFile = "SHAMAN",
+    raidSpecKey = "SHAMAN:2",
+    mainStatus = "MAIN",
+    confirmed = true,
+    updatedAt = currentTime,
+    receivedAt = currentTime,
+}
+recruitmentMessages = addon.WarcraftLogs:BuildRecruitmentSyncMessages()
+assert(#recruitmentMessages > 0, "Der gildenweite Rekrutierungs-Datensatz wurde nicht erzeugt")
+for _, recruitmentMessage in ipairs(recruitmentMessages) do
+    assert(#recruitmentMessage <= 255, "Ein Rekrutierungs-Datenpaket überschreitet das Addon-Limit")
+end
+addon.DB:GetGuild().warcraftLogs.members = {}
+addon.DB:GetGuild().warcraftLogs.importedAt = 0
+addon.DB:GetGuild().remoteProfiles = {}
+for _, recruitmentMessage in ipairs(recruitmentMessages) do
+    addon.WarcraftLogs:ReceiveSync(
+        addon.Util.SplitFields(recruitmentMessage),
+        "Heiler-Realm",
+        "WHISPER"
+    )
+end
+assert(addon.WarcraftLogs:GetImportedCount() == 2,
+    "Die Logprofile wurden auf dem simulierten zweiten Client nicht wiederhergestellt")
+assert(addon.DB:GetGuild().remoteProfiles["archiv-realm"] ~= nil,
+    "Ein bekanntes Addon-Profil fehlt im gildenweiten Rekrutierungs-Datensatz")
+assert(addon.Roster:GetProfile("Archiv-Realm").raidSpecKey == "SHAMAN:2",
+    "Der synchronisierte Profilcache liefert nicht dieselbe Vorschlagsgrundlage")
 
 addon.Recruitment:SetClass("SHAMAN", true)
 addon.Recruitment:SetSpec("HUNTER:3", true)
@@ -1107,9 +1160,12 @@ assert(announced == true, "Der Handshake wurde beim Login nicht gesendet")
 local announcement = LastAddonMessage()
 assert(announcement:sub(1, 2) == "V|", "Die Handshake-Nachricht hat den falschen Typ")
 assert(#announcement <= 255, "Die Handshake-Nachricht überschreitet das Addon-Limit")
-assert(announcement:find("0.9.21", 1, true), "Die Addon-Version fehlt im Handshake")
+assert(announcement:find("0.9.22", 1, true), "Die Addon-Version fehlt im Handshake")
 assert(announcement:find("workshop", 1, true), "Die Fähigkeiten fehlen im Handshake")
 assert(announcement:find("workshop2", 1, true), "Das kompakte Werkstattformat fehlt im Handshake")
+assert(announcement:find("workshop3", 1, true), "Der bestätigte Werkstatttransfer fehlt im Handshake")
+assert(announcement:find("recruitmentsync", 1, true),
+    "Der gildenweite Rekrutierungs-Datensatz fehlt im Handshake")
 assert(announcement:find("gearsync", 1, true), "Der automatische Ausrüstungsabgleich fehlt im Handshake")
 assert(addon.Sync:AnnounceVersion(false, 60) == false,
     "Der Mindestabstand zwischen zwei Handshakes greift nicht")
@@ -1164,6 +1220,86 @@ currentTime = currentTime + 60
 local sentBeforeReply = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "V|7|0.4.6|profile|0", "GUILD", "Heiler-Realm")
 assert(#sentAddon == sentBeforeReply, "Auf eine Handshake-Antwort wurde erneut geantwortet")
+
+-- Grosse Direkttransfers senden nur ein kleines Fenster gleichzeitig weiter.
+-- Erst die Bestätigung des Empfängers öffnet den nächsten Platz; dadurch ist
+-- der Ablauf schnell, erkennt aber verlorene Pakete zuverlässig.
+reliableMessages, reliableToken = addon.Workshop:BuildProfessionMessages(burstProfession)
+reliableComplete = false
+timerDelayThreshold = 1
+addon.Sync.bulkAllowance = 4000
+addon.Sync.bulkQueue = {}
+reliableSentBefore = #sentAddon
+assert(addon.Sync:QueueReliable(
+    reliableMessages,
+    "Heiler-Realm",
+    "W",
+    reliableToken,
+    function()
+        reliableComplete = true
+    end
+) == true, "Der bestätigte Werkstatttransfer ließ sich nicht starten")
+reliableCursor = reliableSentBefore + 1
+reliableGuard = 0
+while addon.Sync.reliableActive and reliableGuard < (#reliableMessages * 3) do
+    reliableGuard = reliableGuard + 1
+    outgoing = sentAddon[reliableCursor]
+    reliableCursor = reliableCursor + 1
+    assert(outgoing ~= nil, "Der bestätigte Transfer blieb ohne weiteres Datenpaket stehen")
+    if outgoing[2]:sub(1, 2) == "W|" and outgoing[3] == "WHISPER" then
+        outgoingFields = addon.Util.SplitFields(outgoing[2])
+        addon.Sync:OnMessage(
+            "GuildCopilot",
+            table.concat({ "A", "7", "W", reliableToken, outgoingFields[5] }, "|"),
+            "WHISPER",
+            "Heiler-Realm"
+        )
+    end
+end
+timerDelayThreshold = math.huge
+assert(reliableComplete == true and addon.Sync.reliableActive == nil,
+    "Der bestätigte Werkstatttransfer wurde trotz aller Paketbestätigungen nicht abgeschlossen")
+
+-- Bleibt eine Bestätigung aus, wird genau dieses Teilpaket erneut gesendet.
+retryMessages, retryToken = addon.Workshop:BuildProfessionMessages(
+    ownWorkshop.professions.verzauberkunst)
+retryTimerStart = #pendingTimers
+retrySentStart = #sentAddon
+timerDelayThreshold = 1
+addon.Sync.bulkAllowance = 4000
+assert(addon.Sync:QueueReliable(retryMessages, "Heiler-Realm", "W", retryToken) == true,
+    "Der Wiederholungstest ließ sich nicht starten")
+assert(#pendingTimers > retryTimerStart, "Für ein unbestätigtes Paket wurde keine Wiederholung geplant")
+pendingTimers[retryTimerStart + 1]()
+assert(#sentAddon > retrySentStart + 1, "Ein unbestätigtes Werkstattpaket wurde nicht erneut gesendet")
+retryFields = addon.Util.SplitFields(sentAddon[#sentAddon][2])
+addon.Sync:OnMessage(
+    "GuildCopilot",
+    table.concat({ "A", "7", "W", retryToken, retryFields[5] }, "|"),
+    "WHISPER",
+    "Heiler-Realm"
+)
+timerDelayThreshold = math.huge
+assert(addon.Sync.reliableActive == nil,
+    "Der wiederholte Transfer wurde nach der Bestätigung nicht abgeschlossen")
+
+for _, reliableMessage in ipairs(reliableMessages) do
+    addon.Sync:OnMessage("GuildCopilot", reliableMessage, "WHISPER", "Heiler-Realm")
+end
+whisperedCrafter = addon.DB:GetGuild().workshop.crafters["heiler-realm"]
+assert(whisperedCrafter and whisperedCrafter.professions.schneiderei,
+    "Werkstattdaten aus dem Flüsterkanal wurden fälschlich nur an die Raidauswertung geleitet")
+whisperedRecipeCount = 0
+for _ in pairs(whisperedCrafter.professions.schneiderei.recipes) do
+    whisperedRecipeCount = whisperedRecipeCount + 1
+end
+assert(whisperedRecipeCount == 80,
+    "Der bestätigte Flüstertransfer hat nicht alle Werkstattrezepte gespeichert")
+ackBeforeRecruitmentWhisper = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", recruitmentMessages[1], "WHISPER", "Heiler-Realm")
+assert(#sentAddon == ackBeforeRecruitmentWhisper + 1
+    and sentAddon[#sentAddon][2]:sub(1, 6) == "A|7|L|",
+    "Der Rekrutierungs-Datensatz wurde im Flüsterkanal nicht bestätigt")
 
 -- Eine Sitzung ohne Gruppe muss den Spieler selbst erfassen.
 raidRoster = {}

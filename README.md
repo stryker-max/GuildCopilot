@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.21
+# Guild Copilot 0.9.22
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -12,7 +12,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - frei bestätigbares Raidprofil mit Primär-Spec, optionalem Dual-Spec, Main/Alt und Flexibilität;
 - unsichtbare Profilsynchronisierung zwischen Gildenmitgliedern mit installiertem Addon; wer neu dazukommt, fragt den Bestand ab und bekommt die Profile der bereits Eingeloggten nachgereicht, statt nur die Änderungen ab dem eigenen Login zu sehen;
 - Addon-Erkennung in der Gildenübersicht: sichtbar, wer Guild Copilot nutzt und wessen Datenversion abweicht, ohne Dauerbroadcasts;
-- Gildenroster-Auswertung und TBC-orientierte Supportrollen-Vorschläge;
+- Gildenroster-Auswertung und TBC-orientierte Supportrollen-Vorschläge; importierte Warcraft-Logs-Profile und bereits bekannte Addon-Profile bilden automatisch einen gemeinsamen Gildendatensatz, damit alle Clients dieselben Lücken sehen;
 - moderne, kompakte Oberfläche mit Seitenleiste und sauber begrenzten Scroll-Textfeldern;
 - Aufklappmenüs mit vielen Einträgen scrollen und öffnen sich in die Richtung, in der Platz ist, statt am Rand des Scrollbereichs abgeschnitten zu werden;
 - aufklappbare Klassenkarten zur Auswahl ganzer Klassen oder beliebig vieler Specs, ohne Pflichtangabe einer Anzahl;
@@ -42,7 +42,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - unsichere Main/Twink-Fälle werden ausdrücklich als **Prüfen** statt als Entfernungsvorschlag gekennzeichnet; es gibt keine automatischen Gildenausschlüsse;
 - zwei manuell wählbare Berufe oder automatische Übernahme aus dem WoW-Berufsfenster, synchronisiert mit anderen Addon-Nutzern;
 - Gildenwerkstatt mit sofortigem, vollständigem Rezeptscan beim Öffnen des Berufsfensters: aktive Filter werden zurückgesetzt, eingeklappte Kategorien automatisch geöffnet und die separate TBC-Verzauberkunst-Schnittstelle unterstützt;
-- kompakte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern ohne künstliche Paketpause; WoW-seitig abgelehnte Pakete werden automatisch wiederholt, ältere Guild-Copilot-Versionen erhalten weiterhin das bisherige Datenformat;
+- kompakte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern: große Datenmengen werden sofort eingereiht und mit dem maximal sicheren Addon-Kanal-Durchsatz gesendet; aktuelle Clients bestätigen jedes direkte Teilpaket, verlorene Pakete werden automatisch wiederholt und ältere Guild-Copilot-Versionen erhalten weiterhin das bisherige Datenformat;
 - suchbasierte Gildenwerkstatt: Statt hunderte Rezepte ungefiltert zu laden, werden Ergebnisse erst nach Suchbegriff, Berufsauswahl oder über gespeicherte Favoriten angezeigt;
 - bebilderter Berufsfilter, Berufssymbole in der Rezeptliste und lokale Rezeptfavoriten;
 - Einstellungsseite für aktive Raider-Ränge, berechtigte Einstellungs-Editoren, Mitgliederpflege-Zugriff, Postfach-Erkennung, TBC-kompatible Erfolgssounds und das Minimap-Symbol;
@@ -78,7 +78,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - eine Kopfzeile fasst alle geprüften Spieler zusammen, etwa „8 geprüft, davon 5 ohne Funde • 6 fehlende Verzauberungen • 4 leere Sockel“;
 - jeder Spieler sieht seine eigene Prüfung unter **Profil → Deine Ausrüstung** und kann sie dort jederzeit selbst auslösen;
 - Warcraft-Logs-Gildenlink aus Region, Realm und Gildenname automatisch vorbereiten oder direkt einfügen;
-- Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen;
+- Warcraft-Logs-Import, dessen Specs die Roster- und Copilot-Auswertung ergänzen; die importierten Profile und der neueste bekannte Addon-Profilcache werden automatisch innerhalb der Gilde abgeglichen, vollständige Kampfprotokolle bleiben getrennt;
 - **Nachanalyse aus Warcraft Logs**: öffentliche Reports liefern Teilnahme, Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände;
 - der Abruf steckt im **Installer** – ein Fenster für Zugangsdaten, Link und Anzahl der Reports; der fertige Importcode landet in der Zwischenablage. Node.js wird dafür nicht gebraucht;
 - der Import lässt sich zuerst mit einem einzelnen Report ausprobieren und protokolliert jeden Schritt einzeln;
@@ -119,7 +119,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.21; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.22; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 
@@ -161,6 +161,6 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 
 ## Gespeicherte Daten
 
-Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter-, Ausrüstungs- und Werkstattprofile sowie das Gildenprofil mit Berechtigungen, Antwortvorlagen, Pflegeentscheidungen und Verzauberungsregeln ausschließlich innerhalb der eigenen Gilde synchronisiert. Fertige Raidauswertungen laufen nur über Raid-, Gruppen- oder gezielte Flüsternachrichten.
+Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über Addon-Nachrichten werden kompakte Charakter-, Ausrüstungs- und Werkstattprofile, die für Copilot benötigten Warcraft-Logs-Profile sowie das Gildenprofil mit Berechtigungen, Antwortvorlagen, Pflegeentscheidungen und Verzauberungsregeln ausschließlich innerhalb der eigenen Gilde synchronisiert. Fertige Raidauswertungen laufen nur über Raid-, Gruppen- oder gezielte Flüsternachrichten. Vollständige Warcraft-Logs-Auswertungen bleiben von diesem Rekrutierungsabgleich getrennt.
 
 Raidstatistik, Consumable-Auswertung, Gear-Audit und Mitgliederpflege sind umgesetzt. Verbleibende Datenpflege, bekannte Grenzen und spätere Ausbaustufen stehen in [ROADMAP.md](ROADMAP.md).
