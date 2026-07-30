@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.43",
+  "## Version: 0.9.44",
 ];
 
 for (const entry of requiredMetadata) {
@@ -438,14 +438,32 @@ if (!settingsPage.includes("page.inboxSoundRankToggles")) {
 const settingsContentHeight = Number(
   settingsPage.match(/content:SetHeight\((\d+)\)/)?.[1]
 );
-let settingsBottom = 0;
+const settingsCards = [];
 for (const match of settingsPage.matchAll(
   /(\w+):SetSize\(752, (\d+)\)\s*\n\s*\1:SetPoint\("TOPLEFT", content, "TOPLEFT", 0, -(\d+)\)/g
 )) {
-  settingsBottom = Math.max(settingsBottom, Number(match[3]) + Number(match[2]));
+  settingsCards.push({
+    name: match[1],
+    top: Number(match[3]),
+    bottom: Number(match[3]) + Number(match[2]),
+  });
 }
+settingsCards.sort((left, right) => left.top - right.top);
+const settingsBottom = settingsCards.length > 0 ? settingsCards[settingsCards.length - 1].bottom : 0;
 if (!settingsContentHeight || settingsBottom === 0) {
   throw new Error("Die Kartenmaße der Einstellungsseite lassen sich nicht mehr ablesen.");
+}
+// Wächst eine Karte, müssen die darunter mitwandern. Sonst schiebt sie sich in
+// die nächste, und das fällt erst im Spiel auf.
+for (let index = 1; index < settingsCards.length; index++) {
+  const previous = settingsCards[index - 1];
+  const current = settingsCards[index];
+  if (current.top < previous.bottom) {
+    throw new Error(
+      `Die Karten ${previous.name} und ${current.name} der Einstellungen überlappen sich: ` +
+        `${previous.name} endet bei ${previous.bottom}, ${current.name} beginnt bei ${current.top}.`
+    );
+  }
 }
 if (settingsContentHeight < settingsBottom) {
   throw new Error(

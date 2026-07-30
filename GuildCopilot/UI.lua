@@ -1106,7 +1106,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1444)
+    content:SetHeight(1484)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1199,7 +1199,7 @@ function GC.UI:BuildSettingsPage()
     end
 
     local notificationCard = CreateCard(content, "Benachrichtigungen & Zugriff")
-    notificationCard:SetSize(752, 190)
+    notificationCard:SetSize(752, 226)
     notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -444)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
@@ -1240,16 +1240,22 @@ function GC.UI:BuildSettingsPage()
         GC.UI:RefreshMinimapButton()
     end)
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
-    page.minimapToggle.text:SetWidth(200)
+    page.minimapToggle.text:SetWidth(260)
 
-    -- Der Rueckweg. Das Symbol laesst sich frei ueber den ganzen Bildschirm
-    -- ziehen; wer es hinter einem anderen Fenster oder am Rand ablegt, kommt
-    -- sonst nicht mehr heran.
+    -- Der Rueckweg, in einer eigenen Zeile. Neben dem Schalter waere kein Platz:
+    -- Rechts davon steht schon die Profilbestaetigung, und beides in eine Zeile
+    -- zu quetschen hiesse, dass der Knopf ueber der Beschriftung liegt.
     page.minimapResetButton = CreateButton(notificationCard, "Symbol zurück an die Minimap", 230, 28, function()
         GC.UI:ResetMinimapButton()
         GC.UI:RefreshSettings()
     end)
-    page.minimapResetButton:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 130, -146)
+    page.minimapResetButton:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -186)
+    CreateLabel(notificationCard,
+        "Das Symbol lässt sich frei ziehen: nahe der Minimap am Ring entlang, weiter weg überall hin.", {
+        muted = true,
+        width = 460,
+        height = 28,
+    }):SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 258, -186)
 
     -- Eigener Ton fuer die Bestaetigung des eigenen Raidprofils. Bewusst vom
     -- Bewerberklang getrennt: Der eine meldet einen fremden Interessenten, der
@@ -1272,7 +1278,7 @@ function GC.UI:BuildSettingsPage()
     -- koennte - deshalb haengt er am Gildenrang und nicht an jedem selbst.
     local soundRankCard = CreateCard(content, "Bewerberton hören")
     soundRankCard:SetSize(752, 180)
-    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
+    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -684)
     local soundRankHelp = CreateLabel(soundRankCard,
         "Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter,"
         .. " nur still. Die Freigabe wird gildenweit synchronisiert.",
@@ -1304,7 +1310,7 @@ function GC.UI:BuildSettingsPage()
     -- erzeugt Muell aus dem ganzen Realm.
     local triggerCard = CreateCard(content, "Postfach-Erkennung: eigene Wörter")
     triggerCard:SetSize(752, 400)
-    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -836)
+    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -876)
     CreateLabel(triggerCard,
         "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
         .. " Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ –"
@@ -1360,7 +1366,7 @@ function GC.UI:BuildSettingsPage()
 
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1248)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1288)
     CreateLabel(gearCard,
         "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
@@ -1385,7 +1391,7 @@ function GC.UI:BuildSettingsPage()
     }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -96)
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1392)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1432)
 end
 
 function GC.UI:RefreshSettings()

@@ -298,6 +298,12 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.44 – Der Rückholknopf lag auf der Beschriftung
+
+- **„Symbol zurück an die Minimap" bekommt eine eigene Zeile.** In 0.9.43 stand er neben dem Schalter „Minimap-Symbol anzeigen" – und damit mitten auf dessen Beschriftung, weil rechts daneben schon die Profilbestätigung sitzt. Die Karte „Benachrichtigungen & Zugriff" ist dafür 36 Pixel höher geworden, alle Karten darunter sind mitgewandert;
+- **`tests/validate.mjs` prüft die Einstellungsseite jetzt auf Überlappungen**, nicht mehr nur auf die Gesamthöhe. Genau dieser Fehler – eine Karte wächst, die darunter bleibt stehen – fällt sonst erst im Spiel auf. Gegengeprüft, indem eine Karte absichtlich zurückgeschoben wurde;
+- neben dem Knopf steht jetzt, was das Ziehen überhaupt kann: nahe der Minimap am Ring entlang, weiter weg überall hin. Vorher stand das nur im Tooltip des Symbols selbst – also genau dort, wo es niemand sucht, der das Symbol gerade nicht findet.
+
 ## 0.9.43 – Das Minimap-Symbol darf endlich weg von der Minimap
 
 - **frei platzierbar statt nur auf dem Ring.** Bisher fuhr das Symbol beim Ziehen ausschließlich im Kreis um die Minimap. Jetzt entscheidet die Bewegung selbst: Wer in der Nähe bleibt, fährt wie gewohnt am Ring entlang; wer weiter als 130 Pixel wegzieht, löst es ab und legt es hin, wo er will. Kein Schalter, kein Menü – der Abstand zum Ring ist bewusst deutlich größer als der Ring selbst (78), damit ein Verrutschen beim Ausrichten nichts ablöst;
