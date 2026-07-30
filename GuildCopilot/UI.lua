@@ -2223,35 +2223,35 @@ function GC.UI:BuildWorkshopPage()
     page.workshopDetailContent:SetWidth(292)
     page.workshopDetailContent:SetHeight(220)
     page.workshopDetailScroll:SetScrollChild(page.workshopDetailContent)
-    page.workshopDetails = CreateLabel(page.workshopDetailContent, "", { width = 292, height = 220, vertical = "TOP" })
+    page.workshopDetails = CreateLabel(page.workshopDetailContent, "", { width = 274, height = 220, vertical = "TOP" })
     page.workshopDetails:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, 0)
 
     -- Materialien als echte Zeilen mit festen Spalten. Ein Textblock kann das
     -- nicht: die Spielschrift ist proportional, Leerzeichen ergeben also keine
     -- Spalte, sondern nur ausgefranste Zahlen.
     page.workshopMaterialHeader = CreateLabel(page.workshopDetailContent, "Materialien",
-        { muted = true, width = 190, height = 15 })
+        { muted = true, width = 176, height = 15 })
     page.workshopMaterialOwnHeader = CreateLabel(page.workshopDetailContent, "Du",
         { muted = true, width = 42, height = 15, align = "RIGHT" })
-    page.workshopMaterialBankHeader = CreateLabel(page.workshopDetailContent, "Bank",
+    page.workshopMaterialBankHeader = CreateLabel(page.workshopDetailContent, "GBank",
         { muted = true, width = 48, height = 15, align = "RIGHT" })
     page.workshopMaterialRows = {}
     for index = 1, 14 do
         local row = CreateFrame("Frame", nil, page.workshopDetailContent)
-        row:SetSize(292, 15)
-        row.name = CreateLabel(row, "", { width = 196, height = 15 })
+        row:SetSize(274, 15)
+        row.name = CreateLabel(row, "", { width = 176, height = 15 })
         row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
         row.own = CreateLabel(row, "", { width = 42, height = 15, align = "RIGHT" })
-        row.own:SetPoint("LEFT", row, "LEFT", 196, 0)
+        row.own:SetPoint("LEFT", row, "LEFT", 178, 0)
         row.bank = CreateLabel(row, "", { width = 48, height = 15, align = "RIGHT" })
-        row.bank:SetPoint("LEFT", row, "LEFT", 242, 0)
+        row.bank:SetPoint("LEFT", row, "LEFT", 226, 0)
         row:Hide()
         page.workshopMaterialRows[index] = row
     end
     page.workshopMaterialSummary = CreateLabel(page.workshopDetailContent, "",
-        { width = 292, height = 60, vertical = "TOP" })
+        { width = 274, height = 60, vertical = "TOP" })
     page.workshopMaterialFooter = CreateLabel(page.workshopDetailContent, "",
-        { muted = true, width = 292, height = 30, vertical = "TOP" })
+        { muted = true, width = 274, height = 30, vertical = "TOP" })
 
     page.workshopStatus = CreateLabel(page,
         "Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.",
@@ -2368,6 +2368,7 @@ function GC.UI:RefreshWorkshop()
         end
         page.workshopMaterialSummary:SetText("")
         page.workshopMaterialFooter:SetText("")
+        page.workshopScrollAnchor = nil
         page.workshopDetailContent:SetHeight(220)
     else
         page.workshopFavorite:Show()
@@ -2384,7 +2385,7 @@ function GC.UI:RefreshWorkshop()
         end
         page.workshopDetails:SetText(table.concat(lines, "\n"))
         local infoHeight = math.max(15, WrappedTextHeight(
-            page.workshopDetails, table.concat(lines, "\n"), 292)) + 6
+            page.workshopDetails, table.concat(lines, "\n"), 274)) + 6
         page.workshopDetails:SetHeight(infoHeight)
 
         -- Materialien stehen in echten Zeilen mit festen Spalten darunter.
@@ -2400,9 +2401,9 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialBankHeader:SetShown(headerShown)
         if headerShown then
             page.workshopMaterialOwnHeader:ClearAllPoints()
-            page.workshopMaterialOwnHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 196, -cursor)
+            page.workshopMaterialOwnHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 178, -cursor)
             page.workshopMaterialBankHeader:ClearAllPoints()
-            page.workshopMaterialBankHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 242, -cursor)
+            page.workshopMaterialBankHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 226, -cursor)
         end
         cursor = cursor + 18
 
@@ -2463,7 +2464,7 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialSummary:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
         local summaryHeight = math.max(15, WrappedTextHeight(
             page.workshopMaterialSummary,
-            page.workshopMaterialSummary:GetText(), 292))
+            page.workshopMaterialSummary:GetText(), 274))
         page.workshopMaterialSummary:SetHeight(summaryHeight)
         cursor = cursor + summaryHeight + 8
 
@@ -2497,13 +2498,16 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialFooter:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
         local footerHeight = #footer > 0
             and math.max(15, WrappedTextHeight(
-                page.workshopMaterialFooter, table.concat(footer, "\n"), 292))
+                page.workshopMaterialFooter, table.concat(footer, "\n"), 274))
             or 0
         page.workshopMaterialFooter:SetHeight(math.max(1, footerHeight))
         cursor = cursor + footerHeight
 
         page.workshopDetailContent:SetHeight(math.max(220, cursor + 6))
-        page.workshopDetailScroll:SetVerticalScroll(0)
+        if page.workshopScrollAnchor ~= selected.key then
+            page.workshopScrollAnchor = selected.key
+            page.workshopDetailScroll:SetVerticalScroll(0)
+        end
         page.workshopDetailScroll:UpdateModernThumb()
     end
 

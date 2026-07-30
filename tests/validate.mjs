@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.33",
+  "## Version: 0.9.34",
 ];
 
 for (const entry of requiredMetadata) {

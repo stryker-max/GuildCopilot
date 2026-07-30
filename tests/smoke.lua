@@ -28,6 +28,14 @@ Dummy.__index = function(self, key)
         return function(frame)
             return frame.shown == true
         end
+    elseif key == "SetVerticalScroll" then
+        return function(frame, value)
+            frame.verticalScroll = tonumber(value) or 0
+        end
+    elseif key == "GetVerticalScroll" then
+        return function(frame)
+            return frame.verticalScroll or 0
+        end
     elseif key == "SetHeight" then
         -- Fuer Layouttests: die gesetzte Hoehe bleibt ablesbar.
         return function(frame, value)
@@ -1799,6 +1807,27 @@ if #summaryPlain > 50 then
 end
 assert((addon.UI.pages.WORKSHOP.workshopDetailContent.height or 0) >= 220,
     "Der Detailbereich hat keine gültige Höhe erhalten")
+
+-- Der Scrollstand darf nur beim Rezeptwechsel zurückspringen. Während der
+-- Synchronisierung feuert pro Paket ein Refresh; setzte der den Stand zurück,
+-- hüpfte die Ansicht beim Lesen dauernd nach oben.
+addon.UI.pages.WORKSHOP.workshopDetailScroll:SetVerticalScroll(50)
+addon.UI:RefreshWorkshop()
+assert(addon.UI.pages.WORKSHOP.workshopDetailScroll.verticalScroll == 50,
+    "Ein Refresh ohne Rezeptwechsel hat den Scrollstand zurückgesetzt")
+scrollSwitchEntry = nil
+for _, entry in ipairs(addon.Workshop:GetCatalog("", "Schneiderei")) do
+    if entry.key ~= addon.UI.pages.WORKSHOP.selectedWorkshopRecipe then
+        scrollSwitchEntry = entry
+        break
+    end
+end
+if scrollSwitchEntry then
+    addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = scrollSwitchEntry.key
+    addon.UI:RefreshWorkshop()
+    assert(addon.UI.pages.WORKSHOP.workshopDetailScroll.verticalScroll == 0,
+        "Beim Wechsel auf ein anderes Rezept blieb der alte Scrollstand stehen")
+end
 -- Ohne Suchumfang bleiben keine alten Materialzeilen stehen.
 addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = nil
 addon.UI.pages.WORKSHOP.workshopProfession.value = ""
