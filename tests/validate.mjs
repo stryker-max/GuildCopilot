@@ -60,6 +60,22 @@ if (!fs.existsSync(installerExe) || fs.statSync(installerExe).size < 1_000_000) 
 if (!readme.includes(`Installer bei ${installerVersion}`) || !readme.includes(`Addon bei ${tocVersion}`)) {
   throw new Error("README nennt nicht die tatsächlich veröffentlichten Addon- und Installer-Versionen.");
 }
+// Die zweite README wurde jahrelang übersehen: Sie stand noch auf 1.0.3/0.9.22,
+// als längst 1.0.5/0.9.44 ausgeliefert war. Ungeprüfte Doku veraltet leise.
+const installerReadme = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "README.md"),
+  "utf8"
+);
+if (!installerReadme.includes(`Installer ${installerVersion}, Addon ${tocVersion}`)) {
+  throw new Error(
+    `Installer/README.md nennt nicht den ausgelieferten Stand (erwartet: „Installer ${installerVersion}, Addon ${tocVersion}“).`
+  );
+}
+// Der abschaltbare Selbstupdate-Haken ist seit 1.0.4 weg; die README hatte ihn
+// noch beschrieben.
+if (/optional automatische Aktualisierung beim Öffnen/.test(installerReadme)) {
+  throw new Error("Installer/README.md beschreibt noch die abschaltbare Aktualisierung beim Öffnen.");
+}
 if (
   !installerProgram.includes("SingleInstanceMutex") ||
   !installerProgram.includes("WaitForPreviousInstance") ||

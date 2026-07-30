@@ -359,6 +359,14 @@ Aus der Gilde gemeldet: Es ruckelt, wenn viele Leute gleichzeitig ein- und auslo
 - **die Zone kommt aus den Bossnamen.** Der Combat Log nennt keine, die Zuordnung Boss zu Instanz gibt es im Addon aber schon (`GC.RaidBosses`). So bleibt sie an einer Stelle gepflegt, statt im Installer ein zweites Mal;
 - **ein Raidabend steht einmal in der Liste, nicht dreimal.** Derselbe Abend kann aus Livesitzung, Warcraft Logs und Logdatei kommen. Als Fingerabdruck taugt kein Hash aus den Teilnehmern – jede Quelle zieht die Liste anders und ein exakter Vergleich schlüge genau dann fehl, wenn er gebraucht wird. Entschieden wird über überschneidende Zeiträume **und** eine Teilnehmerdeckung von mindestens der Hälfte. Angezeigt wird die vollständigste Auswertung; die übrigen Quellen bleiben gespeichert und stehen als Knöpfe in der Kopfzeile der Teilnehmerkarte.
 
+## 0.9.40 – „Twink“ statt „Alt“
+
+*(Dieser Abschnitt fehlte und ist mit 0.9.45 aus dem Commit nachgetragen – deshalb ist er kürzer als seine Nachbarn.)*
+
+- **im Profil und in der Gildenübersicht heißt es „Twink“**, nicht mehr „Alt“ – so nennt es die Gilde auch. Betroffen sind der Schalter neben „Main“ und die Statusspalte der Übersicht;
+- **gespeichert und übertragen wird weiterhin `ALT`.** Die Beschriftung ist eine Anzeigefrage; wer den gespeicherten Wert mitumbenennt, sorgt dafür, dass alte und neue Clients sich beim Abgleich nicht mehr verstehen. Der Kommentar an der Stelle sagt genau das, damit es beim nächsten Umbenennen nicht doch passiert;
+- `docs/TODO-naechste-sitzung.md` kam dazu und hält die offenen Punkte so fest, dass ein einzelner Prompt genügt: je Aufgabe die betroffenen Dateien, die Zeilennummern und die noch offenen Entscheidungen. Abgearbeitet wurden daraus der Knopf im Gildenfenster, die Trigger-Wörter und der Offline-Import (alle 0.9.41) sowie der Onboarding-Wizard (0.9.45).
+
 ## 0.9.39 – Postfach mit Uhrzeit, Realm und Haken statt Datum
 
 - **die Empfangszeit steht jetzt am Eintrag.** Sie war längst gespeichert, aber nirgends zu sehen – dabei entscheidet sie mit, ob sich eine Antwort noch lohnt. Heutige Nachrichten zeigen nur die Uhrzeit, ältere Datum und Uhrzeit; das Jahr steht dabei nur im Weg;

@@ -1,4 +1,4 @@
-# Guild-Copilot-Installer
+﻿# Guild-Copilot-Installer
 
 Ein Windows-Fenster für zwei Aufgaben: das Addon installieren und aktuell halten, und den Warcraft-Logs-Import erzeugen.
 
@@ -10,8 +10,11 @@ Die fertige Anwendung liegt unter [dist/GuildCopilot-Installer.exe](dist/GuildCo
 - lädt das Addon direkt aus `stryker-max/GuildCopilot`, aktualisiert und entfernt es;
 - vergleicht Versionen stellenweise, nicht auf ungleich: eine ältere Fassung im Repository gilt ausdrücklich als Rückstufung und wird nie als Aktualisierung angeboten;
 - überschreibt beim Aktualisieren, statt vorher zu löschen. Ein geöffnetes Explorer-Fenster hat sonst gereicht, um die Installation abzubrechen; anschließend werden nur noch die Dateien entfernt, die es in der neuen Fassung nicht mehr gibt;
-- optional automatische Aktualisierung beim Öffnen und Autostart mit Windows;
-- hält sich selbst aktuell – **Nach Updates suchen** prüft Addon und Installer.
+- **aktualisiert beim Öffnen immer.** Der frühere Haken dafür ist entfernt – er war nur eine Gelegenheit, veraltet zu bleiben;
+- **Nach Updates suchen** steht vorn und ist hervorgehoben, **Neu installieren** tritt zurück: Der eine Knopf wird ständig gebraucht, der andere selten. Ein gefundenes Addon-Update wird sofort eingespielt, ohne zweite Rückfrage – wer danach sucht, will es auch haben. Eine **Rückstufung** auf eine ältere Fassung im Repository bleibt davon ausgenommen und Handarbeit;
+- optionaler Autostart mit Windows;
+- hält sich selbst aktuell – **Nach Updates suchen** prüft Addon und Installer;
+- hat ein eigenes Dateisymbol im Explorer, erzeugt aus dem Logo in sieben Größen von 16 bis 256 Pixeln.
 
 ## Bereich „Warcraft Logs"
 
@@ -37,6 +40,27 @@ Die Ereignisse werden über den ganzen Report gelesen, nicht nur über die Bossk
 
 Verbrauchsgegenstände werden als reine `Spell-ID:Anzahl`-Paare übertragen. In welche Kategorie eine ID fällt, entscheidet allein `GC.Consumables` im Addon; unbekannte IDs werden dort ignoriert und erzeugen nie falsche Zahlen.
 
+## Bereich „Raidabend aus dem Combat Log“
+
+Der netzfreie zweite Weg zur Raidauswertung: **Dateien suchen** listet die
+`WoWCombatLog.txt` aus `<Spielversion>\Logs\`, neueste zuerst, **Import
+erzeugen** wertet sie aus und legt den Importcode in die Zwischenablage –
+ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Die Datei bleibt
+auf dem Rechner.
+
+Der Nutzen ist die Rückwirkung: Aufgezeichnet wird im Spiel mit `/combatlog`,
+und die Datei hat den ganzen Abend – auch wenn niemand **Sitzung starten**
+gedrückt hat. Ein Raidabend ist dabei ein Block aus Bosskämpfen; längere
+Pausen trennen zwei Abende, eine Logdatei läuft über mehrere Abende weiter.
+
+Gelesen wird streamend: Die Testdatei war 46 MB groß, am Stück geladen wäre
+sie ein Problem. Erkannt werden `ENCOUNTER_START`/`ENCOUNTER_END` samt
+übersetztem Bossnamen; fehlt einem Versuch die Schlusszeile, gilt er als
+Wipe. Die Auswertung ist eine eigene Quelle (**Combat Log**) und wird nie mit
+Live- oder Warcraft-Logs-Zahlen verrechnet. Die Klasse steht im Combat Log
+nicht, Teilnehmer von dort erscheinen deshalb ohne Klassenfarbe statt mit
+einer geratenen Klasse.
+
 ## Selbsttest ohne Zugangsdaten
 
 ```bash
@@ -58,4 +82,6 @@ Danach `Installer/dist/version.txt` auf die neue Installer-Version setzen – da
 
 Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wird die neue Fassung daneben abgelegt und die alte umbenannt. Die neue Instanz wartet unsichtbar, bis die alte vollständig beendet ist; dadurch sind nie zwei Installer-Fenster gleichzeitig offen. Beim nächsten Start verschwindet die umbenannte Datei.
 
-Aktueller Stand: Installer 1.0.3, Addon 0.9.22.
+Gebraucht wird das SDK zur `<TargetFramework>`-Zeile der `.csproj` – aktuell **net10.0-windows**, also .NET-SDK 10. Ein älteres SDK bricht den Bau mit einer Meldung über das unbekannte Zielframework ab.
+
+Aktueller Stand: Installer 1.0.5, Addon 0.9.45.
