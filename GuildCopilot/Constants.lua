@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.36",
+    VERSION = "0.9.37",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -44,6 +44,8 @@ GC.Capabilities = {
     "wclimport",
     -- inventory1: Materialbestand und Gildenbank-Abgleich ueber "B|".
     "inventory1",
+    -- gearexempt1: versteht ausgenommene Ausruestungsplaetze im Snapshot.
+    "gearexempt1",
 }
 
 GC.ProfessionOptions = {
@@ -173,30 +175,317 @@ GC.GearVerdicts = {
     IMPROVABLE = { key = "IMPROVABLE", label = "Verbesserbar", order = 3 },
     MISSING = { key = "MISSING", label = "Fehlt", order = 4 },
     UNKNOWN = { key = "UNKNOWN", label = "Unbekannt", order = 5 },
+    -- Ausdrueckliche Ausnahme: Farmgear, Widerstandsset oder ein besonderes
+    -- Encounter-Set. Der Slot wird weiter angezeigt, zaehlt aber nicht als Fund.
+    EXEMPT = { key = "EXEMPT", label = "Ausnahme", order = 6 },
 }
+
+-- Gruende, aus denen ein Slot von der Pruefung ausgenommen wird. Sie stehen
+-- als Text im Tooltip, damit eine Ausnahme nachvollziehbar bleibt und nicht
+-- wie ein stiller Trick wirkt.
+GC.GearExemptionReasons = {
+    { key = "FARM", label = "Farmgear", help = "Ausrüstung außerhalb des Raids." },
+    { key = "RESIST", label = "Widerstandsset", help = "Widerstandsteil für einen bestimmten Kampf." },
+    { key = "ENCOUNTER", label = "Encounter-Set", help = "Sonderausrüstung für einen Bosskampf." },
+}
+
+GC.GearExemptionReasonByKey = {}
+for _, reason in ipairs(GC.GearExemptionReasons) do
+    GC.GearExemptionReasonByKey[reason.key] = reason
+end
+
+-- Spielarchetypen für die Bewertung von Verzauberungen.
+--
+-- Die Rolle (TANK/HEALER/DAMAGER) ist dafür zu grob: Ein Schattenpriester und
+-- ein Schurke sind beide DAMAGER, brauchen aber völlig andere Verzauberungen.
+-- Der Archetyp trennt genau dort, wo sich die Empfehlungen unterscheiden.
+--
+-- Jäger stehen bewusst bei den physischen Damage-Dealern: Sie verzaubern ihre
+-- Rüstung mit denselben Beweglichkeits- und Angriffskraftwerten wie Schurken.
+GC.EnchantArchetypes = {
+    CASTER_DPS = { key = "CASTER_DPS", label = "Zauber-Schaden" },
+    HEALER = { key = "HEALER", label = "Heilung" },
+    PHYSICAL_DPS = { key = "PHYSICAL_DPS", label = "Physischer Schaden" },
+    TANK = { key = "TANK", label = "Tank" },
+}
+
+-- Welche Archetypen zu einer Spec gehören. Wildheit steht in beiden Listen,
+-- weil derselbe Druide als Katze und als Bär spielt - eine Verzauberung, die
+-- für einen von beiden taugt, ist für ihn deshalb nie "falsch".
+GC.SpecArchetypes = {
+    ["WARRIOR:1"] = { "PHYSICAL_DPS" },
+    ["WARRIOR:2"] = { "PHYSICAL_DPS" },
+    ["WARRIOR:3"] = { "TANK" },
+    ["PALADIN:1"] = { "HEALER" },
+    -- Schutz-Paladine verzaubern auf Zaubermacht, weil ihre Bedrohung daran
+    -- haengt: Die BiS-Liste nennt Glyphe der Macht, Grosse Zaubermacht auf den
+    -- Handschuhen und den Runenzauberfaden. Ohne den zweiten Archetyp wuerde
+    -- der Audit genau die empfohlene Ausruestung nicht wiedererkennen.
+    ["PALADIN:2"] = { "TANK", "CASTER_DPS" },
+    ["PALADIN:3"] = { "PHYSICAL_DPS" },
+    ["HUNTER:1"] = { "PHYSICAL_DPS" },
+    ["HUNTER:2"] = { "PHYSICAL_DPS" },
+    ["HUNTER:3"] = { "PHYSICAL_DPS" },
+    ["ROGUE:1"] = { "PHYSICAL_DPS" },
+    ["ROGUE:2"] = { "PHYSICAL_DPS" },
+    ["ROGUE:3"] = { "PHYSICAL_DPS" },
+    ["PRIEST:1"] = { "HEALER" },
+    ["PRIEST:2"] = { "HEALER" },
+    ["PRIEST:3"] = { "CASTER_DPS" },
+    ["SHAMAN:1"] = { "CASTER_DPS" },
+    ["SHAMAN:2"] = { "PHYSICAL_DPS" },
+    ["SHAMAN:3"] = { "HEALER" },
+    ["MAGE:1"] = { "CASTER_DPS" },
+    ["MAGE:2"] = { "CASTER_DPS" },
+    ["MAGE:3"] = { "CASTER_DPS" },
+    ["WARLOCK:1"] = { "CASTER_DPS" },
+    ["WARLOCK:2"] = { "CASTER_DPS" },
+    ["WARLOCK:3"] = { "CASTER_DPS" },
+    ["DRUID:1"] = { "CASTER_DPS" },
+    ["DRUID:2"] = { "PHYSICAL_DPS", "TANK" },
+    ["DRUID:3"] = { "HEALER" },
+}
+
+-- Content-Phasen von TBC. Der Regelsatz nennt je Regel die Phase, ab der eine
+-- Verzauberung überhaupt zu haben ist; die Gilde stellt ihre laufende Phase in
+-- den Einstellungen ein. Eine Verzauberung aus einer späteren Phase wird
+-- deshalb nie eingefordert, solange die Gilde noch nicht so weit ist.
+GC.ContentPhases = {
+    { key = "T4", label = "T4 – Karazhan, Gruul, Magtheridon", order = 1 },
+    { key = "T5", label = "T5 – Serpentinhöhle, Auge", order = 2 },
+    { key = "T6", label = "T6 – Hyjal, Schwarzer Tempel", order = 3 },
+    { key = "T6.5", label = "T6.5 – Sonnenbrunnen", order = 4 },
+}
+
+GC.ContentPhaseByKey = {}
+for _, phase in ipairs(GC.ContentPhases) do
+    GC.ContentPhaseByKey[phase.key] = phase
+end
+
+GC.DefaultContentPhase = "T5"
 
 -- Versionierte Regeln für die Bewertung vorhandener Verzauberungen.
 --
 -- Format je Eintrag:
 --   [enchantID] = {
---       verdict = "OPTIMAL" | "SOLID" | "IMPROVABLE",
---       name    = "Anzeigename der Verzauberung",
---       slots   = { "HANDS", "BACK" },   -- optional, sonst für alle Slots
---       roles   = { "TANK", "HEALER" },  -- optional, sonst für alle Rollen
---       source  = "Quelle der Empfehlung",
+--       verdict    = "OPTIMAL" | "SOLID" | "IMPROVABLE",
+--       name       = "Anzeigename der Verzauberung",
+--       slots      = { "HANDS", "BACK" },      -- optional, sonst für alle Slots
+--       roles      = { "TANK", "HEALER" },     -- optional, sonst für alle Rollen
+--       archetypes = { "CASTER_DPS" },         -- optional, sonst für alle
+--       phase      = "T4",                     -- ab welcher Phase erhältlich
+--       source     = "Quelle der Empfehlung",
 --   }
 --
--- Die Tabelle ist bewusst leer: Enchant-IDs müssen aus einer belegbaren Quelle
--- übernommen werden, sonst bewertet der Audit falsch. Unbekannte IDs werden
--- als "Unbekannt" ausgewiesen und nie als schlecht gewertet. Fehlende
--- Verzauberungen und leere Sockel erkennt der Audit auch ohne diese Regeln
--- exakt, weil sie direkt aus dem Item-Link hervorgehen.
+-- Jede Enchant-ID unten ist einzeln auf ihrer Wowhead-Seite nachgeschlagen: die
+-- Zahl ist die Klammer-ID aus der Zeile "Enchant Item: ... (ID)", also genau
+-- das, was auch im Item-Link steht. Geraten wurde nichts - beim Nachschlagen
+-- haben sich mehrere aus dem Gedaechtnis angenommene Spell-IDs als falsch
+-- erwiesen und wurden verworfen.
+--
+-- Welche Verzauberung fuer welchen Archetyp die beste ist, stammt aus den
+-- BiS-Listen von wowtbc.gg (Stand Phase T5).
+--
+-- Die Stufen bedeuten:
+--   OPTIMAL     - aktuelle Empfehlung fuer diesen Archetyp;
+--   SOLID       - wirkungsvolle, raidtaugliche Alternative;
+--   IMPROVABLE  - funktional, aber fuer den Raid deutlich schwaecher
+--                 (PvP-Werte und Widerstandsverzauberungen).
+--
+-- Was hier fehlt, wird nicht als schlecht gewertet: Unbekannte IDs gelten je
+-- nach Einstellung als anerkannt oder als "Unbekannt", nie als Fund.
 GC.EnchantRuleSet = {
-    version = 1,
-    phase = "",
-    source = "",
-    rules = {},
+    version = 2,
+    phase = "T5",
+    source = "wowhead.com (IDs) + wowtbc.gg (Empfehlungen)",
+    rules = {
+        -- === Kopf: Arkanum/Glyphe aus dem Ruf ===========================
+        [3002] = { verdict = "OPTIMAL", name = "Glyph of Power",
+            slots = { "HEAD" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [3001] = { verdict = "OPTIMAL", name = "Glyph of Renewal",
+            slots = { "HEAD" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2999] = { verdict = "OPTIMAL", name = "Glyph of the Defender",
+            slots = { "HEAD" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [3003] = { verdict = "OPTIMAL", name = "Glyph of Ferocity",
+            slots = { "HEAD" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [3000] = { verdict = "IMPROVABLE", name = "Glyph of the Wild",
+            slots = { "HEAD" }, phase = "T4",
+            source = "PvP-Werte (Abhärtung) zählen im Raid nicht" },
+
+        -- === Schulter: Inschriften ======================================
+        [2995] = { verdict = "OPTIMAL", name = "Greater Inscription of the Orb",
+            slots = { "SHOULDER" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2997] = { verdict = "OPTIMAL", name = "Greater Inscription of the Blade",
+            slots = { "SHOULDER" }, archetypes = { "PHYSICAL_DPS", "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2993] = { verdict = "OPTIMAL", name = "Greater Inscription of the Oracle",
+            slots = { "SHOULDER" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2991] = { verdict = "OPTIMAL", name = "Greater Inscription of the Knight",
+            slots = { "SHOULDER" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2996] = { verdict = "SOLID", name = "Inscription of the Blade",
+            slots = { "SHOULDER" }, archetypes = { "PHYSICAL_DPS", "TANK" }, phase = "T4",
+            source = "kleinere Fassung der Großen Inschrift" },
+        [2994] = { verdict = "SOLID", name = "Inscription of the Orb",
+            slots = { "SHOULDER" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "kleinere Fassung der Großen Inschrift" },
+        [2998] = { verdict = "IMPROVABLE", name = "Inscription of Endurance",
+            slots = { "SHOULDER" }, phase = "T4",
+            source = "Widerstandsinschrift, außerhalb von Widerstandskämpfen schwach" },
+
+        -- === Rücken =====================================================
+        [2621] = { verdict = "OPTIMAL", name = "Cloak - Subtlety",
+            slots = { "BACK" }, archetypes = { "CASTER_DPS", "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [368] = { verdict = "OPTIMAL", name = "Cloak - Greater Agility",
+            slots = { "BACK" }, archetypes = { "PHYSICAL_DPS", "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2664] = { verdict = "IMPROVABLE", name = "Cloak - Major Resistance",
+            slots = { "BACK" }, phase = "T4",
+            source = "Widerstandsverzauberung, nur für Widerstandskämpfe" },
+
+        -- === Brust ======================================================
+        [2661] = { verdict = "OPTIMAL", name = "Chest - Exceptional Stats",
+            slots = { "CHEST" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [1144] = { verdict = "SOLID", name = "Chest - Major Spirit",
+            slots = { "CHEST" }, archetypes = { "HEALER", "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+        [3150] = { verdict = "SOLID", name = "Chest - Restore Mana Prime",
+            slots = { "CHEST" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS für Heilig-Paladine" },
+        [2659] = { verdict = "SOLID", name = "Chest - Exceptional Health",
+            slots = { "CHEST" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS für Schutz-Paladine" },
+        [2933] = { verdict = "IMPROVABLE", name = "Chest - Major Resilience",
+            slots = { "CHEST" }, phase = "T4",
+            source = "PvP-Werte (Abhärtung) zählen im Raid nicht" },
+
+        -- === Handgelenke ================================================
+        [2650] = { verdict = "OPTIMAL", name = "Bracer - Spellpower",
+            slots = { "WRIST" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2617] = { verdict = "OPTIMAL", name = "Bracer - Superior Healing",
+            slots = { "WRIST" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [1593] = { verdict = "OPTIMAL", name = "Bracer - Assault",
+            slots = { "WRIST" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2648] = { verdict = "OPTIMAL", name = "Bracer - Major Defense",
+            slots = { "WRIST" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2647] = { verdict = "SOLID", name = "Bracer - Brawn",
+            slots = { "WRIST" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+        -- Dieselbe Enchant-ID sitzt auf Handgelenken und Stiefeln: Die ID
+        -- beschreibt den Effekt (+12 Ausdauer), nicht den Ausrüstungsplatz.
+        -- Beide Slots gehören deshalb in dieselbe Regel.
+        [2649] = { verdict = "SOLID", name = "Fortitude (+12 Ausdauer)",
+            slots = { "WRIST", "FEET" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+
+        -- === Hände ======================================================
+        [2937] = { verdict = "OPTIMAL", name = "Gloves - Major Spellpower",
+            slots = { "HANDS" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2322] = { verdict = "OPTIMAL", name = "Gloves - Major Healing",
+            slots = { "HANDS" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [1594] = { verdict = "OPTIMAL", name = "Gloves - Assault",
+            slots = { "HANDS" }, archetypes = { "PHYSICAL_DPS", "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2564] = { verdict = "OPTIMAL", name = "Gloves - Superior Agility",
+            slots = { "HANDS" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [684] = { verdict = "SOLID", name = "Gloves - Major Strength",
+            slots = { "HANDS" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+        [2934] = { verdict = "SOLID", name = "Gloves - Blasting",
+            slots = { "HANDS" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+        [2935] = { verdict = "SOLID", name = "Gloves - Spell Strike",
+            slots = { "HANDS" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg Alternative, solange Trefferwertung fehlt" },
+
+        -- === Beine: Beinrüstung und Zauberfaden =========================
+        [2748] = { verdict = "OPTIMAL", name = "Runic Spellthread",
+            slots = { "LEGS" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2746] = { verdict = "OPTIMAL", name = "Golden Spellthread",
+            slots = { "LEGS" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [3012] = { verdict = "OPTIMAL", name = "Nethercobra Leg Armor",
+            slots = { "LEGS" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [3013] = { verdict = "OPTIMAL", name = "Nethercleft Leg Armor",
+            slots = { "LEGS" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2747] = { verdict = "SOLID", name = "Mystic Spellthread",
+            slots = { "LEGS" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "kleinere Fassung des Runenzauberfadens" },
+
+        -- === Füße =======================================================
+        [2939] = { verdict = "OPTIMAL", name = "Boots - Cat's Swiftness",
+            slots = { "FEET" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2940] = { verdict = "OPTIMAL", name = "Boots - Boar's Speed",
+            slots = { "FEET" }, archetypes = { "TANK", "CASTER_DPS", "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2657] = { verdict = "SOLID", name = "Boots - Dexterity",
+            slots = { "FEET" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS für Vergelter-Paladine" },
+
+        -- === Waffe ======================================================
+        [2673] = { verdict = "OPTIMAL", name = "Weapon - Mongoose",
+            slots = { "MAINHAND", "OFFHAND" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2671] = { verdict = "OPTIMAL", name = "Weapon - Sunfire",
+            slots = { "MAINHAND" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2672] = { verdict = "OPTIMAL", name = "Weapon - Soulfrost",
+            slots = { "MAINHAND" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS, gleichwertig zu Sunfire" },
+        [2343] = { verdict = "OPTIMAL", name = "Weapon - Major Healing",
+            slots = { "MAINHAND" }, archetypes = { "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2669] = { verdict = "OPTIMAL", name = "Weapon - Major Spellpower",
+            slots = { "MAINHAND" }, archetypes = { "CASTER_DPS" }, phase = "T4",
+            source = "wowtbc.gg BiS für Elementar-Schamanen und Schutz-Paladine" },
+        [963] = { verdict = "IMPROVABLE", name = "Weapon - Major Striking",
+            slots = { "MAINHAND", "OFFHAND" }, archetypes = { "PHYSICAL_DPS" }, phase = "T4",
+            source = "deutlich schwächer als Mongoose" },
+
+        -- === Schild =====================================================
+        [2655] = { verdict = "SOLID", name = "Shield - Shield Block",
+            slots = { "OFFHAND" }, archetypes = { "TANK" }, phase = "T4",
+            source = "wowtbc.gg Alternative" },
+
+        -- === Ringe (nur für Verzauberer selbst) =========================
+        [2928] = { verdict = "OPTIMAL", name = "Ring - Spellpower",
+            slots = { "FINGER1", "FINGER2" }, archetypes = { "CASTER_DPS", "HEALER" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2929] = { verdict = "OPTIMAL", name = "Ring - Striking",
+            slots = { "FINGER1", "FINGER2" }, archetypes = { "PHYSICAL_DPS", "TANK" }, phase = "T4",
+            source = "wowtbc.gg BiS" },
+        [2931] = { verdict = "SOLID", name = "Ring - Stats",
+            slots = { "FINGER1", "FINGER2" }, phase = "T4",
+            source = "allgemeine Alternative für alle Rollen" },
+    },
 }
+
+-- Bekannte Luecke: Die Aldor-Schulterinschriften (Vengeance, Faith,
+-- Discipline) haben eigene Enchant-IDs, die sich bei der Recherche nicht
+-- belegen liessen - nur die Scryer-Gegenstuecke (Blade, Oracle, Orb) und die
+-- rangunabhaengige Inschrift des Ritters stehen oben. Aldor-Inschriften werden
+-- deshalb nicht falsch bewertet, sondern gar nicht: Sie gelten als unbewertete
+-- Verzauberung und damit als in Ordnung. Wer sie einstufen will, klickt sie in
+-- der Ausruestungspruefung einmal an - die Gildenregel sticht diesen Satz.
 
 -- Entscheidungen zu Pflegevorschlägen. Sie werden gildenweit synchronisiert,
 -- damit nicht mehrere Offiziere denselben Fall doppelt bearbeiten.

@@ -298,6 +298,20 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.37 – Der Regelsatz ist nicht mehr leer
+
+Seit 0.6 stand im Gear Audit dieselbe Lücke: Die Enchant-IDs müssten „aus einer belegbaren Quelle" kommen, und wowtbc.gg wie Wowhead antworteten auf Skriptabrufe mit HTTP 403. Beides gilt weiter – aber nicht für einen Abruf, der die Seite wie ein Leser holt.
+
+- **49 Enchant-IDs, jede einzeln nachgeschlagen.** Genommen wird die Zahl aus der Wowhead-Zeile „Enchant Item: … (ID)": genau das, was auch im Item-Link steht. Geraten wurde nichts, und das war nötig – von den aus dem Gedächtnis angenommenen Spell-IDs waren mehrere falsch (27906 ist nicht Assault, sondern Major Defense; 33993 nicht Superior Agility, sondern Blasting; 27946 nicht Major Stamina, sondern Shield Block). Jede davon hätte still falsch bewertet;
+- **welche Verzauberung für wen gut ist, stammt aus den BiS-Listen von wowtbc.gg** – abgefragt über neun Specs, nicht über eine. Das war der Unterschied: Erst der Schutz-Paladin zeigte, dass ein Tank auf **Zaubermacht** verzaubert, und erst der Jäger brachte den Distanz-Slot ins Spiel. Aus einer einzelnen Spec wäre ein Regelsatz entstanden, der die halbe Gilde falsch bewertet;
+- **bewertet wird nach Archetyp, nicht nach Rolle.** Schattenpriester und Schurke sind beide `DAMAGER`; die Rolle taugt deshalb nicht als Maßstab. Unterschieden werden Zauber-Schaden, Heilung, physischer Schaden und Tank. Schutz-Paladine tragen beide Kennzeichen, Wildheits-Druiden ebenfalls;
+- **eine Regel, die nicht passt, gilt nicht.** Anderer Slot, anderer Archetyp, spätere Phase: Dann wird die Verzauberung behandelt, als stünde sie nirgends – nie als schlecht. Vorher lieferte ein Slot-Fehltreffer ein hartes „Unbekannt", was auf der Ausrüstungsseite wie ein Fund aussah;
+- **eine Enchant-ID hängt am Effekt, nicht am Ausrüstungsplatz:** `2649` ist „+12 Ausdauer" und sitzt sowohl auf Handgelenken als auch auf Stiefeln. Regeln führen deshalb alle Slots, auf denen ihr Effekt vorkommt;
+- **Content-Phase je Gilde** (T4 bis T6.5, Vorgabe T5, `/gcp phase`): Jede Regel nennt die Phase, ab der es sie überhaupt gibt. Was noch nicht existiert, wird nicht eingefordert. Die Phase hängt additiv als Feld 25 am Gildenprofil; ein älterer Client ohne dieses Feld dreht sie nicht zurück;
+- **Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets** (Rechtsklick auf die eigene Slotzeile). Der Platz bleibt sichtbar und zählt nicht als Fund. Sie wandern mit dem Snapshot zu den anderen, aber nur als **freiwilliges sechstes Feld**: Der Empfang prüft die Feldzahl streng, deshalb bleibt ein Paket ohne Ausnahmen unverändert fünffeldrig und für ältere Clients lesbar. Ist das Feld da, muss es stimmen – ein unlesbarer Eintrag lässt das ganze Paket durchfallen, statt halb übernommen zu werden.
+
+Bekannte Lücke: Die **Aldor**-Schulterinschriften (Vengeance, Faith, Discipline) ließen sich nicht belegen; nur die Scryer-Gegenstücke (Blade, Oracle, Orb) und die rangunabhängige Inschrift des Ritters stehen im Satz. Aldor-Inschriften werden deshalb nicht falsch bewertet, sondern gar nicht – sie gelten als unbewertet und damit als in Ordnung, und ein Klick stuft sie gildenweit ein.
+
 ## 0.9.36 – Spieler zählen statt Charaktere
 
 Die Kachel **MIT ADDON** und die Kopfzeile zählten Charaktere: wer mit Main und zwei Twinks unterwegs war, erschien als drei Nutzer.
@@ -421,16 +435,16 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
-## Offene Punkte (Stand 0.9.36)
+## Offene Punkte (Stand 0.9.37)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 
-- **Enchant-Regelsatz**: wird seit 0.8.1 in der Gilde selbst gepflegt; ausgeliefert wird eine leere Tabelle. wowtbc.gg und Wowhead lassen sich nicht automatisch auslesen (beide antworten mit HTTP 403), und die Guides nennen nur englische Namen, während der Item-Link eine Enchant-ID führt.
-- **Regelsatz ohne Phase und Ausnahmen**: Gildeneigene Bewertungen können je Spec oder allgemein gepflegt werden. Content-Phase, Farm-/Widerstandssets sowie zusätzliche Regeln nach Slot oder Rolle fehlen weiterhin.
+- **Aldor-Schulterinschriften**: Die drei Aldor-Varianten fehlen im ausgelieferten Regelsatz, weil sich ihre Enchant-IDs nicht belegen ließen. Sie werden dadurch nicht falsch bewertet, sondern gar nicht.
+- **Phasenauswahl nur über den Slash-Befehl**: `/gcp phase` stellt die Content-Phase um und synchronisiert sie gildenweit. Ein Auswahlfeld auf der Einstellungsseite fehlt noch.
 - **Consumable-Spell-IDs**: Der Kernbestand wurde gegen einen echten SSC/TK-Report geprüft, ist damit aber nicht vollständig. Essen fehlt in der WCL-Auswertung, weil die „Sattgegessen“-IDs je Gericht abweichen; live erkennt das Addon die Aura zusätzlich am Namen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
 - **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
 - **Companion-Abfragen für die WCL-Nachanalyse**: seit 0.9.17 gegen echte Reports gelaufen und dabei viermal korrigiert; Einzelheiten oben unter „Nachanalyse aus Warcraft Logs". Erprobt ist bislang ein einzelner SSC/TK-Report – Karazhan, Gruul und Magtheridon sind noch nicht gegengeprüft.
-- **Gear Audit**: Ausnahmen für Farmgear und Widerstandssets fehlen. Die eigenen Messdaten werden seit 0.9.19 automatisch in der Gilde verteilt; **Gruppe prüfen** bleibt als bewusster Inspect-Rückfall für Mitglieder ohne Addon oder ohne frischen Snapshot.
+- **Gear Audit**: Die eigenen Messdaten werden seit 0.9.19 automatisch in der Gilde verteilt; **Gruppe prüfen** bleibt als bewusster Inspect-Rückfall für Mitglieder ohne Addon oder ohne frischen Snapshot. Ausnahmen für Farmgear und Widerstandssets sind seit 0.9.37 umgesetzt.
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
 - **Profilbestätigung**: Erfolg und Validierungsfehler erscheinen derzeit im Chat; ein dauerhaft sichtbarer Status direkt am Profil sowie ein eigener, vom Bewerberton getrennter Bestätigungssound fehlen.

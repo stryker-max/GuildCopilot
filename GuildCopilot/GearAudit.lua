@@ -258,6 +258,74 @@ function GC.GearAudit:AuditsSelfAutomatically()
     return true
 end
 
+-- === Ausnahmen je Slot =====================================================
+--
+-- Nicht jeder angelegte Gegenstand gehoert zur Raidausruestung: Farmgear,
+-- Widerstandsteile und Encounter-Sets werden bewusst nicht verzaubert. Ohne
+-- Ausnahme meldet der Audit dort dauerhaft dieselben Funde, und wer diese
+-- Meldung nicht abstellen kann, hoert irgendwann auf hinzusehen.
+--
+-- Die Ausnahme setzt jeder fuer seine eigene Ausruestung. Sie behauptet nichts
+-- ueber Qualitaet, sie sagt nur: dieser Slot gehoert nicht zur Wertung.
+
+function GC.GearAudit:GetSlotExceptions()
+    local settings = GC.DB:GetSettings()
+    if not settings.gearAudit then
+        settings.gearAudit = {}
+    end
+    settings.gearAudit.slotExceptions = settings.gearAudit.slotExceptions or {}
+    return settings.gearAudit.slotExceptions
+end
+
+function GC.GearAudit:IsSlotExempt(slotKey)
+    local reason = self:GetSlotExceptions()[slotKey]
+    return type(reason) == "string" and GC.GearExemptionReasonByKey[reason] ~= nil
+end
+
+-- reasonKey = nil hebt die Ausnahme wieder auf.
+function GC.GearAudit:SetSlotException(slotKey, reasonKey)
+    local known = false
+    for _, slot in ipairs(GC.GearSlots) do
+        if slot.key == slotKey then
+            known = true
+            break
+        end
+    end
+    if not known then
+        return false, "Unbekannter Ausrüstungsplatz."
+    end
+    if reasonKey ~= nil and not GC.GearExemptionReasonByKey[reasonKey] then
+        return false, "Unbekannter Ausnahmegrund."
+    end
+
+    local exceptions = self:GetSlotExceptions()
+    exceptions[slotKey] = reasonKey
+    self:AuditSelf(true, true)
+    GC:FireCallback("GEAR_AUDIT_UPDATED")
+    if reasonKey then
+        return true, "Der Ausrüstungsplatz zählt jetzt als "
+            .. GC.GearExemptionReasonByKey[reasonKey].label .. " und wird nicht mehr gemeldet."
+    end
+    return true, "Der Ausrüstungsplatz wird wieder geprüft."
+end
+
+-- Reihum durch die Gruende und wieder zurueck auf "keine Ausnahme".
+function GC.GearAudit:CycleSlotException(slotKey)
+    local current = self:GetSlotExceptions()[slotKey]
+    local nextReason = GC.GearExemptionReasons[1].key
+    if current then
+        nextReason = nil
+        for index, reason in ipairs(GC.GearExemptionReasons) do
+            if reason.key == current then
+                local following = GC.GearExemptionReasons[index + 1]
+                nextReason = following and following.key or nil
+                break
+            end
+        end
+    end
+    return self:SetSlotException(slotKey, nextReason)
+end
+
 -- === Bewertungen je Spec ===================================================
 --
 -- Dieselbe Verzauberung ist nicht fuer jeden gleich gut: Feingefuehl auf der
@@ -422,6 +490,101 @@ function GC.GearAudit:GetRoleForProfile(profile)
     return spec and spec.role or nil
 end
 
+-- Welche Archetypen zu einer Spec gehoeren. Ohne bestaetigtes Profil bleibt das
+-- leer - dann greift keine archetypgebundene Regel, statt zu raten.
+function GC.GearAudit:GetArchetypesForSpec(specKey)
+    if type(specKey) ~= "string" or specKey == "" then
+        return nil
+    end
+    return GC.SpecArchetypes[specKey]
+end
+
+-- Die Phase, in der die Gilde gerade spielt. Sie entscheidet nur darueber, ob
+-- eine Regel schon gilt: Was es im Spiel noch gar nicht gibt, darf nicht als
+-- Empfehlung erscheinen.
+function GC.GearAudit:GetContentPhase()
+    local guildData = GC.DB:GetGuild()
+    local stored = guildData and guildData.profile and guildData.profile.contentPhase
+    if type(stored) == "string" and GC.ContentPhaseByKey[stored] then
+        return stored
+    end
+    return GC.DefaultContentPhase
+end
+
+function GC.GearAudit:SetContentPhase(phaseKey)
+    if not GC.ContentPhaseByKey[phaseKey] then
+        return false, "Unbekannte Phase."
+    end
+    if not self:CanEditEnchantRules() then
+        return false, "Dein Gildenrang darf die Phase nicht ändern."
+    end
+    local guildData = GC.DB:GetGuild()
+    guildData.profile.contentPhase = phaseKey
+    self:OnEnchantRulesChanged()
+    return true, "Die Gilde spielt jetzt in Phase " .. GC.ContentPhaseByKey[phaseKey].label .. "."
+end
+
+-- Eine Regel aus einer spaeteren Phase gilt noch nicht.
+function GC.GearAudit:RuleAppliesToPhase(rule)
+    if not rule or not rule.phase then
+        return true
+    end
+    local rulePhase = GC.ContentPhaseByKey[rule.phase]
+    local guildPhase = GC.ContentPhaseByKey[self:GetContentPhase()]
+    if not rulePhase or not guildPhase then
+        return true
+    end
+    return rulePhase.order <= guildPhase.order
+end
+
+local function ListContains(list, value)
+    if type(list) ~= "table" or value == nil then
+        return false
+    end
+    for _, entry in ipairs(list) do
+        if entry == value then
+            return true
+        end
+    end
+    return false
+end
+
+-- Passt die Regel zu Slot, Rolle, Archetyp und Phase des Geprueften?
+--
+-- Passt sie nicht, wird sie schlicht nicht angewendet. Sie gilt dann als
+-- "keine Regel vorhanden" - eine Verzauberung wird nie deshalb schlecht
+-- bewertet, weil eine fremde Regel nicht auf sie passt.
+function GC.GearAudit:RuleApplies(rule, slot, role, specKey)
+    if not rule then
+        return false
+    end
+    if rule.slots and not ListContains(rule.slots, slot.key) then
+        return false
+    end
+    if rule.roles and role and not ListContains(rule.roles, role) then
+        return false
+    end
+    if rule.archetypes then
+        local archetypes = self:GetArchetypesForSpec(specKey)
+        if not archetypes then
+            -- Ohne bekannte Spec laesst sich der Archetyp nicht bestimmen.
+            -- Dann gilt eine archetypgebundene Regel bewusst nicht.
+            return false
+        end
+        local matches = false
+        for _, archetype in ipairs(archetypes) do
+            if ListContains(rule.archetypes, archetype) then
+                matches = true
+                break
+            end
+        end
+        if not matches then
+            return false
+        end
+    end
+    return self:RuleAppliesToPhase(rule)
+end
+
 function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKey)
     if (tonumber(enchantID) or 0) <= 0 then
         if slot.enchantRequired then
@@ -444,7 +607,15 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKe
         return guildRule.verdict, label .. "  •  " .. scope .. ", von " .. (guildRule.by or "?")
     end
 
-    local rule = GC.EnchantRuleSet.rules[enchantID]
+    local rule = GC.EnchantRuleSet.rules[tonumber(enchantID)]
+    -- Eine Regel, die auf diesen Spieler nicht passt (anderer Slot, andere
+    -- Rolle, anderer Archetyp, spaetere Phase), wird behandelt, als gaebe es
+    -- sie nicht. Sonst wuerde ein Schurken-Handschuhwert einen Magier
+    -- schlechter dastehen lassen, obwohl ueber ihn gar nichts ausgesagt ist.
+    if rule and not self:RuleApplies(rule, slot, role, specKey) then
+        rule = nil
+    end
+
     if not rule then
         local label = (enchantName and enchantName ~= "")
             and enchantName
@@ -458,39 +629,24 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKe
         return "UNKNOWN", "Verzauberung " .. enchantID .. " ist in der Regelliste noch nicht bewertet."
     end
 
-    if rule.slots then
-        local matches = false
-        for _, slotKey in ipairs(rule.slots) do
-            if slotKey == slot.key then
-                matches = true
-                break
-            end
-        end
-        if not matches then
-            return "UNKNOWN", "Regel gilt nicht für diesen Slot."
-        end
+    local reason = enchantName
+    if not reason or reason == "" then
+        reason = rule.name or ("Verzauberung " .. enchantID)
     end
-    if rule.roles and role then
-        local matches = false
-        for _, ruleRole in ipairs(rule.roles) do
-            if ruleRole == role then
-                matches = true
-                break
-            end
-        end
-        if not matches then
-            return "UNKNOWN", "Regel gilt nicht für diese Rolle."
-        end
-    end
-
-    local reason = rule.name or enchantName or ("Verzauberung " .. enchantID)
     if rule.source and rule.source ~= "" then
         reason = reason .. "  •  Quelle: " .. rule.source
     end
     return rule.verdict or "UNKNOWN", reason
 end
 
-function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readItemID)
+function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readItemID, exceptions)
+    -- Fuer die eigene Ausruestung gelten die selbst gesetzten Ausnahmen. Bei
+    -- fremden Spielern kommen sie aus deren Snapshot; wer keine mitschickt,
+    -- wird vollstaendig geprueft.
+    if exceptions == nil and (source or "INSPECT") == "SELF" then
+        exceptions = self:GetSlotExceptions()
+    end
+    exceptions = exceptions or {}
     local profile = GC.Roster:GetProfile(playerName)
     local role = self:GetRoleForProfile(profile)
     -- Die Spec entscheidet ueber die Bewertung und wandert deshalb mit in die
@@ -511,6 +667,7 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readIt
         unknownEnchants = 0,
         emptySlots = 0,
         unreadableSlots = 0,
+        exemptSlots = 0,
     }
 
     for _, slot in ipairs(GC.GearSlots) do
@@ -523,7 +680,21 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readIt
         }
 
         entry.required = slot.enchantRequired == true
-        if not parsed then
+
+        -- Ein ausgenommener Slot wird weiter angezeigt, damit sichtbar bleibt,
+        -- was dort steckt - er zaehlt nur nicht als Fund.
+        local exemptionReason = exceptions[slot.key]
+        if type(exemptionReason) == "string" and GC.GearExemptionReasonByKey[exemptionReason] then
+            entry.exempt = exemptionReason
+            entry.verdict = "EXEMPT"
+            entry.reason = GC.GearExemptionReasonByKey[exemptionReason].label
+                .. ": zählt nicht als Fund."
+            if parsed then
+                entry.itemID = parsed.itemID
+                entry.enchantID = parsed.enchantID
+            end
+            audit.exemptSlots = audit.exemptSlots + 1
+        elseif not parsed then
             local knownItemID
             if type(readItemID) == "function" then
                 local ok, itemID = pcall(readItemID, slot.id)
@@ -619,14 +790,32 @@ function GC.GearAudit:BuildEquipmentMessages(audit)
     end
 
     local recordText = table.concat(records, ",")
-    local fingerprint = table.concat({ classFile, specKey or "", recordText }, "|")
-    local payload = table.concat({
+
+    -- Ausgenommene Slots als eigenes Feld. Es wird nur angehaengt, wenn es
+    -- wirklich Ausnahmen gibt: Aeltere Clients pruefen die Feldzahl streng und
+    -- verwerfen ein Paket mit Zusatzfeld. Ohne Ausnahmen - der Regelfall -
+    -- bleibt das Paket deshalb unveraendert und fuer alle lesbar.
+    local exemptKeys = {}
+    for _, entry in ipairs(audit.slots or {}) do
+        if type(entry) == "table" and type(entry.exempt) == "string"
+            and GC.GearExemptionReasonByKey[entry.exempt] then
+            exemptKeys[#exemptKeys + 1] = entry.key .. ":" .. entry.exempt
+        end
+    end
+    local exemptText = table.concat(exemptKeys, ",")
+
+    local fingerprint = table.concat({ classFile, specKey or "", recordText, exemptText }, "|")
+    local payloadFields = {
         "ES",
         classFile,
         specKey or "",
         tostring(WholeNumber(audit.inspectedAt, 1, 9999999999) or GC.Util.Now()),
         recordText,
-    }, "|")
+    }
+    if exemptText ~= "" then
+        payloadFields[#payloadFields + 1] = exemptText
+    end
+    local payload = table.concat(payloadFields, "|")
 
     local chunks = {}
     for offset = 1, #payload, EQUIPMENT_CHUNK_BYTES do
@@ -737,7 +926,7 @@ function GC.GearAudit:ReplyWithEquipmentSnapshot()
     return true
 end
 
-function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records)
+function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records, exceptions)
     local spec = specKey and GC.SpecByKey[specKey]
     local audit = {
         name = GC.Util.PlayerShortName(sender),
@@ -754,6 +943,7 @@ function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, 
         unknownEnchants = 0,
         emptySlots = 0,
         unreadableSlots = 0,
+        exemptSlots = 0,
     }
 
     for _, slot in ipairs(GC.GearSlots) do
@@ -763,7 +953,18 @@ function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, 
             label = slot.label,
             required = slot.enchantRequired == true,
         }
-        if not measured or measured.itemID <= 0 then
+        local exemptionReason = exceptions and exceptions[slot.key]
+        if type(exemptionReason) == "string" and GC.GearExemptionReasonByKey[exemptionReason] then
+            entry.exempt = exemptionReason
+            entry.verdict = "EXEMPT"
+            entry.reason = GC.GearExemptionReasonByKey[exemptionReason].label
+                .. ": zählt nicht als Fund."
+            if measured and measured.itemID > 0 then
+                entry.itemID = measured.itemID
+                entry.enchantID = measured.enchantID
+            end
+            audit.exemptSlots = audit.exemptSlots + 1
+        elseif not measured or measured.itemID <= 0 then
             entry.verdict = "EMPTY"
             entry.reason = "Kein Gegenstand angelegt."
             if entry.required then
@@ -789,7 +990,8 @@ end
 
 function GC.GearAudit:DecodeEquipmentPayload(payload, sender)
     local fields = GC.Util.SplitFields(payload)
-    if #fields ~= 5 or fields[1] ~= "ES" or not GC.Classes[fields[2]] then
+    -- Feld 6 (ausgenommene Slots) ist freiwillig und kam erst spaeter dazu.
+    if #fields < 5 or #fields > 6 or fields[1] ~= "ES" or not GC.Classes[fields[2]] then
         return nil
     end
 
@@ -838,7 +1040,33 @@ function GC.GearAudit:DecodeEquipmentPayload(payload, sender)
     if count ~= #GC.GearSlots or equipped == 0 then
         return nil
     end
-    return self:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records)
+
+    -- Ausgenommene Slots. Das Feld ist freiwillig, aber wenn es da ist, muss es
+    -- stimmen: Ein unlesbarer Eintrag laesst das ganze Paket durchfallen, damit
+    -- ein beschaedigtes oder fremdes Paket nicht doch halb uebernommen wird.
+    local exceptions = {}
+    if fields[6] ~= nil then
+        local slotKeys = {}
+        for _, slot in ipairs(GC.GearSlots) do
+            slotKeys[slot.key] = true
+        end
+        local exemptCount = 0
+        for pair in tostring(fields[6]):gmatch("[^,]+") do
+            local slotKey, reasonKey = pair:match("^(%u[%u%d]*):(%u+)$")
+            if not slotKey or not slotKeys[slotKey] or not GC.GearExemptionReasonByKey[reasonKey]
+                or exceptions[slotKey] then
+                return nil
+            end
+            exceptions[slotKey] = reasonKey
+            exemptCount = exemptCount + 1
+        end
+        -- Ein leeres Zusatzfeld haette gar nicht erst gesendet werden duerfen.
+        if exemptCount == 0 then
+            return nil
+        end
+    end
+
+    return self:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, records, exceptions)
 end
 
 function GC.GearAudit:ReceiveEquipmentChunk(message, sender)

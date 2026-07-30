@@ -756,6 +756,9 @@ function GC.Sync:BuildGuildProfileMessages()
         EncodeEnchantRules(guildData.enchantRules),
         EncodeSpecEnchantRules(guildData.enchantSpecRules),
         EncodeWarcraftLogsSource(guildData.warcraftLogs),
+        -- Die Content-Phase der Gilde. Sie entscheidet, welche Regeln des
+        -- ausgelieferten Verzauberungs-Regelsatzes ueberhaupt schon gelten.
+        profile.contentPhase or "",
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -924,6 +927,16 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     local wclSource = fields[24] ~= nil and DecodeWarcraftLogsSource(fields[24]) or nil
     if wclSource and GC.WarcraftLogs then
         GC.WarcraftLogs:ApplySource(wclSource)
+    end
+    -- Die Content-Phase. Nur bekannte Phasen werden uebernommen; ein leeres
+    -- oder fehlendes Feld laesst die eigene Einstellung stehen, damit ein
+    -- aelterer Client sie nicht zurueckdreht.
+    local phase = fields[25]
+    if type(phase) == "string" and GC.ContentPhaseByKey[phase] then
+        guildData.profile.contentPhase = phase
+        if GC.GearAudit then
+            GC.GearAudit:ReapplyEnchantRules()
+        end
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")

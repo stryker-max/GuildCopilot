@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.36
+# Guild Copilot 0.9.37
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -74,7 +74,12 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - noch nicht geladene Item-Links werden anhand der angelegten Gegenstands-ID erkannt, erneut gelesen und niemals als vollständiger Gildensnapshot verteilt;
 - jeder Addon-Client stellt diesen kompakten Rohdaten-Snapshot ohne Schalter im Hintergrund der Gilde bereit. Andere Clients bewerten ihn mit dem aktuellen Regelsatz und müssen diesen Spieler nicht zusätzlich inspecten;
 - synchronisiert werden ausschließlich Slot, Gegenstands-ID, Verzauberungs-ID und Zahl leerer Sockel. Fertige Bewertungen, Tooltiptexte und Inventarinhalte werden nicht übertragen;
-- **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück;
+- **mitgelieferter Verzauberungs-Regelsatz** mit 49 belegten TBC-Enchant-IDs über alle Ausrüstungsplätze: jede ID stammt aus der Wowhead-Zeile „Enchant Item: … (ID)" und ist damit genau die Zahl, die auch im Item-Link steht; welche Verzauberung für wen die beste ist, kommt aus den BiS-Listen von wowtbc.gg;
+- bewertet wird nach **Archetyp statt nach Rolle**: Schattenpriester und Schurke sind beide „Schaden", brauchen aber völlig verschiedene Verzauberungen. Unterschieden werden Zauber-Schaden, Heilung, physischer Schaden und Tank; Schutz-Paladine zählen zusätzlich als Zauberer, weil ihre Bedrohung an Zaubermacht hängt;
+- eine Regel, die auf den Geprüften nicht passt – anderer Slot, anderer Archetyp, spätere Phase –, wird behandelt, als gäbe es sie nicht. Eine Verzauberung wird nie deshalb schlecht bewertet, weil eine fremde Regel nicht auf sie zutrifft;
+- **Content-Phase** je Gilde (T4 bis T6.5, Vorgabe T5): Was es im Spiel noch gar nicht gibt, wird nicht eingefordert. Umstellen mit `/gcp phase T5`, die Einstellung gilt gildenweit;
+- **Ausnahmen für Farmgear, Widerstandssets und Encounter-Sets**: Rechtsklick auf eine Slotzeile nimmt den eigenen Ausrüstungsplatz aus der Wertung. Er bleibt sichtbar, zählt aber nicht als Fund, und der Grund steht dabei. Ausnahmen wandern mit dem Ausrüstungs-Snapshot zu den anderen Clients;
+- **eigener Regelsatz der Gilde**: ein Klick auf eine Slotzeile stuft die erkannte Verzauberung als Optimal, Solide oder Verbesserbar ein; ein weiterer Klick nimmt die Bewertung zurück; die Gildenregel sticht dabei immer den mitgelieferten Satz;
 - gespeichert und geteilt wird nur die Verzauberungs-ID mit ihrer Stufe – den Namen löst jeder Client selbst in seiner Sprache auf;
 - den Regelsatz dürfen nur Ränge mit Einstellungsrecht ändern, er gilt gildenweit und wirkt sofort auf alle gespeicherten Prüfungen;
 - gildeneigene Bewertungen gelten wahlweise für eine konkrete Spec; fehlt dort eine Regel, greift die allgemeine Bewertung derselben Enchant-ID für alle Specs;
@@ -126,7 +131,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.36; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.37; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 
@@ -165,6 +170,7 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 - `/gcp`
 - `/guildcopilot`
 - `/gcp werbung` – blendet den Werbebalken ein oder aus
+- `/gcp phase` – zeigt die Content-Phase der Gilde; `/gcp phase T5` stellt sie um
 
 ## Gespeicherte Daten
 

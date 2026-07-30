@@ -4136,11 +4136,29 @@ function GC.UI:BuildGearPage()
 
     page.gearSlotRows = {}
     for index = 1, #GC.GearSlots do
-        local row = CreateButton(content, "", 490, 25, function()
+        local row = CreateButton(content, "", 490, 25, function(_, mouseButton)
             local entry = page.gearSlotEntries and page.gearSlotEntries[index]
             if not entry then
                 return
             end
+
+            -- Rechtsklick nimmt den Slot aus der Wertung: Farmgear,
+            -- Widerstandsteil, Encounter-Set. Das geht nur fuer die eigene
+            -- Ausruestung - ueber fremde Slots entscheidet jeder selbst.
+            if mouseButton == "RightButton" then
+                local ownName = GC.Util.PlayerShortName(GC:GetPlayerFullName())
+                if GC.Util.NormalizeName(GC.GearAudit.selectedName or "")
+                    ~= GC.Util.NormalizeName(ownName) then
+                    page:SetGearStatus(
+                        "Ausnahmen setzt jeder für seine eigene Ausrüstung.", false)
+                    return
+                end
+                local exempted, exemptMessage = GC.GearAudit:CycleSlotException(entry.key)
+                page:SetGearStatus(exemptMessage, exempted)
+                GC.UI:RefreshGear()
+                return
+            end
+
             -- Bewertet wird fuer die Spec des gerade gewaehlten Spielers.
             -- Ohne bekannte Spec faellt es auf die allgemeine Regel zurueck.
             local audit = GC.GearAudit:GetAudit(GC.GearAudit.selectedName)
@@ -4149,6 +4167,7 @@ function GC.UI:BuildGearPage()
             page:SetGearStatus(message, ok)
             GC.UI:RefreshGear()
         end)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         SetTextureColor(row.background, index % 2 == 0 and THEME.input or THEME.card)
         row.border:Hide()
         row.label:Hide()
@@ -4189,7 +4208,8 @@ function GC.UI:BuildGearPage()
     page.gearRatingHint = CreateLabel(detailCard,
         -- Kein Pfeilzeichen: Die WoW-Schriftart kennt es nicht und zeichnet
         -- statt dessen leere Kaesten.
-        "Klick auf eine Zeile schaltet weiter: Optimal, Solide, Verbesserbar, keine Bewertung.",
+        "Linksklick bewertet: Optimal, Solide, Verbesserbar, keine Bewertung. "
+            .. "Rechtsklick nimmt den eigenen Slot aus der Wertung.",
         { muted = true, font = "GameFontNormalSmall", width = 488, height = 16 })
     page.gearRatingHint:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -104)
 
@@ -4718,6 +4738,42 @@ SlashCmdList.GUILDCOPILOT = function(input)
         GC.UI:TogglePostBar()
         return
     end
+
+    -- Die Content-Phase der Gilde. Sie entscheidet, welche Regeln des
+    -- ausgelieferten Verzauberungs-Regelsatzes schon gelten, und wird
+    -- gildenweit geteilt - deshalb darf sie nur aendern, wer auch den
+    -- Regelsatz aendern darf.
+    local phaseArgument = command:match("^phase%s*(.*)$")
+    if phaseArgument then
+        if phaseArgument == "" then
+            local current = GC.GearAudit:GetContentPhase()
+            local names = {}
+            for _, phase in ipairs(GC.ContentPhases) do
+                names[#names + 1] = phase.key
+            end
+            local label = GC.ContentPhaseByKey[current]
+                and GC.ContentPhaseByKey[current].label
+                or current
+            GC:Print("Aktuelle Phase: " .. label
+                .. ". Umstellen mit /gcp phase <" .. table.concat(names, "|") .. ">.")
+            return
+        end
+        local wanted
+        for _, phase in ipairs(GC.ContentPhases) do
+            if phase.key:lower() == phaseArgument then
+                wanted = phase.key
+                break
+            end
+        end
+        if not wanted then
+            GC:Print("Unbekannte Phase. Möglich sind T4, T5, T6 und T6.5.")
+            return
+        end
+        local ok, message = GC.GearAudit:SetContentPhase(wanted)
+        GC:Print(message)
+        return
+    end
+
     GC.UI:Toggle()
 end
 

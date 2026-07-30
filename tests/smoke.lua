@@ -2814,9 +2814,10 @@ assert(findingBlock:find("2 leere Sockel: Brust", 1, true),
     "Die leeren Sockel werden nicht mit Slotnamen benannt")
 assert(findingBlock:find("leere Ausrüstungsplätze", 1, true),
     "Leere Pflichtslots werden nicht gemeldet")
+-- Ohne unbewertete Verzauberung darf auch kein Hinweis darauf erscheinen.
 for _, finding in ipairs(ownFindings) do
     assert(finding.severity ~= "INFO" or not finding.text:find("nicht bewertet", 1, true),
-        "Bei leerer Regelliste wird über unbewertete Verzauberungen berichtet")
+        "Es wird über unbewertete Verzauberungen berichtet, obwohl keine offen ist")
 end
 
 -- Mehrere fehlende Verzauberungen werden zusammengefasst aufgezählt.
@@ -2894,5 +2895,142 @@ assert(GuildCopilotDB.settings.editorRecoveryAvailable == nil,
     "Das alte kontoweite Wiederherstellungsfeld wurde nicht entfernt")
 assert(addon.DB:GetGuild().editorRecoveryAvailable == false,
     "Die eigene Gilde hat ihre verbrauchte Wiederherstellung verloren")
+
+-- === Ausgelieferter Verzauberungs-Regelsatz ================================
+--
+-- Der Regelsatz wird mit belegten Enchant-IDs ausgeliefert. Er darf nur dort
+-- greifen, wo er wirklich etwas aussagt: am passenden Slot, beim passenden
+-- Archetyp und in einer Phase, die es schon gibt.
+--
+-- Eigener Block: Lua erlaubt nur 200 lokale Variablen je Funktion, und dieses
+-- Testskript ist eine einzige.
+do
+local HANDS_SLOT = { key = "HANDS", enchantRequired = true }
+local BACK_SLOT = { key = "BACK", enchantRequired = true }
+
+assert(next(addon.EnchantRuleSet.rules) ~= nil,
+    "Der ausgelieferte Verzauberungs-Regelsatz ist leer")
+assert(addon.EnchantRuleSet.rules[2937].verdict == "OPTIMAL",
+    "Die belegte Handschuh-Zaubermacht fehlt im Regelsatz")
+
+-- Ein Magier mit Major Spellpower auf den Handschuhen: passt.
+local casterVerdict, casterReason = addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 2937, "DAMAGER", "Große Zaubermacht", "MAGE:1")
+assert(casterVerdict == "OPTIMAL",
+    "Die empfohlene Verzauberung des Zauber-Archetyps wird nicht als optimal gewertet")
+assert(casterReason:find("Quelle:", 1, true),
+    "Die Bewertung nennt ihre Quelle nicht")
+
+-- Derselbe Wert bei einem Heiler: darüber sagt die Regel nichts. Er darf
+-- deshalb nicht als optimal gelten - aber auch nicht als Fund.
+local healerVerdict = addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 2937, "HEALER", "Große Zaubermacht", "PRIEST:2")
+assert(healerVerdict ~= "OPTIMAL",
+    "Eine Regel des Zauber-Archetyps wird fälschlich auf einen Heiler angewendet")
+assert(healerVerdict ~= "MISSING" and healerVerdict ~= "IMPROVABLE",
+    "Eine nicht zutreffende Regel erzeugt beim Heiler einen Fund")
+
+-- Handschuhregel auf dem Rücken: gilt nicht.
+local wrongSlotVerdict = addon.GearAudit:EvaluateEnchant(
+    BACK_SLOT, 2937, "DAMAGER", "Große Zaubermacht", "MAGE:1")
+assert(wrongSlotVerdict ~= "OPTIMAL",
+    "Eine Handschuhregel wird auch auf dem Rücken angewendet")
+
+-- Ohne bestätigte Spec lässt sich der Archetyp nicht bestimmen; dann greift
+-- eine archetypgebundene Regel bewusst nicht.
+local noSpecVerdict = addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 2937, nil, "Große Zaubermacht", nil)
+assert(noSpecVerdict ~= "OPTIMAL",
+    "Ohne bekannte Spec wird eine archetypgebundene Regel trotzdem angewendet")
+
+-- Eine Regel aus einer späteren Phase gilt noch nicht.
+addon.EnchantRuleSet.rules[7778] = {
+    verdict = "OPTIMAL", name = "Zukunftsverzauberung",
+    slots = { "HANDS" }, phase = "T6.5",
+}
+addon.DB:GetGuild().profile.contentPhase = "T5"
+assert(addon.GearAudit:GetContentPhase() == "T5", "Die eingestellte Phase wird nicht gelesen")
+local futureVerdict = addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 7778, "DAMAGER", "Zukunftsverzauberung", "MAGE:1")
+assert(futureVerdict ~= "OPTIMAL",
+    "Eine Verzauberung aus einer späteren Phase wird schon jetzt empfohlen")
+
+-- Ist die Gilde so weit, greift dieselbe Regel.
+addon.DB:GetGuild().profile.contentPhase = "T6.5"
+assert(addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 7778, "DAMAGER", "Zukunftsverzauberung", "MAGE:1") == "OPTIMAL",
+    "In der passenden Phase greift die Regel nicht")
+addon.EnchantRuleSet.rules[7778] = nil
+addon.DB:GetGuild().profile.contentPhase = nil
+
+-- Eine gildeneigene Bewertung sticht den ausgelieferten Regelsatz.
+addon.DB:GetGuild().enchantRules["2937"] = { verdict = "IMPROVABLE", name = "Eigene Regel", by = "Chef" }
+assert(addon.GearAudit:EvaluateEnchant(
+    HANDS_SLOT, 2937, "DAMAGER", "Große Zaubermacht", "MAGE:1") == "IMPROVABLE",
+    "Die gildeneigene Bewertung wird vom ausgelieferten Regelsatz überstimmt")
+addon.DB:GetGuild().enchantRules["2937"] = nil
+end
+
+-- === Ausnahmen für Farmgear und Widerstandssets ============================
+--
+-- Ein ausgenommener Slot bleibt sichtbar, zählt aber nicht als Fund.
+do
+inspectGear.player = {}
+for _, slot in ipairs(addon.GearSlots) do
+    if slot.enchantRequired then
+        -- Überall ein unverzaubertes Teil: ohne Ausnahme lauter Funde.
+        inspectGear.player[slot.id] = "|Hitem:4242:0:0:0:0:0:0:0:70|h[Farmteil]|h"
+    end
+end
+addon.GearAudit:AuditSelf(true, true)
+local beforeExemption = addon.GearAudit:GetAudit("Tester")
+local missingBefore = beforeExemption.missingEnchants
+assert(missingBefore >= 2, "Der Ausnahmetest braucht mehrere fehlende Verzauberungen")
+
+local exemptSet, exemptMessage = addon.GearAudit:SetSlotException("HEAD", "RESIST")
+assert(exemptSet == true and exemptMessage:find("Widerstandsset", 1, true),
+    "Die Ausnahme für ein Widerstandsteil ließ sich nicht setzen")
+local afterExemption = addon.GearAudit:GetAudit("Tester")
+assert(afterExemption.missingEnchants == missingBefore - 1,
+    "Ein ausgenommener Slot zählt weiter als fehlende Verzauberung")
+assert(afterExemption.exemptSlots == 1, "Der ausgenommene Slot wird nicht gezählt")
+local headEntry
+for _, entry in ipairs(afterExemption.slots) do
+    if entry.key == "HEAD" then
+        headEntry = entry
+    end
+end
+assert(headEntry and headEntry.verdict == "EXEMPT" and headEntry.exempt == "RESIST",
+    "Der ausgenommene Slot wird nicht als Ausnahme ausgewiesen")
+assert(headEntry.reason:find("Widerstandsset", 1, true),
+    "Die Ausnahme nennt ihren Grund nicht")
+
+-- Die Ausnahme wandert mit dem Snapshot zu den anderen Clients.
+local exemptMessages = addon.GearAudit:BuildEquipmentMessages(afterExemption)
+assert(#exemptMessages > 0, "Ein Snapshot mit Ausnahme wurde nicht erzeugt")
+local exemptPayload = ""
+for _, message in ipairs(exemptMessages) do
+    exemptPayload = exemptPayload .. message:match("^E|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+assert(exemptPayload:find("HEAD:RESIST", 1, true),
+    "Die Ausnahme wird nicht mit dem Ausrüstungs-Snapshot geteilt")
+
+-- Ein Paket mit unlesbarem Ausnahmefeld wird abgelehnt, nicht halb übernommen.
+assert(addon.GearAudit:DecodeEquipmentPayload(exemptPayload .. ",MUELL", "Tester-Realm") == nil,
+    "Ein beschädigtes Ausnahmefeld wurde übernommen")
+
+-- Ohne Ausnahmen bleibt das Paket bei fünf Feldern, damit ältere Clients es
+-- weiterhin lesen können.
+addon.GearAudit:SetSlotException("HEAD", nil)
+local plainAudit = addon.GearAudit:GetAudit("Tester")
+assert(plainAudit.exemptSlots == 0, "Die Ausnahme wurde nicht aufgehoben")
+local plainMessages = addon.GearAudit:BuildEquipmentMessages(plainAudit)
+local plainPayload = ""
+for _, message in ipairs(plainMessages) do
+    plainPayload = plainPayload .. message:match("^E|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+end
+assert(#addon.Util.SplitFields(plainPayload) == 5,
+    "Ohne Ausnahmen wird ein Zusatzfeld gesendet, das ältere Clients verwerfen")
+end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
