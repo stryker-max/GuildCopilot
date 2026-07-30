@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.40",
+  "## Version: 0.9.41",
 ];
 
 for (const entry of requiredMetadata) {
@@ -90,6 +90,39 @@ if (!/ButtonRow\(_checkButton, _removeButton, _installButton\)/.test(installerMa
 }
 if (!/MakeButton\("Nach Updates suchen", \d+, primary: true\)/.test(installerMainForm)) {
   throw new Error("„Nach Updates suchen“ ist nicht mehr der hervorgehobene Knopf.");
+}
+
+// Der Offline-Import aus WoWCombatLog.txt. Die drei Zusicherungen hier sind
+// gegen die echte 46-MB-Datei aus dieser Installation gemessen und jede stand
+// vorher als Fehler in der Auswertung.
+const combatLogImporter = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "CombatLog", "CombatLogImporter.cs"),
+  "utf8"
+);
+if (!combatLogImporter.includes("File.ReadLines")) {
+  throw new Error("Der Offline-Import liest die Protokolldatei nicht mehr streamend.");
+}
+if (/ReadAllText|ReadAllLines/.test(combatLogImporter)) {
+  throw new Error("Der Offline-Import lädt die Protokolldatei am Stück; sie ist mehrere Dutzend MB groß.");
+}
+// Wiederbelebungen: nur SPELL_RESURRECT. Zusammen mit dem gewirkten Zauber
+// wurde jede Wiederbelebung doppelt gezählt - gemessen 47 statt 24 bei nur 39
+// Spielertoden.
+if (/SPELL_CAST_SUCCESS" when SpellIds\.ResurrectSet/.test(combatLogImporter)) {
+  throw new Error("Wiederbelebungen werden wieder doppelt gezählt (Ereignis und gewirkter Zauber).");
+}
+// Ereignisse zählen aus dem ganzen Abend, auch vor dem Pull. Ohne diese Grenze
+// standen elf Umstehende mit null Anwesenheit in der Teilnehmerliste.
+if (!/participant\.Seconds <= 0\) continue/.test(combatLogImporter)) {
+  throw new Error("Teilnehmer ohne Anwesenheit im Bosskampf landen wieder in der Auswertung.");
+}
+// COMBATANT_INFO hat kein Namensfeld. Wer die Zeile wie ein gewöhnliches
+// Ereignis liest, erzeugt einen Teilnehmer namens "0".
+if (!combatLogImporter.includes('subevent == "COMBATANT_INFO"')) {
+  throw new Error("COMBATANT_INFO wird nicht mehr eigens behandelt.");
+}
+if (!installerMainForm.includes("CombatLogPanel")) {
+  throw new Error("Der Offline-Import fehlt im Installer-Fenster.");
 }
 
 // Dateisymbol im Explorer: eine echte .ico mit mehreren Größen.
@@ -258,7 +291,10 @@ const requiredImplementations = [
   ["Ausschluss nur mit Berechtigungsprüfung", /function GC\.Roster:CanRemoveMember/],
   ["echte Blizzard-Prüfung vor dem Ausschluss", /HasBlizzardRemovePermission/],
   ["zweite Bestätigung vor dem Ausschluss", /removeArmed/],
-  ["Nachanalyse aus Warcraft Logs", /GCPWCL%d\+/],
+  // Die Kopfzeile deckt beide Companion-Formate ab: GCPWCL aus Warcraft Logs
+  // und GCPLOG aus dem Offline-Import.
+  ["Nachanalyse aus Companion-Importen", /GCP%u\+%d\+/],
+  ["Offline-Import aus dem Combat Log", /GCPLOG/],
   ["Companion-Zeilen werden tolerant zerlegt", /local function SplitFields/],
   ["Wiederbelebungen aus Logs", /resurrects = tonumber\(fields\[9\]\)/],
   ["Klick ins Importfeld setzt den Cursor", /container:SetScript\("OnMouseDown", FocusEdit\)/],
@@ -266,7 +302,10 @@ const requiredImplementations = [
   ["Rückmeldung mit Uhrzeit", /date\("%H:%M:%S"\)/],
   ["Hinweis auf verwaiste Teilnehmerzeilen", /ohne zugehörige Sitzungszeile/],
   ["verlorene Zeilenumbrüche werden repariert", /local function RepairLineBreaks/],
-  ["Logs-Auswertungen als eigene Quelle", /source = "WCL"/],
+  // Warcraft Logs und der Offline-Import bleiben getrennte Quellen; welche
+  // gilt, entscheidet die Kopfzeile des Importcodes.
+  ["Importquelle folgt der Kopfzeile", /local sessionSource = "WCL"/],
+  ["Offline-Import als eigene Quelle", /sessionSource = "LOG"/],
   ["Consumables aus Logs über die Addon-Tabelle", /DecodeConsumables/],
   ["Quellen werden nicht vermischt", /stored\.source ~= summary\.source/],
   ["aufbereitete Ausrüstungsfunde", /function GC\.GearAudit:GetFindings/],
@@ -351,6 +390,68 @@ const settingsPage = uiSource.slice(
 );
 if (settingsPage.includes("page.templateEdits")) {
   throw new Error("Die Antwortvorlagen stehen wieder in den Einstellungen.");
+}
+
+// Der Knopf im Blizzard-Gildenfenster ist ersatzlos entfallen: Er verdeckte
+// Inhalte, ließ sich nicht verschieben und es bleiben genug Aufrufwege.
+if (allSource.includes("AddGuildWindowButton") || allSource.includes("GuildFrame")) {
+  throw new Error("Der Knopf im Blizzard-Gildenfenster ist wieder vorhanden.");
+}
+if (readme.includes("Button im Blizzard-Gildenfenster")) {
+  throw new Error("Die README nennt den entfernten Knopf im Gildenfenster noch als Aufrufweg.");
+}
+
+// Trigger- und Ausschlusswoerter gehoeren in die Einstellungen. Fest
+// verdrahtete Listen in Chat.lua wuerden sie stillschweigend uebergehen.
+const chatSource = fs.readFileSync(path.join(root, "Chat.lua"), "utf8");
+if (/local\s+(WHISPER_)?RECRUITMENT_TRIGGERS\s*=/.test(chatSource)) {
+  throw new Error("Die Trigger-Wörter sind wieder fest in Chat.lua verdrahtet.");
+}
+for (const list of ["chatTriggers", "chatExclusions", "whisperTriggers", "whisperExclusions"]) {
+  if (!settingsPage.includes(`"${list}"`)) {
+    throw new Error(`Die Liste ${list} fehlt auf der Einstellungsseite.`);
+  }
+}
+if (!chatSource.includes('GetRecruitmentWords("chatExclusions")')
+  || !chatSource.includes('GetRecruitmentWords("whisperExclusions")')) {
+  throw new Error("Die Ausschlusswörter werden nicht auf beiden Wegen ausgewertet.");
+}
+
+// Der Bewerberton haengt am Gildenrang. Die Erfassung darf er nicht anfassen:
+// Wer spaeter ins Postfach sieht, soll nichts verpasst haben.
+if (!chatSource.includes("GC.Roster:HearsInboxSound()")) {
+  throw new Error("Der Bewerberton ist nicht mehr an den Gildenrang gebunden.");
+}
+const captureLead = chatSource.slice(
+  chatSource.indexOf("function GC.Chat:CaptureLead"),
+  chatSource.indexOf("function GC.Chat:CaptureWhisper")
+);
+if (/HearsInboxSound\(\)[\s\S]*?\breturn\b/.test(captureLead.split("PlaySuccessSound")[0])) {
+  throw new Error("Die Rangfreigabe für den Ton verhindert jetzt die Erfassung.");
+}
+if (!settingsPage.includes("page.inboxSoundRankToggles")) {
+  throw new Error("Die Rangfreigabe für den Bewerberton fehlt auf der Einstellungsseite.");
+}
+
+// Die Einstellungsseite scrollt, ihr Inhalt muss aber hoch genug sein: eine
+// neue Karte unter der letzten waere sonst nicht erreichbar.
+const settingsContentHeight = Number(
+  settingsPage.match(/content:SetHeight\((\d+)\)/)?.[1]
+);
+let settingsBottom = 0;
+for (const match of settingsPage.matchAll(
+  /(\w+):SetSize\(752, (\d+)\)\s*\n\s*\1:SetPoint\("TOPLEFT", content, "TOPLEFT", 0, -(\d+)\)/g
+)) {
+  settingsBottom = Math.max(settingsBottom, Number(match[3]) + Number(match[2]));
+}
+if (!settingsContentHeight || settingsBottom === 0) {
+  throw new Error("Die Kartenmaße der Einstellungsseite lassen sich nicht mehr ablesen.");
+}
+if (settingsContentHeight < settingsBottom) {
+  throw new Error(
+    `Der Scrollbereich der Einstellungen ist zu kurz: Karten reichen bis ${settingsBottom} px, ` +
+      `der Inhalt ist ${settingsContentHeight} px hoch.`
+  );
 }
 
 // Die Seitenleiste hat keine Bildlaufleiste. Ein neuer Navigationspunkt darf

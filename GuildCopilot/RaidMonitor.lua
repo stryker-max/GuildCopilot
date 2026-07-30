@@ -319,6 +319,97 @@ function GC.RaidMonitor:GetSummary(sessionID)
     return nil
 end
 
+-- === Derselbe Abend aus mehreren Quellen =================================
+--
+-- Ein Raidabend kann dreifach vorliegen: als Livesitzung, als
+-- Warcraft-Logs-Report und als Offline-Import aus der Logdatei. Ihre Zahlen
+-- werden nie miteinander verrechnet, die Quellen sind unterschiedlich genau.
+-- In der Liste soll der Abend aber einmal stehen und nicht dreimal.
+--
+-- Als Fingerabdruck taugt kein Hash aus den Teilnehmern: Jede Quelle zieht die
+-- Liste anders (Warcraft Logs nach friendlyPlayers, die Logdatei nach
+-- Anwesenheit im Encounter, die Livesitzung nach dem Raidroster). Ein exakter
+-- Vergleich schlüge also genau dann fehl, wenn er gebraucht wird. Entschieden
+-- wird deshalb über beides zusammen: überschneidende Zeiträume und eine
+-- Teilnehmerdeckung von mindestens der Hälfte der kleineren Liste.
+
+local SAME_EVENING_COVERAGE = 0.5
+
+local function ParticipantNameSet(summary)
+    local names = {}
+    local count = 0
+    for _, participant in ipairs(summary.participants or {}) do
+        local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(participant.name or ""))
+        if key ~= "" and not names[key] then
+            names[key] = true
+            count = count + 1
+        end
+    end
+    return names, count
+end
+
+function GC.RaidMonitor:IsSameEvening(left, right)
+    if not left or not right then
+        return false
+    end
+    local leftStart, leftEnd = tonumber(left.startedAt) or 0, tonumber(left.endedAt) or 0
+    local rightStart, rightEnd = tonumber(right.startedAt) or 0, tonumber(right.endedAt) or 0
+    if leftStart > rightEnd or rightStart > leftEnd then
+        return false
+    end
+
+    local leftNames, leftCount = ParticipantNameSet(left)
+    local rightNames, rightCount = ParticipantNameSet(right)
+    if leftCount == 0 or rightCount == 0 then
+        return false
+    end
+    local shared = 0
+    for name in pairs(leftNames) do
+        if rightNames[name] then
+            shared = shared + 1
+        end
+    end
+    return shared >= math.ceil(math.min(leftCount, rightCount) * SAME_EVENING_COVERAGE)
+end
+
+-- Je Abend ein Eintrag. Angezeigt wird die vollständigste Auswertung; die
+-- übrigen Quellen bleiben gespeichert und werden mitgeliefert, damit die
+-- Oberfläche sie anbieten kann.
+function GC.RaidMonitor:GetEvenings()
+    local evenings = {}
+    for _, summary in ipairs(self:GetSummaries()) do
+        local evening
+        for _, candidate in ipairs(evenings) do
+            if self:IsSameEvening(candidate.summary, summary) then
+                evening = candidate
+                break
+            end
+        end
+        if not evening then
+            evening = { summary = summary, sources = {} }
+            evenings[#evenings + 1] = evening
+        end
+        evening.sources[#evening.sources + 1] = summary
+        -- Die vollständigere Auswertung führt den Abend an; bei Gleichstand
+        -- die zuerst gespeicherte, denn die Liste ist schon nach Ende sortiert.
+        if #(summary.participants or {}) > #(evening.summary.participants or {}) then
+            evening.summary = summary
+        end
+    end
+    return evenings
+end
+
+function GC.RaidMonitor:GetEveningOf(sessionID)
+    for _, evening in ipairs(self:GetEvenings()) do
+        for _, summary in ipairs(evening.sources) do
+            if summary.id == sessionID then
+                return evening
+            end
+        end
+    end
+    return nil
+end
+
 -- Erkannte und ausgeschlossene Gegnernamen. Der Combat Log nennt im Raid
 -- dieselben Namen tausendfach; ohne diesen Zwischenspeicher liefe fuer jedes
 -- Schadensereignis die ganze Bossliste durch.

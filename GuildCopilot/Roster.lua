@@ -389,6 +389,58 @@ function GC.Roster:SetMemberCareAccessRank(rankIndex, active)
     return true
 end
 
+-- === Bewerberton je Rang =================================================
+--
+-- Der Ton meldet einen fremden Interessenten. Wer nicht rekrutiert, will ihn
+-- nicht hoeren, weiss aber meist nicht, dass er ihn abschalten koennte -
+-- deshalb entscheidet der Gildenrang und nicht jeder fuer sich. Erfasst wird
+-- weiter fuer alle, nur ohne Ton.
+
+local function InitializeDefaultInboxSoundRanks()
+    local settings = GC.DB:GetGuild().inboxSound
+    if settings.ranksConfigured then
+        return settings
+    end
+    for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
+        settings.ranks[tostring(rank.index)] = rank.index <= 1
+    end
+    settings.ranksConfigured = true
+    return settings
+end
+
+function GC.Roster:IsInboxSoundRank(rankIndex)
+    local settings = GC.DB:GetGuild().inboxSound
+    if not settings.ranksConfigured then
+        return tonumber(rankIndex) ~= nil and tonumber(rankIndex) <= 1
+    end
+    return settings.ranks[tostring(rankIndex)] == true
+end
+
+-- Ist der eigene Rang unbekannt - Roster noch nicht geladen, gerade gar keine
+-- Gilde -, wird der Ton gespielt. Ein Ton zu viel ist verzeihlicher als der
+-- eine verpasste Bewerber, auf den ein Offizier wartet.
+function GC.Roster:HearsInboxSound(playerName)
+    local member = self:GetMember(playerName or GC:GetPlayerFullName())
+    if not member or tonumber(member.rankIndex) == nil then
+        return true
+    end
+    return self:IsInboxSoundRank(member.rankIndex)
+end
+
+function GC.Roster:SetInboxSoundRank(rankIndex, active)
+    if not self:CanEditGuildSettings() then
+        return false
+    end
+    local settings = InitializeDefaultInboxSoundRanks()
+    settings.ranks[tostring(rankIndex)] = active == true
+    GC.DB:GetGuild().profile.updatedAt = GC.Util.Now()
+    if GC.Sync and GC.Sync.QueueGuildProfile then
+        GC.Sync:QueueGuildProfile(true)
+    end
+    GC:FireCallback("SETTINGS_UPDATED")
+    return true
+end
+
 function GC.Roster:SetMemberCareRankProtected(rankIndex, protected)
     if not self:CanEditGuildProfile() then
         return false

@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.40",
+    VERSION = "0.9.41",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -95,6 +95,48 @@ GC.SuccessSoundOptions = {
 -- Bewerberklang: Der eine meldet einen fremden Interessenten, der andere
 -- bestaetigt die eigene Eingabe.
 GC.DefaultProfileSoundKey = "LEVEL_UP"
+
+-- Woran ein Bewerber erkannt wird. Beide Listen sind Vorgaben und in den
+-- Einstellungen ueberschreibbar; sie stehen hier, damit ein geleertes
+-- Eingabefeld wieder auf diesen Stand zurueckfaellt.
+--
+-- Oeffentliche Chatnachrichten und Fluesternachrichten bleiben absichtlich
+-- getrennt: Ein zu weiter Whisper-Trigger nervt nur einen selbst, ein zu
+-- weiter Chat-Trigger erzeugt Muell aus dem ganzen Realm. Deshalb ist die
+-- oeffentliche Liste eng und aus ganzen Wendungen gebaut, die Whisper-Liste
+-- darf einzelne Woerter enthalten.
+GC.DefaultChatTriggers = {
+    "suche eine gilde",
+    "suche gilde",
+    "gilde gesucht",
+    "gildensuche",
+    "lf guild",
+    "looking for a guild",
+    "looking for guild",
+}
+
+GC.DefaultWhisperTriggers = {
+    "interesse",
+    "interessiert",
+    "gilde",
+    "guild",
+    "bewerb",
+    "rekrut",
+    "raidplatz",
+    "raid platz",
+    "mehr info",
+    "mehr infos",
+    "discord",
+    "sucht ihr",
+    "mitmachen",
+    "anschließen",
+    "anschliessen",
+}
+
+-- Ausschlusswoerter haben bewusst keine Vorgabe: Was Muell ist, weiss nur der
+-- eigene Realm. Eine mitgelieferte Liste wuerde Eintraege verhindern, die
+-- jemand anders ausdruecklich haben will.
+GC.MaxRecruitmentFilterWords = 40
 
 -- Verbrauchsgegenstände werden nach Spell-ID gezählt. "repeatable" trennt
 -- Gegenstände, die pro Anwendung zählen (Tränke, Runen, Trommeln), von

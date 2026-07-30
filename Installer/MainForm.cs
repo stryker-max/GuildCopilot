@@ -1,12 +1,14 @@
 using System.Runtime.InteropServices;
+using GuildCopilot.Installer.CombatLog;
 using Microsoft.Win32;
 
 namespace GuildCopilot.Installer;
 
 /// <summary>
-/// Hauptfenster: Kopfbereich, darunter Addon und Warcraft Logs in einem
-/// Stueck, ganz unten der gemeinsame Verlauf. Bewusst ohne Reiter - ein
-/// TabControl setzt einen hellen Systemrahmen ins dunkle Fenster.
+/// Hauptfenster: Kopfbereich, darunter Addon, Warcraft Logs und der
+/// Offline-Import aus dem Combat Log in einem Stueck, ganz unten der gemeinsame
+/// Verlauf. Bewusst ohne Reiter - ein TabControl setzt einen hellen
+/// Systemrahmen ins dunkle Fenster.
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -15,6 +17,7 @@ public sealed class MainForm : Form
 
     private readonly Settings _settings = Settings.Load();
     private LogsPanel? _logsPanel;
+    private CombatLogPanel? _combatLogPanel;
 
     private readonly ComboBox _addonsPath = new();
     private readonly Label _statusLabel = new();
@@ -96,6 +99,14 @@ public sealed class MainForm : Form
 
         _logsPanel = new LogsPanel(_settings, Log);
         content.Controls.Add(_logsPanel);
+        content.Controls.Add(Theme.Separator());
+
+        // Der Offline-Import gehoert unter Warcraft Logs: beides erzeugt einen
+        // Importcode fuer dasselbe Feld im Addon. Er braucht nur den
+        // AddOns-Pfad, weil die Protokolldateien daneben liegen - und zwar bei
+        // jedem Wechsel neu, deshalb eine Funktion statt eines Wertes.
+        _combatLogPanel = new CombatLogPanel(SelectedPath, Log);
+        content.Controls.Add(_combatLogPanel);
 
         root.Controls.Add(BuildHeader(logo), 0, 0);
         root.Controls.Add(content, 0, 1);
@@ -381,6 +392,10 @@ public sealed class MainForm : Form
     {
         var path = SelectedPath();
         var installed = path.Length > 0 ? GameFinder.ReadInstalledVersion(path) : null;
+
+        // Die Protokolldateien gehoeren zur gewaehlten Spielversion. Wechselt
+        // der Pfad, gilt ein anderer Logs-Ordner.
+        _combatLogPanel?.Reload(announce: false);
 
         if (checkRemote)
         {

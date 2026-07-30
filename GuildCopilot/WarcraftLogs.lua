@@ -289,7 +289,24 @@ local function SplitFields(line)
     return fields
 end
 
-local function ParseSessionLine(line)
+-- Der Offline-Import nennt keine Zone: Sie steht im Combat Log nicht, wohl aber
+-- die Bossnamen. Die Zuordnung Boss zu Instanz gibt es im Addon schon
+-- (GC.RaidBosses), also wird sie hier benutzt statt eine zweite Tabelle im
+-- Installer zu pflegen. Ein Abend in zwei Instanzen bekommt beide genannt.
+local function ZoneFromBosses(payload)
+    local instances = {}
+    local seen = {}
+    for name in tostring(payload or ""):gmatch("[^,]+") do
+        local boss = GC.RaidMonitor and GC.RaidMonitor:ResolveBoss(GC.Util.Trim(name))
+        if boss and not seen[boss.instance] then
+            seen[boss.instance] = true
+            instances[#instances + 1] = boss.instance
+        end
+    end
+    return table.concat(instances, " / ")
+end
+
+local function ParseSessionLine(line, source)
     local fields = SplitFields(line)
     local code = GC.Util.Trim(fields[2] or "")
     local startedAt, endedAt, zone, pulls, kills, wipes =
@@ -297,18 +314,22 @@ local function ParseSessionLine(line)
     if code == "" then
         return nil
     end
+    zone = GC.Util.Trim(zone)
+    if zone == "" then
+        zone = ZoneFromBosses(fields[9])
+    end
     return {
-        id = "WCL:" .. code,
+        id = source .. ":" .. code,
         reportCode = code,
         startedAt = tonumber(startedAt) or 0,
         endedAt = tonumber(endedAt) or 0,
-        zone = GC.Util.Trim(zone),
+        zone = zone,
         startedBy = "",
         pulls = tonumber(pulls) or 0,
         kills = tonumber(kills) or 0,
         wipes = tonumber(wipes) or 0,
         participants = {},
-        source = "WCL",
+        source = source,
         receivedAt = GC.Util.Now(),
     }
 end
@@ -342,9 +363,9 @@ end
 -- Zeile ein Datensatz beginnt, gehört davor ein Umbruch. Zusätzliche Leerzeilen
 -- schaden nicht, die werden ohnehin übersprungen.
 local function RepairLineBreaks(text)
-    text = text:gsub("^(GCPWCL%d+|?%d*)", "%1\n")
-    text = text:gsub("([^\n])(GCPWCL%d)", "%1\n%2")
-    text = text:gsub("([^\n])(S|%w+|%d)", "%1\n%2")
+    text = text:gsub("^(GCP%u+%d+|?%d*)", "%1\n")
+    text = text:gsub("([^\n])(GCP%u+%d)", "%1\n%2")
+    text = text:gsub("([^\n])(S|[%w%-]+|%d)", "%1\n%2")
     text = text:gsub("([^\n])(P|[^|\n]+|)", "%1\n%2")
     return text
 end
@@ -359,6 +380,11 @@ function GC.WarcraftLogs:Import(text)
 
     local sessions = {}
     local currentSession
+    -- Quelle der Sitzungen in diesem Import. Der Offline-Import aus dem Combat
+    -- Log bleibt von Warcraft Logs getrennt: Beide beschreiben denselben Abend
+    -- unterschiedlich genau, und Zahlen verschiedener Quellen werden nie
+    -- miteinander verrechnet.
+    local sessionSource = "WCL"
 
     -- Mitgezählt wird, was hereinkam. Ohne diese Zahlen lässt sich ein
     -- unvollständig eingefügter Export nicht von einem reinen Profilexport
@@ -371,13 +397,19 @@ function GC.WarcraftLogs:Import(text)
         line = GC.Util.Trim(line)
         if line ~= "" then
             lineCount = lineCount + 1
-            local marker, reports = line:match("^(GCPWCL%d+)|?(%d*)$")
+            local marker, reports = line:match("^(GCP%u+%d+)|?(%d*)$")
             if marker then
                 headerSeen = true
-                importSource = "WARCRAFT_LOGS"
-                reportCount = tonumber(reports) or 0
+                if marker:sub(1, 6) == "GCPLOG" then
+                    -- Der Offline-Import bringt keine Profile mit; die Klasse
+                    -- steht im Combat Log nicht.
+                    sessionSource = "LOG"
+                else
+                    importSource = "WARCRAFT_LOGS"
+                    reportCount = tonumber(reports) or 0
+                end
             elseif line:sub(1, 2) == "S|" then
-                currentSession = ParseSessionLine(line)
+                currentSession = ParseSessionLine(line, sessionSource)
                 if currentSession then
                     sessions[#sessions + 1] = currentSession
                 end
@@ -454,14 +486,19 @@ function GC.WarcraftLogs:Import(text)
     end
 
     local data = GC.DB:GetGuild().warcraftLogs
-    if uniqueCount > 0 then
-        data.members = imported
-    end
-    data.importedAt = GC.Util.Now()
-    -- Ein eigener Import ersetzt einen zuvor empfangenen Stand.
-    data.lastSyncFrom = ""
-    if headerSeen then
-        data.reportCount = reportCount
+    -- Der Offline-Import aus dem Combat Log liefert keine Profile und keine
+    -- Warcraft-Logs-Quelle. Er darf den dortigen Stand deshalb nicht anfassen -
+    -- sonst löschte ein Logimport die Herkunftsangabe eines echten Reports.
+    if sessionSource == "WCL" then
+        if uniqueCount > 0 then
+            data.members = imported
+        end
+        data.importedAt = GC.Util.Now()
+        -- Ein eigener Import ersetzt einen zuvor empfangenen Stand.
+        data.lastSyncFrom = ""
+        if headerSeen then
+            data.reportCount = reportCount
+        end
     end
 
     -- Nachanalysen werden als eigene Auswertungen abgelegt und niemals mit
@@ -471,7 +508,7 @@ function GC.WarcraftLogs:Import(text)
         if #session.participants > 0 then
             local stored = GC.RaidMonitor:StoreSummary(session)
             local current = GC.RaidMonitor:GetSummary(session.id)
-            if stored or (current and current.source == "WCL") then
+            if stored or (current and current.source == sessionSource) then
                 storedSessionIDs[session.id] = true
             end
         end
@@ -480,13 +517,15 @@ function GC.WarcraftLogs:Import(text)
     for _ in pairs(storedSessionIDs) do
         storedSessions = storedSessions + 1
     end
-    local knownWclSessions = 0
-    for _, summary in ipairs(GC.RaidMonitor:GetSummaries()) do
-        if summary.source == "WCL" then
-            knownWclSessions = knownWclSessions + 1
+    if sessionSource == "WCL" then
+        local knownWclSessions = 0
+        for _, summary in ipairs(GC.RaidMonitor:GetSummaries()) do
+            if summary.source == "WCL" then
+                knownWclSessions = knownWclSessions + 1
+            end
         end
+        data.sessionCount = knownWclSessions
     end
-    data.sessionCount = knownWclSessions
 
     GC:FireCallback("WCL_UPDATED")
     GC:FireCallback("ROSTER_UPDATED")
@@ -499,7 +538,8 @@ function GC.WarcraftLogs:Import(text)
         parts[#parts + 1] = uniqueCount .. (headerSeen and " Warcraft-Logs-Profile" or " Profile")
     end
     if storedSessions > 0 then
-        parts[#parts + 1] = storedSessions .. " Raidauswertungen"
+        parts[#parts + 1] = storedSessions
+            .. (sessionSource == "LOG" and " Raidabende aus dem Combat Log" or " Raidauswertungen")
     end
     local message = GC.Util.JoinGerman(parts) .. " importiert."
 

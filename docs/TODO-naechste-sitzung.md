@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 30.07.2026, nach Release 0.9.39 / Installer 1.0.4.
+Stand: 30.07.2026, nach Release 0.9.41 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -22,76 +22,18 @@ Funktion ab, und smoke.lua ist eine einzige – neue Testblöcke deshalb in
 Nach jedem fertigen Punkt: Version in `GuildCopilot.toc`, `Constants.lua`,
 `README.md` und `tests/validate.mjs` gleichziehen, ROADMAP nachführen, nach
 `main` pushen und den Ordner `GuildCopilot/` in die WoW-Installation spiegeln
-(siehe `AGENTS.md`).
+(siehe `AGENTS.md`). Wird der Installer geändert, zusätzlich `<Version>` in
+`Installer/GuildCopilot-Installer.csproj`, `Installer/dist/version.txt`, die
+veröffentlichte EXE (`dotnet publish`, Befehl in `README.md`) und die SHA-256 in
+der README.
 
 ---
 
-## 1. Knopf im Blizzard-Gildenfenster entfernen
-
-**Was:** Der blaue „Guild Copilot"-Knopf oben rechts im Gildenfenster verdeckt
-Inhalte, lässt sich nicht verschieben und wird nicht gebraucht. Ersatzlos raus.
-
-**Wo:** `GuildCopilot/UI.lua`, Funktion `GC.UI:AddGuildWindowButton()` (um Zeile
-4626). Er hängt an `GuildFrame` mit `TOPRIGHT, -32, -30` und
-`SetFrameStrata("HIGH")` – deshalb liegt er über allem.
-
-**Mitzuziehen:**
-- der Aufruf von `AddGuildWindowButton` (Event-Registrierung suchen)
-- `README.md`: Die Aufrufwege nennen den Knopf ausdrücklich („Aufruf über
-  `/gcp`, den Button im Blizzard-Gildenfenster, das verschiebbare
-  Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**")
-- `tests/validate.mjs` prüfen, ob dort ein Muster darauf zeigt
-- Es bleiben genug Aufrufwege: `/gcp`, Minimap-Symbol, Addon-Optionsseite
-
-**Aufwand:** klein.
-
----
-
-## 2. Trigger-Wörter fürs Postfach konfigurierbar machen
-
-**Was:** Aktuell ist fest verdrahtet, wodurch jemand im Postfach landet. Das
-soll in den Einstellungen pflegbar sein – **und zusätzlich Ausschlusswörter**,
-die einen Eintrag ausdrücklich verhindern.
-
-**Wo:** `GuildCopilot/Chat.lua`
-
-- `RECRUITMENT_TRIGGERS` (ab Zeile 38) – greift bei **öffentlichen
-  Chatnachrichten**: „suche eine gilde", „suche gilde", „gilde gesucht",
-  „gildensuche", „lf guild", „looking for a guild", „looking for guild"
-- `WHISPER_RECRUITMENT_TRIGGERS` (ab Zeile 48) – greift bei **Flüsternachrichten**:
-  „interesse", „interessiert", „gilde", …
-- Ausgewertet in `GC.Chat:IsRecruitmentSignal` (Zeile ~471) und in
-  `CaptureWhisper` (Zeile ~456)
-
-**Zu entscheiden / umzusetzen:**
-- Beide Listen in die Datenbank verlagern, mit den bisherigen Werten als
-  Vorgabe (`Database.lua` DEFAULTS). Die Vorgabe muss wiederherstellbar sein.
-- **Ausschlussliste** ergänzen: Trifft ein Ausschlusswort, entsteht kein
-  Eintrag – auch wenn ein Trigger passt. Ausschluss schlägt Trigger.
-- Getrennt für öffentliche Nachrichten und Flüstern lassen, sie haben
-  unterschiedliche Fehlerkosten: Ein zu weiter Whisper-Trigger nervt nur
-  einen selbst, ein zu weiter Chat-Trigger erzeugt Müll aus dem ganzen Realm.
-- **Gildenweit oder lokal?** Die Standardtexte im Postfach sind gildenweit
-  synchronisiert, die Erkennungsschalter dagegen persönlich
-  (`captureOnlyDuringSearch`, `watchRecruitmentTriggers`). Trigger-Wörter sind
-  eher persönlich – kurz beim Nutzer rückfragen, bevor Sync-Aufwand entsteht.
-- Oberfläche: Einstellungsseite, Karte „Benachrichtigungen & Zugriff" oder eine
-  eigene Karte. Mehrzeiliges Eingabefeld, ein Wort je Zeile, ist am einfachsten
-  zu pflegen. Groß-/Kleinschreibung ignorieren (der Vergleich läuft heute schon
-  über `:lower()`), Einträge trimmen, leere Zeilen verwerfen.
-
-**Testfälle:** Ein eigenes Trigger-Wort greift; ein Ausschlusswort verhindert
-den Eintrag trotz passendem Trigger; leere Listen führen nicht dazu, dass
-plötzlich alles oder nichts erfasst wird.
-
-**Aufwand:** mittel.
-
----
-
-## 3. Onboarding-Wizard – erst konzipieren, noch nicht bauen
+## 1. Onboarding-Wizard – erst konzipieren, noch nicht bauen
 
 **Ausdrücklich nur Konzept.** Der Nutzer will das Konzept sehen, bevor
-irgendetwas umgesetzt wird.
+irgendetwas umgesetzt wird. Am 30.07.2026 bewusst offen gelassen: Der Nutzer
+will diesen Punkt mit einem anderen Modell erarbeiten.
 
 **Idee:** Beim ersten Start nach dem Einloggen führt ein Assistent durch drei
 Schritte:
@@ -142,62 +84,68 @@ Schritte:
 
 ---
 
-## 4. Offline-Import aus `WoWCombatLog.txt`
+## 2. `COMBATANT_INFO` als zweite Ausrüstungsquelle
 
-Der größte verbliebene Punkt. Details stehen bereits in `ROADMAP.md` unter
-„Offene Punkte".
+Der Offline-Import aus 0.9.41 liest die Zeile bislang nur als
+Anwesenheitsbeleg (`Installer/CombatLog/CombatLogImporter.cs`, Zweig
+`subevent == "COMBATANT_INFO"`). Darin steht aber mehr:
 
-**Ausgangslage (am 30.07.2026 auf diesem Rechner geprüft):** Unter
-`_anniversary_/Logs/` liegt eine echte Protokolldatei von 46 MB. Darin stehen:
+```
+COMBATANT_INFO,Player-6409-048F2D0C,0,122,591,672,…,(20,41,0),(),
+[(30146,133,(3003,0,0),(),(32409,70,24061,70)),(29381,110,(),(),()),…]
+```
 
-- `COMBATANT_INFO` – **die komplette Ausrüstung jedes Raidmitglieds beim Pull**,
-  mit Verzauberungen und Sockeln, im Format
-  `(ItemID, ItemLevel, (Enchant,0,0), (), (Gems…))`. Stichprobe: Die dort
-  gefundenen Enchant-IDs `3003`, `2661`, `3012`, `2939`, `1593`, `2564` stehen
-  alle im Regelsatz aus 0.9.37 – der ist damit gegen echte Spieldaten bestätigt.
-- `ENCOUNTER_START,649,"Hochkönig Maulgar",4,25,565,5` – **Encounter-ID und
-  übersetzter Bossname**. Die Roadmap-Annahme „ohne Encounter-API in TBC" gilt
-  für die Logdatei nachweislich nicht.
-- `UNIT_DIED`, `SPELL_CAST_SUCCESS`, `SPELL_AURA_APPLIED`, `SPELL_INTERRUPT`,
-  `SPELL_DISPEL`, `SPELL_RESURRECT` – alles, was die Livesitzung auch zählt.
-- Kopfzeile: `COMBAT_LOG_VERSION,9,ADVANCED_LOG_ENABLED,1,BUILD_VERSION,2.5.6`
+Also je Slot `(ItemID, ItemLevel, (Enchant,0,0), (), (Gems…))` – **die
+vollständige Ausrüstung jedes Raidmitglieds beim Pull, mit Verzauberungen und
+Sockeln.** Genau die Lücke, für die es heute **Gruppe prüfen** als
+Inspect-Rückfall gibt: Leute ohne Addon.
 
-**Warum das lohnt:**
-- **Rückwirkend** – heute ist ein Raidabend verloren, wenn niemand „Sitzung
-  starten" gedrückt hat. Die Datei hat trotzdem alles.
-- **Ohne Warcraft Logs** – kein Upload, keine API-Zugangsdaten.
-- **Ausrüstung auch von Leuten ohne Addon** – genau die Lücke, für die es heute
-  „Gruppe prüfen" als Inspect-Rückfall gibt.
+**Ausgangslage geprüft:** Die Enchant-IDs `3003`, `2661`, `3012`, `2939`,
+`1593`, `2564` aus der Testdatei stehen alle im Regelsatz aus 0.9.37 – der ist
+damit gegen echte Spieldaten bestätigt.
 
-**Umsetzung:**
-- Ein WoW-Addon darf keine Dateien lesen. Der **Installer** wertet aus und
-  erzeugt einen Importcode, genau wie beim Warcraft-Logs-Import
-  (`Installer/Wcl/WclImporter.cs` als Vorlage, `LogsPanel.cs` für die
-  Oberfläche).
-- Importformat analog `GCPWCL3`; das Addon zerlegt Zeilen feldweise
-  (`SplitFields`), damit ein Companion anderen Alters keinen Import verhindert.
-- **Sitzungsfingerabdruck** zur Quell-Deduplizierung: Derselbe Abend kann aus
-  Live-Sitzung, Warcraft Logs und Offline-Import kommen. Heute werden Quellen
-  getrennt gehalten und nie verrechnet (`stored.source ~= summary.source`), aber
-  auch nicht als *derselbe Abend* erkannt – er stünde dreimal in der Liste. Ein
-  Fingerabdruck aus Startzeit, Teilnehmern und Bossen würde sie zusammenführen.
-- `COMBATANT_INFO` als **zweite Gear-Quelle** anbinden. Die Datei ist 46 MB –
-  streamend lesen, nicht am Stück (`File.ReadLines`).
+**Zu klären / umzusetzen:**
+- Zerlegung der geklammerten Struktur. Der Feld-Splitter in
+  `CombatLogImporter.SplitFields` achtet auf Anführungszeichen, **nicht** auf
+  Klammern – für diese Zeile braucht es einen eigenen Leser.
+- Ein neuer Blocktyp im Importcode (`GCPLOG1` erweitern oder Zeilen `G|…`
+  anhängen). Die Addon-Seite zerlegt feldweise (`SplitFields` in
+  `WarcraftLogs.lua`), zusätzliche Felder am Ende stören ältere Clients nicht.
+- Anbindung an die Selbstprüfung: `GC.GearAudit` erwartet welches Format?
+  Vorher prüfen, wie ein Inspect-Snapshot dort abgelegt wird.
 - Die Datei enthält Spielernamen und Ausrüstung der ganzen Gilde. Sie bleibt
   lokal; über den Gildenkanal geht wie bisher nur, was ohnehin geteilt wird.
 
-**Aufwand:** groß. Vor dem Start Umfang mit dem Nutzer abstecken – ob zuerst nur
-die Raidauswertung oder gleich `COMBATANT_INFO` mit dazu.
+**Aufwand:** mittel bis groß. Vor dem Start Umfang abstecken.
+
+---
+
+## 3. Klasse für Teilnehmer aus dem Combat Log
+
+Der Combat Log nennt keine Klasse, deshalb erscheinen Teilnehmer aus der
+Logdatei ohne Klassenfarbe (`classFile` bleibt leer, bewusst statt geraten).
+Zwei Wege:
+
+- über **`COMBATANT_INFO`** – dort stehen die Talentpunkte, also Klasse *und*
+  Spec. Erledigt sich mit Aufgabe 2 mit;
+- über **gewirkte Zauber** – nur teilweise verlässlich und eine zweite
+  Zuordnungstabelle. Nur falls Aufgabe 2 nicht kommt.
+
+**Aufwand:** klein, wenn Aufgabe 2 zuerst kommt.
 
 ---
 
 ## Bleibt bewusst offen
 
-- **Code-Signing des Installers.** Ohne gekauftes Zertifikat warnen Browser,
-  Windows und SmartScreen bei jedem Download auf einem fremden Rechner. Nicht
-  von hier aus lösbar; die SHA-256-Prüfsumme steht in der README.
 - **Aldor-Schulterinschriften** im Verzauberungs-Regelsatz. Ihre Enchant-IDs
   ließen sich nicht belegen; sie gelten deshalb als unbewertet und damit als in
   Ordnung, statt falsch bewertet zu werden.
 - **Private Warcraft-Logs-Reports** – bräuchten eine OAuth-Benutzerfreigabe und
   sind ausdrücklich ausgeschlossen.
+- **Abende in zwei Instanzen** bekommen beide Zonen genannt („Gruuls
+  Unterschlupf / Auge"). Ob das in der schmalen Sitzungsliste lesbar bleibt,
+  zeigt erst der Blick im Spiel.
+- **Encounter-Ereignisse live**: In der Logdatei steht `ENCOUNTER_START` samt
+  übersetztem Bossnamen. Ob das Addon dieselben Ereignisse auch live als Event
+  empfängt, ist nicht geprüft. Wenn ja, wäre das eine genauere Bosserkennung
+  als die Namensliste aus 0.9.38.

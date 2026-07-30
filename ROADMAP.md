@@ -298,6 +298,18 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.41 – Eigene Trigger-Wörter, ein Ton je Rang und der Raidabend aus der Logdatei
+
+- **der Knopf im Blizzard-Gildenfenster ist ersatzlos weg.** Er lag auf `HIGH`-Strata über allem, ließ sich nicht verschieben und verdeckte Inhalte. Es bleiben genug Aufrufwege: `/gcp`, das Minimap-Symbol und die Addon-Optionsseite. Eine Prüfung in `tests/validate.mjs` hält ihn draußen;
+- **Trigger- und Ausschlusswörter fürs Postfach sind einstellbar.** Bisher war fest verdrahtet, wodurch jemand im Postfach landet. Öffentlicher Chat und Flüstern bleiben getrennt, weil die Fehlerkosten verschieden sind: Ein zu weiter Whisper-Trigger nervt nur einen selbst, ein zu weiter Chat-Trigger erzeugt Müll aus dem ganzen Realm. Ein **Ausschlusswort** verhindert den Eintrag auch dann, wenn ein Trigger passt – es holt aber niemanden aus dem Postfach, der schon drinsteht, sonst fehlte ausgerechnet die Nachricht, die zufällig ein Ausschlusswort enthält;
+- ein **leeres Trigger-Feld bedeutet „Vorgabe"**, nicht „nichts" und erst recht nicht „alles". Wer die Erkennung abschalten will, nimmt die Schalter darüber. Dadurch ist die Vorgabe mit einem leeren Feld wiederherstellbar, ohne eine Kopie zu hinterlassen, die bei einer späteren Änderung der Vorgabe veraltet wäre. Ein Knopf trägt die Vorgabe zum Bearbeiten ein, damit man sie für ein zusätzliches Wort nicht abtippen muss. Die Listen sind persönlich, wie die beiden Schalter daneben;
+- **der Bewerberton hängt am Gildenrang.** Wer nicht rekrutiert, will ihn nicht hören – weiß aber meist nicht, dass er ihn abschalten könnte. Deshalb entscheidet der Rang und nicht jeder für sich; die Freigabe wird gildenweit synchronisiert und hängt als Feld am Ende der Gildenprofil-Nutzlast, sodass ältere Clients die Nachricht weiter lesen. Erfasst wird weiter für alle, nur still: Wer später ins Postfach sieht, hat nichts verpasst. Ist der eigene Rang unbekannt, kommt der Ton – ein Ton zu viel ist verzeihlicher als der eine verpasste Bewerber;
+- **Offline-Import aus `WoWCombatLog.txt`.** Ein Raidabend ist nicht mehr verloren, nur weil niemand „Sitzung starten" gedrückt hat. Der Installer liest die Datei streamend (46 MB in der Testinstallation), erkennt `ENCOUNTER_START`/`ENCOUNTER_END` samt übersetztem Bossnamen und zählt genau das, was die Livesitzung auch zählt. Kein Upload, keine Zugangsdaten; die Datei bleibt lokal. Sie wird als eigene Quelle **Combat Log** abgelegt und nie mit Live- oder Warcraft-Logs-Zahlen verrechnet;
+- gegen die echte Datei gemessen und dabei dreimal korrigiert: **Wiederbelebungen** zählen nur über `SPELL_RESURRECT`, nicht zusätzlich über den gewirkten Zauber (sonst 47 statt 24 bei nur 39 Spielertoden); **Teilnehmer ohne Anwesenheit im Bosskampf** fallen heraus (elf Umstehende, die sich in Reichweite selbst gebufft hatten, standen neben 26 echten Teilnehmern); **`COMBATANT_INFO`** wird eigens behandelt, weil die Zeile kein Namensfeld hat – wer sie wie ein gewöhnliches Ereignis liest, bekommt einen Teilnehmer namens „0". Als Anwesenheitsbeleg ist sie dafür die beste Quelle, sie erscheint beim Pull für jedes Raidmitglied;
+- fehlt einem Versuch die Schlusszeile, gilt er als Wipe. In der Testdatei stehen vier `ENCOUNTER_START`, aber nur drei `ENCOUNTER_END` – ohne diesen Abschluss hätte der Abend vier Versuche bei drei Ergebnissen;
+- **die Zone kommt aus den Bossnamen.** Der Combat Log nennt keine, die Zuordnung Boss zu Instanz gibt es im Addon aber schon (`GC.RaidBosses`). So bleibt sie an einer Stelle gepflegt, statt im Installer ein zweites Mal;
+- **ein Raidabend steht einmal in der Liste, nicht dreimal.** Derselbe Abend kann aus Livesitzung, Warcraft Logs und Logdatei kommen. Als Fingerabdruck taugt kein Hash aus den Teilnehmern – jede Quelle zieht die Liste anders und ein exakter Vergleich schlüge genau dann fehl, wenn er gebraucht wird. Entschieden wird über überschneidende Zeiträume **und** eine Teilnehmerdeckung von mindestens der Hälfte. Angezeigt wird die vollständigste Auswertung; die übrigen Quellen bleiben gespeichert und stehen als Knöpfe in der Kopfzeile der Teilnehmerkarte.
+
 ## 0.9.39 – Postfach mit Uhrzeit, Realm und Haken statt Datum
 
 - **die Empfangszeit steht jetzt am Eintrag.** Sie war längst gespeichert, aber nirgends zu sehen – dabei entscheidet sie mit, ob sich eine Antwort noch lohnt. Heutige Nachrichten zeigen nur die Uhrzeit, ältere Datum und Uhrzeit; das Jahr steht dabei nur im Weg;
@@ -457,7 +469,7 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
-## Offene Punkte (Stand 0.9.39)
+## Offene Punkte (Stand 0.9.41)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 
@@ -471,7 +483,9 @@ Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgeset
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
 - **Code-Signing für den Installer**: Ohne Zertifikat warnen Browser, Windows und SmartScreen bei jedem Download auf einem fremden Rechner. Behebbar nur durch ein gekauftes Zertifikat; bis dahin steht die Prüfsumme in der README.
 - **Encounter-Ereignisse im Combat Log**: Die Annahme „ohne Encounter-API in TBC" stimmt für die Logdatei nachweislich nicht – dort steht `ENCOUNTER_START,649,"Hochkönig Maulgar",4,25,565,5`, also ID und übersetzter Name. Ob das Addon dieselben Ereignisse auch live als Event empfängt, ist im Spiel noch nicht geprüft. Wenn ja, wäre das eine genauere Bosserkennung als die Namensliste aus 0.9.38.
-- **Lokale Combat-Log-Nachanalyse**: Live-Sitzungen und der optionale WCL-Import sind vorhanden. Ein externer Offline-Import aus `_anniversary_/Logs/WoWCombatLog.txt`, ein gemeinsamer Sitzungsfingerabdruck zur Quell-Deduplizierung sowie `CombatantInfo` als zweite Gear-Quelle sind noch nicht umgesetzt.
+- **`COMBATANT_INFO` als zweite Gear-Quelle**: Der Offline-Import aus 0.9.41 liest die Zeile bislang nur als Anwesenheitsbeleg. Darin steht aber die vollständige Ausrüstung jedes Raidmitglieds beim Pull, mit Verzauberungen und Sockeln – auch von Leuten ohne Addon. Genau die Lücke, für die es heute **Gruppe prüfen** als Inspect-Rückfall gibt.
+- **Klasse im Offline-Import**: Der Combat Log nennt keine Klasse. Teilnehmerzeilen aus der Logdatei bleiben deshalb ohne Klassenfarbe. Über gewirkte Zauber wäre sie herleitbar, über `COMBATANT_INFO` sogar samt Spec.
+- **Abende in zwei Instanzen**: Die Zone eines Offline-Imports wird aus den Bossnamen aufgelöst. Wer an einem Abend Gruul und das Auge macht, bekommt beide genannt („Gruuls Unterschlupf / Auge"); ob das in der schmalen Sitzungsliste noch lesbar ist, steht im Spiel noch nicht fest.
 
 ## Datenschutz und Fairness
 

@@ -247,6 +247,24 @@ local SESSION_SOURCE_LABEL = {
     LIVE = "Live",
     SYNC = "Addon-Sync",
     WCL = "Warcraft Logs",
+    LOG = "Combat Log",
+}
+
+-- Kurzzeichen für die Sitzungsliste. Dort ist kein Platz für ganze Wörter, und
+-- sie erscheinen nur, wenn derselbe Abend aus mehreren Quellen vorliegt.
+local SESSION_SOURCE_MARK = {
+    LIVE = "Live",
+    SYNC = "Sync",
+    WCL = "Logs",
+    LOG = "Datei",
+}
+
+-- Quellen, deren Anwesenheit reine Encounter-Zeit ist. Beginn und Ende
+-- beschreiben dort den ganzen Abend samt Pausen und Trash; ein Prozentwert
+-- gegen diese Gesamtdauer waere fuer jeden Teilnehmer viel zu niedrig.
+local ENCOUNTER_TIME_SOURCES = {
+    WCL = true,
+    LOG = true,
 }
 
 local function SetButtonEnabled(button, enabled)
@@ -1067,7 +1085,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(822)
+    content:SetHeight(1444)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1219,9 +1237,100 @@ function GC.UI:BuildSettingsPage()
     end, false)
     page.profileSoundDropdown:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 508, -142)
 
+    -- Der Bewerberton meldet einen fremden Interessenten. Wer nicht rekrutiert,
+    -- will ihn nicht hoeren, weiss aber meist nicht, dass er ihn abschalten
+    -- koennte - deshalb haengt er am Gildenrang und nicht an jedem selbst.
+    local soundRankCard = CreateCard(content, "Bewerberton hören")
+    soundRankCard:SetSize(752, 180)
+    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
+    local soundRankHelp = CreateLabel(soundRankCard,
+        "Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter,"
+        .. " nur still. Die Freigabe wird gildenweit synchronisiert.",
+        { muted = true, width = 716, height = 28, vertical = "TOP" })
+    soundRankHelp:SetPoint("TOPLEFT", soundRankCard, "TOPLEFT", 18, -47)
+    page.inboxSoundRankToggles = {}
+    for index = 1, 10 do
+        local toggle
+        toggle = CreateToggle(soundRankCard, "", function(checked)
+            if toggle.rankIndex ~= nil
+                and not GC.Roster:SetInboxSoundRank(toggle.rankIndex, checked) then
+                page.settingsStatus:SetText("Nur freigegebene Gildenränge dürfen den Bewerberton umstellen.")
+                SetTextColor(page.settingsStatus, THEME.danger)
+                GC.UI:RefreshSettings()
+            end
+        end)
+        local column = (index - 1) % 5
+        local row = math.floor((index - 1) / 5)
+        toggle:SetPoint("TOPLEFT", soundRankCard, "TOPLEFT", 18 + (column * 145), -85 - (row * 31))
+        toggle.text:SetWidth(112)
+        toggle.text:SetJustifyH("LEFT")
+        page.inboxSoundRankToggles[index] = toggle
+    end
+
+    -- Trigger- und Ausschlusswoerter. Bewusst lokal: Sie aendern nur, was im
+    -- eigenen Postfach landet. Oeffentliche Nachrichten und Fluestern bleiben
+    -- getrennt, weil die Fehlerkosten verschieden sind - ein zu weiter
+    -- Whisper-Trigger nervt nur einen selbst, ein zu weiter Chat-Trigger
+    -- erzeugt Muell aus dem ganzen Realm.
+    local triggerCard = CreateCard(content, "Postfach-Erkennung: eigene Wörter")
+    triggerCard:SetSize(752, 400)
+    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -836)
+    CreateLabel(triggerCard,
+        "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
+        .. " Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ –"
+        .. " abschalten lässt sich die Erkennung über die Schalter darüber. Diese Listen gelten nur für dich.",
+        { muted = true, width = 716, height = 44, vertical = "TOP" })
+        :SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -44)
+
+    page.recruitmentWordEdits = {}
+    local wordFields = {
+        { key = "chatTriggers", label = "Öffentlicher Chat – Trigger", x = 18, y = -96 },
+        { key = "chatExclusions", label = "Öffentlicher Chat – Ausschluss", x = 386, y = -96 },
+        { key = "whisperTriggers", label = "Flüstern – Trigger", x = 18, y = -212 },
+        { key = "whisperExclusions", label = "Flüstern – Ausschluss", x = 386, y = -212 },
+    }
+    for _, definition in ipairs(wordFields) do
+        CreateLabel(triggerCard, definition.label, { muted = true, width = 348, height = 18 })
+            :SetPoint("TOPLEFT", triggerCard, "TOPLEFT", definition.x, definition.y)
+        local edit = CreateTextArea(triggerCard, 348, 88, 800)
+        edit.container:SetPoint("TOPLEFT", triggerCard, "TOPLEFT", definition.x, definition.y - 20)
+        page.recruitmentWordEdits[definition.key] = edit
+    end
+
+    page.saveRecruitmentWords = CreateButton(triggerCard, "Wörter speichern", 160, 34, function()
+        for key, edit in pairs(page.recruitmentWordEdits) do
+            GC.Chat:SetRecruitmentWordText(key, edit:GetText())
+        end
+        page.recruitmentWordStatus:SetText("Gespeichert. Leere Trigger-Felder nutzen wieder die Vorgabe.")
+        SetTextColor(page.recruitmentWordStatus, THEME.success)
+        GC.UI:RefreshSettings()
+    end, "PRIMARY")
+    page.saveRecruitmentWords:SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -324)
+
+    CreateButton(triggerCard, "Vorgabe wiederherstellen", 200, 34, function()
+        GC.Chat:RestoreRecruitmentDefaults()
+        page.recruitmentWordStatus:SetText("Alle vier Listen stehen wieder auf der Vorgabe.")
+        SetTextColor(page.recruitmentWordStatus, THEME.success)
+        GC.UI:RefreshSettings()
+    end):SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 186, -324)
+
+    -- Wer die Vorgabe nur um ein Wort ergaenzen will, soll sie nicht abtippen
+    -- muessen. Der Knopf traegt sie in die Felder ein, gespeichert wird erst
+    -- mit "Woerter speichern".
+    CreateButton(triggerCard, "Vorgabe eintragen", 170, 34, function()
+        for key, edit in pairs(page.recruitmentWordEdits) do
+            edit:SetText(GC.Chat:GetRecruitmentDefaultText(key))
+        end
+        page.recruitmentWordStatus:SetText("Vorgabe eingetragen – jetzt bearbeiten und speichern.")
+        SetTextColor(page.recruitmentWordStatus, THEME.muted)
+    end):SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 394, -324)
+
+    page.recruitmentWordStatus = CreateLabel(triggerCard, "", { width = 716, height = 18 })
+    page.recruitmentWordStatus:SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -366)
+
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1248)
     CreateLabel(gearCard,
         "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
@@ -1246,7 +1355,7 @@ function GC.UI:BuildSettingsPage()
     }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -96)
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -788)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1392)
 end
 
 function GC.UI:RefreshSettings()
@@ -1261,9 +1370,11 @@ function GC.UI:RefreshSettings()
         local activeToggle = page.activeRankToggles[index]
         local editorToggle = page.editorRankToggles[index]
         local memberCareAccessToggle = page.memberCareAccessToggles[index]
+        local inboxSoundToggle = page.inboxSoundRankToggles[index]
         activeToggle:SetShown(rank ~= nil)
         editorToggle:SetShown(rank ~= nil)
         memberCareAccessToggle:SetShown(rank ~= nil)
+        inboxSoundToggle:SetShown(rank ~= nil)
         if rank then
             activeToggle.rankIndex = rank.index
             activeToggle.text:SetText(rank.name)
@@ -1279,6 +1390,14 @@ function GC.UI:RefreshSettings()
             memberCareAccessToggle.rankIndex = rank.index
             memberCareAccessToggle.text:SetText(rank.name)
             SetToggle(memberCareAccessToggle, GC.Roster:IsMemberCareAccessRank(rank.index))
+            inboxSoundToggle.rankIndex = rank.index
+            inboxSoundToggle.text:SetText(rank.name)
+            SetToggle(inboxSoundToggle, GC.Roster:IsInboxSoundRank(rank.index))
+            if canEditGuildProfile then
+                inboxSoundToggle:Enable()
+            else
+                inboxSoundToggle:Disable()
+            end
             if canEditGuildProfile or GC.Roster:CanUseEditorRecovery(rank.index) then
                 editorToggle:Enable()
             else
@@ -1293,6 +1412,7 @@ function GC.UI:RefreshSettings()
             activeToggle.rankIndex = nil
             editorToggle.rankIndex = nil
             memberCareAccessToggle.rankIndex = nil
+            inboxSoundToggle.rankIndex = nil
         end
     end
 
@@ -1319,6 +1439,33 @@ function GC.UI:RefreshSettings()
         end
     end
     page.profileSoundDropdown:SetValue(profileSoundName or GC.SuccessSoundOptions[1].name)
+
+    -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
+    -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
+    local defaultLabels = {
+        chatTriggers = "öffentlicher Chat",
+        whisperTriggers = "Flüstern",
+    }
+    local usingDefaults = {}
+    for _, key in ipairs({ "chatTriggers", "whisperTriggers" }) do
+        if GC.Chat:GetRecruitmentWordText(key) == "" then
+            usingDefaults[#usingDefaults + 1] = defaultLabels[key]
+        end
+    end
+    for key, edit in pairs(page.recruitmentWordEdits) do
+        if not edit:HasFocus() then
+            edit:SetText(GC.Chat:GetRecruitmentWordText(key))
+        end
+    end
+    if page.recruitmentWordStatus:GetText() == "" then
+        if #usingDefaults > 0 then
+            page.recruitmentWordStatus:SetText("Vorgabe greift bei: "
+                .. GC.Util.JoinGerman(usingDefaults) .. ".")
+        else
+            page.recruitmentWordStatus:SetText("Es gelten durchgehend deine eigenen Listen.")
+        end
+        SetTextColor(page.recruitmentWordStatus, THEME.muted)
+    end
 
     if canEditGuildProfile then
         if page.settingsStatus:GetText() == "" then
@@ -3760,9 +3907,12 @@ function GC.UI:BuildStatisticsPage()
     page.sessionRows = {}
     for index = 1, 12 do
         local row = CreateButton(listCard, "", 206, 23, function()
-            local summary = GC.RaidMonitor:GetSummaries()[index]
-            if summary then
-                GC.RaidMonitor.selectedSessionID = summary.id
+            -- Ein Eintrag ist ein Abend, nicht eine Quelle. Gewaehlt wird die
+            -- vollstaendigste Auswertung; auf die anderen Quellen fuehren die
+            -- Knoepfe neben der Kopfzeile.
+            local evening = GC.RaidMonitor:GetEvenings()[index]
+            if evening then
+                GC.RaidMonitor.selectedSessionID = evening.summary.id
                 GC.UI:RefreshStatistics()
             end
         end)
@@ -3781,6 +3931,24 @@ function GC.UI:BuildStatisticsPage()
     detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
     page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 486, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
+
+    -- Liegt derselbe Abend aus mehreren Quellen vor, steht er einmal in der
+    -- Liste. Verborgen bleiben darf dabei nichts: Diese Knoepfe wechseln die
+    -- Quelle. Sie stehen in der Kopfzeile der Karte, weil darunter die
+    -- Tabellenkoepfe beginnen und dazwischen kein Platz ist.
+    page.sessionSourceButtons = {}
+    for index = 1, 3 do
+        local button = CreateButton(detailCard, "", 118, 20, function()
+            local target = GC.UI.pages.STATISTICS.sessionSourceButtons[index].summaryID
+            if target then
+                GC.RaidMonitor.selectedSessionID = target
+                GC.UI:RefreshStatistics()
+            end
+        end)
+        button:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 146 + ((index - 1) * 122), -14)
+        button:Hide()
+        page.sessionSourceButtons[index] = button
+    end
 
     -- Elixiere haben eine eigene Spalte. Sie mit Flaeschchen zusammenzufassen
     -- war ein Fehler: In einem Raid, in dem niemand Flaeschchen nimmt, stand
@@ -3933,24 +4101,34 @@ function GC.UI:RefreshStatistics()
     SetButtonEnabled(page.sessionButton, canControl)
     SetButtonEnabled(page.requestButton, canControl)
 
-    local summaries = monitor:GetSummaries()
-    page.sessionEmpty:SetShown(#summaries == 0)
+    -- Je Zeile ein Abend, nicht eine Quelle. Wer denselben Abend live
+    -- mitgeschnitten, aus Warcraft Logs geholt und aus der Logdatei importiert
+    -- hat, soll ihn einmal in der Liste finden.
+    local evenings = monitor:GetEvenings()
+    page.sessionEmpty:SetShown(#evenings == 0)
     local selectedID = monitor.selectedSessionID
     if not monitor:GetSummary(selectedID) then
-        selectedID = summaries[1] and summaries[1].id
+        selectedID = evenings[1] and evenings[1].summary.id
         monitor.selectedSessionID = selectedID
     end
 
     for index, row in ipairs(page.sessionRows) do
-        local summary = summaries[index]
-        row:SetShown(summary ~= nil)
-        if summary then
+        local evening = evenings[index]
+        row:SetShown(evening ~= nil)
+        if evening then
+            local summary = evening.summary
             local zone = summary.zone ~= "" and summary.zone or "Raid"
-            if summary.source == "WCL" then
-                zone = "[Logs] " .. zone
+            local marks = {}
+            for _, candidate in ipairs(evening.sources) do
+                marks[#marks + 1] = SESSION_SOURCE_MARK[candidate.source or "LIVE"] or "?"
             end
-            row:SetText(FormatSessionDate(summary) .. "  " .. zone)
-            row:SetActive(summary.id == selectedID)
+            row:SetText(FormatSessionDate(summary) .. "  " .. zone
+                .. (#marks > 1 and ("  [" .. table.concat(marks, "+") .. "]") or ""))
+            local active = false
+            for _, candidate in ipairs(evening.sources) do
+                active = active or candidate.id == selectedID
+            end
+            row:SetActive(active)
         end
     end
 
@@ -3966,10 +4144,23 @@ function GC.UI:RefreshStatistics()
         page.sessionHeadline:SetText("")
     end
 
+    -- Die Quellenknöpfe erscheinen nur, wenn es wirklich mehr als eine gibt.
+    local evening = selected and monitor:GetEveningOf(selectedID)
+    for index, button in ipairs(page.sessionSourceButtons) do
+        local candidate = evening and #evening.sources > 1 and evening.sources[index] or nil
+        button.summaryID = candidate and candidate.id or nil
+        button:SetShown(candidate ~= nil)
+        if candidate then
+            button:SetText((SESSION_SOURCE_LABEL[candidate.source or "LIVE"] or "?")
+                .. " (" .. #(candidate.participants or {}) .. ")")
+            SetButtonEnabled(button, candidate.id ~= selectedID)
+        end
+    end
+
     local sessionSeconds = selected
         and math.max(0, (selected.endedAt or 0) - (selected.startedAt or 0))
         or 0
-    if selected and selected.source == "WCL" then
+    if selected and ENCOUNTER_TIME_SOURCES[selected.source or ""] then
         -- Bei Logs ist die Anwesenheit reine Encounter-Zeit, Beginn/Ende
         -- beschreiben dagegen den ganzen Report inklusive Pausen und Trash.
         -- Der Prozentwert muss deshalb gegen die längste Encounter-Anwesenheit
@@ -4626,18 +4817,6 @@ function GC.UI:RefreshPostBar()
     end
 end
 
-function GC.UI:AddGuildWindowButton()
-    if self.guildButton or not GuildFrame then
-        return
-    end
-    local button = CreateButton(GuildFrame, "Guild Copilot", 124, 24, function()
-        self:Toggle()
-    end, "PRIMARY")
-    button:SetPoint("TOPRIGHT", GuildFrame, "TOPRIGHT", -32, -30)
-    button:SetFrameStrata("HIGH")
-    self.guildButton = button
-end
-
 local function MinimapAngle(y, x)
     if math.atan2 then
         return math.atan2(y, x)
@@ -4862,18 +5041,11 @@ SlashCmdList.GUILDCOPILOT = function(input)
     GC.UI:Toggle()
 end
 
-local uiEvents = CreateFrame("Frame")
-uiEvents:RegisterEvent("ADDON_LOADED")
-uiEvents:SetScript("OnEvent", function()
-    GC.UI:AddGuildWindowButton()
-end)
-
 GC:RegisterCallback("PLAYER_LOGIN", GC.UI, function(self)
     self:CreateMainFrame()
     if GC.DB:GetSettings().postBar.hidden == false then
         self:SetPostBarShown(true)
     end
-    self:AddGuildWindowButton()
     self:AddMinimapButton()
     self:RegisterInterfaceOptions()
 end)

@@ -731,6 +731,7 @@ function GC.Sync:BuildGuildProfileMessages()
     local templates = guildData.replyTemplates
     local memberCare = guildData.memberCare
     local roster = guildData.roster
+    local inboxSound = guildData.inboxSound
     local fields = {
         "GP",
         tostring(profile.updatedAt or 0),
@@ -759,6 +760,11 @@ function GC.Sync:BuildGuildProfileMessages()
         -- Die Content-Phase der Gilde. Sie entscheidet, welche Regeln des
         -- ausgelieferten Verzauberungs-Regelsatzes ueberhaupt schon gelten.
         profile.contentPhase or "",
+        -- Welche Raenge den Bewerberton hoeren. Steht am Ende, damit aeltere
+        -- Clients die Nutzlast weiter lesen koennen; sie spielen dann wie
+        -- bisher nach ihrer eigenen Vorgabe.
+        BoolField(inboxSound.ranksConfigured),
+        table.concat(SortedEnabledRanks(inboxSound.ranks), ","),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -937,6 +943,13 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
         if GC.GearAudit then
             GC.GearAudit:ReapplyEnchantRules()
         end
+    end
+    -- Die Rangfreigabe fuer den Bewerberton. Fehlt das Feld, sendet ein
+    -- aelterer Client; dann bleibt die eigene Freigabe stehen, statt auf
+    -- "niemand hoert etwas" zurueckzufallen.
+    if fields[26] ~= nil then
+        guildData.inboxSound.ranksConfigured = fields[26] == "1"
+        guildData.inboxSound.ranks = DecodeEnabledRanks(fields[27])
     end
     GC:FireCallback("GUILD_PROFILE_UPDATED", sender)
     GC:FireCallback("SETTINGS_UPDATED")

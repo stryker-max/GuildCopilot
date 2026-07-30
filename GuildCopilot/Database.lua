@@ -10,6 +10,18 @@ local DEFAULTS = {
         profileSoundKey = "LEVEL_UP",
         captureOnlyDuringSearch = true,
         watchRecruitmentTriggers = true,
+        -- Trigger- und Ausschlusswoerter fuers Postfach. Bewusst lokal und
+        -- nicht gildenweit: Sie aendern nur, was im eigenen Postfach landet,
+        -- genau wie die beiden Schalter darueber. Eine leere Triggerliste
+        -- bedeutet "Vorgabe aus Constants.lua", nicht "nichts" und erst recht
+        -- nicht "alles" - abschalten laesst sich die Erkennung ueber die
+        -- Schalter, nicht durch ein leeres Feld.
+        recruitmentFilters = {
+            chatTriggers = {},
+            chatExclusions = {},
+            whisperTriggers = {},
+            whisperExclusions = {},
+        },
         minimap = {
             hidden = false,
             angle = 225,
@@ -72,6 +84,14 @@ local GUILD_DEFAULTS = {
     -- Wer hier steht, erzeugt keinen Postfacheintrag mehr. Leeres "until_"
     -- bedeutet dauerhaft, sonst gilt der Eintrag bis zu diesem Datum.
     inboxFilters = {},
+    -- Wessen Rang den Bewerberton hoert. Gildenweit, weil sonst jeder, den der
+    -- Ton nicht betrifft, ihn selbst abschalten muesste - und genau das weiss
+    -- er nicht. Das Postfach fuellt sich fuer alle weiter, nur still: Wer
+    -- spaeter nachsieht, verpasst nichts.
+    inboxSound = {
+        ranksConfigured = false,
+        ranks = {},
+    },
     postHistory = {},
     lastPosts = {},
     warcraftLogs = {

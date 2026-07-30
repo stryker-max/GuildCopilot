@@ -83,7 +83,6 @@ Dummy.__index = function(self, key)
 end
 
 UIParent = setmetatable({}, Dummy)
-GuildFrame = setmetatable({}, Dummy)
 Minimap = setmetatable({}, Dummy)
 function Minimap:GetCenter()
     return 0, 0
@@ -1104,6 +1103,141 @@ assert(addon.Roster:CanAccessMemberCare("Tester-Realm") == true, "Offiziersrang 
 assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == false, "Nicht freigegebener Rang sieht die Mitgliederpflege")
 assert(addon.Roster:SetMemberCareAccessRank(5, true) == true, "Mitgliederpflege-Rang konnte nicht freigegeben werden")
 assert(addon.Roster:CanAccessMemberCare("Heiler-Realm") == true, "Gildenweite Mitgliederpflege-Freigabe greift nicht")
+
+-- Die folgenden Blöcke brauchen ein leeres Postfach zum Zählen, spätere Tests
+-- rechnen aber mit dem bisherigen Bestand. Er wird deshalb beiseitegelegt und
+-- am Ende zurückgestellt. Die Verschachtelung ist Absicht: Lua bricht bei mehr
+-- als 200 lokalen Variablen je Funktion ab, und diese Datei ist eine einzige.
+do
+local parkedInbox = {}
+for index, lead in ipairs(addon.DB:GetGuild().inbox) do
+    parkedInbox[index] = lead
+end
+
+-- Trigger- und Ausschlusswoerter fuers Postfach. Eigene Woerter greifen, ein
+-- Ausschlusswort verhindert den Eintrag trotz passendem Trigger, und ein
+-- geleertes Trigger-Feld faellt auf die Vorgabe zurueck - es erfasst also
+-- weder alles noch nichts.
+do
+    addon.Chat:ClearInbox()
+    addon.Chat:RestoreRecruitmentDefaults()
+    assert(addon.Chat:IsRecruitmentSignal("Hallo, ich suche eine Gilde!") == true,
+        "Die mitgelieferte Vorgabe erkennt keine Gildensuche mehr")
+    assert(addon.Chat:IsRecruitmentSignal("Wer verzaubert meine Waffe?") == false,
+        "Eine beliebige Handelsnachricht gilt als Gildensuche")
+
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "  Sucht MICH  \n\n sucht mich \nzweitgilde\n")
+    local storedTriggers = addon.Chat:GetRecruitmentFilters().chatTriggers
+    assert(#storedTriggers == 2, "Leerzeilen oder doppelte Einträge wurden nicht verworfen")
+    assert(storedTriggers[1] == "sucht mich",
+        "Eingaben werden nicht getrimmt und kleingeschrieben gespeichert")
+    assert(addon.Chat:IsRecruitmentSignal("Sucht mich jemand?") == true,
+        "Ein eigenes Trigger-Wort greift nicht")
+    assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == false,
+        "Die Vorgabe greift weiter, obwohl eine eigene Liste gesetzt ist")
+
+    addon.Chat:SetRecruitmentWordText("chatExclusions", "gold")
+    assert(addon.Chat:IsRecruitmentSignal("Sucht mich jemand? Gold gegen Rüstung!") == false,
+        "Ausschluss schlägt Trigger nicht")
+
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "   \n \n")
+    assert(#addon.Chat:GetRecruitmentFilters().chatTriggers == 0,
+        "Ein leeres Feld wurde als Wort gespeichert")
+    assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == true,
+        "Ein geleertes Trigger-Feld hat die Erkennung abgeschaltet")
+    assert(addon.Chat:IsRecruitmentSignal("Wer verzaubert meine Waffe?") == false,
+        "Ein geleertes Trigger-Feld erfasst plötzlich jede Nachricht")
+
+    addon.Chat:RestoreRecruitmentDefaults()
+    assert(addon.Chat:GetRecruitmentWordText("chatExclusions") == "",
+        "Die Wiederherstellung hat die Ausschlussliste nicht geleert")
+    assert(addon.Chat:GetRecruitmentWordText("chatTriggers") == "",
+        "Nach der Wiederherstellung steht eine eigene Kopie der Vorgabe im Feld")
+end
+
+-- Dasselbe fuer Fluesternachrichten. Zusaetzlich: Ein Ausschlusswort holt
+-- niemanden neu ins Postfach, schneidet aber die Unterhaltung eines bereits
+-- bekannten Interessenten nicht ab.
+do
+    local previousCaptureOnly = addon.DB:GetSettings().captureOnlyDuringSearch
+    addon.DB:GetSettings().captureOnlyDuringSearch = false
+    addon.Chat:ClearInbox()
+    addon.Chat:SetRecruitmentWordText("whisperTriggers", "raidplatz")
+    addon.Chat:SetRecruitmentWordText("whisperExclusions", "boost")
+
+    addon.Chat:CaptureWhisper("Hast du Interesse an einem Boost?", "Werber-Realm", "Player-Werber")
+    assert(#addon.DB:GetGuild().inbox == 0,
+        "Ein Ausschlusswort im Flüstern erzeugte trotzdem einen Postfacheintrag")
+    addon.Chat:CaptureWhisper("Habt ihr einen Raidplatz frei?", "Bewerber2-Realm", "Player-Bew2")
+    assert(#addon.DB:GetGuild().inbox == 1, "Ein eigenes Whisper-Trigger-Wort greift nicht")
+    addon.Chat:CaptureWhisper("Und wie ist das mit einem Boost für mich?", "Bewerber2-Realm", "Player-Bew2")
+    assert(#addon.DB:GetGuild().inbox[1].messages == 2,
+        "Ein Ausschlusswort hat die Unterhaltung eines bekannten Interessenten abgeschnitten")
+
+    addon.Chat:RestoreRecruitmentDefaults()
+    addon.Chat:ClearInbox()
+    addon.DB:GetSettings().captureOnlyDuringSearch = previousCaptureOnly
+end
+
+-- Der Bewerberton haengt am Gildenrang, die Erfassung nicht: Wer nicht
+-- rekrutiert, hoert nichts, findet den Eintrag aber trotzdem im Postfach.
+do
+    local soundSettings = addon.DB:GetGuild().inboxSound
+    soundSettings.ranksConfigured = false
+    soundSettings.ranks = {}
+    assert(addon.Roster:IsInboxSoundRank(1) == true, "Der Offiziersrang hört den Bewerberton nicht")
+    assert(addon.Roster:IsInboxSoundRank(5) == false, "Ein einfacher Rang hört den Bewerberton")
+    assert(addon.Roster:HearsInboxSound("Tester-Realm") == true, "Der eigene Offiziersrang hört nichts")
+    assert(addon.Roster:HearsInboxSound("Heiler-Realm") == false,
+        "Ein nicht freigegebener Rang hört den Bewerberton")
+    assert(addon.Roster:HearsInboxSound("Niemand-Realm") == true,
+        "Bei unbekanntem Rang bleibt der Ton aus, statt im Zweifel zu melden")
+
+    assert(addon.Roster:SetInboxSoundRank(5, true) == true,
+        "Die gildenweite Freigabe für den Bewerberton ließ sich nicht setzen")
+    assert(addon.Roster:HearsInboxSound("Heiler-Realm") == true,
+        "Die gildenweite Freigabe für den Bewerberton greift nicht")
+
+    -- Ohne Freigabe bleibt es still, der Eintrag entsteht aber.
+    local previousCaptureOnly = addon.DB:GetSettings().captureOnlyDuringSearch
+    addon.DB:GetSettings().captureOnlyDuringSearch = false
+    addon.DB:GetSettings().successSound = true
+    addon.Chat:ClearInbox()
+    addon.Chat.heardSenders = {}
+    soundSettings.ranksConfigured = true
+    soundSettings.ranks = { ["0"] = true }
+    playedSoundID = nil
+    addon.Chat:CaptureWhisper("Hallo, ich suche eine Gilde.", "Stiller-Realm", "Player-Still")
+    assert(#addon.DB:GetGuild().inbox == 1,
+        "Ohne Ton-Freigabe wurde der Interessent gar nicht erst erfasst")
+    assert(playedSoundID == nil, "Ein nicht freigegebener Rang hat den Bewerberton gehört")
+
+    soundSettings.ranks = { ["1"] = true }
+    addon.Chat:ClearInbox()
+    addon.Chat.heardSenders = {}
+    addon.Chat:CaptureWhisper("Hallo, ich suche eine Gilde.", "Stiller-Realm", "Player-Still")
+    assert(playedSoundID ~= nil, "Der freigegebene Rang hört den Bewerberton nicht")
+
+    -- Die Freigabe wird gildenweit verteilt; ein aelterer Absender ohne das
+    -- Feld darf die eigene Freigabe nicht zuruecksetzen.
+    local soundPayload = ""
+    for _, message in ipairs(addon.Sync:BuildGuildProfileMessages()) do
+        soundPayload = soundPayload .. message:match("^G|[^|]+|[^|]+|[^|]+|[^|]+|(.*)$")
+    end
+    local soundFields = addon.Util.SplitFields(soundPayload)
+    assert(soundFields[26] == "1" and soundFields[27] == "1",
+        "Die Rangfreigabe für den Bewerberton wird nicht synchronisiert")
+
+    addon.Chat:ClearInbox()
+    addon.Chat.heardSenders = {}
+    addon.DB:GetSettings().captureOnlyDuringSearch = previousCaptureOnly
+    playedSoundID = nil
+end
+
+for index, lead in ipairs(parkedInbox) do
+    addon.DB:GetGuild().inbox[index] = lead
+end
+end
 local savedEditorRanks = addon.DB:GetGuild().profilePermissions.editorRanks
 addon.DB:GetGuild().profilePermissions.editorRanks = {
     ["1"] = true,
@@ -2279,6 +2413,136 @@ assert(addon.Roster:GetProfile("Krieger-Realm").raidSpecKey == "WARRIOR:2",
     "Das alte Format importiert keine Profile mehr")
 
 addon.DB:GetGuild().raidSessions = {}
+
+-- === Offline-Import aus der Combat-Log-Datei ===============================
+--
+-- Der Installer wertet WoWCombatLog.txt aus und schickt GCPLOG1. Es ist eine
+-- eigene Quelle: Warcraft-Logs-Stand und Profile dürfen davon unberührt
+-- bleiben, und die Zone kommt aus den Bossnamen, weil sie in der Datei nicht
+-- steht.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    local wclData = addon.DB:GetGuild().warcraftLogs
+    wclData.reportCode = nil
+    wclData.reportCount = 7
+    wclData.importedAt = 4242
+    wclData.lastSyncFrom = "Offizier-Realm"
+    local memberCountBefore = addon.WarcraftLogs:GetImportedCount()
+
+    local logImported, logMessage = addon.WarcraftLogs:Import(
+        "GCPLOG1|1\n"
+        .. "S|20260728-2002|1785261742|1785265170||4|3|1|Hochkönig Maulgar,Gruul der Drachenschlächter\n"
+        .. "P|Brooklee||1113|0|0|12|28017:1,33268:1|3\n"
+        .. "P|Midgart||1113|1|1|0|28495:1,28520:7|0\n"
+    )
+    assert(logImported == true, logMessage or "Der Offline-Import schlug fehl")
+    assert(logMessage:find("Combat Log", 1, true),
+        "Die Rückmeldung nennt den Offline-Import nicht: " .. tostring(logMessage))
+
+    local logSummary = addon.RaidMonitor:GetSummary("LOG:20260728-2002")
+    assert(logSummary ~= nil, "Die Auswertung aus der Logdatei wurde nicht gespeichert")
+    assert(logSummary.source == "LOG", "Die Logdatei wurde nicht als eigene Quelle abgelegt")
+    assert(logSummary.zone == "Gruuls Unterschlupf",
+        "Die Zone wurde nicht aus den Bossnamen aufgelöst: " .. tostring(logSummary.zone))
+    assert(logSummary.pulls == 4 and logSummary.kills == 3 and logSummary.wipes == 1,
+        "Versuche, Siege und Wipes wurden nicht übernommen")
+    assert(#logSummary.participants == 2, "Nicht alle Teilnehmer der Logdatei wurden übernommen")
+    assert(logSummary.participants[1].name == "Brooklee", "Die Teilnehmerzeilen sind verrutscht")
+    assert(logSummary.participants[1].seconds == 1113, "Die Anwesenheit wurde falsch zerlegt")
+    assert(logSummary.participants[1].dispels == 12, "Die Dispels wurden falsch zerlegt")
+    assert(logSummary.participants[1].resurrects == 3, "Die Wiederbelebungen wurden falsch zerlegt")
+    -- 28017 ist ein Öl, 33268 ein Sattgegessen-Buff. Beide sind nicht
+    -- wiederholbar und zählen deshalb je Spieler einmal, wie in der Livesitzung.
+    assert(logSummary.participants[1].consumables.OIL == 1
+        and logSummary.participants[1].consumables.FOOD == 1,
+        "Die Verbrauchsgegenstände aus der Logdatei wurden nicht gezählt")
+    -- Die Klasse steht im Combat Log nicht. Sie bleibt offen, statt geraten zu
+    -- werden; angezeigt wird der Name dann ohne Klassenfarbe.
+    assert(logSummary.participants[1].classFile == nil,
+        "Für die Logdatei wurde eine Klasse erfunden")
+
+    -- Der Warcraft-Logs-Zweig gehört dem anderen Import.
+    assert(wclData.reportCount == 7, "Der Offline-Import hat die Reportzahl überschrieben")
+    assert(wclData.importedAt == 4242, "Der Offline-Import hat den Warcraft-Logs-Zeitstempel verändert")
+    assert(wclData.lastSyncFrom == "Offizier-Realm",
+        "Der Offline-Import hat die Herkunft des Warcraft-Logs-Stands gelöscht")
+    assert(addon.WarcraftLogs:GetImportedCount() == memberCountBefore,
+        "Der Offline-Import hat die importierten Profile angetastet")
+
+    -- Ein zweiter Durchlauf derselben Datei trifft denselben Abend, statt ihn
+    -- zu verdoppeln.
+    addon.WarcraftLogs:Import(
+        "GCPLOG1|1\n"
+        .. "S|20260728-2002|1785261742|1785265170||4|3|1|Hochkönig Maulgar\n"
+        .. "P|Brooklee||1113|0|0|12||3\n"
+        .. "P|Midgart||1113|1|1|0||0\n"
+    )
+    local logSessions = 0
+    for _, summary in ipairs(addon.RaidMonitor:GetSummaries()) do
+        if summary.source == "LOG" then
+            logSessions = logSessions + 1
+        end
+    end
+    assert(logSessions == 1, "Dieselbe Logdatei zweimal eingelesen ergab zwei Abende")
+end
+
+-- Derselbe Abend kann aus Livesitzung, Warcraft Logs und Logdatei kommen. In
+-- der Liste steht er einmal; angezeigt wird die vollständigste Auswertung, die
+-- übrigen Quellen bleiben erreichbar.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor:StoreSummary({
+        id = "live-abend",
+        startedAt = 1785261000,
+        endedAt = 1785265000,
+        zone = "Gruuls Unterschlupf",
+        pulls = 4, kills = 3, wipes = 1,
+        source = "LIVE",
+        participants = {
+            { name = "Brooklee", seconds = 4000, deaths = 0, resurrects = 3, interrupts = 0, dispels = 12,
+              consumables = {} },
+            { name = "Midgart", seconds = 4000, deaths = 1, resurrects = 0, interrupts = 1, dispels = 0,
+              consumables = {} },
+            { name = "Qtica", seconds = 4000, deaths = 0, resurrects = 6, interrupts = 0, dispels = 8,
+              consumables = {} },
+        },
+    })
+    addon.WarcraftLogs:Import(
+        "GCPLOG1|1\n"
+        .. "S|20260728-2002|1785261742|1785265170||4|3|1|Hochkönig Maulgar\n"
+        .. "P|Brooklee||1113|0|0|12||3\n"
+        .. "P|Midgart||1113|1|1|0||0\n"
+    )
+    assert(#addon.RaidMonitor:GetSummaries() == 2,
+        "Beide Quellen müssen gespeichert bleiben, sie werden nur zusammen angezeigt")
+
+    local evenings = addon.RaidMonitor:GetEvenings()
+    assert(#evenings == 1, "Derselbe Abend steht aus zwei Quellen zweimal in der Liste")
+    assert(#evenings[1].sources == 2, "Die zweite Quelle des Abends fehlt")
+    assert(evenings[1].summary.source == "LIVE",
+        "Nicht die vollständigste Auswertung führt den Abend an")
+    local evening = addon.RaidMonitor:GetEveningOf("LOG:20260728-2002")
+    assert(evening ~= nil and evening.summary.id == "live-abend",
+        "Über die zweite Quelle ist der Abend nicht auffindbar")
+
+    -- Ein anderer Abend mit anderen Leuten bleibt ein eigener Eintrag.
+    addon.RaidMonitor:StoreSummary({
+        id = "live-anderer",
+        startedAt = 1785261500,
+        endedAt = 1785265500,
+        zone = "Karazhan",
+        pulls = 2, kills = 2, wipes = 0,
+        source = "LIVE",
+        participants = {
+            { name = "Fremder", seconds = 4000, consumables = {} },
+            { name = "Unbekannt", seconds = 4000, consumables = {} },
+        },
+    })
+    assert(#addon.RaidMonitor:GetEvenings() == 2,
+        "Ein überschneidender Abend mit anderen Teilnehmern wurde zusammengelegt")
+
+    addon.DB:GetGuild().raidSessions = {}
+end
 
 -- === Mitgliederpflege: Entscheidungen und Ausschluss ========================
 addon.DB:GetGuild().memberCare.decisions = {}

@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.40
+# Guild Copilot 0.9.41
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -56,14 +56,18 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - suchbasierte Gildenwerkstatt: Statt hunderte Rezepte ungefiltert zu laden, werden Ergebnisse erst nach Suchbegriff, Berufsauswahl oder über gespeicherte Favoriten angezeigt;
 - bebilderter Berufsfilter, Berufssymbole in der Rezeptliste und lokale Rezeptfavoriten;
 - Einstellungsseite für aktive Raider-Ränge, berechtigte Einstellungs-Editoren, Mitgliederpflege-Zugriff, Postfach-Erkennung, TBC-kompatible Erfolgssounds und das Minimap-Symbol;
+- **eigene Trigger- und Ausschlusswörter** für das Postfach, getrennt für öffentliche Nachrichten und Flüstern; ein Ausschlusswort verhindert den Eintrag auch dann, wenn ein Trigger passt. Die Listen gelten nur für dich; ein leeres Trigger-Feld nutzt die mitgelieferte Vorgabe, statt die Erkennung stillschweigend abzuschalten;
+- der **Bewerberton hängt am Gildenrang**: Wer nicht rekrutiert, hört ihn nicht, findet den Eintrag aber trotzdem im Postfach. Die Freigabe wird gildenweit synchronisiert;
 - in der **Mitgliederpflege** stehen Prüfregeln, Pflegevorschläge und Entscheidungen als zusammenhängender Ablauf untereinander; die Abmeldungen als eigenes Thema darunter;
 - Lockout-Schutz für gildenweite Einstellungen: eigener Rang nicht abwählbar, Entzug nur durch höhere Ränge und einmalige Offiziers-Wiederherstellung je Gilde für alte Sperren;
-- Gildenprofil, Editor-Ränge, Mitgliederpflege-Zugriff, Raider-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
-- Aufruf über `/gcp`, den Button im Blizzard-Gildenfenster, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**;
+- Gildenprofil, Editor-Ränge, Mitgliederpflege-Zugriff, Raider-Ränge, Bewerberton-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
+- Aufruf über `/gcp`, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**; das Blizzard-Gildenfenster bleibt unangetastet;
 - eigene statische Addon-Optionsseite mit Schriftlogo, Slash-Befehl und ausdrücklichem Öffnen-Button; sie öffnet kein zweites Fenster mehr automatisch und blockiert dadurch nicht die Escape-Taste;
 - zusätzliche direkte Escape-Behandlung für Hauptfenster und Textfelder;
 - eigenes Guild-Copilot-Logo im Fenstertitel und in den Addon-Metadaten;
 - **Raidauswertung** mit ausdrücklich gestarteter Sitzung: Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände;
+- **nachträgliche Raidauswertung aus `WoWCombatLog.txt`**: Der Installer wertet die Protokolldatei aus und erzeugt einen Importcode – auch für einen Abend, an dem niemand „Sitzung starten" gedrückt hat. Ohne Upload und ohne Zugangsdaten; die Datei bleibt lokal;
+- derselbe Abend aus Livesitzung, Warcraft Logs und Logdatei steht **einmal in der Liste**: angezeigt wird die vollständigste Auswertung, die übrigen Quellen sind daneben abrufbar. Zahlen verschiedener Quellen werden nie miteinander verrechnet;
 - Sitzungen dürfen Raidleiter, Assistenten und die für die Mitgliederpflege freigegebenen Gildenränge starten und beenden;
 - die fertige Auswertung wird über den Raidkanal an alle berechtigten Teilnehmer verteilt; Offiziere außerhalb des Raids fragen sie an und erhalten sie per Flüsterkanal;
 - gespeichert werden ausschließlich Zusammenfassungen, keine Combat-Log-Rohdaten;
@@ -136,7 +140,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.40; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.41; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -150,7 +154,7 @@ Bei SmartScreen führt der Weg über **Weitere Informationen → Trotzdem ausfü
 Get-FileHash .\GuildCopilot-Installer.exe -Algorithm SHA256
 ```
 
-SHA-256 der Fassung 1.0.4: `40ED601F9B15C2A2C698BC2FA54DE87461FACF2CBAA376ABDF0BDB7F7DEBFF19`
+SHA-256 der Fassung 1.0.5: `30A4DD7FD03A5C50E1E9DC424588468D19B978E318AEE74003F4A321A0666DC8`
 
 Wem das zu umständlich ist, nimmt `Install.cmd` aus dem Repository – dort wird nichts ausgeführt, was Windows nicht ohnehin kennt.
 
@@ -169,6 +173,19 @@ WoW erlaubt Addons nicht, Chatwerbung zeitgesteuert oder ohne echten Tastendruck
 Den Abruf übernimmt der **Installer** im Bereich **Warcraft Logs**: Client ID, Client Secret, ein Gilden- oder Reportlink, ein Klick – der Importcode landet in der Zwischenablage und wird im Addon eingefügt. Für den WCL-Client wird `http://localhost/callback` als technisch verlangte Redirect-URL eingetragen; verwendet wird sie nicht. Das Client Secret wird nur auf Wunsch gespeichert, dann über die Windows-eigene DPAPI verschlüsselt und an das Windows-Konto gebunden – nie im Klartext.
 
 Beim Gildenlink werden die jüngsten Reports genommen, sortiert nach Endzeit; bei „Reports: 1" also der letzte Raid. Ein Reportlink holt gezielt genau diesen einen.
+
+### Raidabend aus dem Combat Log
+
+Für die Raidauswertung gibt es einen zweiten, netzfreien Weg: den Bereich **Raidabend aus dem Combat Log** im Installer. Er liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode – ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Die Datei bleibt auf dem Rechner; über den Gildenkanal geht wie bisher nur, was ohnehin geteilt wird.
+
+Der Nutzen ist die Rückwirkung: Aufgezeichnet wird im Spiel mit `/combatlog`, und die Datei hat den ganzen Abend – auch wenn niemand **Sitzung starten** gedrückt hat. Ein Raidabend ist dabei ein Block aus Bosskämpfen; längere Pausen trennen zwei Abende, eine Logdatei läuft über mehrere Abende weiter.
+
+Grenzen, damit die Zahlen richtig gelesen werden:
+
+- die **Klasse** steht im Combat Log nicht. Teilnehmer aus der Logdatei erscheinen ohne Klassenfarbe, statt mit einer geratenen Klasse;
+- gezählt wird nur, wer in einem Bosskampf auftaucht. Wer daneben stand und sich selbst gebufft hat, kommt nicht in die Liste;
+- die **Zone** wird aus den Bossnamen aufgelöst, weil die Datei keine nennt;
+- die Auswertung ist eine eigene Quelle (**Combat Log**) und wird nie mit Live- oder Warcraft-Logs-Zahlen verrechnet. Liegt derselbe Abend mehrfach vor, steht er einmal in der Liste – angezeigt wird die vollständigste Auswertung, die übrigen Quellen sind über die Knöpfe in der Teilnehmerkarte erreichbar.
 
 Der ältere Weg über `GuildCopilot/Companion/Start-WCL-Import.cmd` funktioniert unverändert weiter und braucht Node.js. Er bleibt vorerst als Rückfallebene erhalten; Einzelheiten und Fehlersuche stehen in [Companion/README.md](GuildCopilot/Companion/README.md).
 

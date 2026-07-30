@@ -35,33 +35,121 @@ function GC.Chat:PlaySuccessSound(overrideKey)
     return false
 end
 
-local RECRUITMENT_TRIGGERS = {
-    "suche eine gilde",
-    "suche gilde",
-    "gilde gesucht",
-    "gildensuche",
-    "lf guild",
-    "looking for a guild",
-    "looking for guild",
+-- === Trigger- und Ausschlusswoerter =====================================
+--
+-- Die Vorgaben stehen in Constants.lua, gespeichert wird nur die eigene
+-- Fassung. Ein geleertes Triggerfeld faellt deshalb auf die Vorgabe zurueck,
+-- statt die Erkennung stillschweigend abzuschalten - dafuer sind die Schalter
+-- "captureOnlyDuringSearch" und "watchRecruitmentTriggers" da. Ein leeres
+-- Ausschlussfeld heisst schlicht "kein Ausschluss".
+
+local FILTER_LISTS = {
+    chatTriggers = { default = "DefaultChatTriggers" },
+    chatExclusions = {},
+    whisperTriggers = { default = "DefaultWhisperTriggers" },
+    whisperExclusions = {},
 }
 
-local WHISPER_RECRUITMENT_TRIGGERS = {
-    "interesse",
-    "interessiert",
-    "gilde",
-    "guild",
-    "bewerb",
-    "rekrut",
-    "raidplatz",
-    "raid platz",
-    "mehr info",
-    "mehr infos",
-    "discord",
-    "sucht ihr",
-    "mitmachen",
-    "anschließen",
-    "anschliessen",
-}
+function GC.Chat:GetRecruitmentFilters()
+    local settings = GC.DB:GetSettings()
+    local filters = settings.recruitmentFilters
+    if type(filters) ~= "table" then
+        filters = {}
+        settings.recruitmentFilters = filters
+    end
+    for key in pairs(FILTER_LISTS) do
+        if type(filters[key]) ~= "table" then
+            filters[key] = {}
+        end
+    end
+    return filters
+end
+
+-- Ein Wort je Zeile. Verglichen wird spaeter ueber :lower(), deshalb wird hier
+-- schon kleingeschrieben gespeichert; getrimmt, ohne Leerzeilen und ohne
+-- Doppelte, damit die Liste beim naechsten Oeffnen aufgeraeumt aussieht.
+local function CleanWordList(text)
+    local words = {}
+    local seen = {}
+    for line in (tostring(text or "") .. "\n"):gmatch("([^\r\n]*)[\r\n]") do
+        local word = GC.Util.Trim(line):lower()
+        if word ~= "" and not seen[word] then
+            seen[word] = true
+            words[#words + 1] = word
+            if #words >= GC.MaxRecruitmentFilterWords then
+                break
+            end
+        end
+    end
+    return words
+end
+
+GC.Chat.CleanRecruitmentWordList = function(_, text)
+    return CleanWordList(text)
+end
+
+-- Was tatsaechlich verglichen wird: die eigene Liste, sonst die Vorgabe.
+function GC.Chat:GetRecruitmentWords(key)
+    local definition = FILTER_LISTS[key]
+    if not definition then
+        return {}
+    end
+    local stored = self:GetRecruitmentFilters()[key]
+    if #stored > 0 then
+        return stored
+    end
+    return definition.default and GC[definition.default] or {}
+end
+
+-- Was im Eingabefeld steht: nur die eigene Fassung. Ein leeres Feld zeigt
+-- damit an, dass die Vorgabe gilt, statt sie als eigene Eingabe auszugeben.
+function GC.Chat:GetRecruitmentWordText(key)
+    if not FILTER_LISTS[key] then
+        return ""
+    end
+    return table.concat(self:GetRecruitmentFilters()[key], "\n")
+end
+
+-- Die mitgelieferte Vorgabe als Text, damit sie sich in den Einstellungen zum
+-- Bearbeiten eintragen laesst. Ausschlusslisten haben keine Vorgabe und
+-- liefern deshalb einen leeren Text.
+function GC.Chat:GetRecruitmentDefaultText(key)
+    local definition = FILTER_LISTS[key]
+    if not definition or not definition.default then
+        return ""
+    end
+    return table.concat(GC[definition.default] or {}, "\n")
+end
+
+function GC.Chat:SetRecruitmentWordText(key, text)
+    if not FILTER_LISTS[key] then
+        return false
+    end
+    self:GetRecruitmentFilters()[key] = CleanWordList(text)
+    GC:FireCallback("SETTINGS_UPDATED")
+    return true
+end
+
+-- Vorgabe wiederherstellen heisst: die eigene Liste leeren. Dann greift die
+-- Vorgabe wieder, und es bleibt keine Kopie stehen, die bei einer spaeteren
+-- Aenderung der Vorgabe veraltet waere.
+function GC.Chat:RestoreRecruitmentDefaults()
+    local filters = self:GetRecruitmentFilters()
+    for key in pairs(FILTER_LISTS) do
+        filters[key] = {}
+    end
+    GC:FireCallback("SETTINGS_UPDATED")
+    return true
+end
+
+local function MatchesAnyWord(normalizedMessage, words)
+    for _, word in ipairs(words) do
+        if normalizedMessage:find(word, 1, true) then
+            return true
+        end
+    end
+    return false
+end
 
 local function NormalizeChannelName(name)
     name = tostring(name or ""):lower()
@@ -435,7 +523,12 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
         table.remove(lead.messages, 1)
     end
 
-    if settings.successSound and not self.heardSenders[normalizedSender] then
+    -- Der eigene Schalter entscheidet, ob ueberhaupt ein Ton kommt, der
+    -- Gildenrang, ob er einen betrifft. Erfasst wird in jedem Fall - wer
+    -- spaeter ins Postfach sieht, soll nichts verpasst haben.
+    if settings.successSound
+        and GC.Roster:HearsInboxSound()
+        and not self.heardSenders[normalizedSender] then
         self.heardSenders[normalizedSender] = true
         self:PlaySuccessSound()
     end
@@ -455,13 +548,12 @@ function GC.Chat:CaptureWhisper(message, sender, guid)
         end
     end
     local normalizedMessage = tostring(message or ""):lower()
-    local recruitmentSignal = false
-    for _, trigger in ipairs(WHISPER_RECRUITMENT_TRIGGERS) do
-        if normalizedMessage:find(trigger, 1, true) then
-            recruitmentSignal = true
-            break
-        end
-    end
+    -- Ausschluss schlaegt Trigger. Er verhindert aber nur, dass ein Wort
+    -- jemanden neu ins Postfach holt: Wer schon drinsteht, dessen Unterhaltung
+    -- laeuft weiter, sonst fehlte ausgerechnet die Nachricht, die ein
+    -- Ausschlusswort zufaellig enthaelt.
+    local recruitmentSignal = not MatchesAnyWord(normalizedMessage, self:GetRecruitmentWords("whisperExclusions"))
+        and MatchesAnyWord(normalizedMessage, self:GetRecruitmentWords("whisperTriggers"))
     if not knownLead and not recruitmentSignal then
         return
     end
@@ -470,12 +562,10 @@ end
 
 function GC.Chat:IsRecruitmentSignal(message)
     local normalized = tostring(message or ""):lower()
-    for _, trigger in ipairs(RECRUITMENT_TRIGGERS) do
-        if normalized:find(trigger, 1, true) then
-            return true
-        end
+    if MatchesAnyWord(normalized, self:GetRecruitmentWords("chatExclusions")) then
+        return false
     end
-    return false
+    return MatchesAnyWord(normalized, self:GetRecruitmentWords("chatTriggers"))
 end
 
 function GC.Chat:SendReply(playerName, text)
