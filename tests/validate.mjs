@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.38",
+  "## Version: 0.9.39",
 ];
 
 for (const entry of requiredMetadata) {
@@ -281,6 +281,15 @@ const requiredImplementations = [
   ["Werbebalken als eigenes Fenster", /function GC\.UI:CreatePostBar/],
   ["Werbebalken mit Countdown", /s Cooldown"\)/],
   ["Werbebalken sendet nur per Klick", /bar\.sendButton = CreateButton/],
+  ["Empfangszeit im Postfach", /local function FormatInboxTime/],
+  ["kanonische Realm-Zuordnung", /local function CanonicalLeadName/],
+  ["einsehbare Ignorierliste", /GetInboxFilterList/],
+  ["Profilbestätigung als Haken", /profileStatusMark/],
+  ["eigener Ton für die Profilbestätigung", /function GC\.Chat:PlayProfileSound/],
+  ["Bosserkennung über eine gepflegte Liste", /function GC\.RaidMonitor:ResolveBoss/],
+  ["Boss überlebt den Wipe in der Auswertung", /segment\.bossName or segment\.lastNPCDeath/],
+  ["Ausnahmen für Farmgear und Widerstandssets", /function GC\.GearAudit:CycleSlotException/],
+  ["Content-Phase der Gilde", /function GC\.GearAudit:GetContentPhase/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

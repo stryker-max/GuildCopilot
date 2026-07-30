@@ -298,6 +298,13 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.39 – Postfach mit Uhrzeit, Realm und Haken statt Datum
+
+- **die Empfangszeit steht jetzt am Eintrag.** Sie war längst gespeichert, aber nirgends zu sehen – dabei entscheidet sie mit, ob sich eine Antwort noch lohnt. Heutige Nachrichten zeigen nur die Uhrzeit, ältere Datum und Uhrzeit; das Jahr steht dabei nur im Weg;
+- **kanonische Realm-Zuordnung.** Ein Name ohne Realm meint immer den eigenen – nur wusste das die Deduplizierung nicht. Sie verglich Kurznamen und legte deshalb „Doppel" und „Doppel-Fremdrealm" zusammen, also zwei verschiedene Spieler. Jetzt werden beide Namen erst auf dieselbe Schreibweise gebracht: „Doppel" und „Doppel-Aegwynn" sind auf Aegwynn derselbe, „Doppel" und „Doppel-Frostwolf" nicht. Ein Regressionstest bildet genau diesen Fall ab;
+- die **Ignorierliste** war entgegen der bisherigen Notiz längst vollständig da – zeitlich begrenzt oder dauerhaft, einsehbar, mit „Wieder zulassen", und abgelaufene Einträge räumt sie selbst weg. Sie ist jetzt nur zusätzlich durch einen Test abgesichert;
+- **die Profilbestätigung zeigt einen Haken statt eines Datums.** Der Zeitpunkt war neben dem Knopf ohnehin abgeschnitten („Bestätigt am 30.07.2026 um 0…"), und für „das hat geklappt" braucht es keine Worte. Ein Fehlschlag steht weiterhin im Klartext daneben – nur der muss erklären, was zu tun ist. Verwendet wird die WoW-eigene Hakentextur, kein Unicode-Zeichen: Die Spielschrift kennt es nicht und zeichnet leere Kästen.
+
 ## 0.9.38 – Essen, Bosse und ein Installer ohne Rückfragen
 
 - **Essen zählt endlich mit.** Alle Sattgegessen-Buffs heißen im Spiel gleich, tragen aber je Gericht eine eigene Spell-ID – live erkennt das Addon sie am Auranamen, aus Warcraft Logs kommen nur IDs, und dort stand Essen deshalb dauerhaft auf null. Zehn Buffs sind jetzt einzeln nachgeschlagen und eingetragen. Bewusst draußen bleiben die reinen `Food`-Auren (33258, 33262, 33264, 33266 – nur Lebensregeneration während des Essens, kein Raidbuff) und das Tierfutter 33272, das ein Jägertier beglückt und keinen Teilnehmer. Beim Nachschlagen entpuppte sich außerdem 33270 als „Check Players" und 43765 als Kochrezept statt als Buff;
@@ -450,7 +457,7 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
-## Offene Punkte (Stand 0.9.38)
+## Offene Punkte (Stand 0.9.39)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 
@@ -463,7 +470,7 @@ Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgeset
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
 - **Code-Signing für den Installer**: Ohne Zertifikat warnen Browser, Windows und SmartScreen bei jedem Download auf einem fremden Rechner. Behebbar nur durch ein gekauftes Zertifikat; bis dahin steht die Prüfsumme in der README.
-- **Postfach-Zeitstempel und Deduplizierung**: Empfangszeiten werden gespeichert und gleiche Namen/GUIDs grundlegend zusammengeführt. Datum/Uhrzeit werden noch nicht angezeigt; eine kanonische Realm-Zuordnung und eine einsehbare, zeitlich begrenzte Ignorierliste nach dem Löschen fehlen.
+- **Encounter-Ereignisse im Combat Log**: Die Annahme „ohne Encounter-API in TBC" stimmt für die Logdatei nachweislich nicht – dort steht `ENCOUNTER_START,649,"Hochkönig Maulgar",4,25,565,5`, also ID und übersetzter Name. Ob das Addon dieselben Ereignisse auch live als Event empfängt, ist im Spiel noch nicht geprüft. Wenn ja, wäre das eine genauere Bosserkennung als die Namensliste aus 0.9.38.
 - **Lokale Combat-Log-Nachanalyse**: Live-Sitzungen und der optionale WCL-Import sind vorhanden. Ein externer Offline-Import aus `_anniversary_/Logs/WoWCombatLog.txt`, ein gemeinsamer Sitzungsfingerabdruck zur Quell-Deduplizierung sowie `CombatantInfo` als zweite Gear-Quelle sind noch nicht umgesetzt.
 
 ## Datenschutz und Fairness

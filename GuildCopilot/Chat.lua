@@ -71,18 +71,37 @@ local function NormalizeChannelName(name)
     return name
 end
 
+-- Ein Name ohne Realm meint immer den eigenen. Erst wenn beide Namen auf
+-- dieselbe Schreibweise gebracht sind, laesst sich sagen, ob zwei Eintraege
+-- derselbe Spieler sind: "Thrall" und "Thrall-Aegwynn" sind es auf Aegwynn,
+-- "Thrall" und "Thrall-Frostwolf" nicht. Vorher wurden beide Faelle gleich
+-- behandelt und ein fremder Spieler mit dem eigenen zusammengelegt.
+local function CanonicalLeadName(name)
+    local trimmed = GC.Util.Trim(tostring(name or ""))
+    if trimmed == "" then
+        return ""
+    end
+    if trimmed:find("-", 1, true) then
+        return GC.Util.NormalizeName(trimmed)
+    end
+    local ownRealm = tostring(GC:GetPlayerFullName() or ""):match("%-(.+)$")
+    if ownRealm and ownRealm ~= "" then
+        return GC.Util.NormalizeName(trimmed .. "-" .. ownRealm)
+    end
+    -- Ohne bekannten eigenen Realm bleibt nur der nackte Name. Dann wird wie
+    -- bisher ueber den Kurznamen verglichen.
+    return GC.Util.NormalizeName(trimmed)
+end
+
+GC.Chat.CanonicalLeadName = function(_, name)
+    return CanonicalLeadName(name)
+end
+
 local function SameLead(leftName, leftGUID, rightName, rightGUID)
     if leftGUID and leftGUID ~= "" and rightGUID and rightGUID ~= "" then
         return leftGUID == rightGUID
     end
-    if GC.Util.NormalizeName(leftName) == GC.Util.NormalizeName(rightName) then
-        return true
-    end
-    local leftShort = GC.Util.NormalizeName(GC.Util.PlayerShortName(leftName))
-    local rightShort = GC.Util.NormalizeName(GC.Util.PlayerShortName(rightName))
-    return leftShort == rightShort
-        and (not tostring(leftName or ""):find("-", 1, true)
-            or not tostring(rightName or ""):find("-", 1, true))
+    return CanonicalLeadName(leftName) == CanonicalLeadName(rightName)
 end
 
 -- === Postfachfilter ========================================================

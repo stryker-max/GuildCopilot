@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.38
+# Guild Copilot 0.9.39
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -35,6 +35,9 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - die Standardtexte für **Danke**, **Gildeninfos** und **Discord** werden direkt im **Postfach** unter den zugehörigen Knöpfen gepflegt – dort, wo sie benutzt werden – und gelten gildenweit;
 - Interessenten lassen sich über ein **×** direkt neben ihrem Eintrag entfernen oder nach einem Bestätigungsklick vollständig aus dem Postfach löschen;
 - Interessenten erscheinen in ihrer **Klassenfarbe** samt Klassennamen; die Klasse stammt aus der GUID der eingegangenen Nachricht, ist die Klasse unbekannt, bleibt der Name neutral;
+- zu jeder Unterhaltung steht die **Empfangszeit** der letzten Nachricht – heute nur die Uhrzeit, älteres mit Datum;
+- ein Name **ohne Realm** meint den eigenen: Erst dadurch werden derselbe Spieler mit und ohne Realmangabe zusammengeführt, zwei gleichnamige Spieler verschiedener Realms aber auseinandergehalten;
+- eine **Ignorierliste** blendet Dauerschreiber aus – dauerhaft oder bis zu einem Datum, einsehbar und jederzeit über **Wieder zulassen** widerrufbar; abgelaufene Einträge räumt sie selbst weg;
 - zu jedem Interessenten stehen zwei **kopierbare Profil-Links** bereit (classic-armory.org und Warcraft Logs): hineinklicken markiert den ganzen Link, Strg+C kopiert ihn. Region und Realm stammen aus der gespeicherten Warcraft-Logs-Gildenquelle, die dafür gildenweit synchronisiert wird;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Alt-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
@@ -133,7 +136,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.38; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.39; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 

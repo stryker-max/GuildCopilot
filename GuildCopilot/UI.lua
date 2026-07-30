@@ -59,6 +59,20 @@ local function SetTextureColor(texture, color)
     texture:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
 end
 
+-- Wann eine Postfachnachricht kam. Heute reicht die Uhrzeit - beim Beantworten
+-- will man wissen, ob jemand vor zehn Minuten geschrieben hat oder vorletzte
+-- Woche, und das Jahr steht dabei nur im Weg.
+local function FormatInboxTime(timestamp)
+    local value = tonumber(timestamp)
+    if not value or value <= 0 then
+        return ""
+    end
+    if date("%Y-%m-%d", value) == date("%Y-%m-%d") then
+        return "heute " .. date("%H:%M", value)
+    end
+    return date("%d.%m. %H:%M", value)
+end
+
 -- Die Hoehe eines umbrechenden Textes. GetStringHeight liefert je nach
 -- Zeitpunkt nur die Hoehe einer Zeile; dann klemmt der Text sichtbar ab ("..").
 -- Deshalb wird zusaetzlich aus der Zeichenzahl abgeschaetzt und das Groessere
@@ -1414,8 +1428,18 @@ function GC.UI:BuildRosterPage()
 
     -- Ergebnis der letzten Bestaetigung. Im Chat war es nach ein paar
     -- Kampfmeldungen weggescrollt; hier steht es, bis sich etwas aendert.
+    --
+    -- Der Erfolgsfall braucht keine Worte: ein Haken genuegt, und ein Datum
+    -- passte neben dem Knopf ohnehin nicht hin. Nur ein Fehlschlag muss
+    -- erklaeren, was zu tun ist.
+    page.profileStatusMark = profileCard:CreateTexture(nil, "OVERLAY")
+    page.profileStatusMark:SetSize(28, 28)
+    page.profileStatusMark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    page.profileStatusMark:SetPoint("LEFT", confirm, "RIGHT", 8, 0)
+    page.profileStatusMark:Hide()
+
     page.profileStatus = CreateLabel(profileCard, "",
-        { width = 168, height = 38, font = "GameFontNormalSmall" })
+        { width = 210, height = 38, font = "GameFontNormalSmall" })
     page.profileStatus:SetPoint("LEFT", confirm, "RIGHT", 12, 0)
 
     local professions = CreateCard(content, "Deine Berufe")
@@ -1562,16 +1586,15 @@ function GC.UI:RefreshRoster()
     if page.profileStatus then
         local confirmation = GC.Profile:GetLastConfirmation()
         if confirmation and not confirmation.ok then
+            -- Nur der Fehlschlag braucht Worte: Er sagt, was zu tun ist.
+            page.profileStatusMark:Hide()
             page.profileStatus:SetText(confirmation.message or "Bestätigung fehlgeschlagen.")
             SetTextColor(page.profileStatus, THEME.danger)
-        elseif profile.confirmed and profile.confirmedAt then
-            page.profileStatus:SetText("Bestätigt am "
-                .. date("%d.%m.%Y um %H:%M", profile.confirmedAt))
-            SetTextColor(page.profileStatus, THEME.success)
         elseif profile.confirmed then
-            page.profileStatus:SetText("Bestätigt.")
-            SetTextColor(page.profileStatus, THEME.success)
+            page.profileStatusMark:Show()
+            page.profileStatus:SetText("")
         else
+            page.profileStatusMark:Hide()
             page.profileStatus:SetText("Noch nicht bestätigt.")
             SetTextColor(page.profileStatus, THEME.muted)
         end
@@ -3378,7 +3401,15 @@ function GC.UI:RefreshInbox()
             .. classInfo.name .. "|r") or (level and ("  |cff8b98a5" .. level .. "|r") or "")))
     local latest = lead.messages[#lead.messages]
     local source = latest and latest.source and latest.source ~= "WHISPER" and ("  •  " .. latest.source) or ""
-    page.lastMessage:SetText(latest and ("Letzte Nachricht" .. source .. "\n\"" .. latest.text .. "\"") or "")
+    -- Wann geschrieben wurde, entscheidet mit darueber, ob sich eine Antwort
+    -- noch lohnt. Die Zeit stand bisher nur in den Daten, nicht am Eintrag.
+    local stamp = latest and FormatInboxTime(latest.receivedAt) or ""
+    if stamp ~= "" then
+        stamp = "  •  " .. stamp
+    end
+    page.lastMessage:SetText(latest
+        and ("Letzte Nachricht" .. source .. stamp .. "\n\"" .. latest.text .. "\"")
+        or "")
     self:SetLeadProfileLinks(lead)
     page.replyButton:Enable()
     page.inviteButton:Enable()

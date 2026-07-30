@@ -3151,4 +3151,52 @@ assert(playedSoundID ~= 888,
     "Bewerberton und Profilbestätigung klingen gleich")
 end
 
+-- === Postfach: Realm-Zuordnung und Ignorierliste ===========================
+do
+local ownRealm = tostring(addon:GetPlayerFullName()):match("%-(.+)$")
+assert(ownRealm and ownRealm ~= "", "Der Test braucht einen eigenen Realm")
+
+-- Ein Name ohne Realm meint den eigenen.
+assert(addon.Chat:CanonicalLeadName("Thrall") == addon.Chat:CanonicalLeadName("Thrall-" .. ownRealm),
+    "Ein Name ohne Realm wird nicht auf den eigenen Realm aufgelöst")
+assert(addon.Chat:CanonicalLeadName("Thrall") ~= addon.Chat:CanonicalLeadName("Thrall-Fremdrealm"),
+    "Ein gleichnamiger Spieler eines fremden Realms gilt als derselbe")
+
+-- Und genau das darf die Deduplizierung nicht mehr zusammenwerfen.
+addon.DB:GetGuild().inbox = {
+    { name = "Doppel-" .. ownRealm, messages = { { receivedAt = 10, text = "eins" } },
+      firstSeenAt = 10, lastSeenAt = 10 },
+    { name = "Doppel", messages = { { receivedAt = 20, text = "zwei" } },
+      firstSeenAt = 20, lastSeenAt = 20 },
+    { name = "Doppel-Fremdrealm", messages = { { receivedAt = 30, text = "drei" } },
+      firstSeenAt = 30, lastSeenAt = 30 },
+}
+addon.Chat:MergeDuplicateLeads()
+local merged = addon.DB:GetGuild().inbox
+assert(#merged == 2,
+    "Der gleichnamige Spieler vom fremden Realm wurde mit dem eigenen zusammengelegt")
+local ownEntry
+for _, lead in ipairs(merged) do
+    if addon.Chat:CanonicalLeadName(lead.name) == addon.Chat:CanonicalLeadName("Doppel") then
+        ownEntry = lead
+    end
+end
+assert(ownEntry and #ownEntry.messages == 2,
+    "Derselbe Spieler mit und ohne Realmangabe wurde nicht zusammengeführt")
+
+-- Die Ignorierliste blendet aus und gibt wieder frei.
+addon.DB:GetGuild().inboxFilters = {}
+local filtered, filterMessage = addon.Chat:SetInboxFilter("Doppel", 30)
+assert(filtered == true and filterMessage:find("ausgeblendet", 1, true),
+    "Ein Interessent ließ sich nicht zeitlich begrenzt ausblenden")
+assert(addon.Chat:IsInboxFiltered("Doppel") == true, "Der Filter greift nicht")
+local filterList = addon.Chat:GetInboxFilterList()
+assert(#filterList == 1 and filterList[1].until_ ~= "",
+    "Die Ignorierliste ist nicht einsehbar oder nennt kein Ablaufdatum")
+assert(addon.Chat:ClearInboxFilter(filterList[1].key) == true,
+    "Ein Eintrag ließ sich nicht wieder zulassen")
+assert(addon.Chat:IsInboxFiltered("Doppel") == false, "Der freigegebene Spieler bleibt gefiltert")
+addon.DB:GetGuild().inbox = {}
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
