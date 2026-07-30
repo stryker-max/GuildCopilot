@@ -5506,6 +5506,27 @@ function GC.UI:AddMinimapButton()
     self:RefreshMinimapMarker()
 end
 
+-- Die Slash-Befehle an genau einer Stelle. Daraus entstehen die Ausgabe von
+-- "/gcp help" und die Liste auf der Addon-Optionsseite: Zwei getrennte
+-- Aufzaehlungen laufen auseinander, sobald ein Befehl dazukommt - und die
+-- Liste, die niemand pflegt, ist dann die falsche.
+local SLASH_COMMANDS = {
+    { command = "/gcp", description = "öffnet und schließt Guild Copilot" },
+    { command = "/gcp welcome", description = "zeigt das Willkommensfenster mit der Einrichtung" },
+    { command = "/gcp recruite", description = "blendet den Werbebalken ein oder aus" },
+    { command = "/gcp phase", description = "zeigt die Content-Phase der Gilde; „/gcp phase T5“ stellt sie um" },
+    { command = "/gcp debug", description = "misst die Laufzeit; ein zweiter Aufruf zeigt das Ergebnis" },
+    { command = "/gcp help", description = "zeigt diese Liste im Chat" },
+}
+
+function GC.UI:PrintSlashHelp()
+    GC:Print("Verfügbare Befehle:")
+    for _, entry in ipairs(SLASH_COMMANDS) do
+        GC:Print("  |cffffffff" .. entry.command .. "|r – " .. entry.description)
+    end
+    GC:Print("  |cff91a3b8/guildcopilot|r tut überall dasselbe wie |cff91a3b8/gcp|r.")
+end
+
 function GC.UI:RegisterInterfaceOptions()
     if self.optionsPanel then
         return
@@ -5520,7 +5541,7 @@ function GC.UI:RegisterInterfaceOptions()
     wordmark:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotWordmark")
     panel.wordmark = wordmark
 
-    local commandLabel = CreateLabel(panel, "Chat-Befehl", {
+    local commandLabel = CreateLabel(panel, "Chat-Befehle", {
         muted = true,
         align = "CENTER",
         width = 300,
@@ -5532,6 +5553,24 @@ function GC.UI:RegisterInterfaceOptions()
         width = 300,
     })
     command:SetPoint("TOP", commandLabel, "BOTTOM", 0, -8)
+
+    -- Die Befehle stehen hier, weil man diese Seite genau dann aufschlaegt,
+    -- wenn man nicht mehr weiss, wie das Addon hiess - dort nach dem Chatbefehl
+    -- zu suchen ist der naheliegende Weg.
+    panel.commandRows = {}
+    local previous = command
+    for index, entry in ipairs(SLASH_COMMANDS) do
+        local row = CreateLabel(panel, entry.command .. "  –  " .. entry.description, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            align = "CENTER",
+            width = 560,
+            height = 16,
+        })
+        row:SetPoint("TOP", previous, "BOTTOM", 0, index == 1 and -14 or -3)
+        panel.commandRows[index] = row
+        previous = row
+    end
 
     panel.openButton = CreateButton(panel, "Guild Copilot öffnen", 220, 40, function()
         if InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() then
@@ -5553,7 +5592,7 @@ function GC.UI:RegisterInterfaceOptions()
             GC.UI:ShowPage("ROSTER")
         end)
     end, "PRIMARY")
-    panel.openButton:SetPoint("TOP", command, "BOTTOM", 0, -24)
+    panel.openButton:SetPoint("TOP", previous, "BOTTOM", 0, -20)
 
     if InterfaceOptions_AddCategory then
         InterfaceOptions_AddCategory(panel)
@@ -5572,9 +5611,22 @@ SLASH_GUILDCOPILOT1 = "/gcp"
 SLASH_GUILDCOPILOT2 = "/guildcopilot"
 SlashCmdList.GUILDCOPILOT = function(input)
     local command = GC.Util.Trim(tostring(input or "")):lower()
-    if command == "werbung" or command == "balken" then
+    if command == "help" or command == "hilfe" or command == "?" then
+        GC.UI:PrintSlashHelp()
+        return
+    end
+
+    -- "werbung" und "balken" bleiben, damit sich niemand umgewoehnen muss;
+    -- "recruit" faengt den naheliegenden Vertipper von "recruite" mit ab.
+    if command == "recruite" or command == "recruit"
+        or command == "werbung" or command == "balken" then
         GC.UI:CreateMainFrame()
         GC.UI:TogglePostBar()
+        return
+    end
+
+    if command == "welcome" or command == "willkommen" then
+        GC.UI:ShowWelcome()
         return
     end
 

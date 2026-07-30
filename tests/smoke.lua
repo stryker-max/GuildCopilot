@@ -3837,6 +3837,41 @@ assert(page.profileStatus:GetText() == "",
     "Der Änderungshinweis bleibt nach dem Bestätigen stehen")
 end
 
+-- === Slash-Befehle =========================================================
+--
+-- Hilfe und Optionsseite kommen aus derselben Tabelle. Geprüft wird deshalb
+-- nicht nur, dass die Befehle etwas tun, sondern auch, dass die Hilfe jeden
+-- von ihnen nennt - eine Liste, die einen Befehl vergisst, ist schlimmer als
+-- keine.
+do
+local run = SlashCmdList.GUILDCOPILOT
+assert(type(run) == "function", "Der Slash-Befehl ist nicht registriert")
+
+addon.UI:HideWelcome()
+run("welcome")
+assert(addon.UI.welcomeFrame:IsShown() == true, "/gcp welcome zeigt das Willkommensfenster nicht")
+addon.UI:HideWelcome()
+
+-- Der Werbebalken schaltet um, unter neuem wie altem Namen.
+addon.DB:GetSettings().postBar.hidden = true
+run("recruite")
+assert(addon.DB:GetSettings().postBar.hidden == false, "/gcp recruite blendet den Werbebalken nicht ein")
+run("werbung")
+assert(addon.DB:GetSettings().postBar.hidden == true, "/gcp werbung blendet ihn nicht wieder aus")
+run("recruit")
+assert(addon.DB:GetSettings().postBar.hidden == false, "Der Vertipper /gcp recruit greift nicht")
+addon.UI:SetPostBarShown(false)
+
+-- Die Hilfe nennt jeden Befehl, den der Handler kennt.
+local printedBefore = #chatMessages
+run("help")
+local help = table.concat(chatMessages, "\n", printedBefore + 1)
+for _, expected in ipairs({ "/gcp welcome", "/gcp recruite", "/gcp phase", "/gcp debug", "/gcp help" }) do
+    assert(help:find(expected, 1, true) ~= nil,
+        "Die Hilfe nennt " .. expected .. " nicht")
+end
+end
+
 -- === Erste Schritte: abgeleiteter Zustand statt Merker =====================
 --
 -- Der Kern der Checkliste ist, dass sie nichts behauptet: Jeder Schritt gilt

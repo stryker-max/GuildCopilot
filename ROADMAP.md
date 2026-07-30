@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.47 – Befehle, die man auch findet
+
+Das Willkommensfenster aus 0.9.46 ließ sich nach dem ersten Login nicht wieder aufrufen – wer es noch einmal sehen wollte, kam nur über `/run` daran. Und die Befehlsliste stand in der README, also genau dort nicht, wo man sie sucht.
+
+- **`/gcp welcome`** zeigt das Willkommensfenster jederzeit, unabhängig davon, ob dieser Charakter es schon gesehen hat;
+- **`/gcp recruite`** blendet den Werbebalken ein und aus. `/gcp werbung` und `/gcp balken` bleiben gültig – niemand soll sich umgewöhnen müssen –, und `/gcp recruit` fängt den naheliegenden Vertipper mit ab;
+- **`/gcp help`** listet alle Befehle im Chat;
+- **dieselbe Liste steht unter Optionen → AddOns → Guild Copilot.** Diese Seite schlägt man auf, wenn einem der Chatbefehl gerade nicht einfällt – dort nach ihm zu suchen ist der naheliegende Weg, und bis jetzt stand da nur `/gcp`;
+- **beide Aufzählungen kommen aus einer einzigen Tabelle** im Code. Zwei getrennte Listen laufen auseinander, sobald ein Befehl dazukommt, und die ungepflegte ist dann die falsche. Ein Test prüft, dass die Hilfe jeden Befehl nennt.
+
 ## 0.9.46 – Ein Willkommensfenster, und die Berufe wurden nie erkannt
 
 Aus der Gilde gemeldet: „Aus WoW-Berufen übernehmen“ sei irreführend, das Addon erkenne die Berufe ja gar nicht selbst. Die Vermutung stimmte, der Grund war ein anderer als angenommen:

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.46",
+  "## Version: 0.9.47",
 ];
 
 for (const entry of requiredMetadata) {
@@ -356,6 +356,9 @@ const requiredImplementations = [
   ["Berufe aus den Classic-Fähigkeitszeilen", /local function ReadSkillLineProfessions/],
   ["Herkunft der Berufsangabe", /function GC\.Profile:GetProfessionSource/],
   ["Marker am Minimap-Symbol", /function GC\.UI:RefreshMinimapMarker/],
+  ["Slash-Befehle aus einer Tabelle", /local SLASH_COMMANDS = \{/],
+  ["Hilfe aus derselben Tabelle", /function GC\.UI:PrintSlashHelp[\s\S]{0,300}ipairs\(SLASH_COMMANDS\)/],
+  ["Befehle auf der Addon-Optionsseite", /panel\.commandRows/],
   ["Profiländerung frischt die Karte auf", /page\.selectedFlex = enabled\s+GC\.UI:RefreshRoster\(\)/],
 ];
 

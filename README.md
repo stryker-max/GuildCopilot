@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.46
+# Guild Copilot 0.9.47
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -146,7 +146,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.46; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.47; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -211,11 +211,14 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 
 ## Slash-Befehle
 
-- `/gcp`
-- `/guildcopilot`
-- `/gcp werbung` – blendet den Werbebalken ein oder aus
+- `/gcp` – öffnet und schließt Guild Copilot; `/guildcopilot` tut überall dasselbe
+- `/gcp help` – zeigt alle Befehle im Chat
+- `/gcp welcome` – zeigt das Willkommensfenster mit der Einrichtung
+- `/gcp recruite` – blendet den Werbebalken ein oder aus (`/gcp werbung` bleibt gültig)
 - `/gcp phase` – zeigt die Content-Phase der Gilde; `/gcp phase T5` stellt sie um
 - `/gcp debug` – schaltet die Laufzeitmessung ein; ein zweiter Aufruf zeigt die schlimmsten Einzelmessungen und beendet sie
+
+Dieselbe Liste steht unter **Optionen → AddOns → Guild Copilot** – dort sucht man sie, wenn einem der Chatbefehl gerade nicht einfällt. Beide Aufzählungen stammen aus derselben Tabelle im Code und können nicht auseinanderlaufen.
 
 ## Gespeicherte Daten
 
