@@ -1746,6 +1746,43 @@ assert(#matStatus.missing == 2, "Die Fehlliste ist falsch: " .. #matStatus.missi
 assert(matStatus.missing[1].fromGuildBank == 4,
     "Die Gildenbank-Deckung der Fehlmenge ist falsch")
 
+-- Die Materialanzeige benutzt echte Zeilen mit festen Spalten: ein Textblock
+-- kann in der proportionalen Spielschrift keine Spalten ausrichten.
+addon.UI:ShowPage("WORKSHOP")
+addon.UI.pages.WORKSHOP.workshopFavoritesOnly = false
+materialEntry = nil
+for _, entry in ipairs(addon.Workshop:GetCatalog("", "Schneiderei")) do
+    if #entry.reagents > 0 then
+        materialEntry = entry
+        break
+    end
+end
+assert(materialEntry ~= nil, "Kein Schneiderei-Rezept mit Reagenzien für den Anzeigetest")
+addon.UI.pages.WORKSHOP.workshopProfession.value = "Schneiderei"
+addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
+addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = materialEntry.key
+addon.UI:RefreshWorkshop()
+materialRow = addon.UI.pages.WORKSHOP.workshopMaterialRows[1]
+assert(materialRow.shown == true, "Die erste Materialzeile wird nicht angezeigt")
+assert(materialRow.name.value:find("×", 1, true) ~= nil,
+    "Die Materialzeile nennt keine Bedarfsmenge: " .. tostring(materialRow.name.value))
+assert(materialRow.own.value ~= nil and materialRow.own.value ~= "",
+    "Die Spalte für den eigenen Bestand ist leer")
+assert(materialRow.bank.value ~= nil and materialRow.bank.value ~= "",
+    "Die Spalte für die Gildenbank ist leer")
+-- Der Textblock enthält jetzt nur noch Beruf und Hersteller, keine Spalten mehr.
+assert(addon.UI.pages.WORKSHOP.workshopDetails.value:find("GBank", 1, true) == nil,
+    "Die Materialspalten stecken noch im Textblock statt in eigenen Zeilen")
+assert(addon.UI.pages.WORKSHOP.workshopMaterialSummary.value ~= "",
+    "Die Zusammenfassung unter den Materialien fehlt")
+-- Ohne Suchumfang bleiben keine alten Materialzeilen stehen.
+addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = nil
+addon.UI.pages.WORKSHOP.workshopProfession.value = ""
+addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
+addon.UI:RefreshWorkshop()
+assert(addon.UI.pages.WORKSHOP.workshopMaterialRows[1].shown == false,
+    "Eine Materialzeile blieb ohne ausgewähltes Rezept sichtbar")
+
 -- Zählstände werden als Differenzen kodiert und kommen unverändert zurück.
 countRoundtrip = addon.Inventory:EncodeCounts({ [22445] = 20, [22446] = 5, [22447] = 4 })
 decodedCounts = addon.Inventory:DecodeCounts(countRoundtrip)

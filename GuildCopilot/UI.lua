@@ -2181,7 +2181,7 @@ function GC.UI:BuildWorkshopPage()
         vertical = "TOP",
     })
     page.workshopRecipeTitle:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -49)
-    page.workshopFavorite = CreateButton(detailCard, "Merken", 90, 30, function()
+    page.workshopFavorite = CreateButton(detailCard, "Merken", 104, 30, function()
         local recipeKey = page.selectedWorkshopRecipe
         if recipeKey then
             GC.Workshop:SetFavorite(recipeKey, not GC.Workshop:IsFavorite(recipeKey))
@@ -2209,6 +2209,33 @@ function GC.UI:BuildWorkshopPage()
     page.workshopDetailScroll:SetScrollChild(page.workshopDetailContent)
     page.workshopDetails = CreateLabel(page.workshopDetailContent, "", { width = 232, height = 220, vertical = "TOP" })
     page.workshopDetails:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, 0)
+
+    -- Materialien als echte Zeilen mit festen Spalten. Ein Textblock kann das
+    -- nicht: die Spielschrift ist proportional, Leerzeichen ergeben also keine
+    -- Spalte, sondern nur ausgefranste Zahlen.
+    page.workshopMaterialHeader = CreateLabel(page.workshopDetailContent, "Materialien",
+        { muted = true, width = 130, height = 15 })
+    page.workshopMaterialOwnHeader = CreateLabel(page.workshopDetailContent, "Du",
+        { muted = true, width = 42, height = 15, align = "RIGHT" })
+    page.workshopMaterialBankHeader = CreateLabel(page.workshopDetailContent, "Bank",
+        { muted = true, width = 48, height = 15, align = "RIGHT" })
+    page.workshopMaterialRows = {}
+    for index = 1, 14 do
+        local row = CreateFrame("Frame", nil, page.workshopDetailContent)
+        row:SetSize(232, 15)
+        row.name = CreateLabel(row, "", { width = 138, height = 15 })
+        row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.own = CreateLabel(row, "", { width = 42, height = 15, align = "RIGHT" })
+        row.own:SetPoint("LEFT", row, "LEFT", 138, 0)
+        row.bank = CreateLabel(row, "", { width = 48, height = 15, align = "RIGHT" })
+        row.bank:SetPoint("LEFT", row, "LEFT", 182, 0)
+        row:Hide()
+        page.workshopMaterialRows[index] = row
+    end
+    page.workshopMaterialSummary = CreateLabel(page.workshopDetailContent, "",
+        { width = 232, height = 60, vertical = "TOP" })
+    page.workshopMaterialFooter = CreateLabel(page.workshopDetailContent, "",
+        { muted = true, width = 232, height = 30, vertical = "TOP" })
 
     page.workshopStatus = CreateLabel(page,
         "Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.",
@@ -2310,6 +2337,16 @@ function GC.UI:RefreshWorkshop()
                 page.workshopDetails:SetText("Prüfe den Suchbegriff oder frage aktuelle Gildendaten an.")
             end
         end
+        -- Ohne Auswahl duerfen keine Materialzeilen von vorhin stehen bleiben.
+        page.workshopDetails:SetHeight(220)
+        page.workshopMaterialHeader:Hide()
+        page.workshopMaterialOwnHeader:Hide()
+        page.workshopMaterialBankHeader:Hide()
+        for _, row in ipairs(page.workshopMaterialRows) do
+            row:Hide()
+        end
+        page.workshopMaterialSummary:SetText("")
+        page.workshopMaterialFooter:SetText("")
         page.workshopDetailContent:SetHeight(220)
     else
         page.workshopFavorite:Show()
@@ -2317,84 +2354,130 @@ function GC.UI:RefreshWorkshop()
         page.workshopFavorite:SetActive(GC.Workshop:IsFavorite(selected.key))
         page.workshopRecipeTitle:SetText(selected.name)
         local lines = {
-            "|cff91a3b8Beruf|r\n" .. selected.profession,
+            "|cff91a3b8Beruf|r  " .. selected.profession,
             "",
             "|cff91a3b8Hersteller|r",
         }
         for _, crafter in ipairs(selected.crafters) do
             lines[#lines + 1] = "• " .. crafter
         end
-        lines[#lines + 1] = ""
-        if #selected.reagents == 0 then
-            lines[#lines + 1] = "|cff91a3b8Materialien|r"
-            lines[#lines + 1] = "Keine Reagenzien erfasst."
+        page.workshopDetails:SetText(table.concat(lines, "\n"))
+        local infoHeight = (#lines * 15) + 6
+        page.workshopDetails:SetHeight(infoHeight)
+
+        -- Materialien stehen in echten Zeilen mit festen Spalten darunter.
+        local status = #selected.reagents > 0
+            and GC.Inventory:GetReagentStatus(selected.reagents)
+            or nil
+        local cursor = infoHeight + 8
+        local headerShown = status ~= nil
+        page.workshopMaterialHeader:SetShown(true)
+        page.workshopMaterialHeader:ClearAllPoints()
+        page.workshopMaterialHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
+        page.workshopMaterialOwnHeader:SetShown(headerShown)
+        page.workshopMaterialBankHeader:SetShown(headerShown)
+        if headerShown then
+            page.workshopMaterialOwnHeader:ClearAllPoints()
+            page.workshopMaterialOwnHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 138, -cursor)
+            page.workshopMaterialBankHeader:ClearAllPoints()
+            page.workshopMaterialBankHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 182, -cursor)
+        end
+        cursor = cursor + 18
+
+        for index, row in ipairs(page.workshopMaterialRows) do
+            local entry = status and status.rows[index]
+            row:SetShown(entry ~= nil)
+            if entry then
+                -- Nur die Zahlen tragen Farbe. Waeren auch die Namen rot,
+                -- entstuende bei einem fehlenden Rezept eine Wand aus Rot, in
+                -- der nichts mehr heraussticht.
+                local label = entry.name or ("Item #" .. (entry.itemID or "?"))
+                if #label > 20 then
+                    label = label:sub(1, 19) .. "…"
+                end
+                row.name:SetText(entry.needed .. "× " .. label)
+                SetTextColor(row.name, THEME.text)
+                row.own:SetText(tostring(entry.own.total))
+                SetTextColor(row.own,
+                    entry.own.total >= entry.needed and THEME.success or THEME.danger)
+                row.bank:SetText(entry.guildBank and tostring(entry.guildBank) or "–")
+                if not entry.guildBank then
+                    SetTextColor(row.bank, THEME.muted)
+                elseif entry.status == "GUILD" then
+                    SetTextColor(row.bank, THEME.warning)
+                elseif entry.guildBank >= entry.shortfall and entry.shortfall > 0 then
+                    SetTextColor(row.bank, THEME.warning)
+                else
+                    SetTextColor(row.bank, THEME.muted)
+                end
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
+                cursor = cursor + 15
+            end
+        end
+
+        if not status then
+            page.workshopMaterialSummary:SetText("Keine Reagenzien erfasst.")
+            SetTextColor(page.workshopMaterialSummary, THEME.muted)
+        elseif #status.missing > 0 then
+            local parts, fromBank = {}, 0
+            for _, entry in ipairs(status.missing) do
+                parts[#parts + 1] = entry.amount .. "× "
+                    .. (entry.name or ("Item #" .. (entry.itemID or "?")))
+                fromBank = fromBank + (entry.fromGuildBank or 0)
+            end
+            page.workshopMaterialSummary:SetText("|cffff6266Dir fehlt:|r "
+                .. table.concat(parts, ", ")
+                .. (fromBank > 0
+                    and ("\n|cffe8b84b" .. fromBank .. " davon in der Gildenbank.|r")
+                    or ""))
+            SetTextColor(page.workshopMaterialSummary, THEME.text)
         else
-            -- Bedarf, eigener Bestand und Gildenbank nebeneinander. Die Farbe
-            -- beantwortet die Frage auf einen Blick: gruen habe ich selbst,
-            -- gelb reicht erst mit der Gildenbank, rot fehlt auch dann.
-            local status = GC.Inventory:GetReagentStatus(selected.reagents)
-            lines[#lines + 1] = "|cff91a3b8Materialien" .. string.rep(" ", 22) .. "Du    GBank|r"
-            for _, row in ipairs(status.rows) do
-                local color = row.status == "OWN" and "|cff59e695"
-                    or row.status == "GUILD" and "|cffe8b84b"
-                    or "|cffff6266"
-                local label = row.name or ("Item #" .. (row.itemID or "?"))
-                if #label > 26 then
-                    label = label:sub(1, 25) .. "…"
-                end
-                lines[#lines + 1] = string.format("%s%2d× %-26s %5s  %5s|r",
-                    color,
-                    row.needed,
-                    label,
-                    tostring(row.own.total),
-                    row.guildBank and tostring(row.guildBank) or "–")
-            end
-            if #status.missing > 0 then
-                local parts, fromBank = {}, 0
-                for _, entry in ipairs(status.missing) do
-                    parts[#parts + 1] = entry.amount .. "× "
-                        .. (entry.name or ("Item #" .. (entry.itemID or "?")))
-                    fromBank = fromBank + (entry.fromGuildBank or 0)
-                end
-                lines[#lines + 1] = ""
-                lines[#lines + 1] = "|cffff6266Dir fehlt:|r " .. table.concat(parts, ", ")
-                    .. (fromBank > 0
-                        and ("\n|cffe8b84b" .. fromBank .. " davon liegen in der Gildenbank.|r")
-                        or "")
-            elseif #status.rows > 0 then
-                lines[#lines + 1] = ""
-                lines[#lines + 1] = "|cff59e695Alle Materialien vorhanden.|r"
-            end
-            -- Woher der Gildenbankstand kommt und wie alt er ist.
+            page.workshopMaterialSummary:SetText("|cff59e695Alle Materialien vorhanden.|r")
+            SetTextColor(page.workshopMaterialSummary, THEME.text)
+        end
+        cursor = cursor + 8
+        page.workshopMaterialSummary:ClearAllPoints()
+        page.workshopMaterialSummary:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
+        local summaryHeight = page.workshopMaterialSummary:GetStringHeight() or 15
+        page.workshopMaterialSummary:SetHeight(math.max(15, summaryHeight))
+        cursor = cursor + math.max(15, summaryHeight) + 8
+
+        -- Herkunft und Alter der Bestaende, bewusst gedaempft: es ist Beiwerk,
+        -- keine Kernaussage.
+        local footer = {}
+        if status then
             local guildBankAt, guildBankBy = nil, nil
+            local ownBankAt = nil
             for _, row in ipairs(status.rows) do
                 if row.guildBankAt and (not guildBankAt or row.guildBankAt > guildBankAt) then
                     guildBankAt = row.guildBankAt
                     guildBankBy = row.guildBankBy
                 end
-            end
-            if not status.guildBankKnown then
-                lines[#lines + 1] = "|cff91a3b8Gildenbank unbekannt – einmal am Bankfach öffnen genügt.|r"
-            elseif guildBankAt and guildBankAt > 0 and date then
-                lines[#lines + 1] = "|cff91a3b8Gildenbank-Stand: "
-                    .. date("%d.%m. %H:%M", guildBankAt)
-                    .. (guildBankBy and guildBankBy ~= "" and (" von " .. guildBankBy) or "") .. "|r"
-            end
-            local ownBankAt = nil
-            for _, row in ipairs(status.rows) do
                 if row.own.oldestBankAt and (not ownBankAt or row.own.oldestBankAt < ownBankAt) then
                     ownBankAt = row.own.oldestBankAt
                 end
             end
+            if not status.guildBankKnown then
+                footer[#footer + 1] = "Gildenbank noch nicht eingelesen – einmal am Bankfach öffnen genügt."
+            elseif guildBankAt and guildBankAt > 0 and date then
+                footer[#footer + 1] = "Gildenbank: " .. date("%d.%m. %H:%M", guildBankAt)
+                    .. (guildBankBy and guildBankBy ~= "" and (" · " .. guildBankBy) or "")
+            end
             if ownBankAt and ownBankAt > 0 and date then
-                lines[#lines + 1] = "|cff91a3b8Eigener Bankstand: "
-                    .. date("%d.%m. %H:%M", ownBankAt) .. "|r"
+                footer[#footer + 1] = "Eigene Bank: " .. date("%d.%m. %H:%M", ownBankAt)
             end
         end
-        page.workshopDetails:SetText(table.concat(lines, "\n"))
-        local detailHeight = math.max(220, (#lines * 18) + 12)
-        page.workshopDetails:SetHeight(detailHeight)
-        page.workshopDetailContent:SetHeight(detailHeight)
+        page.workshopMaterialFooter:SetText(table.concat(footer, "\n"))
+        page.workshopMaterialFooter:ClearAllPoints()
+        page.workshopMaterialFooter:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
+        local footerHeight = #footer > 0
+            and math.max(15, page.workshopMaterialFooter:GetStringHeight() or 15)
+            or 0
+        page.workshopMaterialFooter:SetHeight(math.max(1, footerHeight))
+        cursor = cursor + footerHeight
+
+        page.workshopDetailContent:SetHeight(math.max(220, cursor + 6))
         page.workshopDetailScroll:SetVerticalScroll(0)
         page.workshopDetailScroll:UpdateModernThumb()
     end
