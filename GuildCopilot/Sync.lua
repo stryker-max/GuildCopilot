@@ -1271,7 +1271,8 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- mit abweichender Version sichtbar werden.
     local messageType, messageSchema = message:match("^(%a+)|(%d+)")
     if messageType == "P" or messageType == "W" or messageType == "G"
-        or messageType == "GQ" or messageType == "E" or messageType == "L" then
+        or messageType == "GQ" or messageType == "E" or messageType == "L"
+        or messageType == "B" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
@@ -1291,6 +1292,14 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         local fields = GC.Util.SplitFields(message)
         if tonumber(fields[2]) == GC.Constants.SCHEMA_VERSION and GC.Workshop then
             GC.Workshop:ReceiveSync(fields, sender, distribution)
+        end
+        return
+    elseif message:sub(1, 2) == "B|" and distribution == "GUILD" then
+        -- Materialbestand: geteilt wird ausschliesslich die Gildenbank, und die
+        -- gehoert allen. Eigene Taschen- und Bankbestaende verlassen den Account
+        -- nie, es gibt fuer sie gar keinen Sendeweg.
+        if GC.Inventory then
+            GC.Inventory:ReceiveSync(GC.Util.SplitFields(message), sender)
         end
         return
     elseif message:sub(1, 2) == "L|" and (distribution == "GUILD" or distribution == "WHISPER") then

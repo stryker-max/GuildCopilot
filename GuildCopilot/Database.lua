@@ -92,6 +92,12 @@ local GUILD_DEFAULTS = {
         catalog = {},
         crafters = {},
     },
+    -- Die Gildenbank gehoert allen und wird deshalb geteilt - je Tab, weil die
+    -- Sichtbarkeit eines Tabs am Gildenrang haengt. Eigene Taschen- und
+    -- Bankbestaende bleiben dagegen im Charakterzweig und werden nie gesendet.
+    guildBank = {
+        tabs = {},
+    },
     raidSessions = {},
     gearAudits = {},
     -- Bewertungen ohne Spec-Bezug. Sie gelten fuer alle und sind der

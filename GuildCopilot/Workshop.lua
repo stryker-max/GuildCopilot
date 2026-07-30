@@ -1171,6 +1171,132 @@ function GC.Workshop:GetPendingPacketCount()
     return #self.syncQueue + (self.bulkPending or 0) + reliable
 end
 
+-- Manifest fuer den Gildenkanal: je Beruf des Accounts nur Hersteller,
+-- Zeitstempel, Anzahl und Fingerabdruck. Wer nichts Neues hat, kostet damit ein
+-- Paket pro Login statt einer vollen Schluesselliste.
+function GC.Workshop:BuildKeyManifestMessages()
+    local records = {}
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        local profession = entry.profession
+        local fingerprintHash = profession.fingerprintHash
+            or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession))
+        records[#records + 1] = table.concat({
+            (GC.Util.Trim(entry.crafter):gsub(",", "")),
+            profession.key,
+            tostring(tonumber(profession.updatedAt) or 0),
+            tostring(RecipeCount(profession)),
+            fingerprintHash,
+        }, ",")
+    end
+    if #records == 0 then
+        return {}
+    end
+    table.sort(records)
+
+    local header = BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "KM", "" })
+    local payloadLimit = math.min(MAX_PAYLOAD_BYTES,
+        GC.Constants.MAX_CHAT_BYTES - #header)
+    local messages = {}
+    local current = ""
+    for _, record in ipairs(records) do
+        local candidate = current == "" and record or (current .. ";" .. record)
+        if #candidate > payloadLimit and current ~= "" then
+            messages[#messages + 1] = BuildMessage({
+                "W", GC.Constants.SCHEMA_VERSION, "KM", current,
+            })
+            current = record
+        else
+            current = candidate
+        end
+    end
+    if current ~= "" then
+        messages[#messages + 1] = BuildMessage({
+            "W", GC.Constants.SCHEMA_VERSION, "KM", current,
+        })
+    end
+    return messages
+end
+
+function GC.Workshop:SendKeyManifest()
+    if not GC.Sync or not IsInGuild or not IsInGuild() then
+        return false
+    end
+    local messages = self:BuildKeyManifestMessages()
+    if #messages == 0 then
+        return false
+    end
+    for _, message in ipairs(messages) do
+        if #message <= GC.Constants.MAX_CHAT_BYTES then
+            GC.Sync:SendBulk(message, "GUILD")
+        end
+    end
+    return true
+end
+
+-- Fordert die Schluesselliste eines fremden Berufs an - gestreut und nur einmal,
+-- damit nicht alle gleichzeitig dasselbe verlangen.
+function GC.Workshop:ScheduleKeyListRequest(wanted)
+    self.suppressedKeyRequests = self.suppressedKeyRequests or {}
+    local now = GC.Util.Now()
+    local pending = {}
+    for _, entry in ipairs(wanted or {}) do
+        local suppressKey = GC.Util.NormalizeName(entry.crafter) .. "|" .. entry.professionKey
+        local suppressedAt = self.suppressedKeyRequests[suppressKey]
+        if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
+            pending[#pending + 1] = entry
+        end
+    end
+    if #pending == 0 then
+        return false
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:SendKeyListRequest(pending)
+    end
+    C_Timer.After(1 + math.random() * MISSING_REQUEST_DELAY, function()
+        GC.Workshop:SendKeyListRequest(pending)
+    end)
+    return true
+end
+
+function GC.Workshop:SendKeyListRequest(wanted)
+    if not GC.Sync then
+        return false
+    end
+    self.suppressedKeyRequests = self.suppressedKeyRequests or {}
+    local now = GC.Util.Now()
+    local byCrafter = {}
+    local order = {}
+    for _, entry in ipairs(wanted or {}) do
+        local suppressKey = GC.Util.NormalizeName(entry.crafter) .. "|" .. entry.professionKey
+        local suppressedAt = self.suppressedKeyRequests[suppressKey]
+        if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
+            self.suppressedKeyRequests[suppressKey] = now
+            if not byCrafter[entry.crafter] then
+                byCrafter[entry.crafter] = {}
+                order[#order + 1] = entry.crafter
+            end
+            local list = byCrafter[entry.crafter]
+            list[#list + 1] = entry.professionKey
+        end
+    end
+    if #order == 0 then
+        return false
+    end
+    for _, crafter in ipairs(order) do
+        local message = BuildMessage({
+            "W",
+            GC.Constants.SCHEMA_VERSION,
+            "KR",
+            GC.Util.SafeChatText(GC.Util.Trim(crafter), 40),
+            table.concat(byCrafter[crafter], ","),
+        })
+        if #message <= GC.Constants.MAX_CHAT_BYTES then
+            GC.Sync:SendBulk(message, "GUILD")
+        end
+    end
+    return true
+end
+
 function GC.Workshop:BuildManifestMessages()
     local records = {}
     for _, professionKey in ipairs(SortedKeys(self:GetOwnData().professions)) do
@@ -1310,9 +1436,15 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- Der Abgleich läuft bewusst über den schnellen, zuverlässigen
         -- Gildenkanal statt über Flüsternachrichten: in manchen Umgebungen
         -- erreichen Addon-Flüster den Empfänger nicht, der Gildenkanal aber
-        -- schon. Gesendet werden alle Berufe des gesamten Accounts (inklusive
-        -- der eigenen Twinks), jeweils dem richtigen Charakter zugeordnet.
-        self:QueueAllProfessions(SupportsCompactWorkshop(sender))
+        -- schon. Geantwortet wird mit dem Manifest aller Account-Berufe
+        -- (inklusive der eigenen Twinks); Schlüssellisten und Rezeptdaten folgen
+        -- nur für das, was der Fragende nachweislich noch nicht hat. Clients
+        -- ohne Manifest-Verständnis bekommen weiterhin den vollen Bestand.
+        if self:GuildNeedsFullRecipeData() then
+            self:QueueAllProfessions(SupportsCompactWorkshop(sender))
+        else
+            self:SendKeyManifest()
+        end
         return
     elseif operation == "M" then
         local senderKey = GC.Util.NormalizeName(sender)
@@ -1353,6 +1485,56 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         local profession = self:GetOwnData().professions[professionKey]
         if profession then
             self:QueueProfessionSync(profession, true, sender, true)
+        end
+        return
+    elseif operation == "KM" then
+        -- Ein fremdes Manifest. Angefordert wird nur, was hier nachweislich
+        -- fehlt oder veraltet ist; unveraenderte Berufe kosten null Pakete.
+        local wanted = {}
+        local crafters = self:GetGuildWorkshop().crafters
+        for record in tostring(fields[4] or ""):gmatch("[^;]+") do
+            local crafter, professionKey, updatedText, countText, fingerprint =
+                record:match("^([^,]+),([^,]+),(%d+),(%d+),(%d+)$")
+            local updatedAt = tonumber(updatedText)
+            local recipeCount = tonumber(countText)
+            if crafter and professionKey and updatedAt and recipeCount
+                and #crafter <= 60 and #professionKey <= 80 and #fingerprint <= 20 then
+                local known = crafters[GC.Util.NormalizeName(crafter)]
+                local knownProfession = known and known.professions
+                    and known.professions[professionKey]
+                local stale = not knownProfession
+                    or (tonumber(knownProfession.updatedAt) or 0) ~= updatedAt
+                    or RecipeKeyCount(knownProfession) ~= recipeCount
+                    or tostring(knownProfession.fingerprintHash or "") ~= fingerprint
+                if stale then
+                    wanted[#wanted + 1] = { crafter = crafter, professionKey = professionKey }
+                end
+            end
+        end
+        if #wanted > 0 then
+            self:ScheduleKeyListRequest(wanted)
+        end
+        return
+    elseif operation == "KR" then
+        -- Jemand verlangt die Schluesselliste eines Berufs. Angesprochen ist der
+        -- genannte Hersteller; auch eine fremde Anfrage unterdrueckt die eigene.
+        local wantedCrafter = GC.Util.Trim(fields[4] or "")
+        local wantedKey = GC.Util.NormalizeName(wantedCrafter)
+        self.suppressedKeyRequests = self.suppressedKeyRequests or {}
+        local requested = {}
+        for professionKey in tostring(fields[5] or ""):gmatch("[^,]+") do
+            requested[NormalizeKey(professionKey)] = true
+            self.suppressedKeyRequests[wantedKey .. "|" .. NormalizeKey(professionKey)] =
+                GC.Util.Now()
+        end
+        if wantedKey == "" or not next(requested) then
+            return
+        end
+        for _, entry in ipairs(self:GetAccountProfessions()) do
+            if GC.Util.NormalizeName(entry.crafter) == wantedKey
+                and requested[entry.profession.key] then
+                self:QueueKeyList(entry.profession, entry.crafter)
+            end
         end
         return
     elseif operation == "N" then
@@ -1815,12 +1997,17 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
             GC.Workshop:RequestGuildData()
         end)
         C_Timer.After(16, function()
-            -- ... und die eigenen Berufe (inklusive der Twinks aus dem lokalen
-            -- Cache) aktiv in die Gilde geben, damit andere sie bekommen, ohne
-            -- selbst anfragen zu müssen. Der Zeitstempel sorgt beim Empfänger
-            -- dafür, dass neuere Daten alte ersetzen.
+            -- ... und den eigenen Bestand ankündigen. Gesendet wird nur das
+            -- Manifest: Hersteller, Zeitstempel, Anzahl und Fingerabdruck je
+            -- Beruf. Wer davon etwas nicht hat, fordert es an - wer alles kennt,
+            -- verursacht keinen weiteren Verkehr. Ein Login ohne Änderungen
+            -- kostet damit ein Paket statt einer vollen Schlüsselliste.
             if IsInGuild and IsInGuild() then
-                GC.Workshop:QueueAllProfessions()
+                if GC.Workshop:GuildNeedsFullRecipeData() then
+                    GC.Workshop:QueueAllProfessions()
+                else
+                    GC.Workshop:SendKeyManifest()
+                end
             end
         end)
     end

@@ -2325,12 +2325,70 @@ function GC.UI:RefreshWorkshop()
             lines[#lines + 1] = "• " .. crafter
         end
         lines[#lines + 1] = ""
-        lines[#lines + 1] = "|cff91a3b8Materialien|r"
         if #selected.reagents == 0 then
+            lines[#lines + 1] = "|cff91a3b8Materialien|r"
             lines[#lines + 1] = "Keine Reagenzien erfasst."
         else
-            for _, reagent in ipairs(selected.reagents) do
-                lines[#lines + 1] = (reagent.count or 1) .. "× " .. (reagent.name or ("Item #" .. (reagent.itemID or "?")))
+            -- Bedarf, eigener Bestand und Gildenbank nebeneinander. Die Farbe
+            -- beantwortet die Frage auf einen Blick: gruen habe ich selbst,
+            -- gelb reicht erst mit der Gildenbank, rot fehlt auch dann.
+            local status = GC.Inventory:GetReagentStatus(selected.reagents)
+            lines[#lines + 1] = "|cff91a3b8Materialien" .. string.rep(" ", 22) .. "Du    GBank|r"
+            for _, row in ipairs(status.rows) do
+                local color = row.status == "OWN" and "|cff59e695"
+                    or row.status == "GUILD" and "|cffe8b84b"
+                    or "|cffff6266"
+                local label = row.name or ("Item #" .. (row.itemID or "?"))
+                if #label > 26 then
+                    label = label:sub(1, 25) .. "…"
+                end
+                lines[#lines + 1] = string.format("%s%2d× %-26s %5s  %5s|r",
+                    color,
+                    row.needed,
+                    label,
+                    tostring(row.own.total),
+                    row.guildBank and tostring(row.guildBank) or "–")
+            end
+            if #status.missing > 0 then
+                local parts, fromBank = {}, 0
+                for _, entry in ipairs(status.missing) do
+                    parts[#parts + 1] = entry.amount .. "× "
+                        .. (entry.name or ("Item #" .. (entry.itemID or "?")))
+                    fromBank = fromBank + (entry.fromGuildBank or 0)
+                end
+                lines[#lines + 1] = ""
+                lines[#lines + 1] = "|cffff6266Dir fehlt:|r " .. table.concat(parts, ", ")
+                    .. (fromBank > 0
+                        and ("\n|cffe8b84b" .. fromBank .. " davon liegen in der Gildenbank.|r")
+                        or "")
+            elseif #status.rows > 0 then
+                lines[#lines + 1] = ""
+                lines[#lines + 1] = "|cff59e695Alle Materialien vorhanden.|r"
+            end
+            -- Woher der Gildenbankstand kommt und wie alt er ist.
+            local guildBankAt, guildBankBy = nil, nil
+            for _, row in ipairs(status.rows) do
+                if row.guildBankAt and (not guildBankAt or row.guildBankAt > guildBankAt) then
+                    guildBankAt = row.guildBankAt
+                    guildBankBy = row.guildBankBy
+                end
+            end
+            if not status.guildBankKnown then
+                lines[#lines + 1] = "|cff91a3b8Gildenbank unbekannt – einmal am Bankfach öffnen genügt.|r"
+            elseif guildBankAt and guildBankAt > 0 and date then
+                lines[#lines + 1] = "|cff91a3b8Gildenbank-Stand: "
+                    .. date("%d.%m. %H:%M", guildBankAt)
+                    .. (guildBankBy and guildBankBy ~= "" and (" von " .. guildBankBy) or "") .. "|r"
+            end
+            local ownBankAt = nil
+            for _, row in ipairs(status.rows) do
+                if row.own.oldestBankAt and (not ownBankAt or row.own.oldestBankAt < ownBankAt) then
+                    ownBankAt = row.own.oldestBankAt
+                end
+            end
+            if ownBankAt and ownBankAt > 0 and date then
+                lines[#lines + 1] = "|cff91a3b8Eigener Bankstand: "
+                    .. date("%d.%m. %H:%M", ownBankAt) .. "|r"
             end
         end
         page.workshopDetails:SetText(table.concat(lines, "\n"))
@@ -4574,6 +4632,11 @@ GC:RegisterCallback("GUILD_PROFILE_UPDATED", GC.UI, function(self)
     self:RefreshSuggestions()
     self:RefreshPost()
     self:RefreshInbox()
+end)
+
+-- Neue Bestandszahlen aendern die Ampel in den Rezeptdetails.
+GC:RegisterCallback("INVENTORY_UPDATED", GC.UI, function(self)
+    self:RefreshWorkshop()
 end)
 
 GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)

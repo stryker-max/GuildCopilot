@@ -1,10 +1,28 @@
 # Plan 0.9.31 – Materialbestand: eigene Taschen, Bank, Twinks und Gildenbank
 
-> **Status: NICHT umgesetzt – reines Architektur- und Übergabedokument.**
-> Geschrieben für die Umsetzung durch eine andere Session/ein anderes Modell
-> ohne weiteren Chat-Kontext. Datei- und Zeilenangaben beziehen sich auf
-> Addon-Version **0.9.30** (Commit `a2aedc7`, Branch `main`); Zeilennummern
-> vor der Umsetzung erneut prüfen.
+> **Status: umgesetzt in Addon-Version 0.9.31.** Dieses Dokument bleibt als
+> Entwurfs- und Begründungsprotokoll erhalten; der ausgelieferte Stand steht im
+> ROADMAP-Abschnitt „0.9.31“.
+>
+> Abweichungen und Ergänzungen bei der Umsetzung:
+> - Die Container-API wird **defensiv** angebunden: `C_Container` zuerst, die
+>   klassischen Globalen als Rückfall, Item-IDs bevorzugt aus dem Item-Link
+>   (der einzige Weg, der in allen Client-Fassungen gleich funktioniert). Die
+>   Gildenbank-Signaturen konnten **nicht im Spiel verifiziert** werden; alle
+>   Aufrufe laufen daher über einen `pcall`-Wrapper und Existenzprüfungen –
+>   fehlt eine Funktion, bleibt die Anzeige leer statt zu brechen.
+> - `GUILDBANKBAGSLOTS_CHANGED` nennt den betroffenen Tab nicht. Gelesen wird
+>   deshalb der aktuell offene Tab (`GetCurrentGuildBankTab`) plus alle noch
+>   ausstehenden; ein leeres Ergebnis überschreibt einen vorhandenen Stand
+>   nicht, weil die Abfrage womöglich noch läuft.
+> - Schritt 6 (Manifest-zuerst) wurde als eigener Nachrichtentyp `KM`/`KR`
+>   umgesetzt statt das Whisper-`M`-Format zu heben – letzteres trägt keinen
+>   Herstellernamen und hätte Twink-Berufe nicht abdecken können.
+> - Schritt 7 (Punkt in der Rezeptliste, Favoriten-Einkaufsliste) ist weiterhin
+>   offen und war ausdrücklich nicht Teil der Abnahme.
+>
+> Datei- und Zeilenangaben unten beziehen sich auf den Stand **vor** der
+> Umsetzung (Addon **0.9.30**, Commit `a2aedc7`).
 
 ## Auftrag des Repository-Owners (Zusammenfassung)
 

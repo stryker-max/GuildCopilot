@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.30",
+    VERSION = "0.9.31",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -42,6 +42,8 @@ GC.Capabilities = {
     "gearaudit",
     "gearsync",
     "wclimport",
+    -- inventory1: Materialbestand und Gildenbank-Abgleich ueber "B|".
+    "inventory1",
 }
 
 GC.ProfessionOptions = {

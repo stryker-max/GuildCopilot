@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.30",
+  "## Version: 0.9.31",
 ];
 
 for (const entry of requiredMetadata) {
@@ -180,6 +180,14 @@ const requiredImplementations = [
   ["vollständiger klassischer Rezeptscan", /PrepareClassicTradeSkill[\s\S]*SetTradeSkillItemNameFilter[\s\S]*isExpanded == false/],
   ["Wiederholung fehlgeschlagener Werkstattpakete", /RELIABLE_MAX_ATTEMPTS/],
   ["bestätigte Werkstatt-Teilpakete", /SendReliableAck\("W"/],
+  ["getrennter Rezeptkatalog", /StoreCatalogRecipe/],
+  ["Herstellerindex ohne Rezeptkopien", /ClaimRecipes/],
+  ["Aufräumen ausgetretener Hersteller", /PruneDepartedCrafters/],
+  ["Berufs-Manifest statt Vollbroadcast", /BuildKeyManifestMessages/],
+  ["Materialbestand aus Taschen und Bank", /GetOwnCounts/],
+  ["Gildenbank je Tab", /ScanGuildBankTab/],
+  ["Gildenbank-Manifest zuerst", /BuildManifestMessage[\s\S]*BuildTabMessages/],
+  ["Ampel für Reagenzien", /GetReagentStatus/],
   ["gildenweiter Rekrutierungs-Datensatz", /BuildRecruitmentSyncMessages/],
   ["TBC-Schreibweise Alchimie", /value == "alchemie"/],
   ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],

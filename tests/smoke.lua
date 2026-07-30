@@ -507,6 +507,59 @@ C_GuildInfo = {
     end,
 }
 
+-- Taschen, eigene Bank und Gildenbank. Der Anniversary-Client bietet nur die
+-- klassischen Globalen, deshalb wird genau dieser Pfad nachgebildet.
+bagContents = {
+    [0] = { { itemID = 22445, count = 20 }, { itemID = 22446, count = 5 } },
+}
+bankContents = {
+    [-1] = { { itemID = 22446, count = 9 } },
+}
+guildBankContents = {
+    [1] = { { itemID = 22446, count = 32 }, { itemID = 22447, count = 4 } },
+}
+guildBankTabCount = 1
+guildBankTabViewable = true
+function GetContainerNumSlots(container)
+    local source = bagContents[container] or bankContents[container]
+    return source and #source or 0
+end
+function GetContainerItemLink(container, slot)
+    local source = bagContents[container] or bankContents[container]
+    local entry = source and source[slot]
+    return entry and ("|cffffffff|Hitem:" .. entry.itemID .. "::::::::70|h[Material]|h|r") or nil
+end
+function GetContainerItemInfo(container, slot)
+    local source = bagContents[container] or bankContents[container]
+    local entry = source and source[slot]
+    if not entry then
+        return nil
+    end
+    return "texture", entry.count
+end
+function GetNumGuildBankTabs()
+    return guildBankTabCount
+end
+function GetGuildBankTabInfo(tabIndex)
+    return "Mats " .. tabIndex, "icon", guildBankTabViewable, true
+end
+function QueryGuildBankTab()
+end
+function GetCurrentGuildBankTab()
+    return 1
+end
+function GetGuildBankItemLink(tabIndex, slot)
+    local entry = (guildBankContents[tabIndex] or {})[slot]
+    return entry and ("|cffffffff|Hitem:" .. entry.itemID .. "::::::::70|h[Material]|h|r") or nil
+end
+function GetGuildBankItemInfo(tabIndex, slot)
+    local entry = (guildBankContents[tabIndex] or {})[slot]
+    if not entry then
+        return nil
+    end
+    return "texture", entry.count
+end
+
 local addon = {}
 local files = {
     "Constants.lua",
@@ -515,6 +568,7 @@ local files = {
     "Profile.lua",
     "WarcraftLogs.lua",
     "Roster.lua",
+    "Inventory.lua",
     "Workshop.lua",
     "RaidMonitor.lua",
     "GearAudit.lua",
@@ -1649,6 +1703,142 @@ assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] == nil,
     "Ein ausgetretenes Gildenmitglied blieb mit seinen Rezepten in der Werkstatt")
 assert(addon.DB:GetGuild().workshop.crafters["fremdtwink-realm"] ~= nil,
     "Der Twink eines Gildenmitglieds wurde fälschlich als ausgetreten entfernt")
+
+-- === Materialbestand und Gildenbank =========================================
+-- Eigene Taschen und Bank werden gezählt; sie verlassen den Account nie.
+addon.Inventory:ScanBags()
+addon.Inventory:ScanBank()
+ownMats = addon.Inventory:GetOwnCounts(22446)
+assert(ownMats.bags == 5, "Taschenbestand falsch gezählt: " .. ownMats.bags)
+assert(ownMats.bank == 9, "Bankbestand falsch gezählt: " .. ownMats.bank)
+assert(ownMats.total == 14, "Gesamtbestand falsch: " .. ownMats.total)
+
+-- Bestände eines eigenen Twinks zählen mit, ohne Netzwerkweg.
+twinkInventory = addon.DB:GetCharacter("Materialtwink-Realm")
+twinkInventory.fullName = "Materialtwink-Realm"
+twinkInventory.inventory = {
+    bags = { counts = { [22446] = 100 }, updatedAt = 500 },
+    bank = { counts = {}, updatedAt = 0 },
+}
+ownMats = addon.Inventory:GetOwnCounts(22446)
+assert(ownMats.alts == 100, "Twink-Bestand fehlt: " .. ownMats.alts)
+assert(ownMats.total == 114, "Gesamtbestand mit Twink falsch: " .. ownMats.total)
+
+-- Die Gildenbank wird je Tab eingelesen.
+assert(addon.Inventory:ScanGuildBankTab(1) == true, "Gildenbank-Tab wurde nicht gelesen")
+guildBankTotal, guildBankAt, guildBankBy = addon.Inventory:GetGuildBankCount(22446)
+assert(guildBankTotal == 32, "Gildenbankbestand falsch: " .. tostring(guildBankTotal))
+assert(guildBankBy == "Tester", "Der Einleser der Gildenbank fehlt: " .. tostring(guildBankBy))
+assert(addon.Inventory:GetGuildBankCount(99999) == 0,
+    "Ein unbekanntes Item hat einen Gildenbankbestand")
+
+-- Ampellogik: selbst gedeckt, erst mit Gildenbank gedeckt, gar nicht gedeckt.
+matStatus = addon.Inventory:GetReagentStatus({
+    { itemID = 22446, count = 10, name = "Gedeckt" },
+    { itemID = 22447, count = 4, name = "Nur Gildenbank" },
+    { itemID = 22445, count = 999, name = "Fehlt" },
+})
+assert(matStatus.rows[1].status == "OWN", "Eigener Bestand wurde nicht als gedeckt erkannt")
+assert(matStatus.rows[2].status == "GUILD",
+    "Deckung über die Gildenbank wurde nicht erkannt: " .. matStatus.rows[2].status)
+assert(matStatus.rows[3].status == "MISSING", "Fehlendes Material wurde nicht erkannt")
+assert(#matStatus.missing == 2, "Die Fehlliste ist falsch: " .. #matStatus.missing)
+assert(matStatus.missing[1].fromGuildBank == 4,
+    "Die Gildenbank-Deckung der Fehlmenge ist falsch")
+
+-- Zählstände werden als Differenzen kodiert und kommen unverändert zurück.
+countRoundtrip = addon.Inventory:EncodeCounts({ [22445] = 20, [22446] = 5, [22447] = 4 })
+decodedCounts = addon.Inventory:DecodeCounts(countRoundtrip)
+assert(decodedCounts[22445] == 20 and decodedCounts[22446] == 5 and decodedCounts[22447] == 4,
+    "Zählstände gingen beim Kodieren verloren: " .. countRoundtrip)
+
+-- Gildenbank-Abgleich: Manifest zuerst, Tabdaten nur auf Anforderung.
+manifestMessage = addon.Inventory:BuildManifestMessage()
+assert(manifestMessage ~= nil and #manifestMessage <= 255,
+    "Das Gildenbank-Manifest ist unbrauchbar")
+tabMessages = addon.Inventory:BuildTabMessages(1)
+assert(#tabMessages >= 1, "Die Tabdaten wurden nicht erzeugt")
+for _, tabMessage in ipairs(tabMessages) do
+    assert(#tabMessage <= 255, "Ein Gildenbank-Paket überschreitet das Chatlimit")
+end
+
+-- Ein neuerer Stand gewinnt, ein älterer verliert - rangunabhängig.
+addon.DB:GetGuild().guildBank.tabs = {}
+for _, tabMessage in ipairs(tabMessages) do
+    addon.Sync:OnMessage("GuildCopilot", tabMessage, "GUILD", "Synkos-Realm")
+end
+assert(addon.Inventory:GetGuildBankCount(22446) == 32,
+    "Ein empfangener Gildenbank-Tab wurde nicht übernommen")
+staleTab = addon.DB:GetGuild().guildBank.tabs[1]
+staleTab.updatedAt = staleTab.updatedAt + 1000
+staleTab.counts = { [22446] = 777 }
+newerMessages = addon.Inventory:BuildTabMessages(1)
+staleTab.counts = { [22446] = 1 }
+staleTab.updatedAt = staleTab.updatedAt + 5000
+for _, newerMessage in ipairs(newerMessages) do
+    addon.Sync:OnMessage("GuildCopilot", newerMessage, "GUILD", "Synkos-Realm")
+end
+assert(addon.Inventory:GetGuildBankCount(22446) == 1,
+    "Ein älterer Gildenbank-Stand hat den neueren überschrieben")
+
+-- Ein Manifest, das einen Tab nicht nennt, darf ihn nicht löschen: der Absender
+-- darf ihn vielleicht nicht sehen.
+addon.Sync:OnMessage("GuildCopilot", "B|7|BM|2,999,123", "GUILD", "Synkos-Realm")
+assert(addon.DB:GetGuild().guildBank.tabs[1] ~= nil,
+    "Ein Manifest ohne den Tab hat den gespeicherten Tab gelöscht")
+
+-- Private Bestände dürfen in keinem gesendeten Paket auftauchen.
+privateLeakBefore = #sentAddon
+addon.Inventory:SendManifest()
+addon.Inventory:SendTab(1)
+addon.Sync:PumpBulk(10)
+for leakIndex = 1, #sentAddon do
+    leakMessage = sentAddon[leakIndex][2]
+    if leakMessage:sub(1, 2) == "B|" then
+        assert(leakMessage:find("114", 1, true) == nil,
+            "Ein privater Gesamtbestand steckt in einem gesendeten Paket: " .. leakMessage)
+    end
+end
+
+-- Werkstatt-Login: Manifest statt voller Schlüssellisten. Ein unveränderter
+-- Bestand kostet damit ein Paket statt vierzehn.
+addon.DB:GetGuild().addonUsers = {}
+addon.Sync:NoteAddonUser("Heiler-Realm", {
+    schemaVersion = 7,
+    version = addon.Constants.VERSION,
+    capabilities = table.concat(addon.Capabilities, ","),
+    source = "HANDSHAKE",
+})
+assert(addon.Workshop:GuildNeedsFullRecipeData() == false,
+    "Eine Gilde aus aktuellen Clients verlangt weiterhin volle Rezeptdaten")
+keyManifestMessages = addon.Workshop:BuildKeyManifestMessages()
+assert(#keyManifestMessages >= 1, "Das Berufs-Manifest wurde nicht erzeugt")
+for _, keyManifestMessage in ipairs(keyManifestMessages) do
+    assert(#keyManifestMessage <= 255, "Ein Berufs-Manifest-Paket ist zu lang")
+end
+assert(#keyManifestMessages < 14,
+    "Das Manifest ist nicht kürzer als der bisherige Login-Broadcast")
+
+-- Wer das Manifest kennt, fordert nichts nach; wer es nicht kennt, schon.
+addon.Workshop.suppressedKeyRequests = {}
+timerDelayThreshold = 0.5
+knownManifestBefore = #pendingTimers
+for _, keyManifestMessage in ipairs(keyManifestMessages) do
+    addon.Sync:OnMessage("GuildCopilot", keyManifestMessage, "GUILD", "Heiler-Realm")
+end
+assert(#pendingTimers > knownManifestBefore,
+    "Für einen unbekannten fremden Beruf wurde keine Schlüsselliste angefordert")
+keyRequestSentBefore = #sentAddon
+pendingTimers[knownManifestBefore + 1]()
+addon.Sync:PumpBulk(10)
+keyRequestFound = false
+for keyRequestIndex = keyRequestSentBefore + 1, #sentAddon do
+    if sentAddon[keyRequestIndex][2]:find("|KR|", 1, true) then
+        keyRequestFound = true
+    end
+end
+assert(keyRequestFound, "Die Anforderung der Schlüsselliste wurde nicht gesendet")
+timerDelayThreshold = math.huge
 
 -- Lange Berufs- und Herstellernamen dürfen das 255-Byte-Chatlimit nie
 -- sprengen: das Nutzlast-Budget richtet sich nach der echten Kopfzeile.
