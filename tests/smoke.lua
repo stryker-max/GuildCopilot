@@ -1899,8 +1899,50 @@ addon.Sync:NoteAddonUser("Heiler-Realm", {
     capabilities = table.concat(addon.Capabilities, ","),
     source = "HANDSHAKE",
 })
-assert(addon.Workshop:GuildNeedsFullRecipeData() == false,
-    "Eine Gilde aus aktuellen Clients verlangt weiterhin volle Rezeptdaten")
+-- Ein Login oder /reload schickt nur das Manifest. Frueher entschied eine
+-- gildenweite Vermutung ueber Vollversand: ein einziger Eintrag mit veralteten
+-- Faehigkeiten liess jedes /reload achtzig Pakete senden.
+addon.Workshop.syncQueue = {}
+addon.Sync.bulkQueue = {}
+addon.Sync.bulkAllowance = 4000
+reloadSentBefore = #sentAddon
+addon.Workshop:SendKeyManifest()
+addon.Sync:PumpBulk(10)
+reloadPackets = #sentAddon - reloadSentBefore
+assert(reloadPackets > 0 and reloadPackets <= 3,
+    "Ein Login sollte hoechstens drei Manifest-Pakete kosten, waren aber " .. reloadPackets)
+-- Ein Fragender ohne Manifest-Verstaendnis bekommt weiterhin den vollen Bestand.
+addon.DB:GetGuild().addonUsers = {}
+addon.Sync:NoteAddonUser("Altclient-Realm", {
+    schemaVersion = 7,
+    version = "0.9.25",
+    capabilities = "profile,workshop,workshop2,workshop3",
+    source = "HANDSHAKE",
+})
+addon.Workshop.requestReplies = {}
+addon.Workshop.syncQueue = {}
+legacySentBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "W|7|Q|3", "GUILD", "Altclient-Realm")
+addon.Sync:PumpBulk(60)
+assert(#sentAddon - legacySentBefore > 3,
+    "Ein alter Client bekam keinen vollen Bestand")
+-- Ein aktueller Fragender bekommt nur das Manifest.
+addon.Sync:NoteAddonUser("Neuclient-Realm", {
+    schemaVersion = 7,
+    version = addon.Constants.VERSION,
+    capabilities = table.concat(addon.Capabilities, ","),
+    source = "HANDSHAKE",
+})
+addon.Workshop.requestReplies = {}
+addon.Workshop.syncQueue = {}
+addon.Sync.bulkQueue = {}
+addon.Sync.bulkAllowance = 4000
+modernSentBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "W|7|Q|3", "GUILD", "Neuclient-Realm")
+addon.Sync:PumpBulk(10)
+assert(#sentAddon - modernSentBefore <= 3,
+    "Ein aktueller Client bekam mehr als das Manifest: "
+    .. (#sentAddon - modernSentBefore) .. " Pakete")
 keyManifestMessages = addon.Workshop:BuildKeyManifestMessages()
 assert(#keyManifestMessages >= 1, "Das Berufs-Manifest wurde nicht erzeugt")
 for _, keyManifestMessage in ipairs(keyManifestMessages) do

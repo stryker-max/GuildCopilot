@@ -1070,26 +1070,11 @@ function GC.Workshop:QueueKeyList(profession, crafterName)
     return true
 end
 
--- Kennt die Gilde noch Clients ohne Schluesselliste, muessen sie weiterhin die
--- vollen Rezeptdaten bekommen; sonst saehen sie gar nichts mehr. Wer sich noch
--- nicht vorgestellt hat, gilt vorsichtshalber als alt.
-function GC.Workshop:GuildNeedsFullRecipeData()
-    local addonUsers = GC.DB:GetGuild().addonUsers or {}
-    local seen = {}
-    for _, entry in pairs(addonUsers) do
-        if type(entry) == "table" and not seen[entry] then
-            seen[entry] = true
-            local isMember = #GC.Roster.members == 0 or GC.Roster:IsGuildMember(entry.name)
-            local capabilities = "," .. tostring(entry.capabilities or "") .. ","
-            if isMember and not capabilities:find(",workshop4,", 1, true) then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-function GC.Workshop:QueueAllProfessions(compact, target, reliable)
+-- "fullData" verlangt ausdruecklich die vollen Rezeptdaten. Ohne das Kennzeichen
+-- gehen nur Schluessellisten raus. Vorher entschied das eine gildenweite
+-- Vermutung: ein einziger Eintrag mit veralteten Faehigkeiten liess damit jeden
+-- Login und jedes /reload zum Vollversand werden.
+function GC.Workshop:QueueAllProfessions(compact, target, reliable, fullData)
     if #self.syncQueue == 0 and not self.syncSending then
         self.syncStats.queued = 0
         self.syncStats.sent = 0
@@ -1099,7 +1084,7 @@ function GC.Workshop:QueueAllProfessions(compact, target, reliable)
     -- in der Gilde langst bekannt, weil jedes Rezept fuer alle identisch ist.
     -- Volle Daten gehen nur an gezielte Empfaenger oder solange noch ein Client
     -- ohne Schluesselliste in der Gilde ist.
-    local keyListOnly = not target and compact ~= false and not self:GuildNeedsFullRecipeData()
+    local keyListOnly = not target and compact ~= false and not fullData
     for _, entry in ipairs(self:GetAccountProfessions()) do
         if keyListOnly then
             self:QueueKeyList(entry.profession, entry.crafter)
@@ -1415,6 +1400,12 @@ local function SupportsCompactWorkshop(sender)
     return ("," .. capabilities .. ","):find(",workshop2,", 1, true) ~= nil
 end
 
+local function SupportsKeyListWorkshop(sender)
+    local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
+    local capabilities = user and tostring(user.capabilities or "") or ""
+    return ("," .. capabilities .. ","):find(",workshop4,", 1, true) ~= nil
+end
+
 local function SupportsReliableWorkshop(sender)
     local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
     local capabilities = user and tostring(user.capabilities or "") or ""
@@ -1433,17 +1424,17 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             return
         end
         self.requestReplies[senderKey] = now
-        -- Der Abgleich läuft bewusst über den schnellen, zuverlässigen
-        -- Gildenkanal statt über Flüsternachrichten: in manchen Umgebungen
-        -- erreichen Addon-Flüster den Empfänger nicht, der Gildenkanal aber
-        -- schon. Geantwortet wird mit dem Manifest aller Account-Berufe
-        -- (inklusive der eigenen Twinks); Schlüssellisten und Rezeptdaten folgen
-        -- nur für das, was der Fragende nachweislich noch nicht hat. Clients
-        -- ohne Manifest-Verständnis bekommen weiterhin den vollen Bestand.
-        if self:GuildNeedsFullRecipeData() then
-            self:QueueAllProfessions(SupportsCompactWorkshop(sender))
-        else
+        -- Der Abgleich läuft über den Gildenkanal, weil Addon-Flüster in
+        -- manchen Umgebungen nicht ankommen. Entscheidend ist, was *dieser*
+        -- Fragende versteht: kennt er Manifeste, bekommt er nur eines (ein
+        -- Paket) und fordert daraus gezielt an, was ihm fehlt. Nur ein Client
+        -- ohne Manifest-Verständnis braucht den vollen Bestand. Früher
+        -- entschied das die Gilde als Ganzes - ein einziger veralteter Eintrag
+        -- ließ dann jeden Abgleich zum Vollversand werden.
+        if SupportsKeyListWorkshop(sender) then
             self:SendKeyManifest()
+        else
+            self:QueueAllProfessions(SupportsCompactWorkshop(sender), nil, nil, true)
         end
         return
     elseif operation == "M" then
@@ -2002,12 +1993,12 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
             -- Beruf. Wer davon etwas nicht hat, fordert es an - wer alles kennt,
             -- verursacht keinen weiteren Verkehr. Ein Login ohne Änderungen
             -- kostet damit ein Paket statt einer vollen Schlüsselliste.
+            -- Nur das Manifest, nie der volle Bestand: ein Login oder /reload
+            -- kostet damit ein Paket statt achtzig. Wer wirklich etwas nicht
+            -- hat, fordert es aus dem Manifest gezielt an, und ein Client ohne
+            -- Manifest-Verständnis bekommt beim eigenen "Q" den vollen Bestand.
             if IsInGuild and IsInGuild() then
-                if GC.Workshop:GuildNeedsFullRecipeData() then
-                    GC.Workshop:QueueAllProfessions()
-                else
-                    GC.Workshop:SendKeyManifest()
-                end
+                GC.Workshop:SendKeyManifest()
             end
         end)
     end
