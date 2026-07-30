@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.39
+# Guild Copilot 0.9.40
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -9,7 +9,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 ## Funktionen
 
 - automatische Erkennung des eigenen Talentbaums;
-- frei bestätigbares Raidprofil mit Primär-Spec, optionalem Dual-Spec, Main/Alt und Flexibilität;
+- frei bestätigbares Raidprofil mit Primär-Spec, optionalem Dual-Spec, Main/Twink und Flexibilität;
 - unsichtbare Profilsynchronisierung zwischen Gildenmitgliedern mit installiertem Addon; wer neu dazukommt, fragt den Bestand ab und bekommt die Profile der bereits Eingeloggten nachgereicht, statt nur die Änderungen ab dem eigenen Login zu sehen;
 - Addon-Erkennung in der Gildenübersicht: sichtbar, wer Guild Copilot nutzt und wessen Datenversion abweicht, ohne Dauerbroadcasts;
 - gezählt werden dabei **Spieler, nicht Charaktere**: jeder Client meldet im Handshake ein anonymes Account-Kennzeichen, sodass Main und Twinks eines Spielers als einer erscheinen (die Charakterzahl steht daneben). Wer das Feld nicht sendet, zählt einzeln – lieber eine Zahl zu hoch als fremde Spieler fälschlich zusammengelegt;
@@ -39,7 +39,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - ein Name **ohne Realm** meint den eigenen: Erst dadurch werden derselbe Spieler mit und ohne Realmangabe zusammengeführt, zwei gleichnamige Spieler verschiedener Realms aber auseinandergehalten;
 - eine **Ignorierliste** blendet Dauerschreiber aus – dauerhaft oder bis zu einem Datum, einsehbar und jederzeit über **Wieder zulassen** widerrufbar; abgelaufene Einträge räumt sie selbst weg;
 - zu jedem Interessenten stehen zwei **kopierbare Profil-Links** bereit (classic-armory.org und Warcraft Logs): hineinklicken markiert den ganzen Link, Strg+C kopiert ihn. Region und Realm stammen aus der gespeicherten Warcraft-Logs-Gildenquelle, die dafür gildenweit synchronisiert wird;
-- Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Alt-Status und Berufen;
+- Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Twink-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
 - ranggeschützte Mitgliederpflege mit aktiven Gildenabmeldungen und nach Inaktivität sortierten Prüfvorschlägen;
 - Vorschläge lassen sich als dauerhafte **Ausnahme**, **zurückgestellt** (30 Tage) oder **erledigt** ablegen; alle Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten;
@@ -136,7 +136,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.39; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.40; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 

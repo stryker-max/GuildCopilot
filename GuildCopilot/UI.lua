@@ -1020,7 +1020,10 @@ function GC.UI:RefreshDashboard()
                     statusText = "Manuell"
                     statusHint = "Wurde von Hand eingetragen, nicht vom Spieler selbst."
                 else
-                    statusText = profile.mainStatus == "ALT" and "Alt" or "Main"
+                    -- Angezeigt wird "Twink"; gespeichert und uebertragen wird
+                    -- weiterhin "ALT", sonst verstehen sich alte und neue
+                    -- Clients beim Abgleich nicht mehr.
+                    statusText = profile.mainStatus == "ALT" and "Twink" or "Main"
                     statusHint = profile.mainStatus == "ALT"
                         and "Als Zweitcharakter gemeldet."
                         or "Als Hauptcharakter gemeldet."
@@ -1397,7 +1400,7 @@ function GC.UI:BuildRosterPage()
     end)
     page.mainCheck:SetPoint("TOPLEFT", profileCard, "TOPLEFT", 18, -251)
 
-    page.altCheck = CreateToggle(profileCard, "Alt", function(enabled)
+    page.altCheck = CreateToggle(profileCard, "Twink", function(enabled)
         if enabled then
             page.selectedMainStatus = "ALT"
             SetToggle(page.mainCheck, false)
