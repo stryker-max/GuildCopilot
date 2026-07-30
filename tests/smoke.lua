@@ -248,6 +248,33 @@ function GetProfessions()
     return 1, 2
 end
 
+-- Faehigkeitszeilen wie im Classic-Client: Dort gibt es GetProfessions nicht,
+-- die Berufe stehen unter einer Kategorie im Faehigkeitenfenster. Die
+-- Kategorie ist absichtlich zugeklappt - eingeklappt zaehlt sie ihre Zeilen
+-- nicht mit, und genau daran scheitert eine Erfassung, die nicht aufklappt.
+skillHeaderExpanded = false
+skillHeaderToggles = 0
+function GetNumSkillLines()
+    return skillHeaderExpanded and 3 or 1
+end
+function GetSkillLineInfo(index)
+    if index == 1 then
+        return "Berufe", true, skillHeaderExpanded
+    elseif index == 2 then
+        return "Verzauberkunst", false, false, 375, 0, 0, 375
+    elseif index == 3 then
+        return "Schneiderei", false, false, 350, 0, 0, 375
+    end
+end
+function ExpandSkillHeader()
+    skillHeaderExpanded = true
+    skillHeaderToggles = skillHeaderToggles + 1
+end
+function CollapseSkillHeader()
+    skillHeaderExpanded = false
+    skillHeaderToggles = skillHeaderToggles + 1
+end
+
 function GetProfessionInfo(index)
     if index == 1 then
         return "Ingenieurskunst", "", 375, 375, 0, 0, 202
@@ -3702,6 +3729,69 @@ assert(addon.Chat:IsInboxFiltered("Doppel") == false, "Der freigegebene Spieler 
 addon.DB:GetGuild().inbox = {}
 end
 
+-- === Berufe: der Classic-Client kennt GetProfessions nicht =================
+--
+-- Bis 0.9.45 stieg die Erfassung wortlos aus, wenn GetProfessions fehlte - und
+-- im Anniversary-Client fehlt es, das ist eine Retail-API. Stehen blieb, was
+-- jemand von Hand eingetragen hatte, und die Statuszeile meldete trotzdem
+-- Erfolg. Genau dieser Fall steht hier.
+do
+local profile = addon.Profile:Get()
+local savedProfessions = profile.professions
+local savedAuto = profile.professionAuto
+local realGetProfessions = GetProfessions
+
+-- Mit der Retail-API bleibt alles wie gehabt.
+profile.professionAuto = true
+addon.Profile:RefreshProfessions(profile)
+assert(addon.Profile:GetProfessionSource(profile) == "OK",
+    "Die Retail-API meldet keinen Erfolg")
+assert(profile.professions[1].name == "Ingenieurskunst",
+    "Der Beruf aus der Retail-API kam nicht an")
+
+-- Ohne sie muss der Weg über die Fähigkeitszeilen greifen.
+GetProfessions = nil
+profile.professions = {}
+skillHeaderExpanded = false
+skillHeaderToggles = 0
+assert(addon.Profile:RefreshProfessions(profile) == true,
+    "Ohne GetProfessions wurde nichts erkannt")
+assert(profile.professions[1] and profile.professions[1].name == "Verzauberkunst",
+    "Der erste Beruf aus den Fähigkeitszeilen fehlt")
+assert(profile.professions[2] and profile.professions[2].name == "Schneiderei",
+    "Der zweite Beruf aus den Fähigkeitszeilen fehlt")
+assert(profile.professions[1].skillLevel == 375, "Der Fertigkeitswert fehlt")
+assert(addon.Profile:GetProfessionSource(profile) == "OK",
+    "Die Erfassung über Fähigkeitszeilen meldet keinen Erfolg")
+
+-- Die zugeklappte Kategorie wurde dafür geöffnet und danach wieder geschlossen.
+assert(skillHeaderToggles == 2,
+    "Die eingeklappte Kategorie wurde nicht geöffnet und wieder geschlossen")
+assert(skillHeaderExpanded == false,
+    "Das Fähigkeitenfenster bleibt nach dem Lesen aufgeklappt zurück")
+
+-- Gibt der Client gar nichts her, darf nichts Erfolg behaupten - und die
+-- vorhandene Angabe bleibt stehen, statt gelöscht zu werden.
+local realNumSkillLines = GetNumSkillLines
+GetNumSkillLines = nil
+assert(addon.Profile:RefreshProfessions(profile) == false,
+    "Ohne jede Auskunft wurde trotzdem etwas gemeldet")
+assert(addon.Profile:GetProfessionSource(profile) == "UNAVAILABLE",
+    "Der Client ohne Berufsauskunft gilt weiter als erfolgreich gelesen")
+assert(profile.professions[1].name == "Verzauberkunst",
+    "Die vorhandene Angabe wurde beim Fehlschlag gelöscht")
+
+-- Von Hand gewählt ist eine eigene Antwort, kein Fehlschlag.
+GetNumSkillLines = realNumSkillLines
+profile.professionAuto = false
+assert(addon.Profile:GetProfessionSource(profile) == "MANUAL",
+    "Die eigene Auswahl wird nicht als solche ausgewiesen")
+
+GetProfessions = realGetProfessions
+profile.professions = savedProfessions
+profile.professionAuto = savedAuto
+end
+
 -- === Profil: geändert heißt unbestätigt ====================================
 --
 -- Der Haken der letzten Bestätigung stand bisher auch über einer längst
@@ -3764,11 +3854,11 @@ local data = addon.Onboarding:GetData()
 
 local function Reset()
     profile.confirmed = false
-    -- Ohne diese Zeile erledigt sich der zweite Schritt mit dem ersten:
-    -- Confirm ruft Refresh, und Refresh liest die WoW-Berufe ein. Im Spiel ist
-    -- das genau richtig; hier soll jeder Übergang einzeln geprüft werden.
+    -- Der Charakter hat einen Beruf, aber noch kein Rezept eingelesen: genau
+    -- die Lage, in der Schritt 2 etwas von einem will. Ohne erlernten Beruf
+    -- gilt er als erledigt, weil es nichts einzulesen gibt.
     profile.professionAuto = false
-    profile.professions = {}
+    profile.professions = { { name = "Verzauberkunst" } }
     profile.workshop = { professions = {} }
     guildData.gearAudits = {}
     data.skipped = {}
@@ -3805,18 +3895,27 @@ assert(steps[2].skipped == true and steps[3].active == true,
 
 -- ... wird aber von der echten Aktion überstimmt: Übersprungen heißt "nicht
 -- drängeln", nicht "nicht wahrnehmen".
-profile.professions = { { name = "Ingenieurskunst" } }
+profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
 steps = addon.Onboarding:GetSteps()
 assert(steps[2].done == true and steps[2].skipped == false,
     "Ein tatsächlich erledigter Schritt gilt weiter als übersprungen")
-assert(tostring(steps[2].detail):find("Ingenieurskunst", 1, true) ~= nil,
-    "Der erkannte Beruf steht nicht an der Zeile")
+assert(tostring(steps[2].detail):find("Schneiderei", 1, true) ~= nil,
+    "Der eingelesene Beruf steht nicht an der Zeile")
 
--- Ein Beruf aus dem Werkstattscan zählt genauso wie ein von Hand gewählter.
+-- Der Schritt meint die Rezepte, nicht die Berufsnamen. Namen liefert der
+-- Client beim Login von selbst - daran gemessen hakte sich der Schritt ab,
+-- ohne dass jemand etwas getan hätte.
+profile.workshop = { professions = {} }
+profile.professions = { { name = "Verzauberkunst" }, { name = "Schneiderei" } }
+assert(addon.Onboarding:GetSteps()[2].done == false,
+    "Der Schritt hakt sich schon an den bloßen Berufsnamen ab")
+
+-- Wer gar keinen Beruf hat, kann auch keinen einlesen.
 profile.professions = {}
+assert(addon.Onboarding:GetSteps()[2].done == true,
+    "Ohne erlernten Beruf bleibt der Schritt für immer offen")
+profile.professions = { { name = "Verzauberkunst" } }
 profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
-steps = addon.Onboarding:GetSteps()
-assert(steps[2].done == true, "Ein gescannter Beruf erledigt den Schritt nicht")
 
 -- Der dritte Schritt kommt aus der Selbstprüfung.
 assert(steps[3].done == false, "Der dritte Schritt gilt ohne Prüfung als erledigt")
@@ -3855,13 +3954,34 @@ assert(addon.Onboarding:GetSteps()[1].skipped == false,
     "Einrichtung fängt die Liste nicht neu an, sondern zeigt nur Übersprungenes")
 
 -- Auto-Öffnen: einmal je Charakter, und nie bei längst bestätigtem Profil.
+-- Gezeigt wird das Willkommensfenster, nicht gleich das ganze Addon.
 Reset()
+addon.UI.frame:Hide()
 assert(addon.Onboarding:ShouldAutoOpen() == true,
     "Ein frischer Charakter bekommt das Fenster nicht zu sehen")
 assert(addon.Onboarding:AutoOpen() == true, "Das Fenster öffnete sich nicht von selbst")
-assert(addon.UI.frame:IsShown() == true, "Das Auto-Öffnen zeigt das Fenster nicht")
+assert(addon.UI.welcomeFrame:IsShown() == true,
+    "Das Willkommensfenster erscheint beim ersten Login nicht")
+assert(addon.UI.frame:IsShown() == false,
+    "Statt des Willkommensfensters springt gleich das ganze Addon auf")
 assert(addon.Onboarding:AutoOpen() == false,
     "Das Fenster springt bei jedem Login erneut auf")
+
+-- Der eine Knopf führt auf die Profilseite, wo die Checkliste steht.
+addon.UI.welcomeFrame.scripts = addon.UI.welcomeFrame.scripts or {}
+addon.UI:HideWelcome()
+assert(addon.UI.welcomeFrame:IsShown() == false, "Das Willkommensfenster lässt sich nicht schließen")
+
+-- Solange etwas offen ist, sitzt ein Punkt am Minimap-Symbol.
+assert(addon.Onboarding:IsPending() == true, "Die offene Einrichtung gilt nicht als ausstehend")
+assert(addon.Onboarding:GetNextStep() ~= nil, "Der nächste offene Schritt wird nicht benannt")
+addon.UI:RefreshMinimapMarker()
+assert(addon.UI.minimapButton.pending:IsShown() == true,
+    "Der Marker am Minimap-Symbol fehlt, obwohl Schritte offen sind")
+addon.Onboarding:Dismiss()
+addon.UI:RefreshMinimapMarker()
+assert(addon.UI.minimapButton.pending:IsShown() == false,
+    "Nach \"Nicht mehr anzeigen\" bleibt der Marker stehen")
 
 Reset()
 profile.confirmed = true

@@ -1574,6 +1574,72 @@ function GC.UI:RefreshSettings()
     page.settingsScroll:UpdateModernThumb()
 end
 
+-- === Willkommensfenster ====================================================
+--
+-- Beim ersten Login eines Charakters: das Schriftlogo und genau ein Knopf.
+-- Kein Text, keine zweite Wahl - was zu tun ist, steht danach als Checkliste
+-- auf der Profilseite, und die ist der eigentliche Inhalt. Ein Fenster, das
+-- schon hier alles erklaert, wird ueberblaettert.
+function GC.UI:CreateWelcomeFrame()
+    if self.welcomeFrame then
+        return self.welcomeFrame
+    end
+
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotWelcomeFrame")
+    frame:SetSize(420, 380)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
+    frame:Hide()
+    table.insert(UISpecialFrames, "GuildCopilotWelcomeFrame")
+
+    local wordmark = frame:CreateTexture(nil, "ARTWORK")
+    wordmark:SetSize(300, 300)
+    wordmark:SetPoint("TOP", frame, "TOP", 0, -8)
+    wordmark:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotWordmark")
+
+    local start = CreateButton(frame, "Einrichtung starten", 240, 42, function()
+        GC.UI:HideWelcome()
+        GC.UI:CreateMainFrame()
+        GC.UI.frame:Show()
+        GC.UI:ShowPage("ROSTER")
+        local page = GC.UI.pages.ROSTER
+        if page and page.profileScroll then
+            page.profileScroll:SetVerticalScroll(0)
+            page.profileScroll:UpdateModernThumb()
+        end
+    end, "PRIMARY")
+    start:SetPoint("BOTTOM", frame, "BOTTOM", 0, 28)
+    start.label:SetFontObject("GameFontNormalLarge")
+
+    -- Ein × und die Escape-Taste, sonst waere das Fenster eine Falle. Es ist
+    -- bewusst unscheinbar: Der eine Knopf soll der Weg sein, nicht dieser.
+    local close = CreateButton(frame, "×", 24, 24, function()
+        GC.UI:HideWelcome()
+    end)
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
+
+    self.welcomeFrame = frame
+    return frame
+end
+
+function GC.UI:ShowWelcome()
+    self:CreateWelcomeFrame()
+    self.welcomeFrame:Show()
+end
+
+function GC.UI:HideWelcome()
+    if self.welcomeFrame then
+        self.welcomeFrame:Hide()
+    end
+end
+
 -- Zu welcher Karte ein Klick auf eine Checklistenzeile rollt. Alle drei
 -- Schritte liegen auf dieser Seite, es ist also ein Rollen und kein
 -- Seitenwechsel.
@@ -1677,7 +1743,18 @@ function GC.UI:BuildOnboardingCard(page, content)
     page.onboardingStatus:SetPoint("LEFT", page.onboardingDismiss, "RIGHT", 12, 0)
 end
 
+-- Der Punkt am Minimap-Symbol. Getrennt vom Zeichnen der Karte, weil er auch
+-- dann stimmen muss, wenn das Fenster zu ist - und das ist der Regelfall.
+function GC.UI:RefreshMinimapMarker()
+    local button = self.minimapButton
+    if not button or not button.pending then
+        return
+    end
+    button.pending:SetShown(GC.Onboarding:IsPending())
+end
+
 function GC.UI:RefreshOnboarding()
+    self:RefreshMinimapMarker()
     local page = self.pages.ROSTER
     if not page or not page.onboardingCard then
         return
@@ -1861,8 +1938,11 @@ function GC.UI:BuildRosterPage()
     local professions = CreateCard(content, "Deine Berufe")
     professions:SetSize(388, 408)
     page.professionCard = professions
+    -- Zwei Dinge, die beide "Berufe" heissen und leicht verwechselt werden:
+    -- die Namen hier oben liest das Addon selbst aus deinen Faehigkeiten, die
+    -- Rezepte dagegen gibt WoW nur bei geoeffnetem Berufsfenster heraus.
     local professionHelp = CreateLabel(professions,
-        "Wähle zwei Berufe manuell oder übernimm sie direkt aus deinem WoW-Berufsfenster. Die Angaben werden im Gildenroster synchronisiert.",
+        "Deine beiden Hauptberufe – vom Addon aus deinen Fähigkeiten gelesen, sonst hier von Hand wählbar. Für die Rezepte in der Gildenwerkstatt musst du dein Berufsfenster einmal öffnen; die Namen allein genügen dafür nicht.",
         { muted = true, width = 352, height = 64, vertical = "TOP" })
     professionHelp:SetPoint("TOPLEFT", professions, "TOPLEFT", 18, -54)
 
@@ -1876,7 +1956,7 @@ function GC.UI:BuildRosterPage()
         dropdown:SetPoint("TOPLEFT", professions, "TOPLEFT", 18 + ((slot - 1) * 182), -130)
         page.professionDropdowns[slot] = dropdown
     end
-    page.professionSync = CreateButton(professions, "Aus WoW-Berufen übernehmen", 230, 34, function()
+    page.professionSync = CreateButton(professions, "Aus Fähigkeiten übernehmen", 230, 34, function()
         GC.Profile:EnableProfessionSync()
         GC.UI:RefreshRoster()
     end, "PRIMARY")
@@ -2111,9 +2191,25 @@ function GC.UI:RefreshRoster()
         local profession = profile.professions and profile.professions[slot]
         page.professionDropdowns[slot]:SetValue(profession and profession.name or "")
     end
-    page.professionStatus:SetText(profile.professionAuto
-        and "Automatische Synchronisierung aktiv."
-        or "Manuell gewählt. Mit dem Button wieder aus WoW übernehmen.")
+    -- Die Statuszeile sagt, was tatsaechlich passiert ist. Bis 0.9.45 meldete
+    -- sie unterschiedslos eine laufende Uebernahme, auch wenn der Client die
+    -- Berufsliste gar nicht herausgibt - dann blieb die Angabe von Hand stehen
+    -- und sah aus wie ein Ergebnis.
+    local professionSource = GC.Profile:GetProfessionSource(profile)
+    if professionSource == "OK" then
+        page.professionStatus:SetText("Automatisch aus deinen Fähigkeiten übernommen.")
+        SetTextColor(page.professionStatus, THEME.muted)
+    elseif professionSource == "EMPTY" then
+        page.professionStatus:SetText("Nachgesehen: Dieser Charakter hat keinen Hauptberuf erlernt.")
+        SetTextColor(page.professionStatus, THEME.muted)
+    elseif professionSource == "MANUAL" then
+        page.professionStatus:SetText("Von Hand gewählt. Der Knopf holt sie wieder aus deinen Fähigkeiten.")
+        SetTextColor(page.professionStatus, THEME.muted)
+    else
+        page.professionStatus:SetText("Deine Fähigkeiten ließen sich nicht lesen – "
+            .. "bitte oben von Hand wählen.")
+        SetTextColor(page.professionStatus, THEME.warning)
+    end
 
     local absence = profile.absence or {}
     if not page.absenceEdits.FROM:HasFocus() then
@@ -5332,6 +5428,18 @@ function GC.UI:AddMinimapButton()
     button.border = border
     button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
+    -- Solange die Einrichtung offen ist, sitzt ein Punkt am Symbol. Er ist das
+    -- einzige Zeichen bei geschlossenem Fenster - ohne ihn merkt niemand, dass
+    -- noch etwas aussteht, sobald das Willkommensfenster einmal weg ist. Er
+    -- verschwindet von selbst und wiederholt sich nie im Chat.
+    local pending = button:CreateTexture(nil, "OVERLAY", nil, 7)
+    pending:SetSize(9, 9)
+    pending:SetPoint("TOPRIGHT", button, "TOPRIGHT", -6, -4)
+    pending:SetTexture(WHITE_TEXTURE)
+    SetTextureColor(pending, THEME.accent)
+    pending:Hide()
+    button.pending = pending
+
     button:SetScript("OnClick", function(_, mouseButton)
         if mouseButton == "RightButton" then
             GC.UI:CreateMainFrame()
@@ -5347,6 +5455,11 @@ function GC.UI:AddMinimapButton()
         end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText("Guild Copilot")
+        local nextStep = GC.Onboarding:GetNextStep()
+        if nextStep then
+            GameTooltip:AddLine("Einrichtung offen: " .. nextStep, 0.18, 0.78, 0.86, true)
+            GameTooltip:AddLine(" ")
+        end
         GameTooltip:AddLine("Linksklick: öffnen/schließen", 1, 1, 1)
         GameTooltip:AddLine("Rechtsklick: Einstellungen", 1, 1, 1)
         GameTooltip:AddLine("Ziehen: am Ring entlang, weiter weg frei platzieren", 1, 1, 1)
@@ -5390,6 +5503,7 @@ function GC.UI:AddMinimapButton()
 
     self.minimapButton = button
     self:RefreshMinimapButton()
+    self:RefreshMinimapMarker()
 end
 
 function GC.UI:RegisterInterfaceOptions()
@@ -5538,6 +5652,9 @@ end)
 -- Seiten deshalb nur noch vor; gezeichnet wird, was gerade zu sehen ist.
 GC:RegisterCallback("PROFILE_UPDATED", GC.UI, function(self)
     self:Invalidate("OVERVIEW", "ROSTER", "MEMBERCARE", "SUGGESTIONS")
+    -- Der Marker am Minimap-Symbol haengt nicht am Zeichnen der Seite: Er muss
+    -- auch stimmen, wenn das Fenster zu ist.
+    self:RefreshMinimapMarker()
 end)
 
 GC:RegisterCallback("SETTINGS_UPDATED", GC.UI, function(self)
@@ -5563,10 +5680,12 @@ GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
     -- Ein eingelesener Beruf erledigt den zweiten Schritt der Checkliste, und
     -- die steht auf der Profilseite.
     self:Invalidate("WORKSHOP", "ROSTER")
+    self:RefreshMinimapMarker()
 end)
 
 GC:RegisterCallback("PROFILE_CONFIRMATION_CHANGED", GC.UI, function(self)
     self:Invalidate("ROSTER")
+    self:RefreshMinimapMarker()
 end)
 
 GC:RegisterCallback("RECRUITMENT_UPDATED", GC.UI, function(self)
@@ -5606,4 +5725,5 @@ end)
 GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
     -- Die eigene Ausruestung steht auch auf der Profilseite.
     self:Invalidate("GEAR", "ROSTER")
+    self:RefreshMinimapMarker()
 end)

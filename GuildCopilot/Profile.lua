@@ -18,6 +18,77 @@ local function ReadProfession(professionIndex)
     }
 end
 
+-- Welche Faehigkeit ein Hauptberuf ist. Sekundaeres wie Kochkunst, Erste Hilfe
+-- und Angeln gehoert ausdruecklich nicht dazu - im Profil stehen die beiden
+-- Hauptberufe. "Alchemie" ist die aeltere Schreibweise derselben Sache.
+local PROFESSION_BY_NAME = {}
+for _, professionName in ipairs(GC.ProfessionOptions) do
+    if professionName ~= "" then
+        PROFESSION_BY_NAME[GC.Util.NormalizeName(professionName)] = professionName
+    end
+end
+PROFESSION_BY_NAME[GC.Util.NormalizeName("Alchemie")] = "Alchimie"
+
+-- Die Berufe aus dem Faehigkeitenfenster lesen.
+--
+-- GetProfessions() ist eine Retail-API und im Anniversary-Client schlicht nicht
+-- vorhanden. Bis 0.9.45 stieg die Erfassung dort wortlos aus - die Statuszeile
+-- meldete trotzdem "Automatische Synchronisierung aktiv", und stehen blieb, was
+-- jemand von Hand eingetragen hatte. Classic fuehrt die Berufe stattdessen als
+-- Faehigkeitszeilen.
+--
+-- Rueckgabe: Liste der gefundenen Berufe, oder nil, wenn der Client gar keine
+-- Auskunft gibt. Der Unterschied ist wichtig - "nichts gefunden" und "kann
+-- nicht nachsehen" sind zwei verschiedene Antworten, und nur die erste heisst,
+-- dass dieser Charakter keinen Beruf hat.
+local function ReadSkillLineProfessions()
+    if type(GetNumSkillLines) ~= "function" or type(GetSkillLineInfo) ~= "function" then
+        return nil
+    end
+
+    -- Eine eingeklappte Kategorie zaehlt GetNumSkillLines nicht mit. Welche
+    -- zugeklappt war, wird notiert und hinterher wiederhergestellt: Das
+    -- Faehigkeitenfenster des Spielers soll danach aussehen wie vorher.
+    local collapsed = {}
+    for index = 1, (GetNumSkillLines() or 0) do
+        local name, isHeader, isExpanded = GetSkillLineInfo(index)
+        if isHeader and not isExpanded and name then
+            collapsed[name] = true
+        end
+    end
+    local anyCollapsed = next(collapsed) ~= nil
+    if anyCollapsed and type(ExpandSkillHeader) == "function" then
+        pcall(ExpandSkillHeader, 0)
+    end
+
+    local found = {}
+    local seen = {}
+    for index = 1, (GetNumSkillLines() or 0) do
+        local name, isHeader, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(index)
+        local canonical = (not isHeader) and name and PROFESSION_BY_NAME[GC.Util.NormalizeName(name)]
+        if canonical and not seen[canonical] then
+            seen[canonical] = true
+            found[#found + 1] = {
+                name = canonical,
+                skillLevel = tonumber(skillRank) or 0,
+                maxSkillLevel = tonumber(skillMaxRank) or 0,
+            }
+        end
+    end
+
+    -- Rueckwaerts zuklappen: Jedes Zuklappen verschiebt die Zeilen darunter.
+    if anyCollapsed and type(CollapseSkillHeader) == "function" then
+        for index = (GetNumSkillLines() or 0), 1, -1 do
+            local name, isHeader = GetSkillLineInfo(index)
+            if isHeader and name and collapsed[name] then
+                pcall(CollapseSkillHeader, index)
+            end
+        end
+    end
+
+    return found
+end
+
 local function ProfessionChanged(left, right)
     left = left or {}
     right = right or {}
@@ -148,24 +219,65 @@ function GC.Profile:ClearAbsence()
     return true
 end
 
+-- Erst die Retail-API, dann die Faehigkeitszeilen von Classic. Rueckgabe wie
+-- bei ReadSkillLineProfessions: nil heisst "kein Weg, es herauszufinden".
+local function ReadProfessions()
+    if type(GetProfessions) == "function" then
+        local profession1, profession2 = GetProfessions()
+        -- Einzeln einsammeln: Fehlt der erste Beruf, endet ipairs ueber eine
+        -- Tabelle mit nil an Position 1 sofort und verschluckt den zweiten.
+        local first = ReadProfession(profession1)
+        local second = ReadProfession(profession2)
+        if first or second then
+            local detected = {}
+            if first then
+                detected[#detected + 1] = first
+            end
+            if second then
+                detected[#detected + 1] = second
+            end
+            return detected
+        end
+    end
+    return ReadSkillLineProfessions()
+end
+
+-- Ergebnis des letzten automatischen Lesens. Rein lokal, wird nie gesendet -
+-- es beschreibt diesen Client, nicht den Charakter.
+--   OK          mindestens ein Beruf gelesen
+--   EMPTY       nachgesehen, dieser Charakter hat keinen Hauptberuf
+--   UNAVAILABLE der Client gibt die Berufsliste nicht heraus
+--   MANUAL      die Uebernahme ist abgeschaltet, es gilt die eigene Auswahl
+function GC.Profile:GetProfessionSource(profile)
+    profile = profile or self:Get()
+    if not profile.professionAuto then
+        return "MANUAL"
+    end
+    return profile.professionSource or "UNAVAILABLE"
+end
+
 function GC.Profile:RefreshProfessions(profile)
     profile = profile or self:Get()
-    if not profile.professionAuto or not GetProfessions then
+    if not profile.professionAuto then
         return false
     end
 
-    local profession1, profession2 = GetProfessions()
-    local detected = {
-        ReadProfession(profession1),
-        ReadProfession(profession2),
-    }
-    if not detected[1] and not detected[2] then
+    local detected = ReadProfessions()
+    if not detected then
+        -- Nicht nachsehen koennen ist keine Antwort: Was gespeichert ist,
+        -- bleibt stehen, aber die Oberflaeche darf keinen Erfolg behaupten.
+        profile.professionSource = "UNAVAILABLE"
+        return false
+    end
+
+    profile.professionSource = #detected > 0 and "OK" or "EMPTY"
+    if #detected == 0 then
         return false
     end
 
     local changed = ProfessionChanged(profile.professions[1], detected[1])
         or ProfessionChanged(profile.professions[2], detected[2])
-    profile.professions = detected
+    profile.professions = { detected[1], detected[2] }
     return changed
 end
 

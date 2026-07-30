@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.45",
+  "## Version: 0.9.46",
 ];
 
 for (const entry of requiredMetadata) {
@@ -352,6 +352,10 @@ const requiredImplementations = [
   ["einmaliges Auto-Öffnen je Charakter", /function GC\.Onboarding:ShouldAutoOpen/],
   ["Karten wandern mit der Checkliste", /function GC\.UI:LayoutRosterPage/],
   ["erneute Bestätigung nach Profiländerung", /local function ProfileSelectionChanged/],
+  ["Willkommensfenster beim ersten Login", /function GC\.UI:CreateWelcomeFrame/],
+  ["Berufe aus den Classic-Fähigkeitszeilen", /local function ReadSkillLineProfessions/],
+  ["Herkunft der Berufsangabe", /function GC\.Profile:GetProfessionSource/],
+  ["Marker am Minimap-Symbol", /function GC\.UI:RefreshMinimapMarker/],
   ["Profiländerung frischt die Karte auf", /page\.selectedFlex = enabled\s+GC\.UI:RefreshRoster\(\)/],
 ];
 
@@ -580,6 +584,28 @@ for (const glyph of ["✓", "►", "○"]) {
 }
 if (!onboardingCard.includes("UI-CheckBox-Check")) {
   throw new Error("Der erledigte Schritt wird nicht mehr mit der Hakentextur markiert.");
+}
+
+// GetProfessions ist eine Retail-API und im Anniversary-Client nicht
+// vorhanden. Wer sich allein darauf verlaesst, erfasst nie einen Beruf - und
+// merkt es nicht, weil die zuletzt von Hand eingetragene Angabe stehen bleibt.
+const profileSource = fs.readFileSync(path.join(root, "Profile.lua"), "utf8");
+if (!/GetNumSkillLines/.test(profileSource) || !/GetSkillLineInfo/.test(profileSource)) {
+  throw new Error("Die Berufserfassung nutzt die Classic-Fähigkeitszeilen nicht mehr.");
+}
+// Eine eingeklappte Kategorie zaehlt ihre Zeilen nicht mit.
+if (!/ExpandSkillHeader/.test(profileSource) || !/CollapseSkillHeader/.test(profileSource)) {
+  throw new Error("Eingeklappte Fähigkeitskategorien werden nicht mehr geöffnet und zurückgesetzt.");
+}
+// „Nichts gefunden“ und „kann nicht nachsehen“ duerfen nicht dieselbe Antwort
+// sein: Nur die erste heisst, dass dieser Charakter keinen Beruf hat.
+for (const state of ["UNAVAILABLE", "EMPTY", "MANUAL"]) {
+  if (!profileSource.includes(`"${state}"`)) {
+    throw new Error(`Die Berufserfassung unterscheidet den Zustand ${state} nicht mehr.`);
+  }
+}
+if (uiSource.includes("Automatische Synchronisierung aktiv")) {
+  throw new Error("Die Berufskarte behauptet wieder Erfolg, ohne ihn zu belegen.");
 }
 
 // Entlastung beim Ein- und Ausloggen vieler Gildenmitglieder. Beide Stellen

@@ -298,6 +298,21 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.46 – Ein Willkommensfenster, und die Berufe wurden nie erkannt
+
+Aus der Gilde gemeldet: „Aus WoW-Berufen übernehmen“ sei irreführend, das Addon erkenne die Berufe ja gar nicht selbst. Die Vermutung stimmte, der Grund war ein anderer als angenommen:
+
+- **`GetProfessions()` gibt es im Anniversary-Client nicht.** Es ist eine Retail-API; Classic führt die Berufe als Zeilen im Fähigkeitenfenster. `RefreshProfessions` stieg deshalb in der ersten Zeile wortlos aus – seit es die Funktion gibt. Die ROADMAP führte das als „nicht verifizierbare Annahme, fällt still aus“; still fiel sie aus, nur sah es aus wie Erfolg: Was von Hand eingetragen war, blieb stehen, und darunter meldete die Statuszeile „Automatische Synchronisierung aktiv“;
+- gelesen wird jetzt über `GetNumSkillLines`/`GetSkillLineInfo`, mit `GetProfessions` als Rückfall, falls es doch einmal da ist. **Eine zugeklappte Kategorie zählt ihre Zeilen nicht mit**, wird deshalb kurz aufgeklappt und danach wieder geschlossen – rückwärts, weil jedes Zuklappen die Zeilen darunter verschiebt. Sekundäres wie Kochkunst und Erste Hilfe bleibt draußen, im Profil stehen die beiden Hauptberufe;
+- **„nichts gefunden“ und „kann nicht nachsehen“ sind zwei Antworten**, und nur die erste heißt, dass dieser Charakter keinen Beruf hat. Die Statuszeile nennt jetzt beide beim Namen und behauptet keinen Erfolg mehr, den es nicht gab. Kann der Client nichts liefern, steht dort die Aufforderung, von Hand zu wählen;
+- **die Karte „Deine Berufe“ trennt Namen und Rezepte.** Beides hieß „Berufe“ und ist verschieden: Die Namen kommen von selbst, die Rezepte für die Gildenwerkstatt gibt WoW nur bei geöffnetem Berufsfenster heraus. Der Knopf heißt entsprechend **Aus Fähigkeiten übernehmen**;
+- derselbe Denkfehler steckte in der Checkliste aus 0.9.45: Schritt 2 prüfte auf **Berufsnamen** und hakte sich damit beim Login von selbst ab, ohne dass jemand etwas getan hätte. Er heißt jetzt **Rezepte einlesen** und meint den Werkstattscan. Wer keinen Beruf erlernt hat, dem gilt er als erledigt statt auf ewig offen zu stehen.
+
+Dazu die aktive Einführung, die bis dahin fehlte:
+
+- **ein Willkommensfenster beim ersten Login je Charakter**: das Schriftlogo und genau ein Knopf, **Einrichtung starten**, der auf die Profilseite führt. Kein Text, keine zweite Wahl – was zu tun ist, steht danach als Checkliste da, und die ist der eigentliche Inhalt. Ein Fenster, das schon hier alles erklärt, wird überblättert. Vorher sprang das ganze Addon auf: dreizehn Navigationspunkte als erster Eindruck;
+- **ein Punkt am Minimap-Symbol**, solange die Einrichtung offen ist; der Tooltip nennt den nächsten Schritt. Er war die eigentliche Lücke: Wer das Fenster einmal schloss, hatte danach kein Zeichen mehr, dass überhaupt etwas aussteht. Er verschwindet von selbst, wiederholt sich nie im Chat und ist mit „Nicht mehr anzeigen“ endgültig weg. Das `×` der Karte lässt ihn dagegen stehen – sonst wäre der Weg zurück unsichtbar.
+
 ## 0.9.45 – Erste Schritte, und „geändert“ heißt wieder „unbestätigt“
 
 Ein neuer Charakter stand bisher vor dreizehn Navigationspunkten und musste selbst herausfinden, womit er anfängt. Der Assistent dafür ist bewusst **kein eigenes Fenster** geworden:

@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.45
+# Guild Copilot 0.9.46
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -41,14 +41,16 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - zu jedem Interessenten stehen zwei **kopierbare Profil-Links** bereit (classic-armory.org und Warcraft Logs): hineinklicken markiert den ganzen Link, Strg+C kopiert ihn. Region und Realm stammen aus der gespeicherten Warcraft-Logs-Gildenquelle, die dafür gildenweit synchronisiert wird;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Twink-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
-- **Einrichtung als Checkliste statt als Wizard-Fenster**: „Erste Schritte“ steht oben im Profil und zeigt, was noch offen ist – Raidprofil bestätigen, Berufe einlesen, Ausrüstung ansehen. Einen „Weiter“-Knopf gibt es nicht, die echte Aktion schiebt die Liste weiter; jeder Schritt ist einzeln überspringbar und die ganze Karte jederzeit abbrechbar. Übersprungen wird von der echten Aktion überstimmt, und **Einrichtung** oben rechts holt die Liste jederzeit zurück. Beim ersten Login je Charakter öffnet sich das Fenster einmal von selbst – nur einmal, und nicht bei Charakteren mit längst bestätigtem Profil;
+- **Willkommensfenster beim ersten Login je Charakter**: Schriftlogo und ein einziger Knopf – **Einrichtung starten** – der auf die Profilseite führt. Es erscheint genau einmal und nie bei Charakteren mit längst bestätigtem Profil;
+- **Einrichtung als Checkliste statt als Wizard-Fenster**: „Erste Schritte“ steht oben im Profil und zeigt, was noch offen ist – Raidprofil bestätigen, Rezepte einlesen, Ausrüstung ansehen. Einen „Weiter“-Knopf gibt es nicht, die echte Aktion schiebt die Liste weiter; jeder Schritt ist einzeln überspringbar und die ganze Karte jederzeit abbrechbar. Übersprungen wird von der echten Aktion überstimmt, und **Einrichtung** oben rechts holt die Liste jederzeit zurück;
+- solange etwas offen ist, sitzt ein **Punkt am Minimap-Symbol**; sein Tooltip nennt den nächsten Schritt. Er verschwindet von selbst und wiederholt sich nie im Chat;
 - **eine geänderte Auswahl gilt als unbestätigt**: Wer Spec, Dual-Spec, Main/Twink oder „flexibel“ umstellt, sieht statt des Bestätigungshakens den Hinweis, dass in der Gilde weiter der zuletzt bestätigte Stand steht;
 - ranggeschützte Mitgliederpflege mit aktiven Gildenabmeldungen und nach Inaktivität sortierten Prüfvorschlägen;
 - Vorschläge lassen sich als dauerhafte **Ausnahme**, **zurückgestellt** (30 Tage) oder **erledigt** ablegen; alle Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten;
 - einzelner Gildenausschluss nur nach einer zweiten, ausdrücklichen Bestätigung, nur mit echter WoW-Berechtigung, nur gegen einen niedrigeren und ungeschützten Rang und niemals automatisch oder in Serie;
 - frei wählbare Inaktivitätsgrenze und geschützte Gildenränge; Twinks und aktiv Abgemeldete werden aus den Vorschlägen ausgeschlossen;
 - unsichere Main/Twink-Fälle werden ausdrücklich als **Prüfen** statt als Entfernungsvorschlag gekennzeichnet; es gibt keine automatischen Gildenausschlüsse;
-- zwei manuell wählbare Berufe oder automatische Übernahme aus dem WoW-Berufsfenster, synchronisiert mit anderen Addon-Nutzern;
+- die beiden **Hauptberufe liest das Addon aus deinen Fähigkeiten**, ohne dass du etwas öffnen musst – eine zugeklappte Kategorie wird dafür kurz auf- und wieder zugeklappt. Gibt der Client keine Auskunft, sagt die Statuszeile das und du wählst von Hand, statt eine erfolgreiche Übernahme vorgespielt zu bekommen. Die **Rezepte** darin sind etwas anderes: Die gibt WoW nur bei geöffnetem Berufsfenster heraus;
 - Gildenwerkstatt mit sofortigem, vollständigem Rezeptscan beim Öffnen des Berufsfensters: aktive Filter werden zurückgesetzt, eingeklappte Kategorien automatisch geöffnet und die separate TBC-Verzauberkunst-Schnittstelle unterstützt;
 - kompakte Werkstatt-Synchronisierung zwischen Online-Gildenmitgliedern: große Datenmengen werden sofort eingereiht und mit dem maximal sicheren Addon-Kanal-Durchsatz gesendet; aktuelle Clients bestätigen jedes direkte Teilpaket, verlorene Pakete werden automatisch wiederholt und ältere Guild-Copilot-Versionen erhalten weiterhin das bisherige Datenformat;
 - der gildenweite Bestand besteht aus einem **Rezeptkatalog**, in dem jedes Rezept genau einmal steht, und einem **Herstellerindex**, der nur die Schlüssel dessen führt, was wer kann. Über den Kanal geht deshalb im Regelfall nur eine kurze Schlüsselliste – ein Spieler mit drei vollen Berufen kostet 14 statt 331 Pakete. Fehlt einem Client ein gemeldetes Rezept, fordert er genau dieses gestreut und nur einmal nach;
@@ -144,7 +146,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.45; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.46; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 

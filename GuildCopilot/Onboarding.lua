@@ -33,8 +33,8 @@ local STEPS = {
     },
     {
         key = "PROFESSIONS",
-        label = "Berufe einlesen",
-        hint = "Öffne einmal jedes deiner Berufsfenster; Guild Copilot liest den Bestand von selbst.",
+        label = "Rezepte einlesen",
+        hint = "Öffne einmal jedes deiner Berufsfenster – die Rezepte darin kann Guild Copilot nur dann lesen.",
     },
     {
         key = "GEAR",
@@ -50,29 +50,39 @@ local function InCombat()
     return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
 end
 
--- Welche Berufe dieser Charakter hat. Der Weg ist gleichgueltig: aus dem
--- geoeffneten Berufsfenster gescannt oder von Hand gewaehlt - es zaehlt das
--- Ergebnis, nicht wie es zustande kam.
-local function KnownProfessions()
-    local profile = GC.Profile:Get()
+-- Zwei Dinge heissen hier beide "Berufe" und sind doch verschieden:
+--
+--   * die **Namen** der beiden Berufe. Die liefert GetProfessions() von selbst,
+--     ohne dass jemand etwas oeffnen muss - sie stehen nach dem Login da.
+--   * die **Rezepte** darin. Die gibt WoW nur heraus, solange das Berufsfenster
+--     offen ist. Ohne diesen einen Handgriff bleibt die Gildenwerkstatt leer.
+--
+-- Der Schritt der Checkliste meint deshalb die Rezepte. Auf die Namen zu
+-- pruefen hiesse, einen Schritt zu stellen, der sich beim Login von selbst
+-- abhakt, ohne dass jemand etwas getan hat.
+local function ScannedProfessionNames()
     local names = {}
-    local seen = {}
-    local function Add(name)
-        name = GC.Util.Trim(name or "")
-        if name == "" or seen[name] then
-            return
+    for _, profession in pairs((GC.Profile:Get().workshop or {}).professions or {}) do
+        local name = GC.Util.Trim(profession and profession.name or "")
+        if name ~= "" then
+            names[#names + 1] = name
         end
-        seen[name] = true
-        names[#names + 1] = name
     end
+    table.sort(names)
+    return names
+end
+
+-- Hat der Charakter ueberhaupt einen Beruf? Wer keinen hat, kann auch keinen
+-- einlesen - der Schritt gilt dann als erledigt statt auf ewig offen zu stehen.
+local function HasAnyProfession()
+    local profile = GC.Profile:Get()
     for slot = 1, 2 do
         local profession = profile.professions and profile.professions[slot]
-        Add(profession and profession.name)
+        if profession and GC.Util.Trim(profession.name or "") ~= "" then
+            return true
+        end
     end
-    for _, profession in pairs((profile.workshop and profile.workshop.professions) or {}) do
-        Add(profession and profession.name)
-    end
-    return names
+    return false
 end
 
 -- Ist der Schritt erledigt, und was ist dabei herausgekommen? Der zweite
@@ -88,11 +98,14 @@ function GC.Onboarding:GetStepState(stepKey)
         local spec = GC.SpecByKey[profile.raidSpecKey or ""]
         return true, spec and (spec.name .. " bestätigt") or "Bestätigt"
     elseif stepKey == "PROFESSIONS" then
-        local names = KnownProfessions()
-        if #names == 0 then
-            return false, nil
+        local names = ScannedProfessionNames()
+        if #names > 0 then
+            return true, table.concat(names, ", ") .. " eingelesen"
         end
-        return true, table.concat(names, ", ") .. " erkannt"
+        if not HasAnyProfession() then
+            return true, "Keine Berufe erlernt – hier gibt es nichts einzulesen"
+        end
+        return false, nil
     elseif stepKey == "GEAR" then
         local audit = GC.GearAudit and GC.GearAudit:GetAudit(GC:GetPlayerFullName())
         if not audit then
@@ -145,13 +158,40 @@ function GC.Onboarding:GetSteps()
     return steps
 end
 
+-- Ohne Umweg ueber GetSteps: Diese Frage stellt auch das Minimap-Symbol, und
+-- zwar bei jeder Profilaenderung. Drei Tabellen dafuer zu bauen waere Verschwendung.
 function GC.Onboarding:IsFinished()
-    for _, step in ipairs(self:GetSteps()) do
-        if not step.done and not step.skipped then
+    local data = self:GetData()
+    for _, definition in ipairs(STEPS) do
+        local done = self:GetStepState(definition.key)
+        if not done and data.skipped[definition.key] ~= true then
             return false
         end
     end
     return true
+end
+
+-- Steht die Einrichtung noch aus? Das ist die Frage fuer den Marker am
+-- Minimap-Symbol. Ein ausgeblendetes "Nicht mehr anzeigen" schaltet ihn mit ab -
+-- wer das gewaehlt hat, will auch keinen Punkt mehr sehen. Das × dagegen gilt
+-- nur der Karte; der Marker bleibt, sonst waere der Weg zurueck unsichtbar.
+function GC.Onboarding:IsPending()
+    if (self:GetData().dismissedAt or 0) > 0 then
+        return false
+    end
+    return not self:IsFinished()
+end
+
+-- Der naechste offene Schritt, fuer den Tooltip am Minimap-Symbol.
+function GC.Onboarding:GetNextStep()
+    local data = self:GetData()
+    for _, definition in ipairs(STEPS) do
+        local done = self:GetStepState(definition.key)
+        if not done and data.skipped[definition.key] ~= true then
+            return definition.label
+        end
+    end
+    return nil
 end
 
 function GC.Onboarding:SetStepSkipped(stepKey, skipped)
@@ -243,9 +283,13 @@ function GC.Onboarding:ShouldAutoOpen()
     return not InCombat()
 end
 
--- Der Merker wird beim tatsaechlichen Oeffnen gesetzt, nicht davor. Dadurch
--- kann das Fenster nie zweimal aufspringen, und ein Login mitten im Kampf
--- verschiebt es auf das naechste Mal, statt es zu verbrauchen.
+-- Der Merker wird beim tatsaechlichen Zeigen gesetzt, nicht davor. Dadurch kann
+-- das Fenster nie zweimal aufspringen, und ein Login mitten im Kampf verschiebt
+-- es auf das naechste Mal, statt es zu verbrauchen.
+--
+-- Gezeigt wird das Willkommensfenster, nicht gleich das ganze Addon: Wer zum
+-- ersten Mal einloggt, soll das Schriftlogo und einen Knopf sehen, nicht
+-- dreizehn Navigationspunkte.
 function GC.Onboarding:AutoOpen()
     if not GC.DB or not GC.DB.data or not GC.UI then
         return false
@@ -254,11 +298,7 @@ function GC.Onboarding:AutoOpen()
         return false
     end
     self:GetData().autoOpenedAt = GC.Util.Now()
-    GC.UI:CreateMainFrame()
-    GC.UI.frame:Show()
-    -- Ueber ShowPage statt ueber activePage: Nur so werden auch die Sichtbarkeit
-    -- der Seiten und der aktive Reiter mitgezogen.
-    GC.UI:ShowPage("ROSTER")
+    GC.UI:ShowWelcome()
     return true
 end
 
