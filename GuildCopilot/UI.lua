@@ -1240,7 +1240,16 @@ function GC.UI:BuildSettingsPage()
         GC.UI:RefreshMinimapButton()
     end)
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
-    page.minimapToggle.text:SetWidth(260)
+    page.minimapToggle.text:SetWidth(200)
+
+    -- Der Rueckweg. Das Symbol laesst sich frei ueber den ganzen Bildschirm
+    -- ziehen; wer es hinter einem anderen Fenster oder am Rand ablegt, kommt
+    -- sonst nicht mehr heran.
+    page.minimapResetButton = CreateButton(notificationCard, "Symbol zurück an die Minimap", 230, 28, function()
+        GC.UI:ResetMinimapButton()
+        GC.UI:RefreshSettings()
+    end)
+    page.minimapResetButton:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 130, -146)
 
     -- Eigener Ton fuer die Bestaetigung des eigenen Raidprofils. Bewusst vom
     -- Bewerberklang getrennt: Der eine meldet einen fremden Interessenten, der
@@ -1442,6 +1451,10 @@ function GC.UI:RefreshSettings()
     SetToggle(page.captureDuringSearchToggle, settings.captureOnlyDuringSearch)
     SetToggle(page.watchChannelToggle, settings.watchRecruitmentTriggers)
     SetToggle(page.minimapToggle, not settings.minimap.hidden)
+    -- Der Rueckholknopf hat nur einen Sinn, wenn das Symbol tatsaechlich frei
+    -- steht und sichtbar ist.
+    SetButtonEnabled(page.minimapResetButton,
+        settings.minimap.free == true and settings.minimap.hidden ~= true)
     SetToggle(page.gearAcceptToggle, GC.GearAudit:AcceptsUnratedEnchants())
     local selectedSoundName = GC.SuccessSoundOptions[1].name
     for _, sound in ipairs(GC.SuccessSoundOptions) do
@@ -4911,15 +4924,84 @@ local function MinimapAngle(y, x)
     return 0
 end
 
+-- Ab diesem Abstand zur Minimapmitte loest sich das Symbol vom Ring und steht
+-- frei. Der Ring selbst liegt bei 78; der Abstand ist bewusst deutlich groesser,
+-- damit ein Verrutschen beim Ziehen am Ring es nicht versehentlich abloest.
+local MINIMAP_FREE_DISTANCE = 130
+
+-- Alles in UIParent-Einheiten rechnen. GetCursorPosition liefert
+-- Bildschirmpixel, GetCenter dagegen Koordinaten im Massstab des jeweiligen
+-- Rahmens - und Minimap und UIParent koennen verschieden skaliert sein. Wer
+-- beides ungerechnet vergleicht, misst Unsinn.
+local function UIScale()
+    return (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+end
+
+local function CursorInUISpace()
+    if type(GetCursorPosition) ~= "function" then
+        return nil, nil
+    end
+    local cursorX, cursorY = GetCursorPosition()
+    if not cursorX or not cursorY then
+        return nil, nil
+    end
+    local scale = UIScale()
+    return cursorX / scale, cursorY / scale
+end
+
+local function MinimapCenterInUISpace()
+    if not Minimap or type(Minimap.GetCenter) ~= "function" then
+        return nil, nil
+    end
+    local centerX, centerY = Minimap:GetCenter()
+    if not centerX or not centerY then
+        return nil, nil
+    end
+    local minimapScale = (Minimap.GetEffectiveScale and Minimap:GetEffectiveScale()) or 1
+    local scale = UIScale()
+    return centerX * minimapScale / scale, centerY * minimapScale / scale
+end
+
 function GC.UI:PositionMinimapButton()
     local button = self.minimapButton
-    if not button or not Minimap then
+    if not button then
         return
     end
     local settings = GC.DB:GetSettings().minimap
-    local angle = math.rad(tonumber(settings.angle) or 225)
     button:ClearAllPoints()
+
+    -- Frei gesetzt haengt das Symbol an UIParent, nicht mehr an der Minimap:
+    -- Sonst gelten die gespeicherten Koordinaten im Massstab der Minimap und
+    -- das Symbol landet bei abweichender Skalierung woanders.
+    if settings.free and UIParent then
+        if button:GetParent() ~= UIParent then
+            button:SetParent(UIParent)
+            button:SetFrameStrata("MEDIUM")
+        end
+        button:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
+            tonumber(settings.x) or 0, tonumber(settings.y) or 0)
+        return
+    end
+
+    if not Minimap then
+        return
+    end
+    if button:GetParent() ~= Minimap then
+        button:SetParent(Minimap)
+        button:SetFrameStrata("MEDIUM")
+    end
+    local angle = math.rad(tonumber(settings.angle) or 225)
     button:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * 78, math.sin(angle) * 78)
+end
+
+-- Rueckweg, falls das Symbol irgendwo landet, wo es nicht mehr zu greifen ist.
+function GC.UI:ResetMinimapButton()
+    local settings = GC.DB:GetSettings().minimap
+    settings.free = false
+    settings.angle = 225
+    settings.x = 0
+    settings.y = 0
+    self:PositionMinimapButton()
 end
 
 function GC.UI:RefreshMinimapButton()
@@ -4978,7 +5060,7 @@ function GC.UI:AddMinimapButton()
         GameTooltip:SetText("Guild Copilot")
         GameTooltip:AddLine("Linksklick: öffnen/schließen", 1, 1, 1)
         GameTooltip:AddLine("Rechtsklick: Einstellungen", 1, 1, 1)
-        GameTooltip:AddLine("Ziehen: Position ändern", 1, 1, 1)
+        GameTooltip:AddLine("Ziehen: am Ring entlang, weiter weg frei platzieren", 1, 1, 1)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function()
@@ -4986,17 +5068,30 @@ function GC.UI:AddMinimapButton()
             GameTooltip:Hide()
         end
     end)
+    -- Ziehen: Nah an der Minimap faehrt das Symbol wie gewohnt auf dem Ring,
+    -- weit genug weggezogen loest es sich und steht frei auf dem Bildschirm.
+    -- So braucht es keinen Schalter - die Bewegung selbst sagt, was gemeint ist.
     button:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
-            local minimapX, minimapY = Minimap:GetCenter()
-            local scale = Minimap:GetEffectiveScale() or 1
-            local cursorX, cursorY = GetCursorPosition()
-            if not minimapX or not minimapY or not cursorX or not cursorY then
+            local cursorX, cursorY = CursorInUISpace()
+            if not cursorX or not cursorY then
                 return
             end
-            cursorX = cursorX / scale
-            cursorY = cursorY / scale
-            GC.DB:GetSettings().minimap.angle = math.deg(MinimapAngle(cursorY - minimapY, cursorX - minimapX))
+            local settings = GC.DB:GetSettings().minimap
+            local centerX, centerY = MinimapCenterInUISpace()
+            if centerX and centerY then
+                local offsetX = cursorX - centerX
+                local offsetY = cursorY - centerY
+                if math.sqrt((offsetX * offsetX) + (offsetY * offsetY)) <= MINIMAP_FREE_DISTANCE then
+                    settings.free = false
+                    settings.angle = math.deg(MinimapAngle(offsetY, offsetX))
+                    GC.UI:PositionMinimapButton()
+                    return
+                end
+            end
+            settings.free = true
+            settings.x = math.floor(cursorX)
+            settings.y = math.floor(cursorY)
             GC.UI:PositionMinimapButton()
         end)
     end)

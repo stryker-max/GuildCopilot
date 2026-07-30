@@ -25,6 +25,12 @@ local DEFAULTS = {
         minimap = {
             hidden = false,
             angle = 225,
+            -- Wird das Symbol weit genug von der Minimap weggezogen, loest es
+            -- sich vom Ring und steht frei; dann gelten x und y statt des
+            -- Winkels. Die Koordinaten sind UIParent-Einheiten von unten links.
+            free = false,
+            x = 0,
+            y = 0,
         },
         workshopFavorites = {},
         postBar = {

@@ -71,6 +71,19 @@ Dummy.__index = function(self, key)
         return function()
             return false
         end
+    elseif key == "Enable" then
+        -- Fuer Layouttests: ob ein Knopf bedienbar ist, bleibt ablesbar.
+        return function(frame)
+            frame.disabled = false
+        end
+    elseif key == "Disable" then
+        return function(frame)
+            frame.disabled = true
+        end
+    elseif key == "IsEnabled" then
+        return function(frame)
+            return frame.disabled ~= true
+        end
     elseif key == "SetScript" then
         return function(frame, event, callback)
             frame.scripts = frame.scripts or {}
@@ -100,8 +113,12 @@ end
 function Minimap:GetEffectiveScale()
     return 1
 end
+-- Stellbarer Mauszeiger, damit sich das Ziehen des Minimap-Symbols pruefen
+-- laesst: nah an der Minimap faehrt es auf dem Ring, weit weg loest es sich.
+cursorX = 0
+cursorY = 0
 function GetCursorPosition()
-    return 0, 0
+    return cursorX, cursorY
 end
 UISpecialFrames = {}
 SlashCmdList = {}
@@ -670,6 +687,52 @@ assert(addon.UI.minimapButton.shown == false, "Minimap-Symbol wurde nicht ausgeb
 addon.UI.pages.SETTINGS.minimapToggle:SetChecked(true)
 addon.UI.pages.SETTINGS.minimapToggle.scripts.OnClick(addon.UI.pages.SETTINGS.minimapToggle)
 assert(addon.UI.minimapButton.shown == true, "Minimap-Symbol wurde nicht wieder eingeblendet")
+
+-- Das Symbol fuhr bisher nur im Kreis um die Minimap. Wer es woanders haben
+-- will, zieht es weit genug weg: Dann loest es sich vom Ring und steht frei.
+do
+    local minimapSettings = addon.DB:GetSettings().minimap
+    local drag = addon.UI.minimapButton.scripts.OnDragStart
+    assert(drag ~= nil, "Das Minimap-Symbol lässt sich nicht mehr ziehen")
+
+    -- Nah an der Minimapmitte (0/0 im Testaufbau): Es bleibt am Ring.
+    cursorX, cursorY = 40, 40
+    drag(addon.UI.minimapButton)
+    addon.UI.minimapButton.scripts.OnUpdate(addon.UI.minimapButton)
+    assert(minimapSettings.free ~= true, "Ein kurzer Zug hat das Symbol schon vom Ring gelöst")
+    assert(math.abs(minimapSettings.angle - 45) < 0.001,
+        "Der Winkel am Ring wurde falsch berechnet: " .. tostring(minimapSettings.angle))
+
+    -- Weit weg: Es löst sich und merkt sich die Bildschirmposition.
+    cursorX, cursorY = 620, 480
+    addon.UI.minimapButton.scripts.OnUpdate(addon.UI.minimapButton)
+    assert(minimapSettings.free == true, "Weit weggezogen blieb das Symbol am Ring hängen")
+    assert(minimapSettings.x == 620 and minimapSettings.y == 480,
+        "Die freie Position wurde nicht gespeichert: "
+        .. tostring(minimapSettings.x) .. "/" .. tostring(minimapSettings.y))
+
+    -- Und wieder zurück in die Nähe: Es rastet erneut am Ring ein.
+    cursorX, cursorY = -60, 0
+    addon.UI.minimapButton.scripts.OnUpdate(addon.UI.minimapButton)
+    assert(minimapSettings.free == false, "Das freie Symbol rastet nicht wieder am Ring ein")
+    addon.UI.minimapButton.scripts.OnDragStop(addon.UI.minimapButton)
+    assert(addon.UI.minimapButton.scripts.OnUpdate == nil,
+        "Nach dem Loslassen läuft die Zieh-Schleife weiter")
+
+    -- Der Rückweg für ein Symbol, das irgendwo unerreichbar liegt.
+    minimapSettings.free = true
+    minimapSettings.x = 5000
+    minimapSettings.y = 5000
+    addon.UI:RefreshSettings()
+    assert(addon.UI.pages.SETTINGS.minimapResetButton.disabled ~= true,
+        "Der Rückholknopf ist gesperrt, obwohl das Symbol frei steht")
+    addon.UI.pages.SETTINGS.minimapResetButton.scripts.OnClick()
+    assert(minimapSettings.free == false and minimapSettings.angle == 225,
+        "Der Rückholknopf hat das Symbol nicht an die Minimap zurückgeholt")
+    assert(addon.UI.pages.SETTINGS.minimapResetButton.disabled == true,
+        "Der Rückholknopf bleibt bedienbar, obwohl das Symbol wieder am Ring hängt")
+    cursorX, cursorY = 0, 0
+end
 local warriorHeader = addon.UI.pages.RECRUITMENT.classRows.WARRIOR.header
 warriorHeader.scripts.OnClick()
 assert(addon.UI.pages.RECRUITMENT.expandedClass == "WARRIOR", "Klassenkarte wurde nicht geöffnet")

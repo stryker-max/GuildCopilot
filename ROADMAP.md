@@ -298,6 +298,13 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.43 – Das Minimap-Symbol darf endlich weg von der Minimap
+
+- **frei platzierbar statt nur auf dem Ring.** Bisher fuhr das Symbol beim Ziehen ausschließlich im Kreis um die Minimap. Jetzt entscheidet die Bewegung selbst: Wer in der Nähe bleibt, fährt wie gewohnt am Ring entlang; wer weiter als 130 Pixel wegzieht, löst es ab und legt es hin, wo er will. Kein Schalter, kein Menü – der Abstand zum Ring ist bewusst deutlich größer als der Ring selbst (78), damit ein Verrutschen beim Ausrichten nichts ablöst;
+- frei gesetzt hängt das Symbol an `UIParent` statt an der Minimap. Sonst gälten die gespeicherten Koordinaten im Maßstab der Minimap, und bei abweichender Skalierung läge es woanders. Gerechnet wird durchgehend in UIParent-Einheiten: `GetCursorPosition` liefert Bildschirmpixel, `GetCenter` dagegen Koordinaten im Maßstab des jeweiligen Rahmens – wer beides ungerechnet vergleicht, misst Unsinn;
+- **„Symbol zurück an die Minimap"** in den Einstellungen. Wer es hinter einem anderen Fenster oder am Bildschirmrand ablegt, kommt sonst nicht mehr heran. Der Knopf ist nur bedienbar, wenn das Symbol tatsächlich frei steht und sichtbar ist;
+- ein Regressionstest zieht das Symbol durch alle drei Zustände – am Ring, abgelöst, wieder eingerastet – und prüft den Rückweg. Er wurde gegengeprüft, indem die Ablösung absichtlich abgeschaltet wurde.
+
 ## 0.9.42 – Ruckler beim Ein- und Ausloggen
 
 Aus der Gilde gemeldet: Es ruckelt, wenn viele Leute gleichzeitig ein- und ausloggen; vermutet wurde die Synchronisierung. Die Vermutung war falsch – die Ursache lag lokal, noch bevor eine einzige Addon-Nachricht im Spiel ist.
