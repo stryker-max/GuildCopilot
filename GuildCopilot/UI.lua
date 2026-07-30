@@ -643,7 +643,8 @@ function GC.UI:CreateMainFrame()
         local stats = GC.Sync:GetAddonUserStats()
         GameTooltip:SetOwner(badge, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Abgleich mit der Gilde")
-        GameTooltip:AddLine(stats.known .. " erkannte Nutzer, davon " .. stats.compatible
+        GameTooltip:AddLine(stats.players .. " Spieler mit "
+            .. stats.known .. " erkannten Charakteren, davon " .. stats.compatible
             .. " mit gleicher Datenversion.", 1, 1, 1, true)
         if #stats.outdatedNames > 0 then
             GameTooltip:AddLine(" ")
@@ -831,8 +832,13 @@ function GC.UI:BuildDashboardPage()
         local stats = GC.Sync:GetAddonUserStats()
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Guild Copilot in der Gilde")
-        GameTooltip:AddLine(stats.known .. " erkannte Nutzer, davon " .. stats.compatible
-            .. " mit passender Datenversion", 1, 1, 1)
+        GameTooltip:AddLine(stats.players .. " Spieler mit "
+            .. stats.known .. " erkannten Charakteren, davon " .. stats.compatible
+            .. " mit passender Datenversion", 1, 1, 1, true)
+        if stats.known > stats.players then
+            GameTooltip:AddLine("Charaktere eines Spielers werden zusammengefasst,"
+                .. " sobald sein Client sich einmal vorgestellt hat.", 0.57, 0.64, 0.72, true)
+        end
         if #stats.outdatedNames > 0 then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Abweichende Datenversion:", 1, 0.72, 0.25)
@@ -942,13 +948,20 @@ function GC.UI:RefreshDashboard()
 
     local addonStats = GC.Sync:GetAddonUserStats()
     local addonCard = page.metricCards.ADDON
-    addonCard.value:SetText(addonStats.known)
+    -- Gezaehlt werden Spieler, nicht Charaktere: wer mit Main und Twinks
+    -- unterwegs war, ist einer. Die Charakterzahl steht daneben, solange sie
+    -- abweicht.
+    addonCard.value:SetText(addonStats.players)
     local incompatible = addonStats.outdated + addonStats.ahead
+    local characterNote = addonStats.known > addonStats.players
+        and ("  •  " .. addonStats.known .. " CHARAKTERE")
+        or ""
     if incompatible > 0 then
-        addonCard.caption:SetText("MIT ADDON  •  " .. incompatible .. " ABWEICHEND")
+        addonCard.caption:SetText("MIT ADDON" .. characterNote
+            .. "  •  " .. incompatible .. " ABWEICHEND")
         SetTextColor(addonCard.caption, THEME.warning)
     else
-        addonCard.caption:SetText("MIT ADDON")
+        addonCard.caption:SetText("MIT ADDON" .. characterNote)
         SetTextColor(addonCard.caption, THEME.muted)
     end
 
@@ -4338,15 +4351,20 @@ function GC.UI:RefreshSyncBadge()
     -- auf einem Bildschirm sind schlimmer als eine unscharfe.
     local stats = GC.Sync:GetAddonUserStats()
     local known = stats.known or 1
+    -- Gezaehlt werden Spieler, nicht Charaktere: drei Twinks desselben Spielers
+    -- sind ein Nutzer. Die Charakterzahl steht nur daneben, wenn sie abweicht.
+    local players = stats.players or known
     local differing = (stats.outdated or 0) + (stats.ahead or 0)
+    local characterNote = known > players and (" (" .. known .. " Chars)") or ""
 
-    if known <= 1 then
+    if players <= 1 then
         badge:SetText("|cff8b98a5• kein anderer Nutzer erkannt|r")
     elseif differing > 0 then
-        badge:SetText("|cffffb840• " .. known .. " Nutzer, "
+        badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote .. ", "
             .. differing .. " mit anderer Version|r")
     else
-        badge:SetText("|cff59e695• " .. known .. " Nutzer, alle synchron|r")
+        badge:SetText("|cff59e695• " .. players .. " Nutzer" .. characterNote
+            .. ", alle synchron|r")
     end
 end
 

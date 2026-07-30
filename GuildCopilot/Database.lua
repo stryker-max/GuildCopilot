@@ -175,8 +175,27 @@ function GC.DB:Initialize()
         end
     end
 
+    -- Ein zufaelliges, anonymes Kennzeichen fuer diesen Account. WoW verraet
+    -- Addons nie, welche Charaktere zusammengehoeren; die SavedVariables liegen
+    -- aber pro Account, also kann der Client es selbst sagen. Damit zaehlt die
+    -- Gildenuebersicht Spieler statt Charaktere. Der Wert traegt keine
+    -- Account-Daten, er ist nur eine Zufallsfolge.
+    if type(GuildCopilotDB.accountTag) ~= "string" or #GuildCopilotDB.accountTag ~= 10 then
+        local alphabet = "0123456789abcdef"
+        local tag = {}
+        for _ = 1, 10 do
+            local index = math.random(#alphabet)
+            tag[#tag + 1] = alphabet:sub(index, index)
+        end
+        GuildCopilotDB.accountTag = table.concat(tag)
+    end
+
     GuildCopilotDB.schemaVersion = GC.Constants.SCHEMA_VERSION
     self.data = GuildCopilotDB
+end
+
+function GC.DB:GetAccountTag()
+    return type(self.data) == "table" and self.data.accountTag or ""
 end
 
 function GC.DB:Get()

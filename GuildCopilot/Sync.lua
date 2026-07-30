@@ -1067,6 +1067,10 @@ function GC.Sync:BuildVersionMessage(requestReply)
         GC.Constants.VERSION,
         table.concat(GC.Capabilities, ","),
         BoolField(requestReply),
+        -- Feld 6: anonymes Account-Kennzeichen. Damit lassen sich die
+        -- Charaktere eines Spielers zusammenfassen - WoW selbst verraet das
+        -- nie. Aeltere Clients ignorieren das Feld schlicht.
+        GC.DB:GetAccountTag(),
     }
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
@@ -1115,6 +1119,11 @@ function GC.Sync:NoteAddonUser(sender, info)
         entry.capabilities = capabilities
         changed = true
     end
+    local accountTag = GC.Util.Trim(info.accountTag)
+    if accountTag ~= "" and entry.accountTag ~= accountTag then
+        entry.accountTag = accountTag
+        changed = true
+    end
     if info.source == "HANDSHAKE" and not entry.handshake then
         entry.handshake = true
         changed = true
@@ -1139,6 +1148,7 @@ function GC.Sync:ReceiveVersion(fields, sender)
         schemaVersion = schemaVersion,
         version = fields[3],
         capabilities = fields[4],
+        accountTag = fields[6],
         source = "HANDSHAKE",
     })
 
@@ -1178,8 +1188,15 @@ function GC.Sync:GetAddonUserStats()
         compatible = 1,
         outdated = 0,
         ahead = 0,
+        -- "known" zaehlt Charaktere, "players" Accounts: wer mit Main und zwei
+        -- Twinks unterwegs war, ist ein Spieler und nicht drei. Charaktere ohne
+        -- gemeldetes Kennzeichen zaehlen einzeln - lieber eine Zahl zu hoch als
+        -- fremde Spieler faelschlich zusammenlegen.
+        players = 1,
         outdatedNames = {},
     }
+    local ownTag = GC.DB:GetAccountTag()
+    local countedTags = {}
 
     -- Ausgetretene Mitglieder erst ausblenden, wenn das Roster gelesen ist;
     -- direkt nach dem Login ist es noch leer.
@@ -1189,6 +1206,13 @@ function GC.Sync:GetAddonUserStats()
         if not seen[entry] and (not rosterReady or GC.Roster:IsGuildMember(entry.name)) then
             seen[entry] = true
             stats.known = stats.known + 1
+            local accountTag = GC.Util.Trim(entry.accountTag)
+            if accountTag == "" then
+                stats.players = stats.players + 1
+            elseif accountTag ~= ownTag and not countedTags[accountTag] then
+                countedTags[accountTag] = true
+                stats.players = stats.players + 1
+            end
             local schemaVersion = tonumber(entry.schemaVersion) or 0
             if schemaVersion == GC.Constants.SCHEMA_VERSION then
                 stats.compatible = stats.compatible + 1

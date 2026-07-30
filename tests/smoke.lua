@@ -1403,8 +1403,12 @@ for messageIndex = sentBeforeRequest + 1, #sentAddon do
     end
 end
 assert(handshakeReply, "Auf eine Handshake-Anfrage wurde nicht geantwortet")
-assert(handshakeReply:sub(-2) == "|0",
+-- Feld 5 ist das Antwortverlangen. Geprueft wird das Feld, nicht das
+-- Nachrichtenende: dahinter steht inzwischen das Account-Kennzeichen.
+assert(addon.Util.SplitFields(handshakeReply)[5] == "0",
     "Die Handshake-Antwort fordert selbst wieder eine Antwort an")
+assert(#addon.Util.SplitFields(handshakeReply)[6] == 10,
+    "Im Handshake fehlt das Account-Kennzeichen")
 assert(profileReply, "Auf eine Handshake-Anfrage wurde das eigene Profil nicht mitgesendet")
 
 -- Auf eine Antwort darf nie geantwortet werden, sonst schaukelt sich der
@@ -1720,6 +1724,55 @@ assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] == nil,
     "Ein ausgetretenes Gildenmitglied blieb mit seinen Rezepten in der Werkstatt")
 assert(addon.DB:GetGuild().workshop.crafters["fremdtwink-realm"] ~= nil,
     "Der Twink eines Gildenmitglieds wurde fälschlich als ausgetreten entfernt")
+
+-- === Spieler statt Charaktere ===============================================
+-- WoW verrät nie, welche Charaktere zu einem Account gehören. Der Client sagt
+-- es deshalb selbst über ein anonymes Kennzeichen im Handshake; gleiche
+-- Kennzeichen sind derselbe Spieler.
+addon.DB:GetGuild().addonUsers = {}
+assert(#addon.DB:GetAccountTag() == 10, "Für diesen Account fehlt ein Kennzeichen")
+-- Die Statistik blendet Nichtmitglieder aus, sobald der Roster gelesen ist. Für
+-- diesen Test steht er bewusst noch aus, damit die Testnamen zählen.
+accountRosterBackup = addon.Roster.members
+addon.Roster.members = {}
+addon.Sync:OnMessage("GuildCopilot",
+    "V|7|" .. addon.Constants.VERSION .. "|profile,workshop4|0|aaaaaaaaaa",
+    "GUILD", "Zwillingsmain-Realm")
+addon.Sync:OnMessage("GuildCopilot",
+    "V|7|" .. addon.Constants.VERSION .. "|profile,workshop4|0|aaaaaaaaaa",
+    "GUILD", "Zwillingstwink-Realm")
+addon.Sync:OnMessage("GuildCopilot",
+    "V|7|" .. addon.Constants.VERSION .. "|profile,workshop4|0|bbbbbbbbbb",
+    "GUILD", "Eigenstaendig-Realm")
+accountStats = addon.Sync:GetAddonUserStats()
+assert(accountStats.known == 4,
+    "Die Charakterzahl stimmt nicht: " .. accountStats.known)
+assert(accountStats.players == 3,
+    "Zwei Charaktere eines Accounts wurden nicht zusammengefasst: "
+    .. accountStats.players)
+assert(addon.Sync:GetAddonUser("Zwillingstwink-Realm").accountTag == "aaaaaaaaaa",
+    "Das Account-Kennzeichen wurde nicht gespeichert")
+
+-- Ein Charakter ohne gemeldetes Kennzeichen zählt einzeln: lieber eine Zahl zu
+-- hoch als fremde Spieler fälschlich zusammenlegen.
+addon.Sync:OnMessage("GuildCopilot", "V|7|0.9.29|profile,workshop3|0",
+    "GUILD", "Ohnekennzeichen-Realm")
+accountStats = addon.Sync:GetAddonUserStats()
+assert(accountStats.players == 4,
+    "Ein Charakter ohne Kennzeichen wurde fälschlich zusammengelegt: "
+    .. accountStats.players)
+
+-- Die Übersicht nennt Spieler als Hauptzahl und die Charakterzahl daneben.
+addon.UI:ShowPage("OVERVIEW")
+addon.UI:RefreshDashboard()
+assert(addon.UI.pages.OVERVIEW.metricCards.ADDON.value.value == "4",
+    "Die Kachel zeigt nicht die Spielerzahl: "
+    .. tostring(addon.UI.pages.OVERVIEW.metricCards.ADDON.value.value))
+assert(addon.UI.pages.OVERVIEW.metricCards.ADDON.caption.value:find("5 CHARAKTERE", 1, true) ~= nil,
+    "Die Kachel nennt die Charakterzahl nicht: "
+    .. tostring(addon.UI.pages.OVERVIEW.metricCards.ADDON.caption.value))
+addon.Roster.members = accountRosterBackup
+addon.DB:GetGuild().addonUsers = {}
 
 -- === Materialbestand und Gildenbank =========================================
 -- Eigene Taschen und Bank werden gezählt; sie verlassen den Account nie.

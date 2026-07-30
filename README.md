@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.35
+# Guild Copilot 0.9.36
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -12,6 +12,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - frei bestätigbares Raidprofil mit Primär-Spec, optionalem Dual-Spec, Main/Alt und Flexibilität;
 - unsichtbare Profilsynchronisierung zwischen Gildenmitgliedern mit installiertem Addon; wer neu dazukommt, fragt den Bestand ab und bekommt die Profile der bereits Eingeloggten nachgereicht, statt nur die Änderungen ab dem eigenen Login zu sehen;
 - Addon-Erkennung in der Gildenübersicht: sichtbar, wer Guild Copilot nutzt und wessen Datenversion abweicht, ohne Dauerbroadcasts;
+- gezählt werden dabei **Spieler, nicht Charaktere**: jeder Client meldet im Handshake ein anonymes Account-Kennzeichen, sodass Main und Twinks eines Spielers als einer erscheinen (die Charakterzahl steht daneben). Wer das Feld nicht sendet, zählt einzeln – lieber eine Zahl zu hoch als fremde Spieler fälschlich zusammengelegt;
 - Gildenroster-Auswertung und TBC-orientierte Supportrollen-Vorschläge; importierte Warcraft-Logs-Profile und bereits bekannte Addon-Profile bilden automatisch einen gemeinsamen Gildendatensatz, damit alle Clients dieselben Lücken sehen;
 - moderne, kompakte Oberfläche mit Seitenleiste und sauber begrenzten Scroll-Textfeldern;
 - Aufklappmenüs mit vielen Einträgen scrollen und öffnen sich in die Richtung, in der Platz ist, statt am Rand des Scrollbereichs abgeschnitten zu werden;
@@ -125,7 +126,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.35; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.36; beide Nummern stehen im Verlauf.
 
 Zum Bauen wird das .NET SDK gebraucht:
 
