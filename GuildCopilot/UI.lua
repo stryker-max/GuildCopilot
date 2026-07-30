@@ -59,6 +59,22 @@ local function SetTextureColor(texture, color)
     texture:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
 end
 
+-- Die Hoehe eines umbrechenden Textes. GetStringHeight liefert je nach
+-- Zeitpunkt nur die Hoehe einer Zeile; dann klemmt der Text sichtbar ab ("..").
+-- Deshalb wird zusaetzlich aus der Zeichenzahl abgeschaetzt und das Groessere
+-- genommen - zu viel Platz ist harmlos, zu wenig schneidet Inhalt ab.
+local function WrappedTextHeight(fontString, text, width, lineHeight)
+    lineHeight = lineHeight or 15
+    local plain = tostring(text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local measured = tonumber(fontString and fontString.GetStringHeight
+        and fontString:GetStringHeight()) or 0
+    local lines = 0
+    for segment in (plain .. "\n"):gmatch("(.-)\n") do
+        lines = lines + math.max(1, math.ceil((#segment + 1) / math.max(12, width / 6.6)))
+    end
+    return math.max(measured, lines * lineHeight)
+end
+
 -- Klassenfarben stehen als RGB in GC.Classes und entsprechen den Blizzard-
 -- Vorgaben. Fuer Inline-Text im Chat-Farbformat braucht es sie hexadezimal.
 local function ClassColorCode(classFile)
@@ -2128,13 +2144,13 @@ function GC.UI:BuildWorkshopPage()
     page.workshopRequest:SetPoint("TOPRIGHT", searchCard, "TOPRIGHT", -14, -14)
 
     local listCard = CreateCard(page, "Gefundene Rezepte")
-    listCard:SetSize(478, 342)
+    listCard:SetSize(418, 342)
     listCard:SetPoint("TOPLEFT", searchCard, "BOTTOMLEFT", 0, -12)
     page.workshopListTitle = listCard.title
     page.workshopRows = {}
     for index = 1, 7 do
         local rowIndex = index
-        local row = CreateButton(listCard, "", 442, 31, function()
+        local row = CreateButton(listCard, "", 382, 31, function()
             local recipe = page.workshopVisibleRecipes and page.workshopVisibleRecipes[rowIndex]
             if recipe then
                 page.selectedWorkshopRecipe = recipe.key
@@ -2144,12 +2160,12 @@ function GC.UI:BuildWorkshopPage()
         row:SetPoint("TOPLEFT", listCard, "TOPLEFT", 18, -48 - ((index - 1) * 34))
         row.label:ClearAllPoints()
         row.label:SetPoint("LEFT", row, "LEFT", 37, 0)
-        row.label:SetPoint("RIGHT", row, "RIGHT", -133, 0)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -112, 0)
         row.label:SetJustifyH("LEFT")
         row.professionIcon = row:CreateTexture(nil, "ARTWORK")
         row.professionIcon:SetSize(21, 21)
         row.professionIcon:SetPoint("LEFT", row, "LEFT", 8, 0)
-        row.meta = CreateLabel(row, "", { muted = true, align = "RIGHT", width = 96, height = 31 })
+        row.meta = CreateLabel(row, "", { muted = true, align = "RIGHT", width = 78, height = 31 })
         row.meta:SetPoint("RIGHT", row, "RIGHT", -9, 0)
         row.favoriteIcon = row:CreateTexture(nil, "ARTWORK")
         row.favoriteIcon:SetSize(15, 15)
@@ -2172,11 +2188,11 @@ function GC.UI:BuildWorkshopPage()
     page.workshopNext:SetPoint("LEFT", page.workshopPageLabel, "RIGHT", 8, 0)
 
     local detailCard = CreateCard(page, "Rezeptdetails")
-    detailCard:SetSize(286, 342)
+    detailCard:SetSize(346, 342)
     detailCard:SetPoint("TOPRIGHT", searchCard, "BOTTOMRIGHT", 0, -12)
     page.workshopRecipeTitle = CreateLabel(detailCard, "Kein Rezept ausgewählt", {
         title = true,
-        width = 250,
+        width = 200,
         height = 45,
         vertical = "TOP",
     })
@@ -2204,17 +2220,17 @@ function GC.UI:BuildWorkshopPage()
     page.workshopDetailScroll:SetPoint("TOPLEFT", detailBody, "TOPLEFT", 8, -8)
     page.workshopDetailScroll:SetPoint("BOTTOMRIGHT", detailBody, "BOTTOMRIGHT", -12, 8)
     page.workshopDetailContent = CreateFrame("Frame", nil, page.workshopDetailScroll)
-    page.workshopDetailContent:SetWidth(232)
+    page.workshopDetailContent:SetWidth(292)
     page.workshopDetailContent:SetHeight(220)
     page.workshopDetailScroll:SetScrollChild(page.workshopDetailContent)
-    page.workshopDetails = CreateLabel(page.workshopDetailContent, "", { width = 232, height = 220, vertical = "TOP" })
+    page.workshopDetails = CreateLabel(page.workshopDetailContent, "", { width = 292, height = 220, vertical = "TOP" })
     page.workshopDetails:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, 0)
 
     -- Materialien als echte Zeilen mit festen Spalten. Ein Textblock kann das
     -- nicht: die Spielschrift ist proportional, Leerzeichen ergeben also keine
     -- Spalte, sondern nur ausgefranste Zahlen.
     page.workshopMaterialHeader = CreateLabel(page.workshopDetailContent, "Materialien",
-        { muted = true, width = 130, height = 15 })
+        { muted = true, width = 190, height = 15 })
     page.workshopMaterialOwnHeader = CreateLabel(page.workshopDetailContent, "Du",
         { muted = true, width = 42, height = 15, align = "RIGHT" })
     page.workshopMaterialBankHeader = CreateLabel(page.workshopDetailContent, "Bank",
@@ -2222,20 +2238,20 @@ function GC.UI:BuildWorkshopPage()
     page.workshopMaterialRows = {}
     for index = 1, 14 do
         local row = CreateFrame("Frame", nil, page.workshopDetailContent)
-        row:SetSize(232, 15)
-        row.name = CreateLabel(row, "", { width = 138, height = 15 })
+        row:SetSize(292, 15)
+        row.name = CreateLabel(row, "", { width = 196, height = 15 })
         row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
         row.own = CreateLabel(row, "", { width = 42, height = 15, align = "RIGHT" })
-        row.own:SetPoint("LEFT", row, "LEFT", 138, 0)
+        row.own:SetPoint("LEFT", row, "LEFT", 196, 0)
         row.bank = CreateLabel(row, "", { width = 48, height = 15, align = "RIGHT" })
-        row.bank:SetPoint("LEFT", row, "LEFT", 182, 0)
+        row.bank:SetPoint("LEFT", row, "LEFT", 242, 0)
         row:Hide()
         page.workshopMaterialRows[index] = row
     end
     page.workshopMaterialSummary = CreateLabel(page.workshopDetailContent, "",
-        { width = 232, height = 60, vertical = "TOP" })
+        { width = 292, height = 60, vertical = "TOP" })
     page.workshopMaterialFooter = CreateLabel(page.workshopDetailContent, "",
-        { muted = true, width = 232, height = 30, vertical = "TOP" })
+        { muted = true, width = 292, height = 30, vertical = "TOP" })
 
     page.workshopStatus = CreateLabel(page,
         "Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.",
@@ -2311,7 +2327,12 @@ function GC.UI:RefreshWorkshop()
         if recipe then
             row:SetText(recipe.name)
             row.professionIcon:SetTexture(GC.ProfessionIcons[recipe.profession] or GC.ProfessionIcons[""])
-            row.meta:SetText(#recipe.crafters .. "  •  " .. recipe.profession)
+            -- Bei aktivem Berufsfilter steht der Beruf schon in der
+            -- Kartenueberschrift; die Wiederholung kostet nur Platz, den der
+            -- Rezeptname besser braucht.
+            row.meta:SetText(professionFilter ~= ""
+                and tostring(#recipe.crafters)
+                or (#recipe.crafters .. "  •  " .. recipe.profession))
             row.favoriteIcon:SetShown(GC.Workshop:IsFavorite(recipe.key))
             row:SetActive(page.selectedWorkshopRecipe == recipe.key)
         end
@@ -2362,7 +2383,8 @@ function GC.UI:RefreshWorkshop()
             lines[#lines + 1] = "• " .. crafter
         end
         page.workshopDetails:SetText(table.concat(lines, "\n"))
-        local infoHeight = (#lines * 15) + 6
+        local infoHeight = math.max(15, WrappedTextHeight(
+            page.workshopDetails, table.concat(lines, "\n"), 292)) + 6
         page.workshopDetails:SetHeight(infoHeight)
 
         -- Materialien stehen in echten Zeilen mit festen Spalten darunter.
@@ -2378,9 +2400,9 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialBankHeader:SetShown(headerShown)
         if headerShown then
             page.workshopMaterialOwnHeader:ClearAllPoints()
-            page.workshopMaterialOwnHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 138, -cursor)
+            page.workshopMaterialOwnHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 196, -cursor)
             page.workshopMaterialBankHeader:ClearAllPoints()
-            page.workshopMaterialBankHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 182, -cursor)
+            page.workshopMaterialBankHeader:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 242, -cursor)
         end
         cursor = cursor + 18
 
@@ -2392,8 +2414,8 @@ function GC.UI:RefreshWorkshop()
                 -- entstuende bei einem fehlenden Rezept eine Wand aus Rot, in
                 -- der nichts mehr heraussticht.
                 local label = entry.name or ("Item #" .. (entry.itemID or "?"))
-                if #label > 20 then
-                    label = label:sub(1, 19) .. "…"
+                if #label > 28 then
+                    label = label:sub(1, 27) .. "…"
                 end
                 row.name:SetText(entry.needed .. "× " .. label)
                 SetTextColor(row.name, THEME.text)
@@ -2439,9 +2461,11 @@ function GC.UI:RefreshWorkshop()
         cursor = cursor + 8
         page.workshopMaterialSummary:ClearAllPoints()
         page.workshopMaterialSummary:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
-        local summaryHeight = page.workshopMaterialSummary:GetStringHeight() or 15
-        page.workshopMaterialSummary:SetHeight(math.max(15, summaryHeight))
-        cursor = cursor + math.max(15, summaryHeight) + 8
+        local summaryHeight = math.max(15, WrappedTextHeight(
+            page.workshopMaterialSummary,
+            page.workshopMaterialSummary:GetText(), 292))
+        page.workshopMaterialSummary:SetHeight(summaryHeight)
+        cursor = cursor + summaryHeight + 8
 
         -- Herkunft und Alter der Bestaende, bewusst gedaempft: es ist Beiwerk,
         -- keine Kernaussage.
@@ -2472,7 +2496,8 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialFooter:ClearAllPoints()
         page.workshopMaterialFooter:SetPoint("TOPLEFT", page.workshopDetailContent, "TOPLEFT", 0, -cursor)
         local footerHeight = #footer > 0
-            and math.max(15, page.workshopMaterialFooter:GetStringHeight() or 15)
+            and math.max(15, WrappedTextHeight(
+                page.workshopMaterialFooter, table.concat(footer, "\n"), 292))
             or 0
         page.workshopMaterialFooter:SetHeight(math.max(1, footerHeight))
         cursor = cursor + footerHeight

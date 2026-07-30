@@ -28,6 +28,15 @@ Dummy.__index = function(self, key)
         return function(frame)
             return frame.shown == true
         end
+    elseif key == "SetHeight" then
+        -- Fuer Layouttests: die gesetzte Hoehe bleibt ablesbar.
+        return function(frame, value)
+            frame.height = tonumber(value)
+        end
+    elseif key == "GetHeight" then
+        return function(frame)
+            return frame.height
+        end
     elseif key == "SetShown" then
         return function(frame, value)
             frame.shown = value == true
@@ -1775,6 +1784,21 @@ assert(addon.UI.pages.WORKSHOP.workshopDetails.value:find("GBank", 1, true) == n
     "Die Materialspalten stecken noch im Textblock statt in eigenen Zeilen")
 assert(addon.UI.pages.WORKSHOP.workshopMaterialSummary.value ~= "",
     "Die Zusammenfassung unter den Materialien fehlt")
+-- Ein langer Fehlt-Text darf nicht abgeschnitten werden: die Zeilenhöhe wird
+-- aus der Zeichenzahl mitgerechnet, weil GetStringHeight im Spiel nur die
+-- Höhe einer Zeile liefern kann.
+summaryPlain = addon.UI.pages.WORKSHOP.workshopMaterialSummary.value
+    :gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+summaryHeightSet = addon.UI.pages.WORKSHOP.workshopMaterialSummary.height or 0
+assert(summaryHeightSet >= 15,
+    "Für die Zusammenfassung wurde keine Höhe gesetzt: " .. summaryHeightSet)
+if #summaryPlain > 50 then
+    assert(summaryHeightSet > 15,
+        "Ein langer Fehlt-Text bekam nur eine Zeile Höhe und würde abschneiden: "
+        .. summaryHeightSet .. " für " .. #summaryPlain .. " Zeichen")
+end
+assert((addon.UI.pages.WORKSHOP.workshopDetailContent.height or 0) >= 220,
+    "Der Detailbereich hat keine gültige Höhe erhalten")
 -- Ohne Suchumfang bleiben keine alten Materialzeilen stehen.
 addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = nil
 addon.UI.pages.WORKSHOP.workshopProfession.value = ""
