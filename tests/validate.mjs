@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.41",
+  "## Version: 0.9.42",
 ];
 
 for (const entry of requiredMetadata) {
@@ -452,6 +452,38 @@ if (settingsContentHeight < settingsBottom) {
     `Der Scrollbereich der Einstellungen ist zu kurz: Karten reichen bis ${settingsBottom} px, ` +
       `der Inhalt ist ${settingsContentHeight} px hoch.`
   );
+}
+
+// Entlastung beim Ein- und Ausloggen vieler Gildenmitglieder. Beide Stellen
+// waren die Ursache der gemeldeten Ruckler; sie dürfen nicht zurückfallen.
+const rosterSource = fs.readFileSync(path.join(root, "Roster.lua"), "utf8");
+if (!/GUILD_ROSTER_UPDATE[\s\S]{0,400}ScheduleScan\(\)/.test(rosterSource)) {
+  throw new Error("Der Roster-Scan läuft wieder ungedrosselt bei jedem Gildenereignis.");
+}
+if (!rosterSource.includes("if self.scanPending then")) {
+  throw new Error("Die Entprellung des Roster-Scans sammelt keine Ereignisse mehr.");
+}
+// Refresh baute früher alle dreizehn Seiten neu auf, auch bei geschlossenem
+// Fenster. Genau das ist der teure Fall.
+const refreshBody = uiSource.slice(
+  uiSource.indexOf("function GC.UI:Refresh()"),
+  uiSource.indexOf("function GC.UI:CreatePostBar")
+);
+for (const method of ["RefreshWorkshop", "RefreshStatistics", "RefreshGear", "RefreshInbox"]) {
+  if (refreshBody.includes(`self:${method}()`)) {
+    throw new Error(`GC.UI:Refresh baut wieder unsichtbare Seiten auf (${method}).`);
+  }
+}
+if (!refreshBody.includes("if not self:IsVisible() then")) {
+  throw new Error("GC.UI:Refresh zeichnet wieder bei geschlossenem Fenster.");
+}
+if (!uiSource.includes("function GC.UI:Invalidate(")) {
+  throw new Error("Die Vormerkung veralteter Seiten fehlt.");
+}
+// Grosse Uebertragungen pausieren im Kampf.
+const syncSource = fs.readFileSync(path.join(root, "Sync.lua"), "utf8");
+if (!/#self\.bulkQueue > 0 and InCombat\(\)/.test(syncSource)) {
+  throw new Error("Werkstatt- und Gildenbankpakete laufen wieder mitten im Kampf.");
 }
 
 // Die Seitenleiste hat keine Bildlaufleiste. Ein neuer Navigationspunkt darf

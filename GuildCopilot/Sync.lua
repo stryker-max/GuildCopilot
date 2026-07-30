@@ -348,12 +348,31 @@ function GC.Sync:SendBulk(payload, distribution, target, callback)
     return true
 end
 
+-- Werkstattkataloge und Gildenbankbestaende sind die einzigen wirklich grossen
+-- Uebertragungen im Addon. Im Kampf haben sie nichts verloren: Dort zaehlt
+-- jede Millisekunde, und niemand sieht in dem Moment in die Werkstatt.
+-- Die Warteschlange bleibt dabei stehen, es geht nichts verloren - sie laeuft
+-- weiter, sobald der Kampf vorbei ist.
+--
+-- Handshakes, Profile und Raidauswertungen laufen bewusst nicht hierueber:
+-- Sie sind wenige Bytes und teils zeitkritisch.
+local function InCombat()
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        return true
+    end
+    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
+end
+
 function GC.Sync:PumpBulk(elapsed)
     elapsed = math.max(0, tonumber(elapsed) or 0)
     self.bulkAllowance = math.min(
         BULK_BURST_BYTES,
         (tonumber(self.bulkAllowance) or BULK_BURST_BYTES) + (elapsed * BULK_BYTES_PER_SECOND)
     )
+
+    if #self.bulkQueue > 0 and InCombat() then
+        return
+    end
 
     -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten
     -- Wartezeit erneut senden. Ohne diese Pause verbraucht ein Ratenlimit alle

@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.41
+# Guild Copilot 0.9.42
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -62,6 +62,7 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - Lockout-Schutz für gildenweite Einstellungen: eigener Rang nicht abwählbar, Entzug nur durch höhere Ränge und einmalige Offiziers-Wiederherstellung je Gilde für alte Sperren;
 - Gildenprofil, Editor-Ränge, Mitgliederpflege-Zugriff, Raider-Ränge, Bewerberton-Ränge und Postfach-Standardtexte werden zwischen Addon-Nutzern synchronisiert;
 - Aufruf über `/gcp`, das verschiebbare Minimap-Symbol oder **Optionen → AddOns → Guild Copilot**; das Blizzard-Gildenfenster bleibt unangetastet;
+- **sparsam beim Ein- und Ausloggen anderer**: Rosterereignisse werden gesammelt statt einzeln verarbeitet, gezeichnet wird nur die aufgeschlagene Seite, und bei geschlossenem Fenster gar nichts. Große Übertragungen (Werkstatt, Gildenbank) pausieren im Kampf und laufen danach weiter;
 - eigene statische Addon-Optionsseite mit Schriftlogo, Slash-Befehl und ausdrücklichem Öffnen-Button; sie öffnet kein zweites Fenster mehr automatisch und blockiert dadurch nicht die Escape-Taste;
 - zusätzliche direkte Escape-Behandlung für Hauptfenster und Textfelder;
 - eigenes Guild-Copilot-Logo im Fenstertitel und in den Addon-Metadaten;
@@ -140,7 +141,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.41; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.42; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -209,6 +210,7 @@ Die Nutzung bleibt außerdem an die jeweiligen Realm-, Kanal- und Verhaltensrege
 - `/guildcopilot`
 - `/gcp werbung` – blendet den Werbebalken ein oder aus
 - `/gcp phase` – zeigt die Content-Phase der Gilde; `/gcp phase T5` stellt sie um
+- `/gcp debug` – schaltet die Laufzeitmessung ein; ein zweiter Aufruf zeigt die schlimmsten Einzelmessungen und beendet sie
 
 ## Gespeicherte Daten
 

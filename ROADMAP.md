@@ -298,6 +298,19 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.42 – Ruckler beim Ein- und Ausloggen
+
+Aus der Gilde gemeldet: Es ruckelt, wenn viele Leute gleichzeitig ein- und ausloggen; vermutet wurde die Synchronisierung. Die Vermutung war falsch – die Ursache lag lokal, noch bevor eine einzige Addon-Nachricht im Spiel ist.
+
+- **der Roster-Scan sammelt jetzt.** `GUILD_ROSTER_UPDATE` feuert bei jedem Ein- und Ausloggen eines beliebigen Gildenmitglieds und zusätzlich, sobald irgendein anderes Addon `GuildRoster()` ruft. Jedes Mal wurden alle Mitglieder neu eingelesen, für jedes Offline-Mitglied zusätzlich die letzte Onlinezeit. Zehn Ereignisse in drei Sekunden ergeben jetzt einen Scan;
+- **gezeichnet wird nur die aufgeschlagene Seite.** `GC.UI:Refresh` baute alle dreizehn Seiten neu auf – Werkstatt, Raidauswertung, Ausrüstung, alles –, und zwar auch **bei geschlossenem Fenster**. Rund 1100 Schleifendurchläufe je Ereignis, für niemanden sichtbar. Die übrigen Seiten merken sich jetzt, dass sie veraltet sind, und holen es beim Aufschlagen nach; die Daten liegen ohnehin in der Datenbank;
+- dasselbe gilt für die Rückmeldungen aus der Synchronisierung: Ein eingehendes Profil zog vorher vier Seiten nach sich, ein Gildenprofil sieben. Bei einer Login-Welle summierte sich das, ohne dass jemand hinsah;
+- **große Übertragungen pausieren im Kampf.** Werkstattkataloge und Gildenbankbestände sind die einzigen wirklich großen Pakete; im Bosskampf haben sie nichts verloren. Die Warteschlange bleibt stehen und läuft danach weiter, verworfen wird nichts. Handshakes, Profile und Raidauswertungen laufen bewusst nicht darüber – sie sind wenige Bytes und teils zeitkritisch;
+- **`/gcp debug` misst mit.** Einschalten, eine Weile spielen, erneut aufrufen: Dann stehen die schlimmsten Einzelmessungen im Chat. Standardmäßig aus, und ausgeschaltet kostet die Messung einen Tabellenzugriff. Gemessen wird mit `debugprofilestop()`, weil es das in jeder Spielfassung gibt;
+- die Streuung der Handshake-Antworten war entgegen der ersten Vermutung längst vorhanden (0,5–4,5 s für die Versionsantwort, für das Profil abhängig von der Zahl bekannter Nutzer) und blieb deshalb unverändert;
+- drei Regressionstests halten das fest: fünf Rosterereignisse ergeben einen Scan, eine unsichtbare Seite wird nicht gezeichnet, und im Kampf geht kein großes Paket raus. Alle drei wurden gegengeprüft, indem die jeweilige Sperre absichtlich entfernt wurde – ohne sie schlagen sie fehl;
+- **die Kachel „Mit Addon“ läuft nicht mehr aus dem Fenster.** Ihre Beschriftung hatte keine feste Breite, und eine FontString ohne Breite wächst einfach weiter: „MIT ADDON • 20 CHARAKTERE • 4 ABWEICHEND“ stand quer über dem halben Bildschirm. Die Überschrift bleibt jetzt kurz, der Zusatz steht in einer eigenen, ebenfalls begrenzten Zeile – ausgeschrieben stand er ohnehin schon in der Titelzeile und im Tooltip. Der Test prüft die Breitengrenze aller vier Kacheln.
+
 ## 0.9.41 – Eigene Trigger-Wörter, ein Ton je Rang und der Raidabend aus der Logdatei
 
 - **der Knopf im Blizzard-Gildenfenster ist ersatzlos weg.** Er lag auf `HIGH`-Strata über allem, ließ sich nicht verschieben und verdeckte Inhalte. Es bleiben genug Aufrufwege: `/gcp`, das Minimap-Symbol und die Addon-Optionsseite. Eine Prüfung in `tests/validate.mjs` hält ihn draußen;

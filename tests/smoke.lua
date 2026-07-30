@@ -45,6 +45,16 @@ Dummy.__index = function(self, key)
         return function(frame)
             return frame.height
         end
+    elseif key == "SetWidth" then
+        -- Ebenso die Breite. Ohne sie waechst eine Beschriftung in WoW ueber
+        -- ihre Karte hinaus, und genau das laesst sich nur hier pruefen.
+        return function(frame, value)
+            frame.width = tonumber(value)
+        end
+    elseif key == "GetWidth" then
+        return function(frame)
+            return frame.width
+        end
     elseif key == "SetShown" then
         return function(frame, value)
             frame.shown = value == true
@@ -472,6 +482,23 @@ function PlaySound(soundID)
     playedSoundID = soundID
 end
 
+-- Stellbarer Kampfzustand: Grosse Uebertragungen pausieren im Kampf.
+inCombat = false
+function InCombatLockdown()
+    return inCombat == true
+end
+function UnitAffectingCombat(unit)
+    return unit == "player" and inCombat == true
+end
+
+-- Der Zeitgeber der Messung. In WoW zaehlt debugprofilestop Millisekunden seit
+-- Profilstart; hier reicht eine monoton steigende Zahl.
+local profileClock = 0
+function debugprofilestop()
+    profileClock = profileClock + 1
+    return profileClock
+end
+
 -- Stellbare Uhr, damit Mindestabstände und Cooldowns prüfbar sind.
 currentTime = 1000
 function time()
@@ -648,6 +675,10 @@ warriorHeader.scripts.OnClick()
 assert(addon.UI.pages.RECRUITMENT.expandedClass == "WARRIOR", "Klassenkarte wurde nicht geöffnet")
 warriorHeader.scripts.OnClick()
 assert(addon.UI.pages.RECRUITMENT.expandedClass == nil, "Klassenkarte wurde beim zweiten Klick nicht geschlossen")
+-- Seit 0.9.42 wird nur die aufgeschlagene Seite gezeichnet. Das Häkchen
+-- entsteht also beim Öffnen der Seite, nicht schon beim Login - genau darum
+-- geht es bei der Entlastung.
+addon.UI:ShowPage("POST")
 assert(addon.UI.pages.POST.channelChecks.RECRUITMENT.mark.shown == true, "Aktiver Chatkanal hat kein sichtbares Häkchen")
 local scannedProfession = addon.Workshop:ScanOpenProfession()
 assert(scannedProfession == true, "Geöffnetes Berufsfenster wurde nicht gescannt")
@@ -1902,9 +1933,27 @@ addon.UI:RefreshDashboard()
 assert(addon.UI.pages.OVERVIEW.metricCards.ADDON.value.value == "4",
     "Die Kachel zeigt nicht die Spielerzahl: "
     .. tostring(addon.UI.pages.OVERVIEW.metricCards.ADDON.value.value))
-assert(addon.UI.pages.OVERVIEW.metricCards.ADDON.caption.value:find("5 CHARAKTERE", 1, true) ~= nil,
+assert(addon.UI.pages.OVERVIEW.metricCards.ADDON.detail.value:find("5 CHARS", 1, true) ~= nil,
     "Die Kachel nennt die Charakterzahl nicht: "
-    .. tostring(addon.UI.pages.OVERVIEW.metricCards.ADDON.caption.value))
+    .. tostring(addon.UI.pages.OVERVIEW.metricCards.ADDON.detail.value))
+
+-- Die Kachel ist 185 Pixel breit. Eine FontString ohne feste Breite waechst
+-- darueber hinaus: "MIT ADDON • 20 CHARAKTERE • 4 ABWEICHEND" stand quer ueber
+-- dem halben Bildschirm. Deshalb steht der Zusatz in einer eigenen, ebenfalls
+-- begrenzten Zeile, und die Ueberschrift bleibt kurz.
+do
+    local card = addon.UI.pages.OVERVIEW.metricCards.ADDON
+    assert(card.caption.value == "MIT ADDON",
+        "Die Ueberschrift der Kachel traegt wieder Zusaetze: " .. tostring(card.caption.value))
+    for _, key in ipairs({ "MEMBERS", "ONLINE", "PROFILES", "ADDON" }) do
+        local metricCard = addon.UI.pages.OVERVIEW.metricCards[key]
+        assert(metricCard.caption.width ~= nil and metricCard.caption.width <= 153,
+            "Die Beschriftung der Kachel " .. key .. " hat keine Breitengrenze")
+        assert(metricCard.detail.width ~= nil and metricCard.detail.width <= 153,
+            "Die Zusatzzeile der Kachel " .. key .. " hat keine Breitengrenze")
+    end
+end
+
 addon.Roster.members = accountRosterBackup
 addon.DB:GetGuild().addonUsers = {}
 
@@ -2413,6 +2462,124 @@ assert(addon.Roster:GetProfile("Krieger-Realm").raidSpecKey == "WARRIOR:2",
     "Das alte Format importiert keine Profile mehr")
 
 addon.DB:GetGuild().raidSessions = {}
+
+-- === Entlastung: Roster-Scan, Seitenaufbau, Kampfbremse ====================
+--
+-- Die gemeldeten Ruckler beim Ein- und Ausloggen vieler Gildenmitglieder kamen
+-- nicht aus der Synchronisierung, sondern aus zwei lokalen Stellen: einem
+-- ungedrosselten Roster-Scan und dem Neuaufbau aller dreizehn Seiten. Beide
+-- Zusicherungen stehen hier, damit sie nicht unbemerkt zurückfallen.
+do
+    -- GUILD_ROSTER_UPDATE feuert bei jedem Login eines beliebigen Mitglieds.
+    -- Fünf davon in Folge dürfen nur einen Scan ergeben.
+    local realScan = addon.Roster.ScanNow
+    local scans = 0
+    addon.Roster.ScanNow = function(self)
+        scans = scans + 1
+        return realScan(self)
+    end
+
+    timerDelayThreshold = 1
+    local pendingBefore = #pendingTimers
+    for _ = 1, 5 do
+        addon.Roster:ScheduleScan()
+    end
+    assert(#pendingTimers == pendingBefore + 1,
+        "Fünf Rosterereignisse haben mehr als einen Scan eingeplant")
+    assert(scans == 0, "Der Scan lief sofort, statt gesammelt zu werden")
+
+    pendingTimers[pendingBefore + 1]()
+    assert(scans == 1, "Der gesammelte Scan lief nicht genau einmal")
+
+    -- Danach ist wieder einer möglich, sonst bliebe das Roster für immer stehen.
+    local pendingAfter = #pendingTimers
+    addon.Roster:ScheduleScan()
+    assert(#pendingTimers == pendingAfter + 1,
+        "Nach dem gesammelten Scan lässt sich kein neuer mehr einplanen")
+    pendingTimers[pendingAfter + 1]()
+    assert(scans == 2, "Der zweite Scan lief nicht")
+
+    timerDelayThreshold = math.huge
+    addon.Roster.ScanNow = realScan
+end
+
+do
+    -- Gezeichnet wird nur, was jemand sieht. Alles andere merkt sich, dass es
+    -- veraltet ist, und holt es beim Aufschlagen nach.
+    local realStatistics = addon.UI.RefreshStatistics
+    local draws = 0
+    addon.UI.RefreshStatistics = function(self)
+        draws = draws + 1
+        return realStatistics(self)
+    end
+
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("OVERVIEW")
+    draws = 0
+
+    addon.UI:Invalidate("STATISTICS")
+    assert(draws == 0, "Eine unsichtbare Seite wurde trotzdem neu gezeichnet")
+    assert(addon.UI.stalePages.STATISTICS == true,
+        "Die unsichtbare Seite wurde nicht als veraltet vorgemerkt")
+
+    addon.UI:ShowPage("STATISTICS")
+    assert(draws == 1, "Beim Aufschlagen wurde die Seite nicht nachgezogen")
+    assert(addon.UI.stalePages.STATISTICS == nil,
+        "Die gezeichnete Seite gilt weiterhin als veraltet")
+
+    -- Die sichtbare Seite wird dagegen sofort neu gezeichnet.
+    addon.UI:Invalidate("STATISTICS")
+    assert(draws == 2, "Die sichtbare Seite wurde nicht sofort aufgefrischt")
+
+    -- Bei geschlossenem Fenster passiert gar nichts. Genau das war der teuerste
+    -- Fall: Ein Login löste den Neuaufbau aller Seiten aus, ohne dass jemand
+    -- hinsah.
+    addon.UI.frame:Hide()
+    draws = 0
+    addon.UI:Refresh()
+    assert(draws == 0, "Bei geschlossenem Fenster wurde weiterhin gezeichnet")
+    assert(addon.UI.stalePages.STATISTICS == true,
+        "Der Neuaufbau wurde nicht wenigstens vorgemerkt")
+
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("OVERVIEW")
+    addon.UI.RefreshStatistics = realStatistics
+end
+
+do
+    -- Werkstatt- und Gildenbankpakete haben im Kampf nichts verloren. Die
+    -- Warteschlange bleibt stehen, verworfen wird nichts.
+    local sentBefore = #sentAddon
+    inCombat = true
+    addon.Sync.bulkAllowance = nil
+    addon.Sync:SendBulk("WKTEST|1", "GUILD")
+    assert(#sentAddon == sentBefore, "Im Kampf wurde ein großes Paket gesendet")
+    assert(#addon.Sync.bulkQueue > 0, "Das Paket wurde im Kampf verworfen statt aufgehoben")
+
+    inCombat = false
+    addon.Sync:PumpBulk(5)
+    assert(#sentAddon > sentBefore, "Nach dem Kampf lief die Warteschlange nicht weiter")
+    assert(#addon.Sync.bulkQueue == 0, "Die Warteschlange blieb nach dem Kampf stehen")
+end
+
+do
+    -- Die Messung ist standardmäßig aus und darf im Betrieb nichts kosten;
+    -- eingeschaltet zählt sie mit, ohne den Ablauf zu verändern.
+    assert(addon.Perf.enabled == false, "Die Messung ist standardmäßig eingeschaltet")
+    local ran = 0
+    addon.Perf:Measure("Test", function() ran = ran + 1 end)
+    assert(ran == 1, "Die abgeschaltete Messung führt den Aufruf nicht mehr aus")
+
+    addon.Perf:Reset()
+    addon.Perf.enabled = true
+    addon.Perf:Measure("Test", function() ran = ran + 1 end)
+    assert(ran == 2, "Die eingeschaltete Messung führt den Aufruf nicht aus")
+    assert(addon.Perf.samples.Test ~= nil and addon.Perf.samples.Test.count == 1,
+        "Die Messung hat nichts aufgezeichnet")
+    assert(#addon.Perf:Report() > 0, "Der Messbericht ist leer")
+    addon.Perf.enabled = false
+    addon.Perf:Reset()
+end
 
 -- === Offline-Import aus der Combat-Log-Datei ===============================
 --

@@ -40,7 +40,42 @@ function GC.Roster:Refresh()
     end
 end
 
+-- === Entprellung ==========================================================
+--
+-- GUILD_ROSTER_UPDATE feuert bei jedem Ein- und Ausloggen eines beliebigen
+-- Gildenmitglieds - und zusaetzlich, sobald irgendein anderes Addon
+-- GuildRoster() ruft. Jeder Scan liest alle Mitglieder neu ein, fuer jedes
+-- Offline-Mitglied zusaetzlich die letzte Onlinezeit, und stoesst danach den
+-- Neuaufbau der Oberflaeche an. Zur Prime Time lief das im Dauerfeuer; genau
+-- daraus entstanden die gemeldeten Ruckler.
+--
+-- Gesammelt wird deshalb: Zehn Logins in fuenf Sekunden ergeben einen Scan.
+-- Die Verzoegerung ist unkritisch, weil die Daten ohnehin erst beim naechsten
+-- Blick ins Fenster gebraucht werden.
+local SCAN_DEBOUNCE = 3
+
+function GC.Roster:ScheduleScan(delay)
+    delay = tonumber(delay) or SCAN_DEBOUNCE
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:Scan()
+        return false
+    end
+    if self.scanPending then
+        return false
+    end
+    self.scanPending = true
+    C_Timer.After(delay, function()
+        self.scanPending = false
+        self:Scan()
+    end)
+    return true
+end
+
 function GC.Roster:Scan()
+    GC.Perf:Measure("Gildenroster einlesen", self.ScanNow, self)
+end
+
+function GC.Roster:ScanNow()
     local members = {}
     local index = {}
     local memberCount = GetNumGuildMembers and GetNumGuildMembers() or 0
@@ -782,7 +817,7 @@ rosterEvents:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_GUILD_UPDATE" then
         GC.Roster:Request()
     else
-        GC.Roster:Scan()
+        GC.Roster:ScheduleScan()
     end
 end)
 

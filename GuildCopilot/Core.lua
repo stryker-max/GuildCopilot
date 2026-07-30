@@ -36,6 +36,78 @@ function GC:FireCallback(eventName, ...)
     end
 end
 
+-- === Messung ==============================================================
+--
+-- Ob ein Ruckler vom Addon kommt, laesst sich nicht aus dem Code lesen, nur
+-- messen. Diese Messung ist standardmaessig aus und kostet dann genau einen
+-- Tabellenzugriff je Aufruf; eingeschaltet wird sie mit "/gcp debug".
+--
+-- Gemessen wird mit debugprofilestop() statt GetTimePreciseSec(): Ersteres
+-- gibt es in jeder Spielfassung, Letzteres nicht.
+GC.Perf = {
+    enabled = false,
+    samples = {},
+}
+
+function GC.Perf:Clock()
+    if type(debugprofilestop) == "function" then
+        return debugprofilestop()
+    end
+    return nil
+end
+
+function GC.Perf:Measure(label, fn, ...)
+    if type(fn) ~= "function" then
+        return
+    end
+    if not self.enabled then
+        return fn(...)
+    end
+    local started = self:Clock()
+    fn(...)
+    local finished = self:Clock()
+    if not started or not finished then
+        return
+    end
+    local elapsed = finished - started
+    local sample = self.samples[label]
+    if not sample then
+        sample = { count = 0, total = 0, worst = 0 }
+        self.samples[label] = sample
+    end
+    sample.count = sample.count + 1
+    sample.total = sample.total + elapsed
+    if elapsed > sample.worst then
+        sample.worst = elapsed
+    end
+end
+
+function GC.Perf:Reset()
+    self.samples = {}
+end
+
+-- Sortiert nach der schlechtesten Einzelmessung: Ein Ruckler ist ein einzelner
+-- langer Aufruf, kein hoher Durchschnitt.
+function GC.Perf:Report()
+    local rows = {}
+    for label, sample in pairs(self.samples) do
+        rows[#rows + 1] = { label = label, sample = sample }
+    end
+    if #rows == 0 then
+        return { "Noch nichts gemessen." }
+    end
+    table.sort(rows, function(left, right)
+        return left.sample.worst > right.sample.worst
+    end)
+    local lines = {}
+    for index = 1, math.min(#rows, 12) do
+        local row = rows[index]
+        lines[#lines + 1] = string.format("%s: %d\195\151, schlimmste %.1f ms, Schnitt %.1f ms",
+            row.label, row.sample.count, row.sample.worst, row.sample.total / row.sample.count)
+    end
+    return lines
+end
+
 GC.Util = {}
 
 function GC.Util.Trim(value)

@@ -778,7 +778,14 @@ function GC.UI:ShowPage(pageKey)
     for _, tab in ipairs(self.tabs) do
         tab:SetActive(tab.key == pageKey)
     end
-    self:Refresh()
+    -- Die aufgeschlagene Seite wird immer neu gezeichnet, auch wenn sie nicht
+    -- als veraltet vorgemerkt war: Ein Klick auf einen Reiter soll den
+    -- aktuellen Stand zeigen, nicht den von vorhin.
+    if self:IsVisible() then
+        self:RefreshSyncBadge()
+        self:RefreshNavigationAccess()
+        self:RefreshPage(pageKey)
+    end
 end
 
 function GC.UI:RefreshNavigationAccess()
@@ -846,12 +853,25 @@ function GC.UI:BuildDashboardPage()
     }
     for index, metric in ipairs(metrics) do
         local card = CreateCard(page)
-        card:SetSize(185, 76)
+        card:SetSize(185, 82)
         card:SetPoint("TOPLEFT", page, "TOPLEFT", (index - 1) * 197, -66)
         card.value = CreateLabel(card, "0", { title = true })
         card.value:SetPoint("TOPLEFT", card, "TOPLEFT", 16, -13)
-        card.caption = CreateLabel(card, metric.label, { muted = true })
-        card.caption:SetPoint("TOPLEFT", card.value, "BOTTOMLEFT", 0, -5)
+        -- Feste Breite und Hoehe, sonst waechst die Beschriftung aus der Karte
+        -- heraus: "MIT ADDON  •  20 CHARAKTERE  •  4 ABWEICHEND" stand quer
+        -- ueber dem halben Bildschirm, weil eine FontString ohne Breite
+        -- einfach weiterlaeuft.
+        card.caption = CreateLabel(card, metric.label, { muted = true, width = 153, height = 14 })
+        card.caption:SetPoint("TOPLEFT", card.value, "BOTTOMLEFT", 0, -4)
+        -- Zweite Zeile fuer Zusaetze. Sie bleibt leer, solange es nichts zu
+        -- sagen gibt, und uebernimmt sonst die Warnfarbe.
+        card.detail = CreateLabel(card, "", {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 153,
+            height = 13,
+        })
+        card.detail:SetPoint("TOPLEFT", card.caption, "BOTTOMLEFT", 0, -2)
         page.metricCards[metric.key] = card
     end
 
@@ -985,17 +1005,18 @@ function GC.UI:RefreshDashboard()
     -- abweicht.
     addonCard.value:SetText(addonStats.players)
     local incompatible = addonStats.outdated + addonStats.ahead
-    local characterNote = addonStats.known > addonStats.players
-        and ("  •  " .. addonStats.known .. " CHARAKTERE")
-        or ""
-    if incompatible > 0 then
-        addonCard.caption:SetText("MIT ADDON" .. characterNote
-            .. "  •  " .. incompatible .. " ABWEICHEND")
-        SetTextColor(addonCard.caption, THEME.warning)
-    else
-        addonCard.caption:SetText("MIT ADDON" .. characterNote)
-        SetTextColor(addonCard.caption, THEME.muted)
+    -- Die Karte ist 185 Pixel breit. Alles, was nicht hineinpasst, steht in der
+    -- zweiten Zeile, im Tooltip der Karte und ohnehin in der Titelzeile des
+    -- Fensters - dreimal derselbe Satz nebeneinander war der Fehler.
+    local details = {}
+    if addonStats.known > addonStats.players then
+        details[#details + 1] = addonStats.known .. " CHARS"
     end
+    if incompatible > 0 then
+        details[#details + 1] = incompatible .. " ABWEICHEND"
+    end
+    addonCard.detail:SetText(table.concat(details, "  •  "))
+    SetTextColor(addonCard.detail, incompatible > 0 and THEME.warning or THEME.muted)
 
     local ranks = GC.Roster:GetRankDefinitions()
     local selectedRanks = 0
@@ -4664,25 +4685,81 @@ function GC.UI:RefreshSyncBadge()
     end
 end
 
+-- === Seiten nur zeichnen, wenn sie jemand sieht ==========================
+--
+-- Bis 0.9.41 baute jeder Aufruf alle dreizehn Seiten neu auf - bei jedem Ein-
+-- und Ausloggen eines Gildenmitglieds, bei jedem eingehenden Profil, und auch
+-- bei geschlossenem Fenster. Genau daraus entstanden die gemeldeten Ruckler
+-- zur Prime Time; mit der Synchronisation selbst hatte das nichts zu tun.
+--
+-- Gezeichnet wird jetzt nur die sichtbare Seite. Die uebrigen merken sich, dass
+-- sie veraltet sind, und holen es beim Aufschlagen nach. Die Daten liegen
+-- ohnehin in der Datenbank - verloren geht nichts, nur der Neuaufbau wartet.
+local PAGE_REFRESH = {
+    OVERVIEW = "RefreshDashboard",
+    SETTINGS = "RefreshSettings",
+    ROSTER = "RefreshRoster",
+    MEMBERCARE = "RefreshMemberCare",
+    WORKSHOP = "RefreshWorkshop",
+    SUGGESTIONS = "RefreshSuggestions",
+    RECRUITMENT = "RefreshRecruitment",
+    POST = "RefreshPost",
+    INBOX = "RefreshInbox",
+    GUILD = "RefreshGuild",
+    WCL = "RefreshWarcraftLogs",
+    STATISTICS = "RefreshStatistics",
+    GEAR = "RefreshGear",
+}
+
+function GC.UI:IsVisible()
+    return self.frame ~= nil and self.frame:IsShown() == true
+end
+
+function GC.UI:RefreshPage(pageKey)
+    local method = PAGE_REFRESH[pageKey]
+    if not method or not self.frame then
+        return
+    end
+    self.stalePages = self.stalePages or {}
+    self.stalePages[pageKey] = nil
+    GC.Perf:Measure("Seite " .. pageKey, self[method], self)
+end
+
+-- Eine Seite gilt als veraltet. Ist sie gerade zu sehen, wird sofort neu
+-- gezeichnet, sonst beim naechsten Aufschlagen.
+function GC.UI:Invalidate(...)
+    if not self.frame then
+        return
+    end
+    self.stalePages = self.stalePages or {}
+    for index = 1, select("#", ...) do
+        local pageKey = select(index, ...)
+        if PAGE_REFRESH[pageKey] then
+            if pageKey == self.activePage and self:IsVisible() then
+                self:RefreshPage(pageKey)
+            else
+                self.stalePages[pageKey] = true
+            end
+        end
+    end
+end
+
 function GC.UI:Refresh()
     if not self.frame then
         return
     end
+    self.stalePages = self.stalePages or {}
+    for pageKey in pairs(PAGE_REFRESH) do
+        self.stalePages[pageKey] = true
+    end
+    if not self:IsVisible() then
+        -- Bei geschlossenem Fenster gibt es nichts zu zeichnen. Der
+        -- Werbebalken haengt nicht daran, er frischt sich selbst auf.
+        return
+    end
     self:RefreshSyncBadge()
     self:RefreshNavigationAccess()
-    self:RefreshDashboard()
-    self:RefreshSettings()
-    self:RefreshRoster()
-    self:RefreshMemberCare()
-    self:RefreshWorkshop()
-    self:RefreshSuggestions()
-    self:RefreshRecruitment()
-    self:RefreshPost()
-    self:RefreshInbox()
-    self:RefreshGuild()
-    self:RefreshWarcraftLogs()
-    self:RefreshStatistics()
-    self:RefreshGear()
+    self:RefreshPage(self.activePage)
 end
 
 -- === Werbebalken ===========================================================
@@ -5003,6 +5080,24 @@ SlashCmdList.GUILDCOPILOT = function(input)
         return
     end
 
+    -- Ob ein Ruckler vom Addon kommt, laesst sich nur messen. Standardmaessig
+    -- ist die Messung aus; wer sie einschaltet, spielt eine Weile und ruft
+    -- "/gcp debug" erneut auf, bekommt die schlimmsten Einzelmessungen.
+    if command == "debug" then
+        if GC.Perf.enabled then
+            for _, line in ipairs(GC.Perf:Report()) do
+                GC:Print(line)
+            end
+            GC.Perf.enabled = false
+            GC:Print("Messung beendet. Erneut einschalten mit /gcp debug.")
+        else
+            GC.Perf:Reset()
+            GC.Perf.enabled = true
+            GC:Print("Messung läuft. Spiel eine Weile weiter und ruf /gcp debug erneut auf.")
+        end
+        return
+    end
+
     -- Die Content-Phase der Gilde. Sie entscheidet, welche Regeln des
     -- ausgelieferten Verzauberungs-Regelsatzes schon gelten, und wird
     -- gildenweit geteilt - deshalb darf sie nur aendern, wer auch den
@@ -5054,74 +5149,71 @@ GC:RegisterCallback("ROSTER_UPDATED", GC.UI, function(self)
     self:Refresh()
 end)
 
+-- Alle folgenden Rueckmeldungen kommen aus der Gildensynchronisierung und
+-- treffen zur Prime Time im Sekundentakt ein. Sie merken die betroffenen
+-- Seiten deshalb nur noch vor; gezeichnet wird, was gerade zu sehen ist.
 GC:RegisterCallback("PROFILE_UPDATED", GC.UI, function(self)
-    self:RefreshDashboard()
-    self:RefreshRoster()
-    self:RefreshMemberCare()
-    self:RefreshSuggestions()
+    self:Invalidate("OVERVIEW", "ROSTER", "MEMBERCARE", "SUGGESTIONS")
 end)
 
 GC:RegisterCallback("SETTINGS_UPDATED", GC.UI, function(self)
-    self:RefreshSettings()
-    self:RefreshGuild()
-    self:RefreshNavigationAccess()
+    self:Invalidate("SETTINGS", "GUILD")
+    if self:IsVisible() then
+        self:RefreshNavigationAccess()
+    end
 end)
 
 GC:RegisterCallback("GUILD_PROFILE_UPDATED", GC.UI, function(self)
-    self:RefreshGuild()
-    self:RefreshSettings()
-    self:RefreshMemberCare()
-    self:RefreshNavigationAccess()
-    self:RefreshSuggestions()
-    self:RefreshPost()
-    self:RefreshInbox()
+    self:Invalidate("GUILD", "SETTINGS", "MEMBERCARE", "SUGGESTIONS", "POST", "INBOX")
+    if self:IsVisible() then
+        self:RefreshNavigationAccess()
+    end
 end)
 
 -- Neue Bestandszahlen aendern die Ampel in den Rezeptdetails.
 GC:RegisterCallback("INVENTORY_UPDATED", GC.UI, function(self)
-    self:RefreshWorkshop()
+    self:Invalidate("WORKSHOP")
 end)
 
 GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
-    self:RefreshWorkshop()
+    self:Invalidate("WORKSHOP")
 end)
 
 GC:RegisterCallback("RECRUITMENT_UPDATED", GC.UI, function(self)
-    self:RefreshRecruitment()
+    self:Invalidate("RECRUITMENT")
 end)
 
 GC:RegisterCallback("INBOX_UPDATED", GC.UI, function(self)
-    self:RefreshInbox()
+    self:Invalidate("INBOX")
 end)
 
 GC:RegisterCallback("WCL_UPDATED", GC.UI, function(self)
-    self:RefreshWarcraftLogs()
-    self:RefreshSuggestions()
     -- Region und Realm der Gildenquelle stehen in den Profil-Links des
-    -- Postfachs. Ohne diese Auffrischung zeigen sie bis zum Seitenwechsel den
+    -- Postfachs. Ohne dessen Auffrischung zeigen sie bis zum Seitenwechsel den
     -- alten Stand.
-    self:RefreshInbox()
+    self:Invalidate("WCL", "SUGGESTIONS", "INBOX")
 end)
 
 GC:RegisterCallback("ROSTER_FILTER_UPDATED", GC.UI, function(self)
-    self:RefreshDashboard()
-    self:RefreshSettings()
+    self:Invalidate("OVERVIEW", "SETTINGS")
 end)
 
 GC:RegisterCallback("MEMBERCARE_UPDATED", GC.UI, function(self)
-    self:RefreshMemberCare()
+    self:Invalidate("MEMBERCARE")
 end)
 
 GC:RegisterCallback("ADDON_USERS_UPDATED", GC.UI, function(self)
-    self:RefreshDashboard()
-    self:RefreshSyncBadge()
+    self:Invalidate("OVERVIEW")
+    if self:IsVisible() then
+        self:RefreshSyncBadge()
+    end
 end)
 
 GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
-    self:RefreshStatistics()
+    self:Invalidate("STATISTICS")
 end)
 
 GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
-    self:RefreshGear()
-    self:RefreshProfileGear()
+    -- Die eigene Ausruestung steht auch auf der Profilseite.
+    self:Invalidate("GEAR", "ROSTER")
 end)
