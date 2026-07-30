@@ -298,6 +298,29 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.45 – Erste Schritte, und „geändert“ heißt wieder „unbestätigt“
+
+Ein neuer Charakter stand bisher vor dreizehn Navigationspunkten und musste selbst herausfinden, womit er anfängt. Der Assistent dafür ist bewusst **kein eigenes Fenster** geworden:
+
+- **eine Checkliste „Erste Schritte“ oben auf der Profilseite.** Alle drei Schritte – Raidprofil bestätigen, Berufe einlesen, Ausrüstung ansehen – leben ohnehin genau dort. Ein Wizard-Fenster hätte dieselben Karten entweder verdoppelt oder überdeckt, und weil die echte Aktion der Übergang sein soll, hätte es sie trotzdem beobachten müssen. Dann kann es auch gleich dorthin führen;
+- **es gibt keinen „Weiter“-Knopf.** Das Bestätigen des Profils *ist* der Übergang zum zweiten Schritt, der erkannte Beruf *ist* der Übergang zum dritten. Ein Knopf daneben hätte nur behauptet, was ohnehin passiert;
+- **der Zustand wird aus den echten Daten abgeleitet, nicht aus Merkern.** Ein Merker, der behauptet, was noch zu tun sei, läuft der Wirklichkeit hinterher, sobald jemand seinen Beruf auf einem anderen Weg einträgt. Nebenbei beantwortet sich damit die offene Frage „kontoweit oder pro Charakter?“ von selbst: Spec, Berufe und Ausrüstung gelten pro Charakter, also sieht ein frischer Twink die Liste und ein fertiger Charakter nicht. Gespeichert wird nur, was sich aus den Daten nicht ablesen lässt – Übersprungenes, Ausgeblendetes und zwei einmalige Ereignisse. Es gibt dafür keinen Sendeweg;
+- **jeder Schritt ist einzeln überspringbar, die ganze Karte jederzeit abbrechbar** (`×` für diese Sitzung, „Nicht mehr anzeigen“ dauerhaft). **Übersprungen heißt „nicht drängeln“, nicht „nicht wahrnehmen“:** Passiert die echte Aktion später doch, gewinnt sie und die Zeile steht auf erledigt;
+- **„Einrichtung“ oben rechts im Fensterkopf** holt die Liste jederzeit zurück – auch nach „Nicht mehr anzeigen“ und auch, wenn längst alles erledigt ist. Der Knopf fängt sie neu an, statt sie nur einzublenden: Wer sie ausdrücklich aufruft, will sie durchgehen, und eine Liste aus lauter übersprungenen Zeilen wäre dafür nutzlos. Ein eigener Navigationspunkt kam nicht in Frage, die Seitenleiste hat keine Bildlaufleiste und ist voll;
+- **beim ersten Login je Charakter öffnet sich das Fenster einmal von selbst.** Der Merker wird beim tatsächlichen Öffnen gesetzt und nicht davor – dadurch kann es nie zweimal aufspringen, und ein Login mitten im Kampf verschiebt es auf das nächste Mal, statt es zu verbrauchen. Wer sein Profil längst bestätigt hat, wird gar nicht erst behelligt;
+- **die Zustandszeichen sind Texturen, keine Schriftzeichen.** Die Spielschrift kennt weder Haken noch Pfeil und zeichnet dafür leere Kästen – dieselbe Lektion wie bei der Profilbestätigung in 0.9.39. `tests/validate.mjs` hält Haken, Pfeil und Kreis aus der Karte heraus;
+- **die Karten darunter wandern mit.** Die Checkliste kommt und geht, alle Karten der Profilseite verschieben sich um denselben Betrag – ihre Maße stehen deshalb in einer Tabelle statt verstreut im Aufbau, und `tests/validate.mjs` prüft sie wie die Einstellungsseite auf Überlappung. Genau der Fehler aus 0.9.44, nur eine Seite weiter.
+
+Dazu ein zweiter Fund aus derselben Karte:
+
+- **„geändert“ heißt wieder „unbestätigt“.** Der Haken der letzten Bestätigung blieb stehen, auch wenn Spec, Dual-Spec, Main/Twink oder „flexibel“ längst umgestellt waren – gespeichert und gildenweit geteilt war aber weiter der zuletzt bestätigte Stand. Weicht die Auswahl davon ab, weicht der Haken jetzt einem Hinweis, der genau das sagt. Verglichen wird gegen dieselben Werte, mit denen die Karte auch vorbelegt wird, sonst gälte ein frisch aufgeschlagenes Profil schon als geändert;
+- **die Schalter frischen die Karte auf.** „Main“, „Twink“ und „flexibel einsetzbar“ änderten bisher nur eine Variable; die Rückmeldung daneben blieb bis zum nächsten Seitenwechsel auf dem alten Stand;
+- **die Rückmeldung steht über dem Knopf statt daneben.** Neben ihm blieb eine 210 Pixel schmale Spalte, die über den Kartenrand hinausragte und in der jeder erklärende Satz abgeschnitten wurde – ausgerechnet der Fehlschlag, der sagen muss, was zu tun ist.
+
+Drei Regressionstests halten das fest, jeder gegengeprüft, indem die zugehörige Sperre absichtlich entfernt wurde: Erledigt überstimmt Übersprungen, eine geänderte Auswahl nimmt den Haken weg, und der Scrollbereich wächst mit der Checkliste. Beim Schreiben der Tests fiel nebenbei auf, dass sich der zweite Schritt im Spiel meist mit dem ersten erledigt: `Confirm` ruft `Refresh`, und `Refresh` liest die WoW-Berufe ein. Das ist richtig so – im Test steht die automatische Übernahme deshalb ausdrücklich still, damit jeder Übergang einzeln geprüft wird.
+
+Die Testbasis selbst hat gefehlt: Auf dem Entwicklungsrechner war kein Node und kein Lua mehr vorhanden. `tests/smoke.lua` lief über eine portable Node-Fassung und **fengari**, wie in `docs/TODO-naechste-sitzung.md` beschrieben – die Lua-5.1-Ergänzungen (`unpack`, `loadstring`) gehören dabei in den Runner und nicht in `smoke.lua`, sonst verfälschen sie den echten Zielinterpreter.
+
 ## 0.9.44 – Der Rückholknopf lag auf der Beschriftung
 
 - **„Symbol zurück an die Minimap" bekommt eine eigene Zeile.** In 0.9.43 stand er neben dem Schalter „Minimap-Symbol anzeigen" – und damit mitten auf dessen Beschriftung, weil rechts daneben schon die Profilbestätigung sitzt. Die Karte „Benachrichtigungen & Zugriff" ist dafür 36 Pixel höher geworden, alle Karten darunter sind mitgewandert;
@@ -495,7 +518,7 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
-## Offene Punkte (Stand 0.9.41)
+## Offene Punkte (Stand 0.9.45)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 

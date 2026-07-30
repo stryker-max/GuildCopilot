@@ -35,6 +35,23 @@ local NAV_SECTION_HEIGHT = 22
 local NAV_TAB_HEIGHT = 32
 local NAV_TAB_SPACING = 34
 
+-- Masse der Profilseite. Ganz oben steht die Checkliste "Erste Schritte", und
+-- sie erscheint nur, solange etwas offen ist. Deshalb stehen die Abstaende der
+-- Karten hier und nicht verstreut im Aufbau: Kommt die Checkliste dazu oder
+-- faellt sie weg, wandern alle Karten darunter um denselben Betrag mit, statt
+-- eine Luecke zu lassen. tests/validate.mjs liest diese Tabelle und prueft, ob
+-- sich zwei Karten ueberlappen - genau der Fehler aus 0.9.44, nur eine Seite
+-- weiter.
+local ROSTER_ONBOARDING_HEIGHT = 228
+local ROSTER_CARD_GAP = 12
+local ROSTER_CONTENT_HEIGHT = 786
+local ROSTER_CARDS = {
+    { key = "profileCard", top = 0, height = 408 },
+    { key = "professionCard", top = 0, height = 408, anchor = "TOPRIGHT" },
+    { key = "absenceCard", top = 420, height = 180 },
+    { key = "gearCard", top = 612, height = 162 },
+}
+
 local TAB_DEFINITIONS = {
     { key = "ROSTER", section = "COPILOT", label = "Profil", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "OVERVIEW", section = "COPILOT", label = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Note_01" },
@@ -700,6 +717,42 @@ function GC.UI:CreateMainFrame()
     end)
     close:SetPoint("RIGHT", header, "RIGHT", -13, 0)
     close.label:SetFontObject("GameFontNormalLarge")
+
+    -- Die Checkliste "Erste Schritte" laesst sich jederzeit wieder aufrufen -
+    -- auch nach "Nicht mehr anzeigen" und auch, wenn schon alles erledigt ist.
+    -- Ein eigener Navigationspunkt kam dafuer nicht in Frage: Die Seitenleiste
+    -- hat keine Bildlaufleiste und ist voll.
+    local setup = CreateButton(header, "Einrichtung", 110, 26, function()
+        GC.Onboarding:Reopen()
+        GC.UI:ShowPage("ROSTER")
+        local page = GC.UI.pages.ROSTER
+        if page and page.profileScroll then
+            page.profileScroll:SetVerticalScroll(0)
+            page.profileScroll:UpdateModernThumb()
+        end
+    end)
+    setup:SetPoint("RIGHT", close, "LEFT", -8, 0)
+    setup:SetScript("OnEnter", function(selfButton)
+        SetTextureColor(selfButton.background, THEME.cardHover)
+        if not GameTooltip then
+            return
+        end
+        GameTooltip:SetOwner(selfButton, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Erste Schritte")
+        GameTooltip:AddLine("Zeigt die Einrichtungs-Checkliste im Profil wieder an.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    setup:SetScript("OnLeave", function(selfButton)
+        selfButton:SetActive(selfButton.active)
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+
+    -- Ist alles erledigt, bleibt die Erfolgsmeldung bis zum Schliessen stehen.
+    frame:SetScript("OnHide", function()
+        GC.Onboarding:NoteWindowClosed()
+    end)
 
     local sidebar = CreatePanel(frame, THEME.sidebar, THEME.sidebar)
     sidebar:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -59)
@@ -1521,6 +1574,167 @@ function GC.UI:RefreshSettings()
     page.settingsScroll:UpdateModernThumb()
 end
 
+-- Zu welcher Karte ein Klick auf eine Checklistenzeile rollt. Alle drei
+-- Schritte liegen auf dieser Seite, es ist also ein Rollen und kein
+-- Seitenwechsel.
+local ONBOARDING_SCROLL_TARGET = {
+    PROFILE = "profileCard",
+    PROFESSIONS = "professionCard",
+    GEAR = "gearCard",
+}
+
+-- Rollt die Profilseite an den Kopf einer Karte. Die Position kommt aus
+-- ROSTER_CARDS samt der Verschiebung durch die Checkliste, damit hier keine
+-- zweite Kopie derselben Masse entsteht.
+function GC.UI:ScrollRosterToCard(cardKey)
+    local page = self.pages.ROSTER
+    if not page or not page.profileScroll then
+        return
+    end
+    local target = 0
+    for _, definition in ipairs(ROSTER_CARDS) do
+        if definition.key == cardKey then
+            target = definition.top
+        end
+    end
+    if page.onboardingCard and page.onboardingCard:IsShown() then
+        target = target + ROSTER_ONBOARDING_HEIGHT + ROSTER_CARD_GAP
+    end
+    local range = tonumber(page.profileScroll:GetVerticalScrollRange()) or 0
+    page.profileScroll:SetVerticalScroll(math.max(0, math.min(target, range)))
+    page.profileScroll:UpdateModernThumb()
+end
+
+-- Die Checkliste "Erste Schritte". Kein Wizard-Fenster: Die drei Schritte
+-- stehen auf genau dieser Seite, die Karte zeigt nur, was davon noch offen
+-- ist. Einen "Weiter"-Knopf gibt es deshalb nicht - die echte Aktion schiebt
+-- die Liste weiter.
+--
+-- Die Zustandszeichen sind Texturen und keine Schriftzeichen: Die Spielschrift
+-- kennt weder Haken noch Pfeil und zeichnet dafuer leere Kaesten (dieselbe
+-- Lektion wie bei der Profilbestaetigung in 0.9.39).
+function GC.UI:BuildOnboardingCard(page, content)
+    local card = CreateCard(content, "Erste Schritte")
+    card:SetSize(752, ROSTER_ONBOARDING_HEIGHT)
+    card:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    card:Hide()
+    page.onboardingCard = card
+
+    local close = CreateButton(card, "×", 24, 24, function()
+        GC.Onboarding:HideForSession()
+        GC.UI:RefreshRoster()
+    end)
+    close:SetPoint("TOPRIGHT", card, "TOPRIGHT", -12, -12)
+
+    page.onboardingRows = {}
+    for index = 1, 3 do
+        local row = CreateFrame("Button", nil, card)
+        row:SetSize(716, 40)
+        row:SetPoint("TOPLEFT", card, "TOPLEFT", 18, -52 - ((index - 1) * 44))
+        row:SetScript("OnClick", function(selfRow)
+            GC.UI:ScrollRosterToCard(ONBOARDING_SCROLL_TARGET[selfRow.stepKey or ""])
+        end)
+
+        row.dot = row:CreateTexture(nil, "ARTWORK")
+        row.dot:SetSize(10, 10)
+        row.dot:SetTexture(WHITE_TEXTURE)
+        row.dot:SetPoint("TOPLEFT", row, "TOPLEFT", 5, -5)
+
+        row.mark = row:CreateTexture(nil, "OVERLAY")
+        row.mark:SetSize(22, 22)
+        row.mark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        row.mark:SetPoint("TOPLEFT", row, "TOPLEFT", -1, 3)
+        row.mark:Hide()
+
+        row.label = CreateLabel(row, "", { width = 420, height = 18 })
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 26, 0)
+        row.detail = CreateLabel(row, "", {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 560,
+            height = 18,
+        })
+        row.detail:SetPoint("TOPLEFT", row, "TOPLEFT", 26, -19)
+
+        row.skip = CreateButton(row, "Überspringen", 106, 22, function(selfButton)
+            GC.Onboarding:SetStepSkipped(selfButton.stepKey, true)
+            GC.UI:RefreshRoster()
+        end)
+        row.skip:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -1)
+        row.skip.label:SetFontObject("GameFontNormalSmall")
+
+        page.onboardingRows[index] = row
+    end
+
+    page.onboardingDismiss = CreateButton(card, "Nicht mehr anzeigen", 150, 24, function()
+        GC.Onboarding:Dismiss()
+        GC.UI:RefreshRoster()
+    end)
+    page.onboardingDismiss:SetPoint("TOPLEFT", card, "TOPLEFT", 18, -190)
+    page.onboardingDismiss.label:SetFontObject("GameFontNormalSmall")
+
+    page.onboardingStatus = CreateLabel(card, "", { width = 540, height = 24 })
+    page.onboardingStatus:SetPoint("LEFT", page.onboardingDismiss, "RIGHT", 12, 0)
+end
+
+function GC.UI:RefreshOnboarding()
+    local page = self.pages.ROSTER
+    if not page or not page.onboardingCard then
+        return
+    end
+
+    local show = GC.Onboarding:ShouldShow()
+    self:LayoutRosterPage(show)
+    if not show then
+        return
+    end
+
+    local steps = GC.Onboarding:GetSteps()
+    for index, row in ipairs(page.onboardingRows) do
+        local step = steps[index]
+        row:SetShown(step ~= nil)
+        if step then
+            row.stepKey = step.key
+            row.skip.stepKey = step.key
+            row.label:SetText(step.label)
+            row.skip:SetShown(not step.done and not step.skipped)
+
+            if step.done then
+                row.mark:Show()
+                row.dot:Hide()
+                SetTextColor(row.label, THEME.text)
+                row.detail:SetText(step.detail or "")
+            elseif step.active then
+                row.mark:Hide()
+                row.dot:Show()
+                SetTextureColor(row.dot, THEME.accent)
+                SetTextColor(row.label, THEME.text)
+                -- Nur der aktuelle Schritt erklaert sich; drei Erklaerungen
+                -- gleichzeitig sind keine Anleitung mehr, sondern ein Text.
+                row.detail:SetText(step.hint or "")
+            else
+                row.mark:Hide()
+                row.dot:Show()
+                -- Uebersprungen tritt weiter zurueck als bloss offen: Der eine
+                -- Schritt ist abgewaehlt, der andere kommt noch.
+                SetTextureColor(row.dot, step.skipped and THEME.border or THEME.muted)
+                SetTextColor(row.label, THEME.muted)
+                row.detail:SetText(step.skipped and "Übersprungen" or "")
+            end
+        end
+    end
+
+    if GC.Onboarding:IsFinished() then
+        if GC.Onboarding:NoteCompleted() and GC.Chat and GC.Chat.PlayProfileSound then
+            GC.Chat:PlayProfileSound()
+        end
+        page.onboardingStatus:SetText("Fertig – dieser Charakter ist eingerichtet.")
+        SetTextColor(page.onboardingStatus, THEME.success)
+    else
+        page.onboardingStatus:SetText("")
+    end
+end
+
 function GC.UI:BuildRosterPage()
     local page = self.pages.ROSTER
     CreatePageTitle(page, "Dein Profil",
@@ -1531,13 +1745,15 @@ function GC.UI:BuildRosterPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(786)
+    content:SetHeight(ROSTER_CONTENT_HEIGHT)
     scroll:SetScrollChild(content)
     page.profileScroll = scroll
+    page.profileContent = content
+
+    self:BuildOnboardingCard(page, content)
 
     local profileCard = CreateCard(content, "Dein Raidprofil")
     profileCard:SetSize(374, 408)
-    profileCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     page.profileCard = profileCard
 
     page.detectedText = CreateLabel(profileCard, "", { muted = true, width = 338, height = 36, vertical = "TOP" })
@@ -1577,6 +1793,10 @@ function GC.UI:BuildRosterPage()
         page.secondarySpecButtons[index] = button
     end
 
+    -- Jede Aenderung frischt die Karte auf: Nur so faellt der Haken der letzten
+    -- Bestaetigung weg und der Hinweis erscheint, dass erneut zu bestaetigen
+    -- ist. Ohne den Aufruf blieb die Rueckmeldung bis zum naechsten
+    -- Seitenwechsel auf dem alten Stand.
     page.mainCheck = CreateToggle(profileCard, "Main", function(enabled)
         if enabled then
             page.selectedMainStatus = "MAIN"
@@ -1584,6 +1804,7 @@ function GC.UI:BuildRosterPage()
         else
             SetToggle(page.mainCheck, true)
         end
+        GC.UI:RefreshRoster()
     end)
     page.mainCheck:SetPoint("TOPLEFT", profileCard, "TOPLEFT", 18, -251)
 
@@ -1594,11 +1815,13 @@ function GC.UI:BuildRosterPage()
         else
             SetToggle(page.altCheck, true)
         end
+        GC.UI:RefreshRoster()
     end)
     page.altCheck:SetPoint("LEFT", page.mainCheck, "RIGHT", 92, 0)
 
     page.flexCheck = CreateToggle(profileCard, "Flexibel einsetzbar", function(enabled)
         page.selectedFlex = enabled
+        GC.UI:RefreshRoster()
     end)
     page.flexCheck:SetPoint("TOPLEFT", profileCard, "TOPLEFT", 18, -292)
 
@@ -1628,13 +1851,16 @@ function GC.UI:BuildRosterPage()
     page.profileStatusMark:SetPoint("LEFT", confirm, "RIGHT", 8, 0)
     page.profileStatusMark:Hide()
 
+    -- Die Rueckmeldung steht ueber dem Knopf und nicht daneben: Neben ihm blieb
+    -- nur eine schmale Spalte, in der jeder erklaerende Satz abgeschnitten
+    -- wurde - und ausgerechnet der Fehlschlag muss sagen, was zu tun ist.
     page.profileStatus = CreateLabel(profileCard, "",
-        { width = 210, height = 38, font = "GameFontNormalSmall" })
-    page.profileStatus:SetPoint("LEFT", confirm, "RIGHT", 12, 0)
+        { width = 338, height = 32, font = "GameFontNormalSmall", multiline = true, vertical = "TOP" })
+    page.profileStatus:SetPoint("TOPLEFT", profileCard, "TOPLEFT", 18, -316)
 
     local professions = CreateCard(content, "Deine Berufe")
     professions:SetSize(388, 408)
-    professions:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+    page.professionCard = professions
     local professionHelp = CreateLabel(professions,
         "Wähle zwei Berufe manuell oder übernimm sie direkt aus deinem WoW-Berufsfenster. Die Angaben werden im Gildenroster synchronisiert.",
         { muted = true, width = 352, height = 64, vertical = "TOP" })
@@ -1664,7 +1890,7 @@ function GC.UI:BuildRosterPage()
 
     local absenceCard = CreateCard(content, "Deine Abmeldung")
     absenceCard:SetSize(752, 180)
-    absenceCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -420)
+    page.absenceCard = absenceCard
     local absenceHelp = CreateLabel(absenceCard,
         "Trage hier direkt ein, wann du nicht verfügbar bist. Mitgliederpflege und Roster berücksichtigen den Zeitraum automatisch.",
         { muted = true, width = 716 })
@@ -1715,7 +1941,7 @@ function GC.UI:BuildRosterPage()
 
     local gearCard = CreateCard(content, "Deine Ausrüstung")
     gearCard:SetSize(752, 162)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -612)
+    page.gearCard = gearCard
     local gearHelp = CreateLabel(gearCard,
         "Prüft deine eigene Ausrüstung auf fehlende Verzauberungen und leere Sockel. Läuft nur bei dir und ohne Gruppe.",
         { muted = true, width = 560, height = 18, vertical = "TOP" })
@@ -1740,6 +1966,33 @@ function GC.UI:BuildRosterPage()
     end)
     page.profileGearOpen:SetPoint("TOPRIGHT", page.profileGearButton, "BOTTOMRIGHT", 0, -6)
 
+    -- Alle Kartenpositionen kommen aus ROSTER_CARDS, auch die erste Fassung:
+    -- Zwei Quellen fuer dieselben Masse waeren zwei Gelegenheiten, sie
+    -- auseinanderlaufen zu lassen.
+    self:LayoutRosterPage(false)
+end
+
+-- Verschiebt die Karten der Profilseite, je nachdem ob die Checkliste "Erste
+-- Schritte" darueber steht. Sie ist die einzige Karte, die kommt und geht -
+-- der Rest wandert geschlossen um denselben Betrag mit.
+function GC.UI:LayoutRosterPage(showOnboarding)
+    local page = self.pages.ROSTER
+    if not page or not page.profileContent then
+        return
+    end
+    local shift = showOnboarding and (ROSTER_ONBOARDING_HEIGHT + ROSTER_CARD_GAP) or 0
+    if page.onboardingCard then
+        page.onboardingCard:SetShown(showOnboarding == true)
+    end
+    for _, definition in ipairs(ROSTER_CARDS) do
+        local card = page[definition.key]
+        if card then
+            local anchor = definition.anchor or "TOPLEFT"
+            card:ClearAllPoints()
+            card:SetPoint(anchor, page.profileContent, anchor, 0, -(definition.top + shift))
+        end
+    end
+    page.profileContent:SetHeight(ROSTER_CONTENT_HEIGHT + shift)
 end
 
 function GC.UI:RefreshProfileGear()
@@ -1759,11 +2012,29 @@ function GC.UI:RefreshProfileGear()
     page.profileGearAge:SetText("Zuletzt geprüft vor " .. ageMinutes .. " Minuten.")
 end
 
+-- Weicht die Auswahl auf der Karte vom gespeicherten Profil ab? Dann ist sie
+-- noch nicht bestaetigt. Verglichen wird gegen genau die Werte, mit denen die
+-- Karte auch vorbelegt wird - sonst gaelte ein frisches Profil schon beim
+-- Aufschlagen als geaendert.
+local function ProfileSelectionChanged(page, profile)
+    if page.selectedProfileSpec ~= (profile.raidSpecKey or profile.detectedSpecKey) then
+        return true
+    end
+    if page.selectedSecondarySpec ~= profile.secondarySpecKey then
+        return true
+    end
+    if (page.selectedMainStatus or "MAIN") ~= (profile.mainStatus or "MAIN") then
+        return true
+    end
+    return (page.selectedFlex == true) ~= (profile.flex == true)
+end
+
 function GC.UI:RefreshRoster()
     local page = self.pages.ROSTER
     if not page then
         return
     end
+    self:RefreshOnboarding()
     self:RefreshProfileGear()
 
     local profile = GC.Profile:Get()
@@ -1771,24 +2042,8 @@ function GC.UI:RefreshRoster()
     page.detectedText:SetText("Erkannt: " .. (detected and detected.name or "noch nicht ermittelbar")
         .. "  •  Talente " .. (profile.talentSignature or "0/0/0"))
 
-    -- Der Bestaetigungsstatus bleibt stehen: erst die letzte Rueckmeldung,
-    -- sonst der gespeicherte Stand des Profils.
-    if page.profileStatus then
-        local confirmation = GC.Profile:GetLastConfirmation()
-        if confirmation and not confirmation.ok then
-            -- Nur der Fehlschlag braucht Worte: Er sagt, was zu tun ist.
-            page.profileStatusMark:Hide()
-            page.profileStatus:SetText(confirmation.message or "Bestätigung fehlgeschlagen.")
-            SetTextColor(page.profileStatus, THEME.danger)
-        elseif profile.confirmed then
-            page.profileStatusMark:Show()
-            page.profileStatus:SetText("")
-        else
-            page.profileStatusMark:Hide()
-            page.profileStatus:SetText("Noch nicht bestätigt.")
-            SetTextColor(page.profileStatus, THEME.muted)
-        end
-    end
+    -- Die Vorbelegung steht vor der Rueckmeldung: Ohne sie waere die Auswahl
+    -- beim ersten Aufschlagen noch leer und damit rechnerisch "geaendert".
     if page.selectedProfileSpec == nil then
         page.selectedProfileSpec = profile.raidSpecKey or profile.detectedSpecKey
     end
@@ -1799,6 +2054,34 @@ function GC.UI:RefreshRoster()
     page.selectedMainStatus = page.selectedMainStatus or profile.mainStatus or "MAIN"
     if page.selectedFlex == nil then
         page.selectedFlex = profile.flex == true
+    end
+
+    -- Der Bestaetigungsstatus bleibt stehen: erst die letzte Rueckmeldung,
+    -- sonst der gespeicherte Stand des Profils.
+    if page.profileStatus then
+        local confirmation = GC.Profile:GetLastConfirmation()
+        local changed = ProfileSelectionChanged(page, profile)
+        if confirmation and not confirmation.ok then
+            -- Nur der Fehlschlag braucht Worte: Er sagt, was zu tun ist.
+            page.profileStatusMark:Hide()
+            page.profileStatus:SetText(confirmation.message or "Bestätigung fehlgeschlagen.")
+            SetTextColor(page.profileStatus, THEME.danger)
+        elseif changed and profile.confirmed then
+            -- Der Haken der letzten Bestaetigung darf nicht ueber einer
+            -- laengst geaenderten Auswahl stehen bleiben: Gespeichert und
+            -- gildenweit geteilt ist weiterhin der alte Stand.
+            page.profileStatusMark:Hide()
+            page.profileStatus:SetText("Geändert – noch nicht bestätigt. "
+                .. "In der Gilde steht weiter der zuletzt bestätigte Stand.")
+            SetTextColor(page.profileStatus, THEME.warning)
+        elseif profile.confirmed then
+            page.profileStatusMark:Show()
+            page.profileStatus:SetText("")
+        else
+            page.profileStatusMark:Hide()
+            page.profileStatus:SetText("Noch nicht bestätigt.")
+            SetTextColor(page.profileStatus, THEME.muted)
+        end
     end
 
     local classInfo = GC.Classes[profile.classFile or ""]
@@ -5277,7 +5560,13 @@ GC:RegisterCallback("INVENTORY_UPDATED", GC.UI, function(self)
 end)
 
 GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
-    self:Invalidate("WORKSHOP")
+    -- Ein eingelesener Beruf erledigt den zweiten Schritt der Checkliste, und
+    -- die steht auf der Profilseite.
+    self:Invalidate("WORKSHOP", "ROSTER")
+end)
+
+GC:RegisterCallback("PROFILE_CONFIRMATION_CHANGED", GC.UI, function(self)
+    self:Invalidate("ROSTER")
 end)
 
 GC:RegisterCallback("RECRUITMENT_UPDATED", GC.UI, function(self)

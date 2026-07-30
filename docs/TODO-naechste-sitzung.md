@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 30.07.2026, nach Release 0.9.41 / Installer 1.0.5.
+Stand: 30.07.2026, nach Release 0.9.45 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -29,11 +29,20 @@ der README.
 
 ---
 
-## 1. Onboarding-Wizard – erst konzipieren, noch nicht bauen
+## 1. Onboarding-Wizard – ERLEDIGT in 0.9.45
 
-**Ausdrücklich nur Konzept.** Der Nutzer will das Konzept sehen, bevor
-irgendetwas umgesetzt wird. Am 30.07.2026 bewusst offen gelassen: Der Nutzer
-will diesen Punkt mit einem anderen Modell erarbeiten.
+**Konzept:** `docs/KONZEPT-onboarding-erste-schritte.md`.
+**Umgesetzt:** `GuildCopilot/Onboarding.lua` und die Karte „Erste Schritte"
+oben auf der Profilseite; Einzelheiten im ROADMAP-Abschnitt „0.9.45".
+
+Aus dem Wizard wurde bewusst **kein eigenes Fenster**, sondern eine
+Checkliste auf der Seite, auf der alle drei Schritte ohnehin liegen. Die
+offene Frage „kontoweit oder pro Charakter?" hat sich mit dem abgeleiteten
+Zustand von selbst beantwortet: pro Charakter. Der Owner hat entschieden,
+dass sich das Fenster beim ersten Login **je Charakter** einmal von selbst
+öffnet.
+
+Der ursprüngliche Auftrag, zur Nachvollziehbarkeit:
 
 **Idee:** Beim ersten Start nach dem Einloggen führt ein Assistent durch drei
 Schritte:
@@ -81,6 +90,7 @@ Schritte:
 - Ein abgebrochener Wizard darf nicht bei jedem Login erneut aufspringen.
 
 **Ergebnis dieser Aufgabe:** ein Konzeptdokument unter `docs/`, kein Code.
+Beides liegt inzwischen vor – siehe oben.
 
 ---
 

@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.44
+# Guild Copilot 0.9.45
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -41,6 +41,8 @@ Guild Copilot ist ein deutschsprachiger Rekrutierungshelfer für **World of Warc
 - zu jedem Interessenten stehen zwei **kopierbare Profil-Links** bereit (classic-armory.org und Warcraft Logs): hineinklicken markiert den ganzen Link, Strg+C kopiert ihn. Region und Realm stammen aus der gespeicherten Warcraft-Logs-Gildenquelle, die dafür gildenweit synchronisiert wird;
 - Gildenübersicht mit bis zu 25 zuletzt aktiven Level-70-Spielern, frei wählbaren Raider-Rängen, Raidprofil, Main/Twink-Status und Berufen;
 - persönliches **Profil** als erster Menüpunkt mit Raidprofil, Dual-Spec, Berufen und eigener Abmeldung von/bis samt optionalem Grund;
+- **Einrichtung als Checkliste statt als Wizard-Fenster**: „Erste Schritte“ steht oben im Profil und zeigt, was noch offen ist – Raidprofil bestätigen, Berufe einlesen, Ausrüstung ansehen. Einen „Weiter“-Knopf gibt es nicht, die echte Aktion schiebt die Liste weiter; jeder Schritt ist einzeln überspringbar und die ganze Karte jederzeit abbrechbar. Übersprungen wird von der echten Aktion überstimmt, und **Einrichtung** oben rechts holt die Liste jederzeit zurück. Beim ersten Login je Charakter öffnet sich das Fenster einmal von selbst – nur einmal, und nicht bei Charakteren mit längst bestätigtem Profil;
+- **eine geänderte Auswahl gilt als unbestätigt**: Wer Spec, Dual-Spec, Main/Twink oder „flexibel“ umstellt, sieht statt des Bestätigungshakens den Hinweis, dass in der Gilde weiter der zuletzt bestätigte Stand steht;
 - ranggeschützte Mitgliederpflege mit aktiven Gildenabmeldungen und nach Inaktivität sortierten Prüfvorschlägen;
 - Vorschläge lassen sich als dauerhafte **Ausnahme**, **zurückgestellt** (30 Tage) oder **erledigt** ablegen; alle Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten;
 - einzelner Gildenausschluss nur nach einer zweiten, ausdrücklichen Bestätigung, nur mit echter WoW-Berechtigung, nur gegen einen niedrigeren und ungeschützten Rang und niemals automatisch oder in Serie;
@@ -142,7 +144,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.44; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.45; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 

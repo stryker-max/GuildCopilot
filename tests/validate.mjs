@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.44",
+  "## Version: 0.9.45",
 ];
 
 for (const entry of requiredMetadata) {
@@ -329,6 +329,14 @@ const requiredImplementations = [
   ["Boss überlebt den Wipe in der Auswertung", /segment\.bossName or segment\.lastNPCDeath/],
   ["Ausnahmen für Farmgear und Widerstandssets", /function GC\.GearAudit:CycleSlotException/],
   ["Content-Phase der Gilde", /function GC\.GearAudit:GetContentPhase/],
+  ["Checkliste statt Wizard-Fenster", /function GC\.UI:BuildOnboardingCard/],
+  ["abgeleiteter Zustand der Einrichtung", /function GC\.Onboarding:GetStepState/],
+  ["jeder Schritt einzeln überspringbar", /function GC\.Onboarding:SetStepSkipped/],
+  ["Einrichtung jederzeit erneut aufrufbar", /function GC\.Onboarding:Reopen/],
+  ["einmaliges Auto-Öffnen je Charakter", /function GC\.Onboarding:ShouldAutoOpen/],
+  ["Karten wandern mit der Checkliste", /function GC\.UI:LayoutRosterPage/],
+  ["erneute Bestätigung nach Profiländerung", /local function ProfileSelectionChanged/],
+  ["Profiländerung frischt die Karte auf", /page\.selectedFlex = enabled\s+GC\.UI:RefreshRoster\(\)/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
@@ -470,6 +478,92 @@ if (settingsContentHeight < settingsBottom) {
     `Der Scrollbereich der Einstellungen ist zu kurz: Karten reichen bis ${settingsBottom} px, ` +
       `der Inhalt ist ${settingsContentHeight} px hoch.`
   );
+}
+
+// Die Profilseite trägt die Checkliste „Erste Schritte“ ganz oben. Sie kommt
+// und geht, alle Karten darunter wandern um denselben Betrag mit - deshalb
+// stehen deren Maße in einer Tabelle statt verstreut im Aufbau. Geprüft wird
+// dasselbe wie bei den Einstellungen: Wächst eine Karte, darf sie sich nicht in
+// die nächste schieben, und der Scrollbereich muss beide Zustände tragen.
+const rosterNumber = (name) => {
+  const match = uiSource.match(new RegExp(`local ${name} = (\\d+)`));
+  if (!match) throw new Error(`Maß ${name} der Profilseite fehlt in UI.lua.`);
+  return Number(match[1]);
+};
+const onboardingHeight = rosterNumber("ROSTER_ONBOARDING_HEIGHT");
+const rosterGap = rosterNumber("ROSTER_CARD_GAP");
+const rosterContentHeight = rosterNumber("ROSTER_CONTENT_HEIGHT");
+const rosterCardBlock = uiSource.slice(
+  uiSource.indexOf("local ROSTER_CARDS = {"),
+  uiSource.indexOf("local TAB_DEFINITIONS = {")
+);
+const rosterRows = [...rosterCardBlock.matchAll(
+  /\{ key = "(\w+)", top = (\d+), height = (\d+)/g
+)].map((match) => ({
+  name: match[1],
+  top: Number(match[2]),
+  bottom: Number(match[2]) + Number(match[3]),
+}));
+if (rosterRows.length < 4) {
+  throw new Error("Die Kartenmaße der Profilseite lassen sich nicht mehr ablesen.");
+}
+// Karten mit demselben Abstand stehen nebeneinander (Raidprofil und Berufe);
+// maßgeblich ist deshalb die unterste Kante je Reihe.
+const rosterLevels = new Map();
+for (const row of rosterRows) {
+  rosterLevels.set(row.top, {
+    top: row.top,
+    bottom: Math.max(rosterLevels.get(row.top)?.bottom ?? 0, row.bottom),
+    name: rosterLevels.get(row.top) ? `${rosterLevels.get(row.top).name}/${row.name}` : row.name,
+  });
+}
+const rosterOrder = [...rosterLevels.values()].sort((left, right) => left.top - right.top);
+for (let index = 1; index < rosterOrder.length; index++) {
+  const previous = rosterOrder[index - 1];
+  const current = rosterOrder[index];
+  if (current.top < previous.bottom) {
+    throw new Error(
+      `Die Karten ${previous.name} und ${current.name} der Profilseite überlappen sich: ` +
+        `${previous.name} endet bei ${previous.bottom}, ${current.name} beginnt bei ${current.top}.`
+    );
+  }
+}
+const rosterBottom = rosterOrder[rosterOrder.length - 1].bottom;
+if (rosterContentHeight < rosterBottom) {
+  throw new Error(
+    `Der Scrollbereich des Profils ist zu kurz: Karten reichen bis ${rosterBottom} px, ` +
+      `der Inhalt ist ${rosterContentHeight} px hoch.`
+  );
+}
+// Die Checkliste muss vollständig über die erste Karte passen, sonst schiebt
+// sie sich beim Einblenden ins Raidprofil.
+if (!uiSource.includes("(ROSTER_ONBOARDING_HEIGHT + ROSTER_CARD_GAP) or 0")) {
+  throw new Error("Die Karten der Profilseite wandern nicht mehr um die volle Höhe der Checkliste.");
+}
+if (onboardingHeight <= 0 || rosterGap <= 0) {
+  throw new Error("Die Checkliste hat keine brauchbare Höhe oder keinen Abstand zur ersten Karte.");
+}
+// Ein eigener Navigationspunkt für die Einrichtung würde die volle
+// Seitenleiste sprengen; der Knopf sitzt deshalb im Fensterkopf.
+if (/\{ key = "ONBOARDING"/.test(uiSource)) {
+  throw new Error("Die Einrichtung hat wieder einen eigenen Navigationspunkt.");
+}
+if (!/CreateButton\(header, "Einrichtung"/.test(uiSource)) {
+  throw new Error("Der Knopf „Einrichtung“ fehlt im Fensterkopf.");
+}
+// Die Spielschrift kennt weder Haken noch Pfeil und zeichnet leere Kästen -
+// dieselbe Lektion wie bei der Profilbestätigung in 0.9.39.
+const onboardingCard = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildOnboardingCard"),
+  uiSource.indexOf("function GC.UI:RefreshOnboarding")
+);
+for (const glyph of ["✓", "►", "○"]) {
+  if (onboardingCard.includes(glyph)) {
+    throw new Error(`Die Checkliste zeichnet ihre Zustände wieder als Schriftzeichen (${glyph}).`);
+  }
+}
+if (!onboardingCard.includes("UI-CheckBox-Check")) {
+  throw new Error("Der erledigte Schritt wird nicht mehr mit der Hakentextur markiert.");
 }
 
 // Entlastung beim Ein- und Ausloggen vieler Gildenmitglieder. Beide Stellen

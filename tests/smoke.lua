@@ -51,6 +51,14 @@ Dummy.__index = function(self, key)
         return function(frame, value)
             frame.width = tonumber(value)
         end
+    elseif key == "SetSize" then
+        -- Karten und Knoepfe werden am Stueck bemasst. Ohne diesen Zweig
+        -- blieben genau ihre Masse als einzige unlesbar - also ausgerechnet
+        -- die, um die es in einem Layouttest geht.
+        return function(frame, width, height)
+            frame.width = tonumber(width)
+            frame.height = tonumber(height)
+        end
     elseif key == "GetWidth" then
         return function(frame)
             return frame.width
@@ -635,6 +643,7 @@ local files = {
     "Sync.lua",
     "Recruitment.lua",
     "Chat.lua",
+    "Onboarding.lua",
     "UI.lua",
 }
 
@@ -3691,6 +3700,202 @@ assert(addon.Chat:ClearInboxFilter(filterList[1].key) == true,
     "Ein Eintrag ließ sich nicht wieder zulassen")
 assert(addon.Chat:IsInboxFiltered("Doppel") == false, "Der freigegebene Spieler bleibt gefiltert")
 addon.DB:GetGuild().inbox = {}
+end
+
+-- === Profil: geändert heißt unbestätigt ====================================
+--
+-- Der Haken der letzten Bestätigung stand bisher auch über einer längst
+-- geänderten Auswahl. Gespeichert und gildenweit geteilt ist aber weiter der
+-- zuletzt bestätigte Stand - genau wie beim Werbetext, der nach jeder
+-- Änderung erneut bestätigt werden muss.
+do
+addon.UI.frame:Show()
+addon.UI:ShowPage("ROSTER")
+local page = addon.UI.pages.ROSTER
+
+addon.Profile:Confirm("HUNTER:2", nil, "MAIN", false)
+page.selectedProfileSpec = nil
+page.secondaryInitialized = nil
+page.selectedMainStatus = nil
+page.selectedFlex = nil
+addon.UI:RefreshRoster()
+assert(page.profileStatusMark:IsShown() == true,
+    "Das frisch bestätigte Profil zeigt keinen Haken")
+assert(page.profileStatus:GetText() == "",
+    "Das unveränderte Profil meldet trotzdem etwas")
+
+-- Ein Klick auf "Flexibel einsetzbar" ist eine Änderung wie jede andere.
+page.selectedFlex = true
+addon.UI:RefreshRoster()
+assert(page.profileStatusMark:IsShown() == false,
+    "Der Haken bleibt über einer geänderten Auswahl stehen")
+assert(page.profileStatus:GetText():find("bestätigt", 1, true) ~= nil,
+    "Die geänderte Auswahl fordert keine erneute Bestätigung")
+
+-- Auch die Spec-Auswahl zählt, und das Bestätigen räumt den Hinweis weg.
+page.selectedFlex = false
+page.selectedProfileSpec = "HUNTER:1"
+addon.UI:RefreshRoster()
+assert(page.profileStatusMark:IsShown() == false,
+    "Eine geänderte Primär-Spec gilt weiter als bestätigt")
+addon.Profile:Confirm(page.selectedProfileSpec, page.selectedSecondarySpec,
+    page.selectedMainStatus, page.selectedFlex)
+addon.UI:RefreshRoster()
+assert(page.profileStatusMark:IsShown() == true,
+    "Nach dem Bestätigen fehlt der Haken")
+assert(page.profileStatus:GetText() == "",
+    "Der Änderungshinweis bleibt nach dem Bestätigen stehen")
+end
+
+-- === Erste Schritte: abgeleiteter Zustand statt Merker =====================
+--
+-- Der Kern der Checkliste ist, dass sie nichts behauptet: Jeder Schritt gilt
+-- genau dann als erledigt, wenn die echten Daten es hergeben. Deshalb pruefen
+-- diese Faelle durchweg ueber die echten Aktionen und nie ueber einen Merker.
+do
+local profile = addon.Profile:Get()
+local guildData = addon.DB:GetGuild()
+local savedConfirmed = profile.confirmed
+local savedProfessions = profile.professions
+local savedWorkshop = profile.workshop
+local savedAudits = guildData.gearAudits
+local savedAuto = profile.professionAuto
+local data = addon.Onboarding:GetData()
+
+local function Reset()
+    profile.confirmed = false
+    -- Ohne diese Zeile erledigt sich der zweite Schritt mit dem ersten:
+    -- Confirm ruft Refresh, und Refresh liest die WoW-Berufe ein. Im Spiel ist
+    -- das genau richtig; hier soll jeder Übergang einzeln geprüft werden.
+    profile.professionAuto = false
+    profile.professions = {}
+    profile.workshop = { professions = {} }
+    guildData.gearAudits = {}
+    data.skipped = {}
+    data.dismissedAt = 0
+    data.autoOpenedAt = 0
+    data.doneShownAt = 0
+    addon.Onboarding.hiddenForSession = nil
+    addon.Onboarding.completionVisible = nil
+end
+
+Reset()
+local steps = addon.Onboarding:GetSteps()
+assert(#steps == 3, "Die Checkliste hat nicht drei Schritte")
+assert(steps[1].done == false and steps[1].active == true,
+    "Der erste offene Schritt ist nicht der aktive")
+assert(steps[2].active == false and steps[3].active == false,
+    "Es sind mehrere Schritte gleichzeitig aktiv")
+assert(addon.Onboarding:ShouldShow() == true,
+    "Die Checkliste bleibt trotz offener Schritte verborgen")
+
+-- Die echte Aktion treibt weiter, nicht ein Weiter-Knopf.
+addon.Profile:Confirm("HUNTER:2", nil, "MAIN", false)
+steps = addon.Onboarding:GetSteps()
+assert(steps[1].done == true, "Das bestätigte Raidprofil erledigt den ersten Schritt nicht")
+assert(steps[1].detail ~= nil, "Der erledigte Schritt nennt sein Ergebnis nicht")
+assert(steps[2].active == true, "Der zweite Schritt rückt nicht nach")
+
+-- Überspringen schiebt weiter ...
+assert(addon.Onboarding:SetStepSkipped("PROFESSIONS", true) == true,
+    "Ein Schritt ließ sich nicht überspringen")
+steps = addon.Onboarding:GetSteps()
+assert(steps[2].skipped == true and steps[3].active == true,
+    "Der übersprungene Schritt gibt den nächsten nicht frei")
+
+-- ... wird aber von der echten Aktion überstimmt: Übersprungen heißt "nicht
+-- drängeln", nicht "nicht wahrnehmen".
+profile.professions = { { name = "Ingenieurskunst" } }
+steps = addon.Onboarding:GetSteps()
+assert(steps[2].done == true and steps[2].skipped == false,
+    "Ein tatsächlich erledigter Schritt gilt weiter als übersprungen")
+assert(tostring(steps[2].detail):find("Ingenieurskunst", 1, true) ~= nil,
+    "Der erkannte Beruf steht nicht an der Zeile")
+
+-- Ein Beruf aus dem Werkstattscan zählt genauso wie ein von Hand gewählter.
+profile.professions = {}
+profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
+steps = addon.Onboarding:GetSteps()
+assert(steps[2].done == true, "Ein gescannter Beruf erledigt den Schritt nicht")
+
+-- Der dritte Schritt kommt aus der Selbstprüfung.
+assert(steps[3].done == false, "Der dritte Schritt gilt ohne Prüfung als erledigt")
+addon.UI.frame:Show()
+addon.UI:ShowPage("ROSTER")
+addon.GearAudit:AuditSelf()
+steps = addon.Onboarding:GetSteps()
+assert(steps[3].done == true, "Die Ausrüstungsprüfung erledigt den dritten Schritt nicht")
+assert(addon.Onboarding:IsFinished() == true, "Die vollständige Liste gilt nicht als fertig")
+
+-- Die Erfolgsmeldung erscheint genau einmal und bleibt bis zum Schließen des
+-- Fensters stehen - sonst wäre sie weg, bevor jemand sie liest. Bei offenem
+-- Fenster ist sie bereits beim Zeichnen angekündigt worden: Die Prüfung hat
+-- den letzten Schritt geschlossen.
+assert(data.doneShownAt > 0, "Die fertige Liste wurde beim Zeichnen nicht angekündigt")
+assert(addon.Onboarding:NoteCompleted() == false, "Die Erfolgsmeldung erscheint mehrfach")
+assert(addon.Onboarding:ShouldShow() == true, "Die fertige Liste verschwindet sofort")
+addon.Onboarding:NoteWindowClosed()
+assert(addon.Onboarding:ShouldShow() == false,
+    "Die fertige Liste erscheint beim nächsten Öffnen erneut")
+
+-- Das × blendet nur für diese Sitzung aus, "Nicht mehr anzeigen" dauerhaft,
+-- und der Knopf "Einrichtung" holt beides zurück.
+Reset()
+addon.Onboarding:HideForSession()
+assert(addon.Onboarding:ShouldShow() == false, "Das × blendet die Checkliste nicht aus")
+addon.Onboarding:Reopen()
+assert(addon.Onboarding:ShouldShow() == true, "Einrichtung holt die Checkliste nicht zurück")
+addon.Onboarding:SetStepSkipped("PROFILE", true)
+addon.Onboarding:Dismiss()
+assert(addon.Onboarding:ShouldShow() == false, "Nicht mehr anzeigen wirkt nicht")
+addon.Onboarding:Reopen()
+assert(addon.Onboarding:ShouldShow() == true,
+    "Nach Nicht mehr anzeigen lässt sich die Checkliste nicht wieder aufrufen")
+assert(addon.Onboarding:GetSteps()[1].skipped == false,
+    "Einrichtung fängt die Liste nicht neu an, sondern zeigt nur Übersprungenes")
+
+-- Auto-Öffnen: einmal je Charakter, und nie bei längst bestätigtem Profil.
+Reset()
+assert(addon.Onboarding:ShouldAutoOpen() == true,
+    "Ein frischer Charakter bekommt das Fenster nicht zu sehen")
+assert(addon.Onboarding:AutoOpen() == true, "Das Fenster öffnete sich nicht von selbst")
+assert(addon.UI.frame:IsShown() == true, "Das Auto-Öffnen zeigt das Fenster nicht")
+assert(addon.Onboarding:AutoOpen() == false,
+    "Das Fenster springt bei jedem Login erneut auf")
+
+Reset()
+profile.confirmed = true
+assert(addon.Onboarding:ShouldAutoOpen() == false,
+    "Ein längst eingerichteter Charakter wird beim Login behelligt")
+assert(data.autoOpenedAt == 0,
+    "Der abgelehnte Versuch hat den einmaligen Merker trotzdem verbraucht")
+
+-- Die Karten darunter wandern mit, statt eine Lücke zu lassen.
+Reset()
+addon.UI.frame:Show()
+addon.UI:ShowPage("ROSTER")
+local page = addon.UI.pages.ROSTER
+assert(page.onboardingCard:IsShown() == true, "Die Checkliste erscheint nicht auf der Profilseite")
+local heightWithCard = page.profileContent:GetHeight()
+addon.Onboarding:Dismiss()
+addon.UI:RefreshRoster()
+assert(page.onboardingCard:IsShown() == false, "Die abgelehnte Checkliste bleibt sichtbar")
+local heightWithoutCard = page.profileContent:GetHeight()
+assert(heightWithCard > heightWithoutCard,
+    "Der Scrollbereich wächst nicht mit der Checkliste")
+assert(heightWithCard - heightWithoutCard >= page.onboardingCard:GetHeight(),
+    "Die Karten wandern um weniger als die Höhe der Checkliste")
+
+-- Aufraeumen: erst die Merker, dann der echte Zustand - Reset() setzt das
+-- Profil zurueck und wuerde die Wiederherstellung sonst gleich wieder
+-- ueberschreiben.
+Reset()
+addon.Onboarding:Dismiss()
+profile.confirmed = savedConfirmed
+profile.professionAuto = savedAuto
+profile.professions = savedProfessions
+profile.workshop = savedWorkshop
+guildData.gearAudits = savedAudits
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
