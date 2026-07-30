@@ -319,6 +319,52 @@ function GC.RaidMonitor:GetSummary(sessionID)
     return nil
 end
 
+-- Erkannte und ausgeschlossene Gegnernamen. Der Combat Log nennt im Raid
+-- dieselben Namen tausendfach; ohne diesen Zwischenspeicher liefe fuer jedes
+-- Schadensereignis die ganze Bossliste durch.
+local bossLookupCache = {}
+
+-- Erkannt wird ueber den Eigennamen als Teilzeichenkette: "Prinz Malchezaar"
+-- und "Prince Malchezaar" enthalten beide "Malchezaar". Damit braucht es
+-- keine belegte Uebersetzung je Client-Sprache.
+function GC.RaidMonitor:ResolveBoss(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    local cached = bossLookupCache[name]
+    if cached ~= nil then
+        return cached or nil
+    end
+
+    local lowered = name:lower()
+    for _, boss in ipairs(GC.RaidBosses) do
+        for _, needle in ipairs(boss.names) do
+            if lowered:find(needle:lower(), 1, true) then
+                bossLookupCache[name] = boss
+                return boss
+            end
+        end
+    end
+    bossLookupCache[name] = false
+    return nil
+end
+
+-- Nur pruefen, solange der Boss des Abschnitts noch nicht feststeht: Ist er
+-- einmal erkannt, kostet der Rest des Kampfes gar nichts mehr.
+function GC.RaidMonitor:NoteBossParticipant(segment, guid, name)
+    if not segment or segment.bossName then
+        return
+    end
+    if not tostring(guid or ""):find("Creature", 1, true) then
+        return
+    end
+    local boss = self:ResolveBoss(name)
+    if boss then
+        segment.bossName = SanitizedText(name, 36)
+        segment.bossInstance = boss.instance
+    end
+end
+
 function GC.RaidMonitor:BeginSegment(startedAt)
     local session = self.session
     if not session or session.segment then
@@ -328,6 +374,8 @@ function GC.RaidMonitor:BeginSegment(startedAt)
         startedAt = tonumber(startedAt) or GC.Util.Now(),
         playerDeaths = 0,
         lastNPCDeath = nil,
+        bossName = nil,
+        bossInstance = nil,
     }
 end
 
@@ -366,8 +414,13 @@ function GC.RaidMonitor:CloseSegment(endedAt)
         result = "KILL"
     end
 
+    -- Der erkannte Boss hat Vorrang vor dem zuletzt gestorbenen Gegner. Genau
+    -- bei einem Wipe stirbt der Boss ja nicht, und dann stand hier bisher der
+    -- Name irgendeines Adds - oder gar nichts.
     session.pulls[#session.pulls + 1] = {
-        name = segment.lastNPCDeath or "Kampf",
+        name = segment.bossName or segment.lastNPCDeath or "Kampf",
+        instance = segment.bossInstance,
+        boss = segment.bossName ~= nil,
         startedAt = segment.startedAt,
         endedAt = endedAt,
         result = result,
@@ -441,6 +494,14 @@ function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, d
     local session = self.session
     if not session or not TRACKED_SUBEVENTS[subevent] then
         return
+    end
+
+    -- Wer im Abschnitt mitmischt, verraet, gegen wen gekaempft wird. Der Boss
+    -- wirkt Zauber, lange bevor er stirbt - deshalb steht sein Name auch dann
+    -- fest, wenn der Versuch im Wipe endet.
+    if session.segment and not session.segment.bossName then
+        self:NoteBossParticipant(session.segment, sourceGUID, sourceName)
+        self:NoteBossParticipant(session.segment, destGUID, destName)
     end
 
     if subevent == "UNIT_DIED" then

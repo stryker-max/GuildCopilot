@@ -298,6 +298,21 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.38 – Essen, Bosse und ein Installer ohne Rückfragen
+
+- **Essen zählt endlich mit.** Alle Sattgegessen-Buffs heißen im Spiel gleich, tragen aber je Gericht eine eigene Spell-ID – live erkennt das Addon sie am Auranamen, aus Warcraft Logs kommen nur IDs, und dort stand Essen deshalb dauerhaft auf null. Zehn Buffs sind jetzt einzeln nachgeschlagen und eingetragen. Bewusst draußen bleiben die reinen `Food`-Auren (33258, 33262, 33264, 33266 – nur Lebensregeneration während des Essens, kein Raidbuff) und das Tierfutter 33272, das ein Jägertier beglückt und keinen Teilnehmer. Beim Nachschlagen entpuppte sich außerdem 33270 als „Check Players" und 43765 als Kochrezept statt als Buff;
+- **gepflegte Bossliste für alle neun TBC-Schlachtzüge.** Der Gewinn liegt beim **Wipe**: Dort stirbt der Boss gerade nicht, also hieß der Versuch bisher „Kampf" oder trug den Namen eines Adds – und Wipes sind das, was man hinterher ansieht. Erkannt wird über den **Eigennamen als Teilzeichenkette**: „Prinz Malchezaar" und „Prince Malchezaar" enthalten beide „Malchezaar". Damit trägt die Liste auf deutschen wie englischen Clients, ohne dass für jeden Boss eine belegte Übersetzung nötig wäre – die ließ sich nämlich nicht beschaffen, alle deutschen Bosslisten antworteten mit HTTP 403. Wo ein Boss keinen Eigennamen hat (Der Kurator, Maid der Tugend), stehen beide Sprachfassungen. Trifft nichts, bleibt es bei der bisherigen Heuristik;
+- der Combat Log liefert im Raid tausende Ereignisse, deshalb prüft die Erkennung **nur, solange der Boss noch nicht feststeht**, und merkt sich abgewiesene Namen. Ist der Boss erkannt, kostet der Rest des Kampfes nichts mehr;
+- **die Profilbestätigung bleibt sichtbar.** Erfolg und Fehler standen nur im Chat und waren nach ein paar Kampfmeldungen weggescrollt; wer nebenher etwas anderes tat, wusste hinterher nicht, ob sein Profil steht. Jetzt steht das Ergebnis samt Zeitpunkt am Profil. Dazu ein eigener Ton – der **Stufenaufstieg** (SoundKit 888) –, damit die Rückmeldung auf die eigene Eingabe nicht klingt wie die Meldung über einen fremden Interessenten.
+
+### Installer 1.0.4
+
+- **eigenes Dateisymbol** im Explorer, erzeugt aus dem Logo in sieben Größen von 16 bis 256 Pixeln. Eine einzelne Größe hätte Windows sichtbar hochskaliert;
+- **„Nach Updates suchen" steht vorn und ist hervorgehoben**, „Neu installieren" tritt zurück: Der eine Knopf wird ständig gebraucht, der andere selten;
+- **ein gefundenes Update wird sofort eingespielt** – ohne zweite Rückfrage, denn wer danach sucht, will es auch haben. Eine **Rückstufung** auf eine ältere Fassung im Repository bleibt ausdrücklich davon ausgenommen und weiter Handarbeit;
+- **beim Öffnen wird immer aktualisiert.** Der Haken „Beim Öffnen automatisch aktualisieren" ist entfernt – er war nur eine Gelegenheit, veraltet zu bleiben. Beide Wege entscheiden jetzt über dieselbe Stelle, statt die Frage doppelt zu beantworten;
+- die README erklärt jetzt, **warum Windows beim Herunterladen warnt** (die `.exe` ist nicht code-signiert, dazu Mark of the Web und SmartScreen), was ein Zertifikat kosten würde und warum ein selbst ausgestelltes nichts hilft. Dazu die SHA-256-Prüfsumme zum Vergleichen. Abschalten lässt sich die Warnung nicht – und SmartScreen auszuschalten wäre keine Lösung, sondern nur der Verzicht auf eine Prüfung, die auch anderswo nützt.
+
 ## 0.9.37 – Der Regelsatz ist nicht mehr leer
 
 Seit 0.6 stand im Gear Audit dieselbe Lücke: Die Enchant-IDs müssten „aus einer belegbaren Quelle" kommen, und wowtbc.gg wie Wowhead antworteten auf Skriptabrufe mit HTTP 403. Beides gilt weiter – aber nicht für einen Abruf, der die Seite wie ein Leser holt.
@@ -435,19 +450,19 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
-## Offene Punkte (Stand 0.9.37)
+## Offene Punkte (Stand 0.9.38)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:
 
 - **Aldor-Schulterinschriften**: Die drei Aldor-Varianten fehlen im ausgelieferten Regelsatz, weil sich ihre Enchant-IDs nicht belegen ließen. Sie werden dadurch nicht falsch bewertet, sondern gar nicht.
 - **Phasenauswahl nur über den Slash-Befehl**: `/gcp phase` stellt die Content-Phase um und synchronisiert sie gildenweit. Ein Auswahlfeld auf der Einstellungsseite fehlt noch.
-- **Consumable-Spell-IDs**: Der Kernbestand wurde gegen einen echten SSC/TK-Report geprüft, ist damit aber nicht vollständig. Essen fehlt in der WCL-Auswertung, weil die „Sattgegessen“-IDs je Gericht abweichen; live erkennt das Addon die Aura zusätzlich am Namen. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
-- **Bosserkennung**: heuristisch über Kampfabschnitte, keine gepflegte Bossliste je Instanz.
+- **Consumable-Spell-IDs**: Der Kernbestand wurde gegen einen echten SSC/TK-Report geprüft, ist damit aber nicht vollständig; Essen ist seit 0.9.38 abgedeckt. Unbekannte IDs werden nicht gezählt, es entstehen also keine falschen Zahlen.
+- **Bosserkennung**: Seit 0.9.38 gibt es eine gepflegte Liste über den Eigennamen. Ob jeder deutsche Client-Name wirklich trifft, ist im Spiel noch nicht gegengeprüft – trifft einer nicht, greift die bisherige Heuristik.
 - **Companion-Abfragen für die WCL-Nachanalyse**: seit 0.9.17 gegen echte Reports gelaufen und dabei viermal korrigiert; Einzelheiten oben unter „Nachanalyse aus Warcraft Logs". Erprobt ist bislang ein einzelner SSC/TK-Report – Karazhan, Gruul und Magtheridon sind noch nicht gegengeprüft.
 - **Gear Audit**: Die eigenen Messdaten werden seit 0.9.19 automatisch in der Gilde verteilt; **Gruppe prüfen** bleibt als bewusster Inspect-Rückfall für Mitglieder ohne Addon oder ohne frischen Snapshot. Ausnahmen für Farmgear und Widerstandssets sind seit 0.9.37 umgesetzt.
 - **Private WCL-Reports**: bewusst ausgeschlossen, dafür wäre eine OAuth-Benutzerfreigabe nötig.
 - **Nicht verifizierbare API-Annahmen**: ob `GetProfessions` und `CombatLogGetCurrentEventInfo` in TBC Classic Anniversary genau so antworten, ließ sich von außen nicht belegen. Beide Aufrufe sind abgesichert und fallen still aus, statt Fehler zu werfen.
-- **Profilbestätigung**: Erfolg und Validierungsfehler erscheinen derzeit im Chat; ein dauerhaft sichtbarer Status direkt am Profil sowie ein eigener, vom Bewerberton getrennter Bestätigungssound fehlen.
+- **Code-Signing für den Installer**: Ohne Zertifikat warnen Browser, Windows und SmartScreen bei jedem Download auf einem fremden Rechner. Behebbar nur durch ein gekauftes Zertifikat; bis dahin steht die Prüfsumme in der README.
 - **Postfach-Zeitstempel und Deduplizierung**: Empfangszeiten werden gespeichert und gleiche Namen/GUIDs grundlegend zusammengeführt. Datum/Uhrzeit werden noch nicht angezeigt; eine kanonische Realm-Zuordnung und eine einsehbare, zeitlich begrenzte Ignorierliste nach dem Löschen fehlen.
 - **Lokale Combat-Log-Nachanalyse**: Live-Sitzungen und der optionale WCL-Import sind vorhanden. Ein externer Offline-Import aus `_anniversary_/Logs/WoWCombatLog.txt`, ein gemeinsamer Sitzungsfingerabdruck zur Quell-Deduplizierung sowie `CombatantInfo` als zweite Gear-Quelle sind noch nicht umgesetzt.
 

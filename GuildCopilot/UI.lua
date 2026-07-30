@@ -1186,6 +1186,22 @@ function GC.UI:BuildSettingsPage()
     page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
     page.minimapToggle.text:SetWidth(260)
 
+    -- Eigener Ton fuer die Bestaetigung des eigenen Raidprofils. Bewusst vom
+    -- Bewerberklang getrennt: Der eine meldet einen fremden Interessenten, der
+    -- andere bestaetigt die eigene Eingabe.
+    CreateLabel(notificationCard, "Profilbestätigung:", { muted = true, width = 118, height = 32 })
+        :SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -145)
+    page.profileSoundDropdown = CreateChoiceDropdown(notificationCard, 190, soundNames, function(value)
+        for _, sound in ipairs(GC.SuccessSoundOptions) do
+            if sound.name == value then
+                GC.DB:GetSettings().profileSoundKey = sound.key
+                GC.Chat:PlayProfileSound()
+                break
+            end
+        end
+    end, false)
+    page.profileSoundDropdown:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 508, -142)
+
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
     gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -644)
@@ -1277,6 +1293,15 @@ function GC.UI:RefreshSettings()
         end
     end
     page.successSoundDropdown:SetValue(selectedSoundName)
+
+    local profileSoundName
+    for _, sound in ipairs(GC.SuccessSoundOptions) do
+        if sound.key == (settings.profileSoundKey or GC.DefaultProfileSoundKey) then
+            profileSoundName = sound.name
+            break
+        end
+    end
+    page.profileSoundDropdown:SetValue(profileSoundName or GC.SuccessSoundOptions[1].name)
 
     if canEditGuildProfile then
         if page.settingsStatus:GetText() == "" then
@@ -1386,6 +1411,12 @@ function GC.UI:BuildRosterPage()
         GC.UI:RefreshRoster()
     end, "PRIMARY")
     confirm:SetPoint("BOTTOMLEFT", profileCard, "BOTTOMLEFT", 18, 18)
+
+    -- Ergebnis der letzten Bestaetigung. Im Chat war es nach ein paar
+    -- Kampfmeldungen weggescrollt; hier steht es, bis sich etwas aendert.
+    page.profileStatus = CreateLabel(profileCard, "",
+        { width = 168, height = 38, font = "GameFontNormalSmall" })
+    page.profileStatus:SetPoint("LEFT", confirm, "RIGHT", 12, 0)
 
     local professions = CreateCard(content, "Deine Berufe")
     professions:SetSize(388, 408)
@@ -1525,6 +1556,26 @@ function GC.UI:RefreshRoster()
     local detected = GC.SpecByKey[profile.detectedSpecKey or ""]
     page.detectedText:SetText("Erkannt: " .. (detected and detected.name or "noch nicht ermittelbar")
         .. "  •  Talente " .. (profile.talentSignature or "0/0/0"))
+
+    -- Der Bestaetigungsstatus bleibt stehen: erst die letzte Rueckmeldung,
+    -- sonst der gespeicherte Stand des Profils.
+    if page.profileStatus then
+        local confirmation = GC.Profile:GetLastConfirmation()
+        if confirmation and not confirmation.ok then
+            page.profileStatus:SetText(confirmation.message or "Bestätigung fehlgeschlagen.")
+            SetTextColor(page.profileStatus, THEME.danger)
+        elseif profile.confirmed and profile.confirmedAt then
+            page.profileStatus:SetText("Bestätigt am "
+                .. date("%d.%m.%Y um %H:%M", profile.confirmedAt))
+            SetTextColor(page.profileStatus, THEME.success)
+        elseif profile.confirmed then
+            page.profileStatus:SetText("Bestätigt.")
+            SetTextColor(page.profileStatus, THEME.success)
+        else
+            page.profileStatus:SetText("Noch nicht bestätigt.")
+            SetTextColor(page.profileStatus, THEME.muted)
+        end
+    end
     if page.selectedProfileSpec == nil then
         page.selectedProfileSpec = profile.raidSpecKey or profile.detectedSpecKey
     end

@@ -220,6 +220,23 @@ function GC.Profile:Refresh()
     return profile
 end
 
+-- Ergebnis der letzten Bestaetigung. Bisher stand es nur im Chat und war nach
+-- ein paar Kampfmeldungen weggescrollt - wer nebenher etwas anderes tat, wusste
+-- hinterher nicht, ob sein Profil nun steht. Deshalb bleibt es am Profil.
+function GC.Profile:GetLastConfirmation()
+    return self.lastConfirmation
+end
+
+function GC.Profile:NoteConfirmation(ok, message)
+    self.lastConfirmation = {
+        ok = ok == true,
+        message = message,
+        at = GC.Util.Now(),
+    }
+    GC:FireCallback("PROFILE_CONFIRMATION_CHANGED")
+    return self.lastConfirmation
+end
+
 function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
     if secondarySpecKey == "MAIN" or secondarySpecKey == "ALT" then
         flex = mainStatus
@@ -227,11 +244,16 @@ function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
         secondarySpecKey = nil
     end
 
+    local function Fail(message)
+        self:NoteConfirmation(false, message)
+        return nil, message
+    end
+
     local profile = self:Refresh()
     raidSpecKey = raidSpecKey or profile.raidSpecKey or profile.detectedSpecKey
     local raidSpec = raidSpecKey and GC.SpecByKey[raidSpecKey]
     if not raidSpec or raidSpec.classFile ~= profile.classFile then
-        return nil, "Bitte zuerst eine gültige Primär-Spec deiner Klasse auswählen."
+        return Fail("Bitte zuerst eine gültige Primär-Spec deiner Klasse auswählen.")
     end
     profile.raidSpecKey = raidSpecKey
 
@@ -239,7 +261,7 @@ function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
         and (secondarySpecKey == profile.raidSpecKey
             or not GC.SpecByKey[secondarySpecKey]
             or GC.SpecByKey[secondarySpecKey].classFile ~= profile.classFile) then
-        return nil, "Die Dual-Spec muss zu deiner Klasse passen und sich von der Primär-Spec unterscheiden."
+        return Fail("Die Dual-Spec muss zu deiner Klasse passen und sich von der Primär-Spec unterscheiden.")
     end
     if secondarySpecKey then
         profile.secondarySpecKey = secondarySpecKey
@@ -250,8 +272,16 @@ function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
     profile.flex = flex == true
     profile.confirmed = true
     profile.updatedAt = GC.Util.Now()
+    profile.confirmedAt = profile.updatedAt
     GC:FireCallback("PROFILE_UPDATED", profile, true)
     GC:Print("Dein Raidprofil wurde bestätigt.")
+    -- Eigener Ton: Der Bewerberton meldet einen fremden Interessenten, das hier
+    -- ist die Rueckmeldung auf die eigene Eingabe. Beides gleich klingen zu
+    -- lassen hiess, zweimal nachzusehen.
+    if GC.Chat and GC.Chat.PlayProfileSound then
+        GC.Chat:PlayProfileSound()
+    end
+    self:NoteConfirmation(true, "Raidprofil bestätigt.")
     return profile
 end
 

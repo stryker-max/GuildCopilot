@@ -18,14 +18,23 @@ public sealed class MainForm : Form
 
     private readonly ComboBox _addonsPath = new();
     private readonly Label _statusLabel = new();
-    private readonly Button _installButton = Theme.MakeButton("Installieren", 230, primary: true);
+    // "Nach Updates suchen" ist der Knopf, den man im Normalfall drueckt - er
+    // steht deshalb vorn und ist hervorgehoben. Neu installieren braucht man
+    // selten, also tritt es farblich zurueck.
+    private readonly Button _installButton = Theme.MakeButton("Installieren", 230, primary: false);
     private readonly Button _removeButton = Theme.MakeButton("Entfernen", 160, primary: false);
-    private readonly Button _checkButton = Theme.MakeButton("Nach Updates suchen", 200, primary: false);
-    private readonly CheckBox _autoUpdate = new();
+    private readonly Button _checkButton = Theme.MakeButton("Nach Updates suchen", 200, primary: true);
     private readonly CheckBox _autoStart = new();
     private readonly TextBox _log = Theme.MakeLogBox();
 
     private string _availableVersion = string.Empty;
+
+    /// <summary>
+    /// Ob im Repository eine echte neuere Addon-Fassung liegt. Nur dann darf
+    /// "Nach Updates suchen" von selbst installieren - eine Rueckstufung auf
+    /// eine aeltere Fassung bleibt eine bewusste Entscheidung von Hand.
+    /// </summary>
+    private bool _updateAvailable;
 
     public MainForm()
     {
@@ -205,13 +214,9 @@ public sealed class MainForm : Form
         _installButton.Click += async (_, _) => await InstallAsync();
         _removeButton.Click += (_, _) => Remove();
         _checkButton.Click += async (_, _) => await CheckForUpdatesAsync();
-        panel.Controls.Add(Theme.ButtonRow(_installButton, _removeButton, _checkButton));
+        panel.Controls.Add(Theme.ButtonRow(_checkButton, _removeButton, _installButton));
 
         var switches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
-        _autoUpdate.Text = "Beim Öffnen automatisch aktualisieren";
-        _autoUpdate.AutoSize = true;
-        _autoUpdate.ForeColor = Theme.Text;
-        switches.Controls.Add(_autoUpdate);
         _autoStart.Text = "Mit Windows starten";
         _autoStart.AutoSize = true;
         _autoStart.ForeColor = Theme.Text;
@@ -297,22 +302,20 @@ public sealed class MainForm : Form
         }
         Log($"{found.Count} Spielversion(en) erkannt.  Installer {SelfUpdate.CurrentVersion} (eigene Zählung, unabhängig vom Addon).");
 
-        _autoUpdate.Checked = _settings.AutoUpdate;
         _autoStart.Checked = IsAutostartEnabled();
 
         await RefreshStatusAsync(checkRemote: true);
 
-        if (!_autoUpdate.Checked) return;
-
+        // Beim Öffnen wird immer aktualisiert. Das stand frueher als Haken zur
+        // Wahl - aber wer den Installer oeffnet, will einen aktuellen Stand;
+        // eine Option dafuer war nur eine Gelegenheit, veraltet zu bleiben.
         if (await UpdateSelfAsync()) return;
 
-        var selectedPath = SelectedPath();
-        var installed = selectedPath.Length > 0 && Directory.Exists(selectedPath)
-            ? GameFinder.ReadInstalledVersion(selectedPath)
-            : null;
-        if (selectedPath.Length > 0 && Directory.Exists(selectedPath)
-            && _availableVersion.Length > 0
-            && AddonSource.CompareVersions(installed, _availableVersion) < 0)
+        // Dieselbe Entscheidung wie beim Knopf "Nach Updates suchen": Ob eine
+        // echte neuere Fassung vorliegt, hat RefreshStatusAsync oben schon
+        // festgestellt. Das hier vorher doppelt zu berechnen hiess, dass zwei
+        // Stellen dieselbe Frage beantworten - und irgendwann verschieden.
+        if (_updateAvailable)
         {
             Log("Automatische Aktualisierung ist aktiv.");
             await InstallAsync();
@@ -340,6 +343,16 @@ public sealed class MainForm : Form
     private async Task CheckForUpdatesAsync()
     {
         await RefreshStatusAsync(checkRemote: true);
+
+        // Gefundenes Addon-Update wird sofort eingespielt: Wer auf "Nach
+        // Updates suchen" drueckt, will es haben - eine zweite Rueckfrage
+        // waere nur ein weiterer Klick auf dem Weg zum selben Ziel.
+        if (_updateAvailable)
+        {
+            Log($"Neue Version {_availableVersion} gefunden – wird direkt installiert.");
+            await InstallAsync();
+        }
+
         await UpdateSelfAsync();
     }
 
@@ -385,6 +398,7 @@ public sealed class MainForm : Form
         // Verglichen wird der Stelle nach, nicht auf ungleich: eine aeltere
         // Fassung im Repository darf nie als Aktualisierung angeboten werden.
         var comparison = AddonSource.CompareVersions(installed, _availableVersion);
+        _updateAvailable = false;
         if (installed is null)
         {
             SetStatus($"Nicht installiert  –  verfügbar: {Display(_availableVersion)}", Theme.Muted);
@@ -402,6 +416,9 @@ public sealed class MainForm : Form
             SetStatus($"Veraltet  –  installiert: {installed}   verfügbar: {_availableVersion}", Theme.Danger);
             _installButton.Text = $"Auf {_availableVersion} aktualisieren";
             _removeButton.Enabled = true;
+            // Nur hier: Eine echte neuere Fassung. Der Rueckstufungsfall unten
+            // bleibt bewusst von Hand.
+            _updateAvailable = true;
         }
         else if (comparison > 0)
         {
@@ -524,7 +541,6 @@ public sealed class MainForm : Form
     private void Persist()
     {
         _settings.AddonsPath = SelectedPath();
-        _settings.AutoUpdate = _autoUpdate.Checked;
         _settings.Save();
         _logsPanel?.Persist();
     }

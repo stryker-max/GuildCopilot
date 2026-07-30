@@ -6,9 +6,17 @@ GC.Chat = {
     heardSenders = {},
 }
 
-function GC.Chat:PlaySuccessSound()
+-- Der Ton fuer die eigene Profilbestaetigung. Er ist bewusst vom Bewerberton
+-- getrennt: Der eine meldet einen fremden Interessenten, der andere bestaetigt
+-- die eigene Eingabe.
+function GC.Chat:PlayProfileSound()
     local settings = GC.DB:GetSettings()
-    local soundKey = settings.successSoundKey or "READY_CHECK"
+    return self:PlaySuccessSound(settings.profileSoundKey or GC.DefaultProfileSoundKey)
+end
+
+function GC.Chat:PlaySuccessSound(overrideKey)
+    local settings = GC.DB:GetSettings()
+    local soundKey = overrideKey or settings.successSoundKey or "READY_CHECK"
     local selectedOption
     for _, option in ipairs(GC.SuccessSoundOptions or {}) do
         if option.key == soundKey then

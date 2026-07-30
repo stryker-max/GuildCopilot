@@ -16,6 +16,10 @@ public static class SpellIds
         28518, 28519, 28520, 28521, 28540,
         28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
         28017, 28019,
+        // Sattgegessen-Buffs. Jedes Gericht hat eine eigene ID; die reinen
+        // "Food"-Regenerationsauren stehen bewusst nicht hier, weil sie keine
+        // Werte geben.
+        33254, 33256, 33257, 33259, 33261, 33263, 33265, 33268, 43764, 45245,
     };
 
     /// <summary>

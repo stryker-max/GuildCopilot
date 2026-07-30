@@ -3033,4 +3033,122 @@ assert(#addon.Util.SplitFields(plainPayload) == 5,
     "Ohne Ausnahmen wird ein Zusatzfeld gesendet, das ältere Clients verwerfen")
 end
 
+-- === Essen in der Verbrauchsauswertung =====================================
+--
+-- Aus Warcraft Logs kommen nur Spell-IDs. Ohne die Sattgegessen-IDs blieb
+-- Essen dort dauerhaft bei null, obwohl der ganze Raid gegessen hatte.
+do
+local foodIDs = { 33254, 33256, 33257, 33259, 33261, 33263, 33265, 33268, 43764, 45245 }
+for _, spellID in ipairs(foodIDs) do
+    local entry = addon.Consumables[spellID]
+    assert(entry and entry.category == "FOOD",
+        "Der Sattgegessen-Buff " .. spellID .. " fehlt in der Verbrauchstabelle")
+end
+
+-- Die reine Lebensregeneration waehrend des Essens ist kein Raidbuff.
+for _, spellID in ipairs({ 33258, 33262, 33264, 33266, 33269 }) do
+    assert(addon.Consumables[spellID] == nil,
+        "Die bloße Essensregeneration " .. spellID .. " wird als Verbrauchsgegenstand gezählt")
+end
+
+-- Tierfutter beglueckt das Jaegertier, nicht den Raidteilnehmer.
+assert(addon.Consumables[33272] == nil, "Tierfutter wird als Raidbuff gezählt")
+
+-- Essen ist ein Dauerbuff: Es zaehlt je Spieler und Sitzung einmal, auch wenn
+-- die Aura zwischendurch erneuert wird.
+assert(addon.ConsumableCategoryByKey.FOOD.repeatable == false,
+    "Essen wird als wiederholbarer Verbrauchsgegenstand gezählt")
+end
+
+-- === Bosserkennung über eine gepflegte Liste ===============================
+do
+-- Der Eigenname trägt in beiden Client-Sprachen.
+assert(addon.RaidMonitor:ResolveBoss("Prinz Malchezaar").instance == "Karazhan",
+    "Der deutsche Bossname wird nicht erkannt")
+assert(addon.RaidMonitor:ResolveBoss("Prince Malchezaar").instance == "Karazhan",
+    "Der englische Bossname wird nicht erkannt")
+assert(addon.RaidMonitor:ResolveBoss("Lady Vashj").instance == "Serpentinhöhle",
+    "Lady Vashj wird nicht ihrer Instanz zugeordnet")
+assert(addon.RaidMonitor:ResolveBoss("Verirrter Diener") == nil,
+    "Ein Trash-Gegner wird als Boss erkannt")
+
+-- Nur Gegner zählen. Ein Spieler, der sich wie ein Boss nennt, nicht.
+local playerSegment = { startedAt = 0, playerDeaths = 0 }
+addon.RaidMonitor:NoteBossParticipant(playerSegment, "Player-1-2-3", "Lady Vashj")
+assert(playerSegment.bossName == nil, "Ein Spielername wurde als Boss gewertet")
+
+local bossSegment = { startedAt = 0, playerDeaths = 0 }
+addon.RaidMonitor:NoteBossParticipant(bossSegment, "Creature-0-1-2-3-4-5", "Lady Vashj")
+assert(bossSegment.bossName == "Lady Vashj" and bossSegment.bossInstance == "Serpentinhöhle",
+    "Der Boss des Kampfabschnitts wurde nicht erfasst")
+
+-- Der eigentliche Gewinn: Bei einem Wipe stirbt der Boss nicht. Vorher hieß
+-- der Versuch deshalb "Kampf" oder trug den Namen eines Adds.
+local previousSession = addon.RaidMonitor.session
+addon.RaidMonitor.session = {
+    participants = {
+        a = { presentSince = 1 }, b = { presentSince = 1 },
+        c = { presentSince = 1 }, d = { presentSince = 1 },
+    },
+    participantOrder = {},
+    pulls = {},
+    segment = {
+        startedAt = currentTime,
+        playerDeaths = 4,
+        lastNPCDeath = "Verseuchte Elementarin",
+        bossName = "Lady Vashj",
+        bossInstance = "Serpentinhöhle",
+    },
+}
+addon.RaidMonitor:CloseSegment(currentTime + 180)
+local wipePull = addon.RaidMonitor.session.pulls[1]
+assert(wipePull and wipePull.result == "WIPE", "Der Wipe wurde nicht als solcher gewertet")
+assert(wipePull.name == "Lady Vashj",
+    "Ein Wipe wird weiter nach dem zuletzt gestorbenen Add benannt statt nach dem Boss")
+assert(wipePull.instance == "Serpentinhöhle" and wipePull.boss == true,
+    "Der Versuch nennt seine Instanz nicht")
+
+-- Ohne erkannten Boss bleibt es beim bisherigen Verhalten.
+addon.RaidMonitor.session.pulls = {}
+addon.RaidMonitor.session.segment = {
+    startedAt = currentTime,
+    playerDeaths = 0,
+    lastNPCDeath = "Verirrter Diener",
+}
+addon.RaidMonitor:CloseSegment(currentTime + 180)
+local trashPull = addon.RaidMonitor.session.pulls[1]
+assert(trashPull.name == "Verirrter Diener" and trashPull.boss ~= true,
+    "Ohne erkannten Boss greift der bisherige Rückfall nicht mehr")
+addon.RaidMonitor.session = previousSession
+end
+
+-- === Profilbestätigung: sichtbarer Status und eigener Ton ==================
+do
+-- Ein Fehlschlag bleibt am Profil stehen, statt im Chat wegzuscrollen.
+local badProfile, badMessage = addon.Profile:Confirm("MAGE:1")
+assert(badProfile == nil and badMessage ~= nil,
+    "Eine Spec fremder Klasse wurde angenommen")
+local failed = addon.Profile:GetLastConfirmation()
+assert(failed and failed.ok == false and failed.message == badMessage,
+    "Der fehlgeschlagene Bestätigungsversuch wird nicht am Profil vermerkt")
+
+-- Die gelungene Bestätigung ebenso, mit Zeitpunkt.
+playedSoundID = nil
+local goodProfile = addon.Profile:Confirm("HUNTER:2", nil, "MAIN", false)
+assert(goodProfile ~= nil, "Die gültige Bestätigung schlug fehl")
+local succeeded = addon.Profile:GetLastConfirmation()
+assert(succeeded and succeeded.ok == true,
+    "Die gelungene Bestätigung wird nicht am Profil vermerkt")
+assert(goodProfile.confirmedAt ~= nil, "Der Bestätigungszeitpunkt fehlt")
+
+-- Eigener Ton, getrennt vom Bewerberklang: der Stufenaufstieg (SoundKit 888).
+assert(playedSoundID == 888,
+    "Die Profilbestätigung spielt nicht den Stufenaufstiegssound")
+addon.DB:GetSettings().successSoundKey = "READY_CHECK"
+playedSoundID = nil
+addon.Chat:PlaySuccessSound()
+assert(playedSoundID ~= 888,
+    "Bewerberton und Profilbestätigung klingen gleich")
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

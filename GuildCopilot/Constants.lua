@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.37",
+    VERSION = "0.9.38",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -85,7 +85,16 @@ GC.SuccessSoundOptions = {
     { key = "RAID_WARNING", name = "Raidwarnung", soundID = 8959 },
     { key = "IG_QUEST_LIST_COMPLETE", name = "Quest abgeschlossen", soundID = 619 },
     { key = "MAP_PING", name = "Karten-Ping", soundID = 3175 },
+    -- SoundKit 888 heisst in Classic "LEVELUP". Der Schluessel steht wie bei
+    -- den anderen Eintraegen zuerst; fehlt er im SOUNDKIT der Spielfassung,
+    -- greift die nackte Zahl.
+    { key = "LEVEL_UP", name = "Stufenaufstieg", soundID = 888 },
 }
+
+-- Vorgabe fuer die eigene Profilbestaetigung. Bewusst ein anderer Ton als der
+-- Bewerberklang: Der eine meldet einen fremden Interessenten, der andere
+-- bestaetigt die eigene Eingabe.
+GC.DefaultProfileSoundKey = "LEVEL_UP"
 
 -- Verbrauchsgegenstände werden nach Spell-ID gezählt. "repeatable" trennt
 -- Gegenstände, die pro Anwendung zählen (Tränke, Runen, Trommeln), von
@@ -143,6 +152,106 @@ GC.Consumables = {
     [39627] = { category = "ELIXIR", name = "Elixier der Draeneiweisheit" },
     [28017] = { category = "OIL", name = "Überlegenes Zaubereröl" },
     [28019] = { category = "OIL", name = "Überlegenes Manaöl" },
+
+    -- === Essen ==============================================================
+    --
+    -- Alle Sattgegessen-Buffs heissen im Spiel gleich, tragen aber je Gericht
+    -- eine eigene Spell-ID. Live erkennt das Addon sie deshalb zusaetzlich am
+    -- Auranamen ("Sattgegessen"/"Well Fed"); aus Warcraft Logs kommen nur IDs,
+    -- und ohne diese Liste blieb Essen dort dauerhaft bei null.
+    --
+    -- Aufgenommen sind nur Buffs, die wirklich Werte geben. Bewusst draussen:
+    -- die "Food"-Auren (blosse Lebensregeneration waehrend des Essens, z. B.
+    -- 33258, 33262, 33264, 33266), die reine Regenerationsvariante 33269 und
+    -- das Tierfutter 33272 (+10 Zufriedenheit) - letzteres beglueckt das
+    -- Jaegertier, nicht den Raidteilnehmer.
+    [33254] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer)" },
+    [33256] = { category = "FOOD", name = "Sattgegessen (+20 Stärke)" },
+    [33257] = { category = "FOOD", name = "Sattgegessen (+30 Ausdauer)" },
+    [33259] = { category = "FOOD", name = "Sattgegessen (+40 Angriffskraft)" },
+    [33261] = { category = "FOOD", name = "Sattgegessen (+20 Beweglichkeit)" },
+    [33263] = { category = "FOOD", name = "Sattgegessen (+23 Zaubermacht)" },
+    [33265] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +8 Mana/5s)" },
+    [33268] = { category = "FOOD", name = "Sattgegessen (+44 Heilung)" },
+    [43764] = { category = "FOOD", name = "Sattgegessen (+20 Trefferwertung)" },
+    [45245] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +20 Willenskraft)" },
+}
+
+-- Bosse der TBC-Schlachtzuege.
+--
+-- Wozu: Ohne Encounter-API benennt der Raidmonitor einen Kampfabschnitt nach
+-- dem zuletzt gestorbenen Gegner. Bei einem Wipe stirbt der Boss aber gerade
+-- nicht - der Versuch hiess dann "Kampf" oder trug den Namen eines Adds.
+-- Genau die Wipes sind aber das, was man hinterher ansehen will.
+--
+-- Erkannt wird ueber den **Eigennamen**, nicht ueber den vollen Titel: "Prinz
+-- Malchezaar" und "Prince Malchezaar" enthalten beide "Malchezaar". Damit
+-- funktioniert die Liste auf einem deutschen wie auf einem englischen Client,
+-- ohne dass fuer jeden Boss eine belegte Uebersetzung noetig waere - die liess
+-- sich naemlich nicht zuverlaessig beschaffen.
+--
+-- Wo ein Boss keinen Eigennamen hat (Der Kurator, Maid der Tugend), stehen
+-- beide Sprachfassungen. Trifft nichts davon, bleibt es bei der bisherigen
+-- Heuristik: Es geht nichts verloren, es wird nur nichts gewonnen.
+GC.RaidBosses = {
+    { instance = "Karazhan", names = { "Attumen", "Midnight" } },
+    { instance = "Karazhan", names = { "Moroes" } },
+    { instance = "Karazhan", names = { "Maid der Tugend", "Maiden of Virtue" } },
+    { instance = "Karazhan", names = { "Dorothee", "Tito", "Roar", "Strohmann", "Strawman",
+        "Tinhead", "Blechkopf", "Kruschik", "Der Große, Böse Wolf", "The Big Bad Wolf",
+        "Romulo", "Julianne" } },
+    { instance = "Karazhan", names = { "Der Kurator", "The Curator" } },
+    { instance = "Karazhan", names = { "Terestian" } },
+    { instance = "Karazhan", names = { "Aran" } },
+    { instance = "Karazhan", names = { "Netherspite" } },
+    { instance = "Karazhan", names = { "Malchezaar" } },
+    { instance = "Karazhan", names = { "Nachtbann", "Nightbane" } },
+
+    { instance = "Gruuls Unterschlupf", names = { "Maulgar" } },
+    { instance = "Gruuls Unterschlupf", names = { "Gruul" } },
+
+    { instance = "Magtheridons Kammer", names = { "Magtheridon" } },
+
+    { instance = "Serpentinhöhle", names = { "Hydross" } },
+    { instance = "Serpentinhöhle", names = { "Lurker", "Lauerer" } },
+    { instance = "Serpentinhöhle", names = { "Leotheras" } },
+    { instance = "Serpentinhöhle", names = { "Karathress" } },
+    { instance = "Serpentinhöhle", names = { "Morogrim" } },
+    { instance = "Serpentinhöhle", names = { "Vashj" } },
+
+    { instance = "Auge", names = { "Al'ar" } },
+    { instance = "Auge", names = { "Solarian" } },
+    { instance = "Auge", names = { "Void Reaver", "Leerenschinder" } },
+    { instance = "Auge", names = { "Kael'thas" } },
+
+    { instance = "Zul'Aman", names = { "Nalorakk" } },
+    { instance = "Zul'Aman", names = { "Akil'zon" } },
+    { instance = "Zul'Aman", names = { "Jan'alai" } },
+    { instance = "Zul'Aman", names = { "Halazzi" } },
+    { instance = "Zul'Aman", names = { "Malacrass" } },
+    { instance = "Zul'Aman", names = { "Zul'jin" } },
+
+    { instance = "Hyjal", names = { "Winterchill" } },
+    { instance = "Hyjal", names = { "Anetheron" } },
+    { instance = "Hyjal", names = { "Kaz'rogal" } },
+    { instance = "Hyjal", names = { "Azgalor" } },
+    { instance = "Hyjal", names = { "Archimonde" } },
+
+    { instance = "Schwarzer Tempel", names = { "Naj'entus" } },
+    { instance = "Schwarzer Tempel", names = { "Supremus" } },
+    { instance = "Schwarzer Tempel", names = { "Akama" } },
+    { instance = "Schwarzer Tempel", names = { "Teron" } },
+    { instance = "Schwarzer Tempel", names = { "Gurtogg" } },
+    { instance = "Schwarzer Tempel", names = { "Reliquiar der Seelen", "Reliquary of Souls" } },
+    { instance = "Schwarzer Tempel", names = { "Shahraz" } },
+    { instance = "Schwarzer Tempel", names = { "Illidari", "Veras", "Zerevor", "Malande", "Gathios" } },
+    { instance = "Schwarzer Tempel", names = { "Illidan" } },
+
+    { instance = "Sonnenbrunnen", names = { "Kalecgos", "Sathrovarr" } },
+    { instance = "Sonnenbrunnen", names = { "Sacrolash", "Alythess" } },
+    { instance = "Sonnenbrunnen", names = { "Felmyst" } },
+    { instance = "Sonnenbrunnen", names = { "Muru", "Entropius" } },
+    { instance = "Sonnenbrunnen", names = { "Kil'jaeden" } },
 }
 
 -- Ausrüstungsslots für den Gear Audit. "enchantRequired" markiert nur Slots,

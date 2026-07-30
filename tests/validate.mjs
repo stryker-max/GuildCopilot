@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.37",
+  "## Version: 0.9.38",
 ];
 
 for (const entry of requiredMetadata) {
@@ -67,6 +67,45 @@ if (
   !installerSelfUpdate.includes("--wait-for-pid")
 ) {
   throw new Error("Der Installer-Neustart verhindert doppelte Fenster nicht vollständig.");
+}
+
+// Der Installer soll sich ohne Rückfragen aktuell halten: beim Öffnen und auf
+// Knopfdruck. Der frühere Haken dafür ist bewusst entfernt.
+const installerMainForm = fs.readFileSync(
+  path.join(repositoryRoot, "Installer", "MainForm.cs"),
+  "utf8"
+);
+if (installerMainForm.includes("_autoUpdate")) {
+  throw new Error("Die abschaltbare Aktualisierung beim Öffnen ist noch vorhanden.");
+}
+if (!/if \(_updateAvailable\)[\s\S]{0,400}await InstallAsync\(\)/.test(installerMainForm)) {
+  throw new Error("Ein gefundenes Update wird nicht ohne Rückfrage installiert.");
+}
+// Eine ältere Fassung im Repository darf nie automatisch eingespielt werden.
+if (!/comparison < 0[\s\S]{0,400}_updateAvailable = true/.test(installerMainForm)) {
+  throw new Error("Die automatische Installation hängt nicht mehr allein an einer neueren Fassung.");
+}
+if (!/ButtonRow\(_checkButton, _removeButton, _installButton\)/.test(installerMainForm)) {
+  throw new Error("„Nach Updates suchen“ steht nicht mehr vorn.");
+}
+if (!/MakeButton\("Nach Updates suchen", \d+, primary: true\)/.test(installerMainForm)) {
+  throw new Error("„Nach Updates suchen“ ist nicht mehr der hervorgehobene Knopf.");
+}
+
+// Dateisymbol im Explorer: eine echte .ico mit mehreren Größen.
+const iconPath = path.join(repositoryRoot, "Installer", "Assets", "GuildCopilot.ico");
+if (!installerProject.includes("<ApplicationIcon>")) {
+  throw new Error("Der Installer hat kein Dateisymbol eingebunden.");
+}
+if (!fs.existsSync(iconPath)) {
+  throw new Error("Die Symboldatei des Installers fehlt.");
+}
+const icon = fs.readFileSync(iconPath);
+if (icon.readUInt16LE(0) !== 0 || icon.readUInt16LE(2) !== 1) {
+  throw new Error("Die Symboldatei ist keine gültige .ico.");
+}
+if (icon.readUInt16LE(4) < 4) {
+  throw new Error("Die Symboldatei führt zu wenige Größen; der Explorer skaliert dann sichtbar.");
 }
 
 if (!fs.existsSync(logoPath)) {

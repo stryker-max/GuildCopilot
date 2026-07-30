@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.37
+# Guild Copilot 0.9.38
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -128,10 +128,28 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - lädt das Addon direkt aus diesem Repository, aktualisiert und entfernt es;
 - vergleicht Versionen stellenweise, nicht auf ungleich: eine ältere Fassung im Repository wird ausdrücklich als Rückstufung ausgewiesen und nie als Aktualisierung angeboten;
 - überschreibt beim Aktualisieren, statt vorher zu löschen. Ein geöffnetes Explorer-Fenster hat sonst gereicht, um die Installation abzubrechen;
-- hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer;
+- hält sich selbst aktuell; **Nach Updates suchen** prüft Addon und Installer und **spielt ein gefundenes Addon-Update sofort ein** – ohne zweite Rückfrage, weil wer danach sucht es auch haben will. Eine Rückstufung auf eine ältere Fassung im Repository bleibt eine bewusste Entscheidung von Hand;
+- **Nach Updates suchen** steht vorn und ist hervorgehoben, **Neu installieren** tritt zurück: der eine Knopf wird ständig gebraucht, der andere selten;
+- hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.3 und das Addon bei 0.9.37; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.4 und das Addon bei 0.9.38; beide Nummern stehen im Verlauf.
+
+### Warum Windows beim Herunterladen warnt
+
+Auf einem fremden Rechner meldet sich erst der Browser, dann Windows, dann SmartScreen („Der Computer wurde durch Windows geschützt"). Das ist kein Fehler und liegt nicht an der Datei: Die `.exe` ist **nicht code-signiert**, und Windows markiert zusätzlich alles, was aus dem Internet kommt.
+
+Abstellen lässt sich das nicht von hier aus – dafür bräuchte es ein **Code-Signing-Zertifikat** (OV etwa 200–400 €/Jahr und erst nach aufgebauter Reputation wirksam, EV etwa 400–600 €/Jahr und sofort; beide seit 2023 nur noch mit Hardware-Token). Ein selbst ausgestelltes Zertifikat hilft ausdrücklich **nicht**, SmartScreen ignoriert es. SmartScreen abzuschalten ist keine Lösung, sondern nur der Verzicht auf eine Prüfung, die auch bei anderen Dateien nützlich ist.
+
+Bei SmartScreen führt der Weg über **Weitere Informationen → Trotzdem ausführen**. Wer sichergehen will, vergleicht vorher die Prüfsumme:
+
+```powershell
+Get-FileHash .\GuildCopilot-Installer.exe -Algorithm SHA256
+```
+
+SHA-256 der Fassung 1.0.4: `40ED601F9B15C2A2C698BC2FA54DE87461FACF2CBAA376ABDF0BDB7F7DEBFF19`
+
+Wem das zu umständlich ist, nimmt `Install.cmd` aus dem Repository – dort wird nichts ausgeführt, was Windows nicht ohnehin kennt.
 
 Zum Bauen wird das .NET SDK gebraucht:
 

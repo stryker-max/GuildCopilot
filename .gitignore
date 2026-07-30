@@ -12,3 +12,7 @@ Installer/obj/
 
 # Zwischenordner des Publish-Laufs
 Installer/publish-tmp/
+
+# Debugsymbole. Ausgeliefert wird nur die .exe; die .pdb entsteht beim Publish
+# gleich daneben und gehoert nicht ins Repository.
+Installer/dist/*.pdb

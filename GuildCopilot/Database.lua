@@ -5,6 +5,9 @@ local DEFAULTS = {
     settings = {
         successSound = true,
         successSoundKey = "READY_CHECK",
+        -- Eigener Ton fuer die Bestaetigung des eigenen Raidprofils, getrennt
+        -- vom Bewerberklang.
+        profileSoundKey = "LEVEL_UP",
         captureOnlyDuringSearch = true,
         watchRecruitmentTriggers = true,
         minimap = {
