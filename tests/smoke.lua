@@ -5388,14 +5388,21 @@ do
     assert(tostring(del2_frame.note:GetText()):find("3 ältere verworfen", 1, true) ~= nil,
         "Verworfene Einträge werden nicht ausgewiesen")
 
-    -- Logs-Quelle: exakte Gegenstände mit Anzahl, ohne Uhrzeit.
+    -- Logs-Quelle: exakte Gegenstände mit Anzahl, ohne Uhrzeit. Unbekannte
+    -- IDs erscheinen als "Zauber <id>" statt zu verschwinden.
     addon.UI:ShowConsumableLog({
         name = "Logger", classFile = "PRIEST",
-        consumableItems = { { n = "Zerstörungstrank", c = "POTION", count = 3 } },
+        consumableItems = {
+            { n = "Zerstörungstrank", c = "POTION", count = 3 },
+            { s = 46837, count = 2 },
+        },
     })
     assert(del2_frame.rows[1].time:GetText() == "3×"
         and del2_frame.rows[1].name:GetText() == "Zerstörungstrank",
         "Die Logs-Ansicht zeigt die Gegenstände nicht")
+    assert(tostring(del2_frame.rows[2].name:GetText()):find("46837", 1, true) ~= nil
+        and del2_frame.rows[2].time:GetText() == "2×",
+        "Unbekannte IDs erscheinen nicht in der Gegenstandsliste")
 
     -- Fremde Zusammenfassung: Rückfall auf Kategoriezähler.
     addon.UI:ShowConsumableLog({ name = "Zähler", consumables = { FLASK = 1 } })

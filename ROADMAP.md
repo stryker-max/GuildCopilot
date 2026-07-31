@@ -298,6 +298,13 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.78 – Gegenstandsliste: unbekannte IDs verschwinden nicht mehr
+
+Owner-Verwirrung am echten Export geklärt: Die „exakten Gegenstände" stehen im Export als Zauber-IDs (`28499:4` = 4× Übermächtiger Manatrank) – das Addon übersetzt sie beim Import in Namen. Alle IDs des konkreten Karazhan-Exports waren bereits in der Tabelle. Zusätzlich abgesichert:
+
+- **IDs außerhalb der eigenen Tabelle werden nicht mehr verschluckt:** Sie erscheinen jetzt trotzdem in der Gegenstandsliste – benannt über den Spielclient (GetSpellInfo), notfalls als „Zauber 46837" mit Art „?". In die Spaltenzähler fließen sie weiterhin nicht ein (keine falschen Zahlen);
+- Merkhilfe: Die Detailliste eines alten Abends erscheint in der **Logs-Quelle** nach einem erneuten Import; die Live-Quelle alter Abende bleibt bei Kategoriezählern.
+
 ## 0.9.77 – Verbrauchsprotokoll je Spieler; „Auswertung anfordern" wirkt sichtbar
 
 **Klick auf einen Teilnehmer der Raidauswertung öffnet sein Verbrauchsprotokoll** (Owner-Frage: „was hat der Spieler alles eingeworfen? Maybe mit Timestamp?"):

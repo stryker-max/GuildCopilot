@@ -8329,10 +8329,19 @@ function GC.UI:RefreshConsumableLog()
             .. (dropped > 0 and ("  ·  " .. dropped .. " ältere verworfen") or ""))
     elseif items and #items > 0 then
         for _, item in ipairs(items) do
+            local itemName = item.n
+            if not itemName and item.s then
+                -- Die eigene Tabelle kennt die ID nicht - der Spielclient
+                -- meist schon.
+                if GetSpellInfo then
+                    itemName = GetSpellInfo(item.s)
+                end
+                itemName = itemName or ("Zauber " .. tostring(item.s))
+            end
             entries[#entries + 1] = {
                 time = (item.count or 0) .. "×",
-                name = tostring(item.n or "?"),
-                cat = CategoryLabel(item.c),
+                name = tostring(itemName or "?"),
+                cat = item.c and CategoryLabel(item.c) or "?",
             }
         end
         frame.subtitle:SetText("Aus Warcraft Logs: exakte Gegenstände mit Anzahl - Uhrzeiten kennt der Export nicht.")

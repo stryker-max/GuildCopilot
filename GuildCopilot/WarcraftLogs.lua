@@ -260,10 +260,10 @@ local function DecodeConsumables(payload)
     local items = {}
     for token in tostring(payload or ""):gmatch("[^,]+") do
         local spellID, count = token:match("^(%d+):(%d+)$")
+        count = tonumber(count) or 0
         local consumable = spellID and GC.Consumables[tonumber(spellID)]
         local category = consumable and GC.ConsumableCategoryByKey[consumable.category]
         if category then
-            count = tonumber(count) or 0
             if category.repeatable then
                 counters[category.key] = counters[category.key] + count
             elseif count > 0 then
@@ -277,6 +277,11 @@ local function DecodeConsumables(payload)
                     count = count,
                 }
             end
+        elseif spellID and count > 0 then
+            -- Unbekannte IDs verschwinden nicht mehr: kein Zähler (keine
+            -- falschen Zahlen in den Spalten), aber ein Eintrag in der
+            -- Gegenstandsliste - den Namen kennt notfalls der Spielclient.
+            items[#items + 1] = { s = tonumber(spellID), count = count }
         end
     end
     return counters, items
