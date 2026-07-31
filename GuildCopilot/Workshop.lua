@@ -316,6 +316,16 @@ function GC.Workshop:GetOwnData()
     return profile.workshop
 end
 
+-- Der eigene Werkstatt-Datensatz zu einem Berufsnamen, egal in welcher
+-- Schreibweise er ankommt (Alchemie/Alchimie). Für die Profilseite: Skill,
+-- Rezeptzahl und Stand des letzten Einlesens.
+function GC.Workshop:GetOwnProfession(professionName)
+    if GC.Util.Trim(professionName or "") == "" then
+        return nil
+    end
+    return self:GetOwnData().professions[NormalizeKey(professionName)]
+end
+
 -- Der gildenweite Bestand besteht aus zwei getrennten Teilen: einem
 -- Rezeptkatalog, in dem jedes Rezept genau einmal steht, und einem Index, wer
 -- welches Rezept kann. Vor dieser Trennung hielt jeder Crafter eine eigene

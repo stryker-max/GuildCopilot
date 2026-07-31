@@ -5080,4 +5080,58 @@ do
     review:Hide()
 end
 
+-- === Berufe-Karte: Werkstatt-Stand statt Übernehmen-Knopf ===================
+do
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("ROSTER")
+    local rosterPage = addon.UI.pages.ROSTER
+    assert(rosterPage.professionSync == nil,
+        "Der Übernehmen-Knopf existiert noch, sollte aber entfernt sein")
+
+    local profile = addon.Profile:Get()
+    local savedProfessions = profile.professions
+    local savedAuto = profile.professionAuto
+    local savedSource = profile.professionSource
+    profile.professionAuto = true
+    profile.professionSource = "OK"
+    profile.professions = {
+        { name = "Schneiderei", skillLevel = 375, maxSkillLevel = 375 },
+        { name = "Verzauberkunst", skillLevel = 200, maxSkillLevel = 300 },
+    }
+    local ownWorkshop = addon.Workshop:GetOwnData()
+    local savedOwn = ownWorkshop.professions.schneiderei
+    -- Frühere Testblöcke haben Verzauberkunst-Rezepte hinterlegt; für den
+    -- "Rezepte fehlen"-Fall muss der Schlüssel vorübergehend leer sein.
+    local savedEnchanting = ownWorkshop.professions.verzauberkunst
+    ownWorkshop.professions.verzauberkunst = nil
+    ownWorkshop.professions.schneiderei = {
+        key = "schneiderei", name = "Schneiderei",
+        skillLevel = 375, maxSkillLevel = 375,
+        updatedAt = currentTime - 300,
+        recipes = { ["r:1"] = {}, ["r:2"] = {}, ["r:3"] = {} },
+    }
+    addon.UI:RefreshRoster()
+    local firstLine = tostring(rosterPage.professionLines[1]:GetText())
+    local secondLine = tostring(rosterPage.professionLines[2]:GetText())
+    assert(firstLine:find("3 Rezepte", 1, true) ~= nil,
+        "Die Berufszeile zählt die geteilten Rezepte nicht")
+    assert(firstLine:find("375/375", 1, true) ~= nil,
+        "Die Berufszeile nennt den Skillstand nicht")
+    assert(secondLine:find("Rezepte fehlen", 1, true) ~= nil,
+        "Der Beruf ohne Rezepte nennt den nächsten Schritt nicht")
+
+    -- Von Hand gewählt: Der Statustext erklärt den Weg zurück zur Automatik
+    -- über die leere Dropdown-Auswahl statt über den entfernten Knopf.
+    profile.professionAuto = false
+    addon.UI:RefreshRoster()
+    assert(tostring(rosterPage.professionStatus:GetText()):find("leere Auswahl", 1, true) ~= nil,
+        "Der Handbetrieb erklärt den Rückweg zur Automatik nicht")
+
+    profile.professions = savedProfessions
+    profile.professionAuto = savedAuto
+    profile.professionSource = savedSource
+    ownWorkshop.professions.schneiderei = savedOwn
+    ownWorkshop.professions.verzauberkunst = savedEnchanting
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

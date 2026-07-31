@@ -2210,19 +2210,30 @@ function GC.UI:BuildRosterPage()
     for slot = 1, 2 do
         local professionSlot = slot
         local dropdown = CreateChoiceDropdown(professions, 170, GC.ProfessionOptions, function(value)
-            GC.Profile:SetProfession(professionSlot, value)
+            if GC.Util.Trim(value) == "" then
+                -- Die leere Auswahl heißt: wieder automatisch aus den
+                -- Fähigkeiten lesen. Den früheren Übernehmen-Knopf ersetzt
+                -- das vollständig.
+                GC.Profile:EnableProfessionSync()
+            else
+                GC.Profile:SetProfession(professionSlot, value)
+            end
             GC.UI:RefreshRoster()
         end)
         dropdown:SetPoint("TOPLEFT", professions, "TOPLEFT", 18 + ((slot - 1) * 182), -130)
         page.professionDropdowns[slot] = dropdown
     end
-    page.professionSync = CreateButton(professions, "Aus Fähigkeiten übernehmen", 230, 34, function()
-        GC.Profile:EnableProfessionSync()
-        GC.UI:RefreshRoster()
-    end, "PRIMARY")
-    page.professionSync:SetPoint("TOPLEFT", professions, "TOPLEFT", 18, -181)
+    -- Statt eines Übernehmen-Knopfs (die Übernahme läuft von selbst) steht
+    -- hier der Werkstatt-Stand je Beruf: Skill, geteilte Rezepte, Alter des
+    -- letzten Einlesens - und der nächste Schritt, wenn Rezepte fehlen.
+    page.professionLines = {}
+    for slot = 1, 2 do
+        local line = CreateLabel(professions, "", { width = 352, height = 20 })
+        line:SetPoint("TOPLEFT", professions, "TOPLEFT", 18, -184 - ((slot - 1) * 24))
+        page.professionLines[slot] = line
+    end
     page.professionStatus = CreateLabel(professions, "", { muted = true, width = 352, height = 42, vertical = "TOP" })
-    page.professionStatus:SetPoint("TOPLEFT", professions, "TOPLEFT", 18, -230)
+    page.professionStatus:SetPoint("TOPLEFT", professions, "TOPLEFT", 18, -238)
     local workshopButton = CreateButton(professions, "Zur Gildenwerkstatt", 210, 36, function()
         GC.UI:ShowPage("WORKSHOP")
     end)
@@ -2451,19 +2462,59 @@ function GC.UI:RefreshRoster()
         local profession = profile.professions and profile.professions[slot]
         page.professionDropdowns[slot]:SetValue(profession and profession.name or "")
     end
+    -- Werkstatt-Stand je Beruf: Wie viele Rezepte hängen schon in der
+    -- Gildenwerkstatt, und wie alt ist der Stand? Fehlen Rezepte, steht der
+    -- nächste Schritt gleich daneben - das Einlesen braucht ein einmal
+    -- geöffnetes Berufsfenster.
+    for slot = 1, 2 do
+        local line = page.professionLines[slot]
+        local profession = (profile.professions or {})[slot]
+        local professionName = profession and GC.Util.Trim(profession.name or "") or ""
+        if professionName == "" then
+            line:SetText("")
+        else
+            local skill = tonumber(profession.skillLevel) or 0
+            local maxSkill = tonumber(profession.maxSkillLevel) or 0
+            local skillText = skill > 0
+                and (" " .. skill .. (maxSkill > 0 and ("/" .. maxSkill) or ""))
+                or ""
+            local stored = GC.Workshop:GetOwnProfession(professionName)
+            local recipeCount = 0
+            for _ in pairs((stored and stored.recipes) or {}) do
+                recipeCount = recipeCount + 1
+            end
+            if recipeCount > 0 then
+                local ageMinutes = math.max(0,
+                    math.floor((GC.Util.Now() - (stored.updatedAt or 0)) / 60))
+                local ageText = ageMinutes < 120 and (ageMinutes .. " Min.")
+                    or ageMinutes < 2880 and (math.floor(ageMinutes / 60) .. " Std.")
+                    or (math.floor(ageMinutes / 1440) .. " Tagen")
+                line:SetText(professionName .. skillText .. "  ·  |cff59e695"
+                    .. recipeCount .. " Rezepte|r in der Werkstatt  ·  vor " .. ageText)
+                SetTextColor(line, THEME.text)
+            else
+                line:SetText(professionName .. skillText
+                    .. "  ·  |cffffb840Rezepte fehlen|r – Berufsfenster einmal öffnen.")
+                SetTextColor(line, THEME.text)
+            end
+        end
+    end
+
     -- Die Statuszeile sagt, was tatsaechlich passiert ist. Bis 0.9.45 meldete
     -- sie unterschiedslos eine laufende Uebernahme, auch wenn der Client die
     -- Berufsliste gar nicht herausgibt - dann blieb die Angabe von Hand stehen
     -- und sah aus wie ein Ergebnis.
     local professionSource = GC.Profile:GetProfessionSource(profile)
     if professionSource == "OK" then
-        page.professionStatus:SetText("Automatisch aus deinen Fähigkeiten übernommen.")
+        page.professionStatus:SetText("Automatisch aus deinen Fähigkeiten übernommen. "
+            .. "Neue Rezepte wandern beim Öffnen des Berufsfensters von selbst in die Werkstatt.")
         SetTextColor(page.professionStatus, THEME.muted)
     elseif professionSource == "EMPTY" then
         page.professionStatus:SetText("Nachgesehen: Dieser Charakter hat keinen Hauptberuf erlernt.")
         SetTextColor(page.professionStatus, THEME.muted)
     elseif professionSource == "MANUAL" then
-        page.professionStatus:SetText("Von Hand gewählt. Der Knopf holt sie wieder aus deinen Fähigkeiten.")
+        page.professionStatus:SetText("Von Hand gewählt. Die leere Auswahl oben schaltet zurück "
+            .. "auf die automatische Erkennung.")
         SetTextColor(page.professionStatus, THEME.muted)
     else
         page.professionStatus:SetText("Deine Fähigkeiten ließen sich nicht lesen – "

@@ -298,6 +298,14 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.69 – Berufe-Karte: Werkstatt-Stand statt Übernehmen-Knopf
+
+Der Knopf „Aus Fähigkeiten übernehmen" ist weg – er verwirrte nur, denn die Übernahme läuft ohnehin automatisch (bei jedem Fähigkeiten-Update und beim Öffnen des Berufsfensters). An seiner Stelle zeigt die Karte jetzt etwas Nützliches:
+
+- **Werkstatt-Stand je Beruf:** eine Zeile pro Hauptberuf mit Skillstand („Schneiderei 375/375"), der Zahl der in der Gildenwerkstatt geteilten Rezepte (grün) und dem Alter des letzten Einlesens („vor 12 Min." / „vor 3 Std." / „vor 2 Tagen");
+- **fehlen Rezepte, steht der nächste Schritt daneben:** „Rezepte fehlen – Berufsfenster einmal öffnen." (gelb) – genau die eine Handlung, die WoW fürs Einlesen wirklich verlangt;
+- **Rückweg zur Automatik ohne Knopf:** Wer von Hand einen Beruf gewählt hat, wählt einfach den leeren Eintrag im Dropdown – das schaltet die automatische Erkennung wieder ein. Der Statustext erklärt das an Ort und Stelle.
+
 ## 0.9.68 – Auswertungsfenster, Gruppenprüfung mit Verzauberungs-Details, Import-Rettung
 
 Drei Owner-Wünsche aus dem laufenden Raidabend:
