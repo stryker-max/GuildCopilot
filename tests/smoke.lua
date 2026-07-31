@@ -4775,32 +4775,37 @@ do
 end
 
 do
-    -- Teilnehmer von Hand ordnen: Ziehen übernimmt die angezeigte Reihenfolge
-    -- als Handordnung der Auswertung und schaltet die Spaltensortierung ab;
-    -- Unbekannte hängen hinten an.
+    -- Spalten statt Zeilen verschieben (Owner-Wunsch): Die Ordnung der
+    -- Wertespalten liegt in den Einstellungen, NAME bleibt fest vorn.
     orders_page = addon.UI.pages.STATISTICS
-    orders_summary = { participants = {
-        { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" },
-    } }
-    orders_page.displayedParticipants = orders_summary.participants
-    orders_page.selectedSummary = orders_summary
-    orders_page.sortKey = "deaths"
-    assert(addon.UI:MoveParticipantRow(1, 3) == true, "Das Umsortieren scheiterte")
-    assert(orders_summary.manualOrder[1] == "Beta"
-        and orders_summary.manualOrder[2] == "Gamma"
-        and orders_summary.manualOrder[3] == "Alpha",
-        "Die Handordnung stimmt nach dem Ziehen nicht")
-    assert(orders_page.sortKey == nil,
-        "Die Spaltensortierung blieb trotz Handordnung aktiv")
+    addon.DB:GetSettings().statColumnOrder = nil
+    orders_list = addon.UI:GetStatColumnOrder()
+    assert(orders_list[1] == "presence" and orders_list[#orders_list] == "drums",
+        "Die Standard-Spaltenordnung stimmt nicht")
 
-    orders_list = addon.UI.ArrangeParticipants({
-        { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" }, { name = "Delta" },
-    }, orders_summary.manualOrder)
-    assert(orders_list[1].name == "Beta" and orders_list[3].name == "Alpha"
-        and orders_list[4].name == "Delta",
-        "Die Handordnung wird nicht angewandt oder verliert Unbekannte")
-    orders_page.selectedSummary = nil
-    orders_page.displayedParticipants = nil
+    assert(addon.UI:MoveStatColumn("food", 2) == true, "Das Spaltenverschieben scheiterte")
+    orders_list = addon.UI:GetStatColumnOrder()
+    assert(orders_list[2] == "food" and orders_list[1] == "presence",
+        "FOOD steht nach dem Verschieben nicht an Position 2")
+    assert(addon.DB:GetSettings().statColumnOrder[2] == "food",
+        "Die Spaltenordnung wurde nicht gespeichert")
+
+    -- Unbekannte Schlüssel werden abgelehnt; kaputte gespeicherte Einträge
+    -- fliegen beim Lesen raus, fehlende hängen hinten an.
+    assert(addon.UI:MoveStatColumn("quatsch", 1) == false,
+        "Eine unbekannte Spalte wurde verschoben")
+    addon.DB:GetSettings().statColumnOrder = { "drums", "unfug", "drums" }
+    orders_list = addon.UI:GetStatColumnOrder()
+    assert(orders_list[1] == "drums" and orders_list[2] == "presence"
+        and #orders_list == 9,
+        "Die Reparatur der gespeicherten Spaltenordnung versagt")
+
+    -- Kopf- und Zellpositionen folgen der Ordnung ohne Fehler.
+    addon.UI:ApplyStatColumnLayout()
+    assert(orders_page.sortHeaderByKey ~= nil and orders_page.sortHeaderByKey.drums ~= nil,
+        "Die Kopfzeilen sind nicht über ihre Schlüssel erreichbar")
+    addon.DB:GetSettings().statColumnOrder = nil
+    addon.UI:ApplyStatColumnLayout()
 end
 
 do

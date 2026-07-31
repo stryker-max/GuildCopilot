@@ -1952,55 +1952,81 @@ function GC.UI:BuildOnboardingCard(page, content)
     page.onboardingStatus:SetPoint("LEFT", page.onboardingDismiss, "RIGHT", 12, 0)
 end
 
--- Der Punkt am Minimap-Symbol. Getrennt vom Zeichnen der Karte, weil er auch
--- dann stimmen muss, wenn das Fenster zu ist - und das ist der Regelfall.
--- Wendet die Handordnung einer Auswertung auf die Teilnehmerliste an.
--- Unbekannte Namen (nachträglich empfangene Teilnehmer) hängen hinten an,
--- damit niemand aus der Liste fällt.
-function GC.UI.ArrangeParticipants(participants, manualOrder)
-    if type(manualOrder) ~= "table" or #manualOrder == 0 then
-        return participants
+-- === Spaltenordnung der Teilnehmertabelle ==================================
+-- Die Wertespalten der Raidauswertung lassen sich am Kopf packen und an eine
+-- neue Position ziehen (Owner-Wunsch; das frühere Zeilen-Ziehen ist ersatzlos
+-- raus). NAME bleibt fest vorn, die Reihenfolge der übrigen Spalten liegt in
+-- den Einstellungen und gilt damit für alle Auswertungen.
+
+local STAT_COLUMN_DEFAULTS = { "presence", "deaths", "interrupts", "dispels",
+    "potions", "flasks", "elixirs", "food", "drums" }
+
+function GC.UI:GetStatColumnOrder()
+    local saved = GC.DB:GetSettings().statColumnOrder
+    local known = {}
+    for _, key in ipairs(STAT_COLUMN_DEFAULTS) do
+        known[key] = true
     end
-    local byName = {}
-    for _, participant in ipairs(participants) do
-        byName[GC.Util.NormalizeName(participant.name)] = participant
-    end
-    local arranged = {}
-    for _, name in ipairs(manualOrder) do
-        local key = GC.Util.NormalizeName(name)
-        if byName[key] then
-            arranged[#arranged + 1] = byName[key]
-            byName[key] = nil
+    local order = {}
+    local used = {}
+    for _, key in ipairs(type(saved) == "table" and saved or {}) do
+        if known[key] and not used[key] then
+            used[key] = true
+            order[#order + 1] = key
         end
     end
-    for _, participant in ipairs(participants) do
-        if byName[GC.Util.NormalizeName(participant.name)] then
-            arranged[#arranged + 1] = participant
+    -- Spalten künftiger Versionen hängen hinten an, kaputte Einträge fallen
+    -- stillschweigend weg.
+    for _, key in ipairs(STAT_COLUMN_DEFAULTS) do
+        if not used[key] then
+            order[#order + 1] = key
         end
     end
-    return arranged
+    return order
 end
 
--- Das Ziehen einer Teilnehmerzeile: Die gerade angezeigte Reihenfolge wird
--- zur Handordnung dieser Auswertung, die gezogene Zeile wandert an die
--- Zielposition, und die Spaltensortierung tritt zurück.
-function GC.UI:MoveParticipantRow(fromIndex, toIndex)
-    local page = self.pages.STATISTICS
-    local displayed = page and page.displayedParticipants
-    local selected = page and page.selectedSummary
-    if not displayed or not selected or not displayed[fromIndex] then
+function GC.UI:MoveStatColumn(key, targetPosition)
+    local order = self:GetStatColumnOrder()
+    local from
+    for index, existing in ipairs(order) do
+        if existing == key then
+            from = index
+        end
+    end
+    if not from then
         return false
     end
-    local names = {}
-    for index, participant in ipairs(displayed) do
-        names[index] = participant.name
-    end
-    local moved = table.remove(names, fromIndex)
-    table.insert(names, math.max(1, math.min(toIndex, #names + 1)), moved)
-    selected.manualOrder = names
-    page.sortKey = nil
-    self:RefreshStatistics()
+    table.remove(order, from)
+    table.insert(order, math.max(1, math.min(tonumber(targetPosition) or from, #order + 1)), key)
+    GC.DB:GetSettings().statColumnOrder = order
+    self:ApplyStatColumnLayout()
     return true
+end
+
+-- Setzt Kopfzeile und alle Zellen der Teilnehmertabelle an die Positionen
+-- der aktuellen Ordnung. Läuft beim Seitenaufbau und nach jedem Verschieben.
+function GC.UI:ApplyStatColumnLayout()
+    local page = self.pages.STATISTICS
+    if not page or not page.sortHeaderByKey then
+        return
+    end
+    local cursor = 104
+    for _, key in ipairs(self:GetStatColumnOrder()) do
+        local width = (page.statColumnWidths or {})[key] or 40
+        local header = page.sortHeaderByKey[key]
+        if header then
+            header:ClearAllPoints()
+            header:SetPoint("TOPLEFT", header:GetParent(), "TOPLEFT", cursor + 13, -66)
+        end
+        for _, row in ipairs(page.participantRows or {}) do
+            local cell = row[key]
+            if cell then
+                cell:ClearAllPoints()
+                cell:SetPoint("LEFT", row, "LEFT", cursor, 0)
+            end
+        end
+        cursor = cursor + width + 3
+    end
 end
 
 function GC.UI:RefreshMinimapMarker()
@@ -6019,7 +6045,11 @@ function GC.UI:BuildStatisticsPage()
 
     -- Die Kopfzeile sortiert. Erster Klick absteigend, zweiter aufsteigend -
     -- "wer hat keine Flaeschchen" ist damit ein Klick statt einer Suche.
+    -- ZIEHEN eines Kopfes ordnet die Spalte an eine neue Position (kurzer
+    -- Klick bleibt Sortieren; WoW feuert den Drag erst ab einer Schwelle).
     page.sortHeaders = {}
+    page.sortHeaderByKey = {}
+    page.statColumnWidths = {}
     for _, headerDefinition in ipairs(detailHeaders) do
         local sortKey = headerDefinition.key
         local header = CreateButton(detailCard, headerDefinition.text,
@@ -6043,6 +6073,45 @@ function GC.UI:BuildStatisticsPage()
         header.baseText = headerDefinition.text
         header.sortKey = sortKey
         page.sortHeaders[#page.sortHeaders + 1] = header
+        page.sortHeaderByKey[sortKey] = header
+        page.statColumnWidths[sortKey] = headerDefinition.width
+        if sortKey ~= "name" then
+            header:RegisterForDrag("LeftButton")
+            header:SetScript("OnDragStart", function(self)
+                page.columnDragKey = sortKey
+                if self.SetAlpha then
+                    self:SetAlpha(0.55)
+                end
+            end)
+            header:SetScript("OnDragStop", function(self)
+                if self.SetAlpha then
+                    self:SetAlpha(1)
+                end
+                local draggedKey = page.columnDragKey
+                page.columnDragKey = nil
+                if not draggedKey or not GetCursorPosition then
+                    return
+                end
+                local scale = (UIParent and UIParent.GetEffectiveScale
+                    and UIParent:GetEffectiveScale()) or 1
+                local cursorX = GetCursorPosition()
+                if not cursorX then
+                    return
+                end
+                cursorX = cursorX / scale
+                for position, key in ipairs(GC.UI:GetStatColumnOrder()) do
+                    local target = page.sortHeaderByKey[key]
+                    if target and key ~= draggedKey then
+                        local left, right = target:GetLeft(), target:GetRight()
+                        if left and right and cursorX >= left and cursorX <= right then
+                            GC.UI:MoveStatColumn(draggedKey, position)
+                            GC.UI:RefreshStatistics()
+                            return
+                        end
+                    end
+                end
+            end)
+        end
     end
 
     local scroll = CreateModernScrollFrame(detailCard)
@@ -6053,19 +6122,13 @@ function GC.UI:BuildStatisticsPage()
     content:SetHeight(1100)
     scroll:SetScrollChild(content)
 
-    -- Zeilen lassen sich mit der Maus umsortieren (Owner-Wunsch): Das Ziehen
-    -- übernimmt die gerade angezeigte Reihenfolge als Handsortierung dieser
-    -- Auswertung und schaltet die Spaltensortierung ab. Ein Klick auf einen
-    -- Spaltenkopf sortiert wieder nach Spalte; die Handordnung bleibt
-    -- gemerkt, bis erneut gezogen wird.
-    --
-    -- Der Hinweis steht unten: Oben rechts sitzen jetzt die Quellenknöpfe,
-    -- und beide zusammen quetschten sich gegenseitig.
-    CreateLabel(detailCard, "Zeilen ziehen ordnet von Hand", {
+    -- Das frühere Zeilen-Ziehen ist ersatzlos entfernt (Owner: "Blödsinn") -
+    -- verschieben lassen sich jetzt die SPALTEN, am Kopf gepackt.
+    CreateLabel(detailCard, "Spaltenköpfe ziehen ordnet die Spalten", {
         muted = true,
         font = "GameFontNormalSmall",
         align = "RIGHT",
-        width = 220,
+        width = 260,
     }):SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 8)
 
     page.participantRows = {}
@@ -6074,43 +6137,6 @@ function GC.UI:BuildStatisticsPage()
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         row.rowIndex = index
-        row:RegisterForDrag("LeftButton")
-        row:SetScript("OnDragStart", function(self)
-            if self.participant then
-                page.dragFromIndex = self.rowIndex
-                if self.SetAlpha then
-                    self:SetAlpha(0.55)
-                end
-            end
-        end)
-        row:SetScript("OnDragStop", function(self)
-            if self.SetAlpha then
-                self:SetAlpha(1)
-            end
-            local fromIndex = page.dragFromIndex
-            page.dragFromIndex = nil
-            if not fromIndex or not GetCursorPosition then
-                return
-            end
-            local scale = (UIParent and UIParent.GetEffectiveScale
-                and UIParent:GetEffectiveScale()) or 1
-            local _, cursorY = GetCursorPosition()
-            if not cursorY then
-                return
-            end
-            cursorY = cursorY / scale
-            for targetIndex, candidate in ipairs(page.participantRows) do
-                if candidate:IsShown() then
-                    local top, bottom = candidate:GetTop(), candidate:GetBottom()
-                    if top and bottom and cursorY <= top and cursorY >= bottom then
-                        if targetIndex ~= fromIndex then
-                            GC.UI:MoveParticipantRow(fromIndex, targetIndex)
-                        end
-                        return
-                    end
-                end
-            end
-        end)
         local columns = {
             { key = "name", x = 5, width = 96 },
             { key = "presence", x = 104, width = 44 },
@@ -6170,6 +6196,10 @@ function GC.UI:BuildStatisticsPage()
     end
     page.participantEmpty = CreateLabel(detailCard, "Wähle links eine Sitzung aus.", { muted = true, width = 400, height = 40, vertical = "TOP" })
     page.participantEmpty:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -88)
+
+    -- Die gespeicherte Spaltenordnung anwenden - Kopfzeile und Zellen wurden
+    -- oben nur an ihren Standardplätzen erzeugt.
+    self:ApplyStatColumnLayout()
 end
 
 function GC.UI:RefreshStatistics()
@@ -6344,10 +6374,9 @@ function GC.UI:RefreshStatistics()
             end
             return leftValue < rightValue
         end)
-    elseif selected then
-        -- Ohne aktive Spaltensortierung gilt die Handordnung der Auswertung.
-        participants = GC.UI.ArrangeParticipants(participants, selected.manualOrder)
     end
+    -- Ohne aktive Spaltensortierung bleibt die gespeicherte Reihenfolge der
+    -- Auswertung; die frühere Zeilen-Handordnung ist entfernt.
     page.displayedParticipants = participants
     page.selectedSummary = selected
 

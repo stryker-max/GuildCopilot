@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.73 – Spalten verschieben statt Zeilen ziehen
+
+Owner-Urteil über das Zeilen-Ziehen: „Blödsinn" – raus damit, ersatzlos (samt Handordnung je Auswertung). Stattdessen das, was wirklich fehlte:
+
+- **Spalten am Kopf packen und verschieben:** TIME, DEATH, INT, DISP, POT, FLASK, ELIXIR, FOOD, DRUM lassen sich per Ziehen des Spaltenkopfs in eine eigene Reihenfolge bringen. Kurzer Klick bleibt Sortieren (WoW feuert den Drag erst ab einer Schwelle), NAME bleibt fest vorn;
+- **ordentlich per Raster:** Beim Loslassen rasten alle Spalten auf berechnete Positionen ein – nichts überlappt, keine krummen Abstände, die Zellen aller 40 Zeilen wandern mit;
+- **die Ordnung bleibt gespeichert** (kontoweit, gilt für jede Auswertung); unbekannte Alt-Einträge repariert das Lesen stillschweigend, neue Spalten künftiger Versionen hängen hinten an;
+- der Hinweis unten heißt jetzt „Spaltenköpfe ziehen ordnet die Spalten".
+
 ## 0.9.72 – Raidauswertung: klare Quellen, roter Proviant, löschbare Sitzungen
 
 Feinschliff nach dem ersten Abend mit Live+Logs nebeneinander:
