@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.48 – Zwei Ereignisse, die zu oft zugestellt wurden
+
+Aus der Gilde gemeldet: Performance-Einbrüche bei einzelnen Spielern, dazu ein Fall, in dem nach dem Aktivieren von Guild Copilot alle übrigen Addons deaktiviert waren. Die Ursache beider Meldungen ist **nicht** gefunden – die Suche danach hat aber zwei Stellen zutage gefördert, die unabhängig davon falsch waren:
+
+- **`COMBAT_LOG_EVENT_UNFILTERED` ist nur noch während einer laufenden Raidsitzung abonniert.** Es ist das häufigste Ereignis im Spiel und wurde bisher dauerhaft entgegengenommen, auch wenn gar nichts mitgeschrieben wurde. Der Handler stieg zwar sofort wieder aus, aber schon die Zustellung kostet bei jedem einzelnen Ereignis Zeit. Registriert wird jetzt in `StartSession`, abgemeldet in `FinishSession`;
+- **`UNIT_INVENTORY_CHANGED` wird über `RegisterUnitEvent` auf den eigenen Charakter begrenzt.** Das Ereignis feuert für jede Einheit in der Gruppe; gefiltert wurde erst in Lua. Im 25er-Raid lief der Handler damit fünfundzwanzigmal so oft wie nötig. Der Client filtert das billiger, als Lua es je könnte;
+- zwei Tests halten fest, dass das Combat-Log-Abo mit der Sitzung kommt und mit ihr wieder geht.
+
+**Ehrlich zum Umfang:** Beide Änderungen sind Hygiene, kein spürbarer Sprung. Wer eine merkliche Verbesserung der Bildrate erwartet, wird enttäuscht – die gemeldeten Einbrüche sind damit sehr wahrscheinlich **nicht** erklärt. Die eigentliche Ursache braucht Messwerte aus dem Raid (AddonProfiler) und Fehlerprotokolle der Betroffenen (BugSack/BugGrabber), nicht weitere Vermutungen.
+
 ## 0.9.47 – Befehle, die man auch findet
 
 Das Willkommensfenster aus 0.9.46 ließ sich nach dem ersten Login nicht wieder aufrufen – wer es noch einmal sehen wollte, kam nur über `/run` daran. Und die Befehlsliste stand in der README, also genau dort nicht, wo man sie sucht.

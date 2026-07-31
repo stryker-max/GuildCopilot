@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 30.07.2026, nach Release 0.9.45 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.48 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -142,6 +142,43 @@ Zwei Wege:
   Zuordnungstabelle. Nur falls Aufgabe 2 nicht kommt.
 
 **Aufwand:** klein, wenn Aufgabe 2 zuerst kommt.
+
+---
+
+## 4. Performance-Meldungen aus der Gilde – Ursache noch offen
+
+Gemeldet wurden Bildraten-Einbrüche bei mehreren Spielern sowie ein Fall, in
+dem nach dem Aktivieren von Guild Copilot **alle anderen Addons deaktiviert**
+waren. Mit 0.9.48 sind zwei Ereignisabos korrigiert – die Ursache ist damit
+aber **nicht** gefunden.
+
+**Ausgeschlossen ist bereits:** Das Addon ruft nirgends `DisableAddOn`,
+`EnableAddOn` oder `C_AddOns` auf, und es legt außer `SLASH_GUILDCOPILOT1/2`
+keine globalen Variablen an – eine Kollision mit fremden Addons scheidet aus.
+Die Interface-Version `20506` stimmt mit dem Anniversary-Client überein.
+
+**Arbeitshypothese zum Deaktivierungsfall:** WoW schreibt die Liste der
+aktivierten Addons beim Ausloggen nach `WTF\Account\…\AddOns.txt`. Stürzt der
+Client ab, bleibt die Datei unvollständig und beim nächsten Login sieht alles
+deaktiviert aus. Zu klären: Ist der Client des Betroffenen abgestürzt, und
+liegen Einträge im `Errors`- bzw. `Crashes`-Verzeichnis?
+
+**Vor weiteren Codeänderungen erst messen:**
+- BugSack + BugGrabber bei den Betroffenen, um Lua-Fehler statt Vermutungen zu
+  bekommen;
+- AddonProfiler im Raid, um zu belegen, ob GCP überhaupt die CPU-Zeit zieht;
+- die `GuildCopilot.lua` aus dem WTF-Ordner eines Betroffenen ansehen – die
+  reale Datenmenge ist unbekannt.
+
+**Danach zu bewerten, aber nicht vorher zu optimieren:**
+- `ResolveConsumable` in `RaidMonitor.lua` ruft `tostring(spellName):lower()`
+  für jedes `SPELL_AURA_APPLIED`/`_REFRESH`/`SPELL_CAST_SUCCESS` auf, dessen
+  Spell-ID kein bekanntes Verbrauchsgut ist – also im Regelfall. Dazu
+  normalisiert `FindParticipant` bei jedem Aufruf den Namen. Nur relevant,
+  solange eine Sitzung läuft;
+- `GC.DB:Prune()` räumt rein zeitbasiert auf. `remoteProfiles` und
+  `workshop.crafters` haben **keine Mengenobergrenze**; nur `inbox` (100) und
+  `postHistory` (50) sind gedeckelt. In einer großen Gilde kann das wachsen.
 
 ---
 

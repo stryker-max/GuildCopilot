@@ -5,6 +5,7 @@ GC.RaidMonitor = {
     incoming = {},
     lastAnswerAt = 0,
     selectedSessionID = nil,
+    combatLogTracking = false,
 }
 
 local MAX_STORED_SESSIONS = 12
@@ -13,6 +14,29 @@ local WIPE_RATIO = 0.5
 local MAX_PAYLOAD_BYTES = 165
 local MIN_ANSWER_INTERVAL = 30
 local INCOMING_TTL = 5 * 60
+
+-- COMBAT_LOG_EVENT_UNFILTERED ist das haeufigste Ereignis im Spiel; im Raid
+-- feuert es tausende Male pro Sekunde. Schon die Zustellung an einen Handler,
+-- der sofort wieder aussteigt, kostet bei jedem einzelnen Ereignis Zeit.
+-- Abonniert wird es deshalb nur, solange eine Sitzung wirklich mitschreibt.
+-- Die uebrigen Ereignisse sind selten und bleiben dauerhaft registriert.
+local raidEvents = CreateFrame("Frame")
+raidEvents:RegisterEvent("GROUP_ROSTER_UPDATE")
+raidEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
+raidEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+function GC.RaidMonitor:SetCombatLogTracking(enabled)
+    enabled = enabled and true or false
+    if self.combatLogTracking == enabled then
+        return
+    end
+    self.combatLogTracking = enabled
+    if enabled then
+        raidEvents:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    else
+        raidEvents:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    end
+end
 
 local function SanitizedText(value, maximumBytes)
     value = GC.Util.Trim(value)
@@ -161,6 +185,7 @@ function GC.RaidMonitor:StartSession(sessionID, startedBy, startedAt, zone)
         pulls = {},
         segment = nil,
     }
+    self:SetCombatLogTracking(true)
     self:SyncParticipants()
     GC:FireCallback("RAID_SESSION_UPDATED")
     return self.session
@@ -218,6 +243,7 @@ function GC.RaidMonitor:FinishSession(endedAt)
 
     local summary = self:BuildSummary(session, endedAt)
     self.session = nil
+    self:SetCombatLogTracking(false)
     self:StoreSummary(summary)
     GC:FireCallback("RAID_SESSION_UPDATED")
     return summary
@@ -865,11 +891,8 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester)
     return true
 end
 
-local raidEvents = CreateFrame("Frame")
-raidEvents:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-raidEvents:RegisterEvent("GROUP_ROSTER_UPDATE")
-raidEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
-raidEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- Der Rahmen und die dauerhaften Ereignisse stehen oben in der Datei, damit
+-- StartSession und FinishSession das Combat-Log-Abo umschalten koennen.
 raidEvents:SetScript("OnEvent", function(_, event)
     if not GC.RaidMonitor.session then
         return

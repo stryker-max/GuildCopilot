@@ -1476,6 +1476,13 @@ assert(sentAddon[#sentAddon][3] == "RAID", "Die Sitzung wurde nicht über den Ra
 local liveSession = addon.RaidMonitor.session
 assert(liveSession.participants.schurke ~= nil, "Raidmitglieder wurden nicht übernommen")
 
+-- Das Combat-Log-Abo darf nur waehrend einer laufenden Sitzung bestehen; sonst
+-- laeuft der teuerste Ereignisstrom des Spiels dauerhaft ins Leere.
+do
+    assert(addon.RaidMonitor.combatLogTracking == true,
+        "Das Combat-Log-Abo wurde beim Sitzungsstart nicht eingeschaltet")
+end
+
 addon.RaidMonitor:BeginSegment(currentTime)
 FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
 FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
@@ -1505,6 +1512,11 @@ currentTime = currentTime + 60
 local sessionEnded = addon.RaidMonitor:EndSession()
 assert(sessionEnded == true, "Die Raidsitzung wurde nicht beendet")
 assert(addon.RaidMonitor.session == nil, "Die Sitzung läuft nach dem Beenden weiter")
+
+do
+    assert(addon.RaidMonitor.combatLogTracking == false,
+        "Das Combat-Log-Abo blieb nach dem Sitzungsende bestehen")
+end
 
 local storedSummary = addon.RaidMonitor:GetSummaries()[1]
 assert(storedSummary ~= nil, "Die Auswertung wurde nicht gespeichert")

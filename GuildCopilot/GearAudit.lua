@@ -1562,8 +1562,17 @@ end
 local gearEvents = CreateFrame("Frame")
 gearEvents:RegisterEvent("INSPECT_READY")
 gearEvents:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-gearEvents:RegisterEvent("UNIT_INVENTORY_CHANGED")
 gearEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+
+-- UNIT_INVENTORY_CHANGED feuert fuer jede Einheit in der Gruppe; interessant
+-- ist ausschliesslich der eigene Charakter. Ungefiltert liefe der Handler im
+-- 25er-Raid fuenfundzwanzigmal so oft wie noetig - der Client filtert das
+-- billiger, als es Lua je koennte.
+if gearEvents.RegisterUnitEvent then
+    gearEvents:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
+else
+    gearEvents:RegisterEvent("UNIT_INVENTORY_CHANGED")
+end
 gearEvents:SetScript("OnEvent", function(_, event, value)
     if event == "INSPECT_READY" then
         GC.GearAudit:OnInspectReady(value)
