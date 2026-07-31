@@ -1188,7 +1188,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1700)
+    content:SetHeight(1740)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1475,7 +1475,7 @@ function GC.UI:BuildSettingsPage()
     -- Klang und Bildschirmmeldung der Gildenaufträge. Jedes Ereignis hat
     -- seinen eigenen Ton aus der bekannten Klangliste; "Aus" schaltet es ab.
     local orderCard = CreateCard(content, "Gildenaufträge")
-    orderCard:SetSize(752, 224)
+    orderCard:SetSize(752, 264)
     orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1432)
     local orderSoundNames = { "Aus" }
     for _, sound in ipairs(GC.SuccessSoundOptions) do
@@ -1506,27 +1506,57 @@ function GC.UI:BuildSettingsPage()
     page.orderSoundProgress = OrderSoundDropdown("Fortschritt an eigenen Aufträgen", -86, "progress")
     page.orderSoundDone = OrderSoundDropdown("Auftrag abgeschlossen", -124, "done")
 
+    CreateLabel(orderCard, "Anzeigedauer der Meldung (Sekunden)",
+        { muted = true, width = 236, height = 30 })
+        :SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -162)
+    page.orderBannerHold = CreateEdit(orderCard, 60, 26)
+    page.orderBannerHold.container:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 262, -164)
+    page.orderBannerHold:SetScript("OnTextChanged", function(edit)
+        local seconds = tonumber(GC.Util.Trim(edit:GetText()))
+        if seconds then
+            GC.DB:GetSettings().orderBanner.holdSeconds =
+                math.max(1, math.min(30, math.floor(seconds)))
+        end
+    end)
+
     page.orderBannerToggle = CreateToggle(orderCard,
         "Bildschirmmeldung bei neuen machbaren Aufträgen", function(checked)
         GC.DB:GetSettings().orderBanner.enabled = checked
     end)
-    page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -166)
+    page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -200)
     page.orderBannerToggle.text:SetWidth(360)
-    local bannerTest = CreateButton(orderCard, "Meldung testen", 140, 30, function()
-        -- Der Positionier-Modus zeigt Kasten und Rand, damit sich der Anker
-        -- mit der Maus greifen und verschieben lässt.
-        GC.UI:ShowOrderBanner("Neuer Gildenauftrag", true)
+
+    page.orderBannerTest = CreateButton(orderCard, "Meldung testen", 150, 30, function()
+        -- Klang und Meldung zusammen, wie im Ernstfall. Der Positionier-Modus
+        -- zeigt Kasten und Rand, damit sich der Anker mit der Maus greifen
+        -- und verschieben lässt.
+        GC.Orders:PlayEventSound("newOrder")
+        GC.UI:ShowOrderBanner("Neuer Gildenauftrag von "
+            .. GC.Util.PlayerShortName(GC:GetPlayerFullName()), true)
     end)
-    bannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -160)
+    page.orderBannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -158)
+    page.orderBannerReset = CreateButton(orderCard, "Position zurücksetzen", 150, 26, function()
+        local bannerSettings = GC.DB:GetSettings().orderBanner
+        bannerSettings.x = 0
+        bannerSettings.y = 200
+        if GC.UI.orderBanner then
+            GC.UI.orderBanner:ClearAllPoints()
+            GC.UI.orderBanner:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
+        end
+        GC.UI:ShowOrderBanner("Neuer Gildenauftrag von "
+            .. GC.Util.PlayerShortName(GC:GetPlayerFullName()), true)
+    end)
+    page.orderBannerReset:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -194)
+
     CreateLabel(orderCard,
         "Die Meldung lässt sich mit der Maus dorthin schieben, wo sie nichts verdeckt.", {
         muted = true,
         width = 716,
         height = 16,
-    }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -196)
+    }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -236)
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1668)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1708)
 end
 
 function GC.UI:RefreshSettings()
@@ -1633,6 +1663,7 @@ function GC.UI:RefreshSettings()
     page.orderSoundProgress:SetValue(OrderSoundName("progress", "MAP_PING"))
     page.orderSoundDone:SetValue(OrderSoundName("done", "IG_QUEST_LIST_COMPLETE"))
     SetToggle(page.orderBannerToggle, settings.orderBanner.enabled ~= false)
+    page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
@@ -4107,10 +4138,16 @@ end
 -- rückt Älteres wie beim Scrolling Combat Text nach oben und verblasst dort.
 -- Der Kasten erscheint nur im Positionier-Modus ("Meldung testen" in den
 -- Einstellungen), damit sich der Anker mit der Maus greifen lässt.
-local BANNER_HOLD_SECONDS = 3
 local BANNER_FADE_SECONDS = 1.5
 local BANNER_LINES = 3
 local BANNER_LINE_HEIGHT = 34
+
+-- Die Standdauer kommt aus den Einstellungen (1 bis 30 Sekunden). Gelesen
+-- wird sie je Tick - ein Tabellenzugriff, und Änderungen greifen sofort.
+local function BannerHoldSeconds()
+    local value = tonumber(GC.DB:GetSettings().orderBanner.holdSeconds) or 3
+    return math.max(1, math.min(30, value))
+end
 
 function GC.UI:CreateOrderBanner()
     if self.orderBanner then
@@ -4193,17 +4230,18 @@ function GC.UI:CreateOrderBanner()
 
     banner:SetScript("OnUpdate", function(frame, elapsed)
         elapsed = tonumber(elapsed) or 0
+        local hold = BannerHoldSeconds()
         local anyActive = false
         for _, line in ipairs(frame.lines) do
             if line.age then
                 line.age = line.age + elapsed
-                if line.age >= BANNER_HOLD_SECONDS + BANNER_FADE_SECONDS then
+                if line.age >= hold + BANNER_FADE_SECONDS then
                     line.age = nil
                     line:Hide()
-                elseif line.age > BANNER_HOLD_SECONDS then
+                elseif line.age > hold then
                     if line.SetAlpha then
                         line:SetAlpha(math.max(0,
-                            1 - ((line.age - BANNER_HOLD_SECONDS) / BANNER_FADE_SECONDS)))
+                            1 - ((line.age - hold) / BANNER_FADE_SECONDS)))
                     end
                     anyActive = true
                 else
@@ -4219,8 +4257,8 @@ function GC.UI:CreateOrderBanner()
         local newest = frame.lines[1]
         local ruleAlpha = 0
         if newest.age then
-            ruleAlpha = newest.age <= BANNER_HOLD_SECONDS and 1
-                or math.max(0, 1 - ((newest.age - BANNER_HOLD_SECONDS) / BANNER_FADE_SECONDS))
+            ruleAlpha = newest.age <= hold and 1
+                or math.max(0, 1 - ((newest.age - hold) / BANNER_FADE_SECONDS))
         end
         for _, rule in ipairs(frame.rules) do
             rule:SetShown(ruleAlpha > 0)
@@ -4571,15 +4609,19 @@ function GC.UI:BuildPostPage()
         SetTextColor(page.postResult, success and THEME.success or THEME.danger)
         GC.UI:RefreshPost()
     end, "PRIMARY")
-    page.searchButton:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 0)
+    -- Die Rueckmeldung stand rechts neben dem Werbebalken-Knopf und wurde
+    -- uebersehen - wer ohne bestaetigten Text auf "Suche starten" klickte,
+    -- bekam scheinbar keinen Hinweis. Jetzt steht sie in voller Breite direkt
+    -- unter dem Knopf, auf den man gerade geklickt hat.
+    page.searchButton:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 26)
     page.postBarToggle = CreateButton(page, "Werbebalken", 150, 44, function()
         GC.UI:TogglePostBar()
         GC.UI:RefreshPost()
     end)
     page.postBarToggle:SetPoint("LEFT", page.searchButton, "RIGHT", 12, 0)
 
-    page.postResult = CreateLabel(page, "", { width = 370 })
-    page.postResult:SetPoint("LEFT", page.postBarToggle, "RIGHT", 16, 0)
+    page.postResult = CreateLabel(page, "", { width = 776 })
+    page.postResult:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 4)
 
     page:SetScript("OnUpdate", function(_, elapsed)
         page.elapsed = (page.elapsed or 0) + elapsed
@@ -6462,6 +6504,22 @@ local function MinimapCenterInUISpace()
     return centerX * minimapScale / scale, centerY * minimapScale / scale
 end
 
+-- Ring und dunkler Untergrund gehoeren zur Minimap-Optik. Frei platziert sah
+-- der offene Goldring wie ein grosses "C" aus (Owner-Screenshot); dort zeigt
+-- der Knopf nur noch das Wappen, etwas groesser und mittig.
+local function ApplyMinimapButtonChrome(button, free)
+    button.border:SetShown(not free)
+    button.background:SetShown(not free)
+    button.icon:ClearAllPoints()
+    if free then
+        button.icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+        button.icon:SetSize(28, 28)
+    else
+        button.icon:SetPoint("TOPLEFT", button, "TOPLEFT", 7, -6)
+        button.icon:SetSize(17, 17)
+    end
+end
+
 function GC.UI:PositionMinimapButton()
     local button = self.minimapButton
     if not button then
@@ -6469,6 +6527,7 @@ function GC.UI:PositionMinimapButton()
     end
     local settings = GC.DB:GetSettings().minimap
     button:ClearAllPoints()
+    ApplyMinimapButtonChrome(button, settings.free == true)
 
     -- Frei gesetzt haengt das Symbol an UIParent, nicht mehr an der Minimap:
     -- Sonst gelten die gespeicherten Koordinaten im Massstab der Minimap und

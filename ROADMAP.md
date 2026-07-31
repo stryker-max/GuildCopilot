@@ -298,6 +298,17 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.56 – Feinschliff aus dem laufenden Test
+
+Sechs Owner-Rückmeldungen in einer Runde:
+
+- **„Meldung testen" spielt jetzt auch den Klang** – Klang und Meldung zusammen, wie im Ernstfall;
+- die Meldung nennt wieder den Auftraggeber: **„Neuer Gildenauftrag von xyz"** (gleicher Absender wird hochgezählt, verschiedene stapeln);
+- **Anzeigedauer einstellbar** (1–30 Sekunden, Vorgabe 3) – damit ist alles am Feature einstellbar: Klang je Ereignis, Dauer, Ein/Aus, Position;
+- neuer Knopf **„Position zurücksetzen"**, falls die Meldung einmal unauffindbar hängt;
+- **das „C" unten links aufgeklärt:** Das frei platzierte Minimap-Symbol trug noch den goldenen Minimap-Ring – der offene Ring sah losgelöst wie ein Buchstabe aus. Frei platziert zeigt der Knopf jetzt nur das Wappen, mittig und etwas größer; am Minimap-Ring bleibt alles beim Alten. (Die Logo-Textur selbst war in Ordnung – geprüft durch Dekodieren der TGA.);
+- **der Hinweis „Bitte den aktuellen Werbetext zuerst bestätigen" ist jetzt sichtbar:** Er existierte schon, stand aber klein rechts neben dem Werbebalken-Knopf. Jede Rückmeldung von „Suche starten" steht nun in voller Breite direkt unter dem Knopf.
+
 ## 0.9.55 – Bildschirmmeldung nach Owner-Geschmack, und weiches Scrollen
 
 Rückmeldung mit Screenshot zur 0.9.54er-Meldung („man kann es kaum lesen"):

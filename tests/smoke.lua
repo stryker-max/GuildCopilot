@@ -4547,12 +4547,14 @@ do
     assert(playedSoundID == 888, "Der neue machbare Auftrag spielt nicht den Stufenaufstieg")
     assert(addon.UI.orderBanner ~= nil and addon.UI.orderBanner.shown == true,
         "Die Bildschirmmeldung zum neuen Auftrag fehlt")
-    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag",
-        "Die Meldung ist nicht die generische Zeile ohne Rezept und Name")
+    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag von Heiler",
+        "Die Meldung nennt nicht den Auftraggeber ohne Rezept")
     -- Gleiche Meldung nochmal, solange die alte steht: hochzählen statt stapeln.
-    addon.UI:ShowOrderBanner("Neuer Gildenauftrag")
-    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag  ×2",
+    addon.UI:ShowOrderBanner("Neuer Gildenauftrag von Heiler")
+    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag von Heiler  ×2",
         "Mehrere gleiche Meldungen werden nicht zusammengefasst")
+    assert(tonumber(addon.DB:GetSettings().orderBanner.holdSeconds) == 3,
+        "Die Anzeigedauer hat keine Vorgabe von drei Sekunden")
     addon.UI.orderBanner.lines[1].age = nil
     addon.UI.orderBanner:Hide()
 

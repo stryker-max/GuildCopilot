@@ -949,10 +949,11 @@ function GC.Orders:NotifyNewOrder(order)
         .. GC.Util.PlayerShortName(order.createdBy or "?") .. " – dein "
         .. GC.Util.PlayerShortName(candidates[1]) .. " kann das Rezept.")
     self:PlayEventSound("newOrder")
-    -- Die Bildschirmmeldung bleibt bewusst generisch (Owner-Entscheidung):
-    -- Rezept und Name stehen im Chat und auf dem Board, die Meldung sagt nur,
-    -- DASS es etwas Machbares gibt.
-    GC:FireCallback("ORDERS_BANNER", "Neuer Gildenauftrag")
+    -- Die Meldung nennt den Auftraggeber, aber kein Rezept - das steht im
+    -- Chat und auf dem Board. Gleicher Absender wird in der Anzeige
+    -- hochgezählt, verschiedene stapeln sich wie Scrolling Combat Text.
+    GC:FireCallback("ORDERS_BANNER",
+        "Neuer Gildenauftrag von " .. GC.Util.PlayerShortName(order.createdBy or "?"))
 end
 
 -- === Abgleich ===============================================================

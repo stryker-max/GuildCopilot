@@ -60,6 +60,9 @@ local DEFAULTS = {
             enabled = true,
             x = 0,
             y = 200,
+            -- Sekunden, die die Meldung voll sichtbar steht, bevor sie
+            -- ausblendet; in den Einstellungen von 1 bis 30 einstellbar.
+            holdSeconds = 3,
         },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
