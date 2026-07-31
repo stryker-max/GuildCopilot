@@ -4529,6 +4529,17 @@ do
         } } },
     }
 
+    -- Bannerzustand aus früheren Blöcken abräumen: Im Mock altern Zeilen nie,
+    -- eine stehengebliebene Meldung würde sonst sofort zu "×2" zusammengefasst.
+    if addon.UI.orderBanner then
+        for _, line in ipairs(addon.UI.orderBanner.lines) do
+            line.age = nil
+            line:SetText("")
+            line.baseText = nil
+        end
+        addon.UI.orderBanner:Hide()
+    end
+
     playedSoundID = nil
     addon.Sync:OnMessage("GuildCopilot",
         "O|7|C|soundtest-1|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
@@ -4536,6 +4547,13 @@ do
     assert(playedSoundID == 888, "Der neue machbare Auftrag spielt nicht den Stufenaufstieg")
     assert(addon.UI.orderBanner ~= nil and addon.UI.orderBanner.shown == true,
         "Die Bildschirmmeldung zum neuen Auftrag fehlt")
+    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag",
+        "Die Meldung ist nicht die generische Zeile ohne Rezept und Name")
+    -- Gleiche Meldung nochmal, solange die alte steht: hochzählen statt stapeln.
+    addon.UI:ShowOrderBanner("Neuer Gildenauftrag")
+    assert(addon.UI.orderBanner.lines[1]:GetText() == "Neuer Gildenauftrag  ×2",
+        "Mehrere gleiche Meldungen werden nicht zusammengefasst")
+    addon.UI.orderBanner.lines[1].age = nil
     addon.UI.orderBanner:Hide()
 
     addon.Sync:OnMessage("GuildCopilot",

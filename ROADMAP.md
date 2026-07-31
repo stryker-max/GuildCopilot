@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.55 – Bildschirmmeldung nach Owner-Geschmack, und weiches Scrollen
+
+Rückmeldung mit Screenshot zur 0.9.54er-Meldung („man kann es kaum lesen"):
+
+- **Kein Kasten mehr:** Die Meldung ist reiner Text mit dicker Kontur und Schatten, darüber und darunter eine **dünne Linie** – die klassische Raidwarnungs-Optik. Der Kasten erscheint nur noch im Positionier-Modus über „Meldung testen", damit sich der Anker greifen lässt;
+- **drei Sekunden stehen, dann anderthalb Sekunden ausblenden** statt hartem Verschwinden;
+- **nur noch „Neuer Gildenauftrag"** – Rezept und Auftraggeber stehen im Chat und auf dem Board, die Meldung sagt nur, dass es etwas Machbares gibt (Owner: „der Name ist gar nicht relevant"). Sie erscheint unverändert nur, wenn ein eigener Charakter das Rezept kann, und bleibt über die Einstellungen abschaltbar;
+- **mehrere auf einmal:** Gleiche Meldungen werden zu „Neuer Gildenauftrag ×2" zusammengefasst; unterschiedliche rücken wie beim Scrolling Combat Text nach oben und verblassen dort;
+- **nebenbei gemeldet und behoben:** Das Mausrad scrollte alle Seiten in harten 24-Pixel-Schritten – auf der 1700 Pixel hohen Einstellungsseite fühlte sich das stockend an. Jetzt setzt das Rad ein Ziel und ein kurzlebiges OnUpdate nähert sich ihm exponentiell; im Leerlauf hängt kein Handler am Rahmen (0.9.49-Prinzip).
+
 ## 0.9.54 – Gildenaufträge: Klang und Bildschirmmeldung
 
 Owner-Wunsch mit Präzisierung während der Umsetzung (Stufenaufstieg statt Raidwarnung für neue Aufträge):

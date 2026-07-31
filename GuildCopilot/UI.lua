@@ -393,16 +393,45 @@ local function CreateModernScrollFrame(parent)
     end
 
     scroll:SetScript("OnScrollRangeChanged", function(self)
+        -- Ein veraltetes Animationsziel (Seitenwechsel, neuer Inhalt) darf
+        -- den naechsten Radtick nicht an eine alte Position springen lassen.
+        self.targetScroll = nil
         self:UpdateModernThumb()
     end)
     scroll:SetScript("OnVerticalScroll", function(self)
         self:UpdateModernThumb()
     end)
+
+    -- Weiches Scrollen: Das Rad setzt nur ein Ziel, ein kurzlebiges OnUpdate
+    -- naehert sich ihm exponentiell (bildratenunabhaengig). Vorher sprang die
+    -- Position in harten 24-Pixel-Schritten - auf der 1700 Pixel hohen
+    -- Einstellungsseite fuehlte sich das stockend an. Das OnUpdate haengt nur
+    -- waehrend der Animation am Rahmen; Leerlauf kostet keinen Handleraufruf.
+    local function SmoothScrollStep(self, elapsed)
+        local current = self:GetVerticalScroll() or 0
+        local target = self.targetScroll
+        if not target then
+            self:SetScript("OnUpdate", nil)
+            return
+        end
+        local difference = target - current
+        if math.abs(difference) < 1 then
+            self:SetVerticalScroll(target)
+            self.targetScroll = nil
+            self:SetScript("OnUpdate", nil)
+        else
+            self:SetVerticalScroll(current
+                + (difference * math.min(1, (tonumber(elapsed) or 0) * 14)))
+        end
+        self:UpdateModernThumb()
+    end
+
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(self, delta)
-        local newValue = self:GetVerticalScroll() - (delta * 24)
-        self:SetVerticalScroll(math.max(0, math.min(newValue, self:GetVerticalScrollRange())))
-        self:UpdateModernThumb()
+        local base = self.targetScroll or self:GetVerticalScroll() or 0
+        self.targetScroll = math.max(0,
+            math.min(base - (delta * 64), self:GetVerticalScrollRange() or 0))
+        self:SetScript("OnUpdate", SmoothScrollStep)
     end)
     return scroll
 end
@@ -1484,7 +1513,9 @@ function GC.UI:BuildSettingsPage()
     page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -166)
     page.orderBannerToggle.text:SetWidth(360)
     local bannerTest = CreateButton(orderCard, "Meldung testen", 140, 30, function()
-        GC.UI:ShowOrderBanner("Neuer Gildenauftrag: Beispiel ×1")
+        -- Der Positionier-Modus zeigt Kasten und Rand, damit sich der Anker
+        -- mit der Maus greifen und verschieben lässt.
+        GC.UI:ShowOrderBanner("Neuer Gildenauftrag", true)
     end)
     bannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -160)
     CreateLabel(orderCard,
@@ -4070,9 +4101,16 @@ function GC.UI:ToggleOrderTracker()
 end
 
 -- === Bildschirmmeldung ======================================================
--- Eine eigene, gut lesbare Raidwarnung für neue machbare Gildenaufträge. Die
--- eingebaute Position oben-mittig ist erfahrungsgemäß von WeakAuras belegt;
--- diese hier ist frei verschiebbar und merkt sich ihren Platz.
+-- Eine eigene, gut lesbare Raidwarnung für neue machbare Gildenaufträge -
+-- ohne Hintergrundkasten, mit dicker Kontur und Schatten für den Kontrast.
+-- Sie steht drei Sekunden und verblasst dann; kommen mehrere Meldungen,
+-- rückt Älteres wie beim Scrolling Combat Text nach oben und verblasst dort.
+-- Der Kasten erscheint nur im Positionier-Modus ("Meldung testen" in den
+-- Einstellungen), damit sich der Anker mit der Maus greifen lässt.
+local BANNER_HOLD_SECONDS = 3
+local BANNER_FADE_SECONDS = 1.5
+local BANNER_LINES = 3
+local BANNER_LINE_HEIGHT = 34
 
 function GC.UI:CreateOrderBanner()
     if self.orderBanner then
@@ -4080,13 +4118,12 @@ function GC.UI:CreateOrderBanner()
     end
     local settings = GC.DB:GetSettings().orderBanner
     local banner = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotOrderBanner")
-    banner:SetSize(560, 46)
+    banner:SetSize(640, BANNER_LINES * BANNER_LINE_HEIGHT)
     banner:SetPoint("CENTER", UIParent, "CENTER",
         tonumber(settings.x) or 0, tonumber(settings.y) or 200)
     banner:SetFrameStrata("HIGH")
     banner:SetClampedToScreen(true)
     banner:SetMovable(true)
-    banner:EnableMouse(true)
     banner:RegisterForDrag("LeftButton")
     banner:SetScript("OnDragStart", banner.StartMoving)
     banner:SetScript("OnDragStop", function(frame)
@@ -4097,38 +4134,154 @@ function GC.UI:CreateOrderBanner()
             GC.DB:GetSettings().orderBanner.y = math.floor(tonumber(y) or 0)
         end
     end)
-    banner:SetBackdropColor(THEME.window[1], THEME.window[2], THEME.window[3], 0.92)
-    banner.text = CreateLabel(banner, "", {
-        font = "GameFontNormalHuge",
-        align = "CENTER",
-        width = 540,
-        height = 46,
-    })
-    banner.text:SetPoint("CENTER", banner, "CENTER", 0, 0)
-    SetTextColor(banner.text, THEME.accent)
+
+    function banner:SetPositioning(active)
+        self.positioning = active == true
+        self:EnableMouse(self.positioning)
+        if self.positioning then
+            self:SetBackdropColor(THEME.window[1], THEME.window[2], THEME.window[3], 0.85)
+            self:SetBackdropBorderColor(THEME.accent[1], THEME.accent[2], THEME.accent[3], 1)
+        else
+            self:SetBackdropColor(0, 0, 0, 0)
+            self:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+    end
+    banner:SetPositioning(false)
+
+    banner.lines = {}
+    for index = 1, BANNER_LINES do
+        local line = CreateLabel(banner, "", {
+            font = "GameFontNormalHuge",
+            align = "CENTER",
+            width = 640,
+            height = BANNER_LINE_HEIGHT,
+        })
+        -- Neues erscheint unten am Anker, Älteres rückt nach oben.
+        line:SetPoint("BOTTOM", banner, "BOTTOM", 0, (index - 1) * BANNER_LINE_HEIGHT)
+        SetTextColor(line, THEME.accent)
+        if line.GetFont and line.SetFont then
+            local fontPath, fontSize = line:GetFont()
+            if fontPath then
+                line:SetFont(fontPath, fontSize or 20, "THICKOUTLINE")
+            end
+        end
+        if line.SetShadowOffset then
+            line:SetShadowOffset(2, -2)
+        end
+        if line.SetShadowColor then
+            line:SetShadowColor(0, 0, 0, 0.9)
+        end
+        line.age = nil
+        line:Hide()
+        banner.lines[index] = line
+    end
+
+    -- Die dünnen Linien über und unter der Meldung - die klassische
+    -- Raidwarnungs-Optik, nur ohne Kasten. Sie verblassen mit der Meldung.
+    banner.rules = {}
+    for index, offset in ipairs({ 0, BANNER_LINE_HEIGHT }) do
+        local rule = banner:CreateTexture(nil, "ARTWORK")
+        rule:SetHeight(1)
+        rule:SetPoint("BOTTOMLEFT", banner, "BOTTOMLEFT", 40, offset)
+        rule:SetPoint("BOTTOMRIGHT", banner, "BOTTOMRIGHT", -40, offset)
+        if rule.SetColorTexture then
+            rule:SetColorTexture(THEME.accent[1], THEME.accent[2], THEME.accent[3], 0.9)
+        end
+        rule:Hide()
+        banner.rules[index] = rule
+    end
+
+    banner:SetScript("OnUpdate", function(frame, elapsed)
+        elapsed = tonumber(elapsed) or 0
+        local anyActive = false
+        for _, line in ipairs(frame.lines) do
+            if line.age then
+                line.age = line.age + elapsed
+                if line.age >= BANNER_HOLD_SECONDS + BANNER_FADE_SECONDS then
+                    line.age = nil
+                    line:Hide()
+                elseif line.age > BANNER_HOLD_SECONDS then
+                    if line.SetAlpha then
+                        line:SetAlpha(math.max(0,
+                            1 - ((line.age - BANNER_HOLD_SECONDS) / BANNER_FADE_SECONDS)))
+                    end
+                    anyActive = true
+                else
+                    if line.SetAlpha then
+                        line:SetAlpha(1)
+                    end
+                    anyActive = true
+                end
+            end
+        end
+        -- Die Linien folgen der jüngsten Zeile: Sie ist immer die letzte, die
+        -- verblasst, also tragen die Linien schlicht deren Deckkraft.
+        local newest = frame.lines[1]
+        local ruleAlpha = 0
+        if newest.age then
+            ruleAlpha = newest.age <= BANNER_HOLD_SECONDS and 1
+                or math.max(0, 1 - ((newest.age - BANNER_HOLD_SECONDS) / BANNER_FADE_SECONDS))
+        end
+        for _, rule in ipairs(frame.rules) do
+            rule:SetShown(ruleAlpha > 0)
+            if rule.SetAlpha then
+                rule:SetAlpha(ruleAlpha)
+            end
+        end
+        if not anyActive then
+            frame:SetPositioning(false)
+            frame:Hide()
+        end
+    end)
+
     banner:Hide()
     self.orderBanner = banner
     return banner
 end
 
-function GC.UI:ShowOrderBanner(text)
-    if GC.DB:GetSettings().orderBanner.enabled == false then
+function GC.UI:ShowOrderBanner(text, positioning)
+    if GC.DB:GetSettings().orderBanner.enabled == false and not positioning then
         return
     end
     local banner = self:CreateOrderBanner()
-    banner.text:SetText(text or "")
-    -- Eine neuere Meldung verlängert die Anzeige; der Timer der älteren
-    -- versteckt dann nichts mehr.
-    banner.hideAt = GC.Util.Now() + 5
-    banner:Show()
-    if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(5, function()
-            local current = GC.UI.orderBanner
-            if current and GC.Util.Now() >= (current.hideAt or 0) then
-                current:Hide()
-            end
-        end)
+    local lines = banner.lines
+    text = text or ""
+
+    -- Gleiche Meldung, solange die alte noch steht: hochzählen statt
+    -- stapeln. "Neuer Gildenauftrag ×3" sagt mehr als drei identische Zeilen.
+    if lines[1].age and lines[1].baseText == text then
+        lines[1].repeatCount = (lines[1].repeatCount or 1) + 1
+        lines[1]:SetText(text .. "  ×" .. lines[1].repeatCount)
+        lines[1].age = 0
+        if lines[1].SetAlpha then
+            lines[1]:SetAlpha(1)
+        end
+        banner:Show()
+        return
     end
+
+    -- Ältere Zeilen eine Position nach oben schieben, die neue kommt unten an.
+    for index = #lines, 2, -1 do
+        local line = lines[index]
+        local below = lines[index - 1]
+        line:SetText(below:GetText() or "")
+        line.age = below.age
+        line.baseText = below.baseText
+        line.repeatCount = below.repeatCount
+        line:SetShown(line.age ~= nil)
+    end
+    lines[1]:SetText(text)
+    lines[1].baseText = text
+    lines[1].repeatCount = 1
+    lines[1].age = 0
+    if lines[1].SetAlpha then
+        lines[1]:SetAlpha(1)
+    end
+    lines[1]:Show()
+    if positioning then
+        banner:SetPositioning(true)
+    end
+    banner:Show()
 end
 
 function GC.UI:BuildRecruitmentPage()
