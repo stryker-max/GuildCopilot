@@ -4498,6 +4498,36 @@ do
 end
 
 do
+    -- Ranggeschützte Navigation: Der Mitgliederpflege-Punkt verschwindet
+    -- nicht mehr, er trägt ein Schloss und dimmt; ein Klick leitet um.
+    orders_summary = addon.DB:GetGuild().memberCare
+    orders_result = orders_summary.accessRanksConfigured
+    orders_list = orders_summary.accessRanks
+    orders_summary.accessRanksConfigured = true
+    orders_summary.accessRanks = {}
+    addon.UI:RefreshNavigationAccess()
+    orders_page = nil
+    for _, tab in ipairs(addon.UI.tabs) do
+        if tab.key == "MEMBERCARE" then
+            orders_page = tab
+        end
+    end
+    assert(orders_page ~= nil, "Der Mitgliederpflege-Punkt fehlt")
+    assert(orders_page.shown == true, "Der gesperrte Punkt wurde versteckt statt geschlossen")
+    assert(orders_page.locked == true and orders_page.lock.shown == true,
+        "Der gesperrte Punkt trägt kein Schloss")
+    addon.UI:ShowPage("MEMBERCARE")
+    assert(addon.UI.activePage == "ROSTER", "Der gesperrte Punkt öffnete die Seite trotzdem")
+
+    orders_summary.accessRanksConfigured = orders_result
+    orders_summary.accessRanks = orders_list
+    addon.UI:RefreshNavigationAccess()
+    assert(orders_page.locked == false and orders_page.lock.shown == false,
+        "Das Schloss blieb nach der Freigabe stehen")
+    addon.UI:ShowPage("ROSTER")
+end
+
+do
     -- Versionsprüfer (/gcp ver): V-Nachrichten über RAID/PARTY erreichen den
     -- Empfänger (der Raid-Sammelzweig schluckte sie früher), Antworten gehen
     -- auf demselben Kanal zurück, und das Fenster färbt nach Vergleich.

@@ -822,6 +822,36 @@ function GC.UI:CreateMainFrame()
         tab.icon:SetSize(22, 22)
         tab.icon:SetPoint("LEFT", tab, "LEFT", 13, 0)
         tab.icon:SetTexture(definition.icon)
+
+        -- Ranggeschützte Punkte verschwinden nicht mehr, sie tragen ein
+        -- Schloss (Owner-Entscheidung): Sichtbar heißt "gibt es, braucht
+        -- Rang" - unsichtbar hieße "gibt es nicht".
+        tab.lock = tab:CreateTexture(nil, "OVERLAY")
+        tab.lock:SetSize(14, 14)
+        tab.lock:SetPoint("RIGHT", tab, "RIGHT", -8, 0)
+        tab.lock:SetTexture("Interface\\Buttons\\LockButton-Locked-Up")
+        tab.lock:Hide()
+        function tab:SetLocked(locked)
+            self.locked = locked == true
+            self.lock:SetShown(self.locked)
+            if self.SetAlpha then
+                self:SetAlpha(self.locked and 0.45 or 1)
+            end
+        end
+        tab:HookScript("OnEnter", function(self)
+            if self.locked and GameTooltip then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Für deinen Gildenrang gesperrt")
+                GameTooltip:AddLine("Berechtigte Ränge legen die Freigabe in den Einstellungen fest.",
+                    1, 1, 1, true)
+                GameTooltip:Show()
+            end
+        end)
+        tab:HookScript("OnLeave", function(self)
+            if self.locked and GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
         self.tabs[#self.tabs + 1] = tab
 
         local page = CreateFrame("Frame", nil, frame)
@@ -851,7 +881,8 @@ end
 function GC.UI:ShowPage(pageKey)
     if pageKey == "MEMBERCARE" and not GC.Roster:CanAccessMemberCare() then
         pageKey = "ROSTER"
-        GC:Print("Mitgliederpflege ist für deinen Gildenrang nicht freigeschaltet.")
+        GC:Print("Mitgliederpflege ist für deinen Gildenrang gesperrt – "
+            .. "berechtigte Ränge legen die Freigabe in den Einstellungen fest.")
     end
     self.activePage = pageKey
     for key, page in pairs(self.pages) do
@@ -874,7 +905,9 @@ function GC.UI:RefreshNavigationAccess()
     local canAccessMemberCare = GC.Roster:CanAccessMemberCare()
     for _, tab in ipairs(self.tabs) do
         if tab.key == "MEMBERCARE" then
-            tab:SetShown(canAccessMemberCare)
+            -- Sichtbar bleiben, aber mit Schloss und gedimmt statt versteckt.
+            tab:SetShown(true)
+            tab:SetLocked(not canAccessMemberCare)
         end
     end
     if self.activePage == "MEMBERCARE" and not canAccessMemberCare then
