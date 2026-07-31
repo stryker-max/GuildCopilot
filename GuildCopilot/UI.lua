@@ -1877,6 +1877,55 @@ end
 
 -- Der Punkt am Minimap-Symbol. Getrennt vom Zeichnen der Karte, weil er auch
 -- dann stimmen muss, wenn das Fenster zu ist - und das ist der Regelfall.
+-- Wendet die Handordnung einer Auswertung auf die Teilnehmerliste an.
+-- Unbekannte Namen (nachträglich empfangene Teilnehmer) hängen hinten an,
+-- damit niemand aus der Liste fällt.
+function GC.UI.ArrangeParticipants(participants, manualOrder)
+    if type(manualOrder) ~= "table" or #manualOrder == 0 then
+        return participants
+    end
+    local byName = {}
+    for _, participant in ipairs(participants) do
+        byName[GC.Util.NormalizeName(participant.name)] = participant
+    end
+    local arranged = {}
+    for _, name in ipairs(manualOrder) do
+        local key = GC.Util.NormalizeName(name)
+        if byName[key] then
+            arranged[#arranged + 1] = byName[key]
+            byName[key] = nil
+        end
+    end
+    for _, participant in ipairs(participants) do
+        if byName[GC.Util.NormalizeName(participant.name)] then
+            arranged[#arranged + 1] = participant
+        end
+    end
+    return arranged
+end
+
+-- Das Ziehen einer Teilnehmerzeile: Die gerade angezeigte Reihenfolge wird
+-- zur Handordnung dieser Auswertung, die gezogene Zeile wandert an die
+-- Zielposition, und die Spaltensortierung tritt zurück.
+function GC.UI:MoveParticipantRow(fromIndex, toIndex)
+    local page = self.pages.STATISTICS
+    local displayed = page and page.displayedParticipants
+    local selected = page and page.selectedSummary
+    if not displayed or not selected or not displayed[fromIndex] then
+        return false
+    end
+    local names = {}
+    for index, participant in ipairs(displayed) do
+        names[index] = participant.name
+    end
+    local moved = table.remove(names, fromIndex)
+    table.insert(names, math.max(1, math.min(toIndex, #names + 1)), moved)
+    selected.manualOrder = names
+    page.sortKey = nil
+    self:RefreshStatistics()
+    return true
+end
+
 function GC.UI:RefreshMinimapMarker()
     local button = self.minimapButton
     if not button or not button.pending then
@@ -5573,11 +5622,61 @@ function GC.UI:BuildStatisticsPage()
     content:SetHeight(1100)
     scroll:SetScrollChild(content)
 
+    -- Zeilen lassen sich mit der Maus umsortieren (Owner-Wunsch): Das Ziehen
+    -- übernimmt die gerade angezeigte Reihenfolge als Handsortierung dieser
+    -- Auswertung und schaltet die Spaltensortierung ab. Ein Klick auf einen
+    -- Spaltenkopf sortiert wieder nach Spalte; die Handordnung bleibt
+    -- gemerkt, bis erneut gezogen wird.
+    CreateLabel(detailCard, "Zeilen ziehen ordnet von Hand", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        align = "RIGHT",
+        width = 220,
+    }):SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -16, -20)
+
     page.participantRows = {}
     for index = 1, 40 do
         local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
+        row.rowIndex = index
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function(self)
+            if self.participant then
+                page.dragFromIndex = self.rowIndex
+                if self.SetAlpha then
+                    self:SetAlpha(0.55)
+                end
+            end
+        end)
+        row:SetScript("OnDragStop", function(self)
+            if self.SetAlpha then
+                self:SetAlpha(1)
+            end
+            local fromIndex = page.dragFromIndex
+            page.dragFromIndex = nil
+            if not fromIndex or not GetCursorPosition then
+                return
+            end
+            local scale = (UIParent and UIParent.GetEffectiveScale
+                and UIParent:GetEffectiveScale()) or 1
+            local _, cursorY = GetCursorPosition()
+            if not cursorY then
+                return
+            end
+            cursorY = cursorY / scale
+            for targetIndex, candidate in ipairs(page.participantRows) do
+                if candidate:IsShown() then
+                    local top, bottom = candidate:GetTop(), candidate:GetBottom()
+                    if top and bottom and cursorY <= top and cursorY >= bottom then
+                        if targetIndex ~= fromIndex then
+                            GC.UI:MoveParticipantRow(fromIndex, targetIndex)
+                        end
+                        return
+                    end
+                end
+            end
+        end)
         local columns = {
             { key = "name", x = 5, width = 96 },
             { key = "presence", x = 104, width = 44 },
@@ -5772,7 +5871,12 @@ function GC.UI:RefreshStatistics()
             end
             return leftValue < rightValue
         end)
+    elseif selected then
+        -- Ohne aktive Spaltensortierung gilt die Handordnung der Auswertung.
+        participants = GC.UI.ArrangeParticipants(participants, selected.manualOrder)
     end
+    page.displayedParticipants = participants
+    page.selectedSummary = selected
 
     for _, header in ipairs(page.sortHeaders or {}) do
         if page.sortKey == header.sortKey then

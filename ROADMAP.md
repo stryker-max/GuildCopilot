@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.58 – Raidauswertung: Teilnehmer von Hand ordnen
+
+Owner-Wunsch: Die Teilnehmerliste soll sich zusätzlich zur Spaltensortierung per **Ziehen mit der Maus** frei ordnen lassen (etwa nach Gruppen fürs Besprechen).
+
+- Eine Zeile greifen und über einer anderen loslassen verschiebt sie dorthin. Die gerade angezeigte Reihenfolge wird dabei zur **Handordnung dieser Auswertung** und bleibt an ihr gespeichert (lokal, wandert nicht durch die Gilde);
+- Handordnung und Spaltensortierung wechseln sich sauber ab: Ziehen schaltet die Spaltensortierung ab, ein Klick auf einen Spaltenkopf sortiert wieder nach Spalte – die Handordnung bleibt gemerkt und gilt erneut, sobald keine Spalte aktiv ist;
+- nachträglich empfangene Teilnehmer, die in der Handordnung noch nicht vorkommen, hängen hinten an, statt zu verschwinden;
+- ein kleiner Hinweis „Zeilen ziehen ordnet von Hand" steht an der Karte; zwei Testblöcke sichern Verschieben und Anwendung der Ordnung ab.
+
 ## 0.9.57 – Gildenaufträge: das Kuriernetz
 
 Owner-Frage: „Wenn nur einer alleine online ist und Aufträge reinstellt, empfängt die ja keiner – oder hättest du da noch eine Lösung?" Die Antwort in drei Teilen:

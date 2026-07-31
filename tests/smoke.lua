@@ -4489,6 +4489,35 @@ do
 end
 
 do
+    -- Teilnehmer von Hand ordnen: Ziehen übernimmt die angezeigte Reihenfolge
+    -- als Handordnung der Auswertung und schaltet die Spaltensortierung ab;
+    -- Unbekannte hängen hinten an.
+    orders_page = addon.UI.pages.STATISTICS
+    orders_summary = { participants = {
+        { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" },
+    } }
+    orders_page.displayedParticipants = orders_summary.participants
+    orders_page.selectedSummary = orders_summary
+    orders_page.sortKey = "deaths"
+    assert(addon.UI:MoveParticipantRow(1, 3) == true, "Das Umsortieren scheiterte")
+    assert(orders_summary.manualOrder[1] == "Beta"
+        and orders_summary.manualOrder[2] == "Gamma"
+        and orders_summary.manualOrder[3] == "Alpha",
+        "Die Handordnung stimmt nach dem Ziehen nicht")
+    assert(orders_page.sortKey == nil,
+        "Die Spaltensortierung blieb trotz Handordnung aktiv")
+
+    orders_list = addon.UI.ArrangeParticipants({
+        { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" }, { name = "Delta" },
+    }, orders_summary.manualOrder)
+    assert(orders_list[1].name == "Beta" and orders_list[3].name == "Alpha"
+        and orders_list[4].name == "Delta",
+        "Die Handordnung wird nicht angewandt oder verliert Unbekannte")
+    orders_page.selectedSummary = nil
+    orders_page.displayedParticipants = nil
+end
+
+do
     -- Board und Tracker: Reiterwechsel blendet den Katalog aus, eigene und
     -- fremde Aufträge landen in den richtigen Abschnitten, der Tracker zeigt
     -- sich nur mit "du bist dran"-Zeilen.
