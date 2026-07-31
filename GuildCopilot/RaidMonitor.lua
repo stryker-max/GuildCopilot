@@ -24,6 +24,10 @@ local raidEvents = CreateFrame("Frame")
 raidEvents:RegisterEvent("GROUP_ROSTER_UPDATE")
 raidEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
 raidEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- pcall, weil ein Client-Build ohne diese Ereignisse beim Registrieren
+-- unbekannter Namen einen Fehler wirft - dann bleibt es bei der Heuristik.
+pcall(raidEvents.RegisterEvent, raidEvents, "ENCOUNTER_START")
+pcall(raidEvents.RegisterEvent, raidEvents, "ENCOUNTER_END")
 
 function GC.RaidMonitor:SetCombatLogTracking(enabled)
     enabled = enabled and true or false
@@ -283,12 +287,16 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
         receivedAt = GC.Util.Now(),
     }
 
+    -- Der boss-Filter räumt auch Sitzungen älterer Versionen auf, die noch
+    -- Trashkämpfe als Versuche gespeichert haben.
     for _, pull in ipairs(session.pulls) do
-        summary.pulls = summary.pulls + 1
-        if pull.result == "KILL" then
-            summary.kills = summary.kills + 1
-        elseif pull.result == "WIPE" then
-            summary.wipes = summary.wipes + 1
+        if pull.boss then
+            summary.pulls = summary.pulls + 1
+            if pull.result == "KILL" then
+                summary.kills = summary.kills + 1
+            elseif pull.result == "WIPE" then
+                summary.wipes = summary.wipes + 1
+            end
         end
     end
 
@@ -515,10 +523,11 @@ function GC.RaidMonitor:BeginSegment(startedAt)
     }
 end
 
--- Ohne Encounter-API in TBC wird ein Bosskampf heuristisch erkannt: ein
--- Kampfabschnitt ab MIN_SEGMENT_SECONDS gilt als Versuch, benannt nach dem
--- zuletzt gestorbenen Gegner. Sterben mindestens WIPE_RATIO der Anwesenden,
--- zählt der Abschnitt als Wipe.
+-- Als Versuch zählt nur ein erkannter Bosskampf: entweder meldet ihn der
+-- Client über ENCOUNTER_START, oder die Namensheuristik findet einen Boss im
+-- Combat Log. Reine Trashkämpfe werden verworfen - sonst stünden nach dem
+-- ersten Boss längst "8 Versuche" auf der Uhr. Sterben mindestens WIPE_RATIO
+-- der Anwesenden, zählt der Abschnitt als Wipe.
 function GC.RaidMonitor:CloseSegment(endedAt)
     local session = self.session
     local segment = session and session.segment
@@ -527,9 +536,15 @@ function GC.RaidMonitor:CloseSegment(endedAt)
     end
     session.segment = nil
 
+    if not segment.bossName then
+        return
+    end
+
     endedAt = tonumber(endedAt) or GC.Util.Now()
     local duration = endedAt - segment.startedAt
-    if duration < MIN_SEGMENT_SECONDS then
+    -- Ein vom Client bestätigter Encounter zählt auch, wenn er kürzer war -
+    -- eine überlegene Gruppe legt Attumen in unter 15 Sekunden.
+    if not segment.encounterResult and duration < MIN_SEGMENT_SECONDS then
         return
     end
 
@@ -544,7 +559,9 @@ function GC.RaidMonitor:CloseSegment(endedAt)
     -- nicht sofort als Wipe gilt.
     local wipeThreshold = math.max(2, math.ceil(presentCount * WIPE_RATIO))
     local result = "RESET"
-    if presentCount > 0 and segment.playerDeaths >= wipeThreshold then
+    if segment.encounterResult then
+        result = segment.encounterResult
+    elseif presentCount > 0 and segment.playerDeaths >= wipeThreshold then
         result = "WIPE"
     elseif segment.lastNPCDeath then
         result = "KILL"
@@ -562,6 +579,46 @@ function GC.RaidMonitor:CloseSegment(endedAt)
         result = result,
     }
     GC:FireCallback("RAID_SESSION_UPDATED")
+end
+
+-- Der Anniversary-Client meldet Bosskämpfe selbst: ENCOUNTER_START nennt den
+-- Boss beim Namen, ENCOUNTER_END den Ausgang. Das schlägt jede Heuristik und
+-- deckt auch Bosse ab, die in der eigenen Liste fehlen.
+function GC.RaidMonitor:OnEncounterStart(_, encounterName)
+    local session = self.session
+    if not session then
+        return
+    end
+    if not session.segment then
+        self:BeginSegment(GC.Util.Now())
+    end
+    local segment = session.segment
+    if not segment or segment.bossName then
+        return
+    end
+    local name = SanitizedText(encounterName, 36)
+    if name ~= "" then
+        segment.bossName = name
+        local boss = self:ResolveBoss(name)
+        segment.bossInstance = (boss and boss.instance)
+            or (GetRealZoneText and GetRealZoneText()) or nil
+    end
+end
+
+function GC.RaidMonitor:OnEncounterEnd(_, encounterName, _, _, success)
+    local session = self.session
+    local segment = session and session.segment
+    if not segment then
+        return
+    end
+    if not segment.bossName then
+        local name = SanitizedText(encounterName, 36)
+        if name ~= "" then
+            segment.bossName = name
+        end
+    end
+    segment.encounterResult = (tonumber(success) == 1) and "KILL" or "WIPE"
+    self:CloseSegment(GC.Util.Now())
 end
 
 -- Essen laesst sich nicht ueber Zauber-IDs erfassen: Jedes Gericht hat eine
@@ -953,7 +1010,7 @@ raidEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 -- Der Rahmen und die dauerhaften Ereignisse stehen oben in der Datei, damit
 -- StartSession und FinishSession das Combat-Log-Abo umschalten koennen.
-raidEvents:SetScript("OnEvent", function(_, event)
+raidEvents:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
         GC.RaidMonitor:OnZoneEntered()
         return
@@ -969,5 +1026,9 @@ raidEvents:SetScript("OnEvent", function(_, event)
         GC.RaidMonitor:BeginSegment(GC.Util.Now())
     elseif event == "PLAYER_REGEN_ENABLED" then
         GC.RaidMonitor:CloseSegment(GC.Util.Now())
+    elseif event == "ENCOUNTER_START" then
+        GC.RaidMonitor:OnEncounterStart(...)
+    elseif event == "ENCOUNTER_END" then
+        GC.RaidMonitor:OnEncounterEnd(...)
     end
 end)

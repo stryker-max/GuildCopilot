@@ -6095,8 +6095,16 @@ function GC.UI:RefreshStatistics()
         for _ in pairs(session.participants) do
             participantCount = participantCount + 1
         end
+        -- Wie in BuildSummary zählen nur erkannte Bosskämpfe; so zeigt auch
+        -- eine unter älterer Version gestartete Sitzung keine Trashzahlen.
+        local pullCount = 0
+        for _, pull in ipairs(session.pulls) do
+            if pull.boss then
+                pullCount = pullCount + 1
+            end
+        end
         page.sessionStatus:SetText("|cff59e695Sitzung läuft|r  •  " .. participantCount .. " Teilnehmer  •  "
-            .. #session.pulls .. " Versuche\nGestartet von " .. (session.startedBy ~= "" and session.startedBy or "unbekannt")
+            .. pullCount .. " Versuche\nGestartet von " .. (session.startedBy ~= "" and session.startedBy or "unbekannt")
             .. (session.zone ~= "" and ("  •  " .. session.zone) or ""))
         page.sessionButton:SetText("Sitzung beenden")
     else

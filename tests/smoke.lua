@@ -3767,7 +3767,9 @@ assert(wipePull.name == "Lady Vashj",
 assert(wipePull.instance == "Serpentinhöhle" and wipePull.boss == true,
     "Der Versuch nennt seine Instanz nicht")
 
--- Ohne erkannten Boss bleibt es beim bisherigen Verhalten.
+-- Ohne erkannten Boss zählt der Abschnitt gar nicht mehr: Vorher stand nach
+-- dem ersten Boss "8 Versuche" auf der Uhr, weil jede Trashgruppe ab
+-- 15 Sekunden mitgezählt wurde.
 addon.RaidMonitor.session.pulls = {}
 addon.RaidMonitor.session.segment = {
     startedAt = currentTime,
@@ -3775,9 +3777,33 @@ addon.RaidMonitor.session.segment = {
     lastNPCDeath = "Verirrter Diener",
 }
 addon.RaidMonitor:CloseSegment(currentTime + 180)
-local trashPull = addon.RaidMonitor.session.pulls[1]
-assert(trashPull.name == "Verirrter Diener" and trashPull.boss ~= true,
-    "Ohne erkannten Boss greift der bisherige Rückfall nicht mehr")
+assert(#addon.RaidMonitor.session.pulls == 0,
+    "Ein Trashkampf ohne erkannten Boss wurde als Versuch gezählt")
+
+-- Der Client meldet Bosskämpfe selbst: ENCOUNTER_START benennt den Abschnitt
+-- (auch bei Bossen, die in der eigenen Liste fehlen), ENCOUNTER_END wertet
+-- ihn - selbst unter der 15-Sekunden-Schwelle.
+addon.RaidMonitor.session.segment = nil
+addon.RaidMonitor:OnEncounterStart(9999, "Testboss aus der Zukunft", 176, 10)
+assert(addon.RaidMonitor.session.segment ~= nil
+    and addon.RaidMonitor.session.segment.bossName == "Testboss aus der Zukunft",
+    "ENCOUNTER_START eröffnet keinen benannten Kampfabschnitt")
+addon.RaidMonitor:OnEncounterEnd(9999, "Testboss aus der Zukunft", 176, 10, 1)
+assert(addon.RaidMonitor.session.segment == nil,
+    "ENCOUNTER_END schließt den Kampfabschnitt nicht")
+local encounterPull = addon.RaidMonitor.session.pulls[1]
+assert(encounterPull and encounterPull.result == "KILL"
+    and encounterPull.name == "Testboss aus der Zukunft" and encounterPull.boss == true,
+    "Der vom Client gemeldete Sieg wurde nicht übernommen")
+
+-- Ein gemeldeter Fehlschlag zählt als Wipe, egal was die Todeszählung sagt.
+addon.RaidMonitor.session.pulls = {}
+addon.RaidMonitor:OnEncounterStart(9998, "Nachtbann", 176, 10)
+addon.RaidMonitor:OnEncounterEnd(9998, "Nachtbann", 176, 10, 0)
+assert(addon.RaidMonitor.session.pulls[1]
+    and addon.RaidMonitor.session.pulls[1].result == "WIPE"
+    and addon.RaidMonitor.session.pulls[1].instance == "Karazhan",
+    "Der vom Client gemeldete Wipe wurde nicht übernommen")
 addon.RaidMonitor.session = previousSession
 end
 

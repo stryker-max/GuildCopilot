@@ -298,6 +298,14 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.67 – „8 Versuche" nach dem ersten Boss: Trash zählte mit
+
+Owner-Meldung live aus Karazhan: ein Boss lag, die Kopfzeile behauptete 8 Versuche. Ursache: Als Versuch galt bisher **jeder** Kampfabschnitt ab 15 Sekunden – in einer Raidinstanz ist das jede zweite Trashgruppe.
+
+- **Nur erkannte Bosskämpfe zählen noch als Versuch.** Reine Trashkämpfe werden verworfen statt gespeichert;
+- **der Client meldet Bosse jetzt selbst:** Der Anniversary-Client kennt `ENCOUNTER_START`/`ENCOUNTER_END` (dieselben Ereignisse, auf die sich DBM stützt). Start benennt den Abschnitt – auch bei Bossen, die in der eigenen Liste fehlen –, Ende liefert den Ausgang: Sieg ist Sieg, Fehlschlag ist Wipe, egal was die Todeszählung sagt. Ein bestätigter Encounter zählt auch unter 15 Sekunden – eine überlegene Gruppe legt Attumen schneller. Die Namensheuristik über die Bossliste bleibt als Rückfallebene, falls ein Client-Build die Ereignisse nicht kennt (Registrierung per `pcall` abgesichert);
+- **alte Sitzungen rechnen sich sauber:** Zusammenfassung und Live-Kopfzeile zählen nur noch Boss-Versuche – eine unter älterer Version gestartete oder gespeicherte Sitzung zeigt damit ebenfalls korrigierte Zahlen, ohne dass Daten angefasst werden.
+
 ## 0.9.66 – Raidabend-Komfort: Instanzfenster, Gruppenprüfung, Sitzungs-Banner
 
 Vier Owner-Wünsche rund um den Raidstart:
