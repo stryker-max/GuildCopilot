@@ -868,6 +868,10 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
         -- Auswertung nicht an einem einzelnen Client hängt.
         if not self.session and distribution ~= "WHISPER" then
             self:StartSession(fields[3], sender, tonumber(fields[4]), fields[5])
+            -- Sichtbar wie ein Gildenauftrag (Owner-Wunsch): Die Meldung
+            -- nutzt denselben Banner samt Ein/Aus-Schalter und Position.
+            GC:FireCallback("ORDERS_BANNER",
+                "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(sender))
         end
         return true
     elseif fields[1] == "RE" then
@@ -912,9 +916,48 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester)
     return true
 end
 
+-- Beim Betreten einer Raidinstanz fragt das Addon, ob eine Sitzung starten
+-- soll - aber nur bei denen, die das auch duerfen (CanControlSession), nur
+-- im Schlachtzug, nur ohne laufende Sitzung und nur einmal je Besuch.
+function GC.RaidMonitor:OnZoneEntered()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return
+    end
+    -- Kurz warten: Direkt nach dem Ladebildschirm sind Instanz- und
+    -- Gruppendaten noch nicht verlaesslich.
+    C_Timer.After(3, function()
+        local monitor = GC.RaidMonitor
+        local instanceType
+        if IsInInstance then
+            local _, kind = IsInInstance()
+            instanceType = kind
+        end
+        if instanceType ~= "raid" then
+            -- Draussen: Der naechste Instanzbesuch darf wieder fragen.
+            monitor.sessionPromptShown = nil
+            return
+        end
+        if monitor.session or monitor.sessionPromptShown then
+            return
+        end
+        if not monitor:IsInRaidGroup() or not monitor:CanControlSession() then
+            return
+        end
+        monitor.sessionPromptShown = true
+        GC:FireCallback("RAID_SESSION_PROMPT",
+            (GetRealZoneText and GetRealZoneText()) or "")
+    end)
+end
+
+raidEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+
 -- Der Rahmen und die dauerhaften Ereignisse stehen oben in der Datei, damit
 -- StartSession und FinishSession das Combat-Log-Abo umschalten koennen.
 raidEvents:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_ENTERING_WORLD" then
+        GC.RaidMonitor:OnZoneEntered()
+        return
+    end
     if not GC.RaidMonitor.session then
         return
     end

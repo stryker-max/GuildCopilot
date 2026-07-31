@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.66 – Raidabend-Komfort: Instanzfenster, Gruppenprüfung, Sitzungs-Banner
+
+Vier Owner-Wünsche rund um den Raidstart:
+
+- **Instanz-Begrüßungsfenster:** Wer eine Raidinstanz betritt und Sitzungen steuern darf (`CanControlSession` – nur Leiter/Assistenten/freigegebene Ränge), bekommt ein kleines Fenster: „Du bist in ‚Karazhan'. Auswertung mitschreiben? Ausrüstung checken?" mit **[Sitzung starten] [Gruppe prüfen] [Nicht jetzt]**. Nur einmal je Instanzbesuch, draußen setzt sich der Merker zurück, keine Automatik – gestartet wird nur per Klick;
+- **„Gruppe prüfen" hat jetzt ein eigenes Fenster:** Statt der großen Dauerliste aller je geprüften Spieler zeigt es NUR die aktuelle Gruppe – je Zeile Name (Klassenfarbe), Datenstand (Addon/Inspect, Alter) und Befund (grün „ok", rot mit Funden, gedämpft „keine Daten"), Funde sortieren nach oben, Zusammenfassung unten, „Erneut prüfen" im Fenster. Eintreffende Inspects und Addon-Daten füllen es live. Die Ausrüstungsseite mit der Dauerliste bleibt unverändert bestehen;
+- **Sitzungsstart poppt bei allen auf:** Startet jemand die Raidsitzung, erscheint bei den übrigen Addon-Nutzern die Bildschirmmeldung „Raidsitzung gestartet von X" – derselbe Banner wie bei den Gildenaufträgen, mit demselben Schalter und derselben Position;
+- **die „Geprüfte Spieler"-Liste beginnt oben:** Beim frischen Aufschlagen der Ausrüstungsseite steht der Scroller jetzt am Anfang statt auf der gemerkten Altposition – bewusst nur beim Anzeigen, nicht bei jeder Datenauffrischung.
+
 ## 0.9.65 – Werkstatt: „110 Berufe" waren Pakete, „13 Berufe" ein Duplikat
 
 Owner-Screenshot: Die Statuszeile meldete „Empfangen: 110 Berufe mit 4003 Rezepten", direkt neben der Karte mit ehrlichen 885 Rezepten und 13 Berufen. Zwei getrennte Zählfehler:

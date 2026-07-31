@@ -6332,8 +6332,17 @@ function GC.UI:BuildGearPage()
     end
 
     page.scanButton = CreateButton(controlCard, "Gruppe prüfen", 150, 30, function()
+        -- Öffnet die fokussierte Gruppenübersicht im eigenen Fenster
+        -- (Owner-Wunsch) und stößt die Prüfung an; die Seite mit der
+        -- Dauerliste bleibt unangetastet daneben bestehen.
         local ok, message = GC.GearAudit:StartRaidScan()
         page:SetGearStatus(message, ok)
+        GC.UI:ShowGroupGearCheck()
+        local frame = GC.UI.groupGearCheck
+        if frame then
+            frame.status:SetText(message or "")
+            SetTextColor(frame.status, ok and THEME.success or THEME.danger)
+        end
         GC.UI:RefreshGear()
     end, "PRIMARY")
     page.scanButton:SetPoint("TOPRIGHT", controlCard, "TOPRIGHT", -18, -14)
@@ -6359,6 +6368,16 @@ function GC.UI:BuildGearPage()
     page.gearPlayerScroll = playerScroll
     page.gearPlayerContent = playerContent
     page.gearRows = {}
+
+    -- Beim frischen Aufschlagen der Seite steht die Spielerliste oben
+    -- (Owner-Wunsch) - sie merkte sich sonst die alte Scrollposition.
+    -- Bewusst nur beim Anzeigen, nicht bei jeder Datenauffrischung, sonst
+    -- springt die Liste beim Stöbern unter der Hand weg.
+    page:HookScript("OnShow", function()
+        playerScroll.targetScroll = nil
+        playerScroll:SetVerticalScroll(0)
+        playerScroll:UpdateModernThumb()
+    end)
 
     function page:EnsureGearPlayerRow(index)
         if self.gearRows[index] then
@@ -7148,6 +7167,234 @@ end
 -- "/gcp help" und die Liste auf der Addon-Optionsseite: Zwei getrennte
 -- Aufzaehlungen laufen auseinander, sobald ein Befehl dazukommt - und die
 -- Liste, die niemand pflegt, ist dann die falsche.
+-- === Sitzungsfrage beim Instanzbeitritt =====================================
+-- Wer eine Raidinstanz betritt und Sitzungen steuern darf, wird gefragt, ob
+-- die Auswertung mitlaufen soll (Owner-Wunsch). Ein kleines Fenster, keine
+-- Automatik: Gestartet wird nur per Klick.
+
+function GC.UI:ShowSessionPrompt(zoneName)
+    if not self.sessionPrompt then
+        local prompt = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotSessionPrompt")
+        prompt:SetSize(420, 124)
+        prompt:SetPoint("TOP", UIParent, "TOP", 0, -180)
+        prompt:SetFrameStrata("DIALOG")
+        prompt:SetClampedToScreen(true)
+        prompt:SetMovable(true)
+        prompt:EnableMouse(true)
+        prompt:RegisterForDrag("LeftButton")
+        prompt:SetScript("OnDragStart", prompt.StartMoving)
+        prompt:SetScript("OnDragStop", prompt.StopMovingOrSizing)
+        prompt.title = CreateLabel(prompt, "Raidinstanz betreten", { title = true, width = 320 })
+        prompt.title:SetPoint("TOPLEFT", prompt, "TOPLEFT", 16, -12)
+        prompt.closeX = CreateButton(prompt, "×", 22, 22, function()
+            prompt:Hide()
+        end)
+        prompt.closeX:SetPoint("TOPRIGHT", prompt, "TOPRIGHT", -8, -8)
+        prompt.text = CreateLabel(prompt, "", { muted = true, width = 388, height = 30, vertical = "TOP" })
+        prompt.text:SetPoint("TOPLEFT", prompt, "TOPLEFT", 16, -38)
+        prompt.startButton = CreateButton(prompt, "Sitzung starten", 150, 30, function()
+            local ok, message = GC.RaidMonitor:BeginSession()
+            GC:Print(message)
+            prompt:Hide()
+            if ok then
+                GC.UI:Invalidate("STATISTICS")
+            end
+        end, "PRIMARY")
+        prompt.startButton:SetPoint("BOTTOMLEFT", prompt, "BOTTOMLEFT", 16, 12)
+        prompt.gearButton = CreateButton(prompt, "Gruppe prüfen", 140, 30, function()
+            local ok, message = GC.GearAudit:StartRaidScan()
+            GC.UI:ShowGroupGearCheck()
+            local frame = GC.UI.groupGearCheck
+            if frame then
+                frame.status:SetText(message or "")
+                SetTextColor(frame.status, ok and THEME.success or THEME.danger)
+            end
+        end)
+        prompt.gearButton:SetPoint("LEFT", prompt.startButton, "RIGHT", 8, 0)
+        prompt.dismissButton = CreateButton(prompt, "Nicht jetzt", 100, 30, function()
+            prompt:Hide()
+        end)
+        prompt.dismissButton:SetPoint("BOTTOMRIGHT", prompt, "BOTTOMRIGHT", -16, 12)
+        prompt:Hide()
+        self.sessionPrompt = prompt
+    end
+    self.sessionPrompt.text:SetText(GC.Util.Trim(zoneName or "") ~= ""
+        and ("Du bist in „" .. zoneName .. "“. Auswertung mitschreiben? Ausrüstung checken?")
+        or "Du hast eine Raidinstanz betreten. Auswertung mitschreiben? Ausrüstung checken?")
+    self.sessionPrompt:Show()
+end
+
+GC:RegisterCallback("RAID_SESSION_PROMPT", GC.UI, function(self, zoneName)
+    self:ShowSessionPrompt(zoneName)
+end)
+
+-- Startet jemand anderes die Sitzung, ist die Frage beantwortet.
+GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
+    if self.sessionPrompt and self.sessionPrompt:IsShown() and GC.RaidMonitor.session then
+        self.sessionPrompt:Hide()
+    end
+end)
+
+-- === Gruppenprüfung Ausrüstung ==============================================
+-- "Gruppe prüfen" zeigt die AKTUELLE Gruppe in einem eigenen Fenster
+-- (Owner-Wunsch): nur die Leute von jetzt, je Zeile der Befund - statt der
+-- großen Dauerliste aller je geprüften Spieler auf der Seite.
+
+local GEAR_SOURCE_LABELS = { INSPECT = "Inspect", SYNC = "Addon", SELF = "Eigene Daten" }
+
+function GC.UI:CreateGroupGearFrame()
+    if self.groupGearCheck then
+        return self.groupGearCheck
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotGroupGearCheck")
+    frame:SetSize(520, 458)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "Gruppenprüfung – Ausrüstung", { title = true, width = 340 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.subtitle = CreateLabel(frame, "Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, "
+        .. "der Rest per Inspect in Reichweite.", { muted = true, width = 470, height = 26, vertical = "TOP" })
+    frame.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -36)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+
+    CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 120, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -68)
+    CreateLabel(frame, "STAND", { muted = true, font = "GameFontNormalSmall", width = 90, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 150, -68)
+    CreateLabel(frame, "BEFUND", { muted = true, font = "GameFontNormalSmall", width = 240, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 252, -68)
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -86)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 78)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(470)
+    frame.content:SetHeight(280)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 40 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(470, 24)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 26))
+        row.name = CreateLabel(row, "", { width = 126, height = 24 })
+        row.name:SetPoint("LEFT", row, "LEFT", 4, 0)
+        row.stand = CreateLabel(row, "", { muted = true, width = 96, height = 24 })
+        row.stand:SetPoint("LEFT", row, "LEFT", 134, 0)
+        row.befund = CreateLabel(row, "", { width = 230, height = 24 })
+        row.befund:SetPoint("LEFT", row, "LEFT", 236, 0)
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.counts = CreateLabel(frame, "", { width = 490, height = 18 })
+    frame.counts:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 52)
+    frame.rescan = CreateButton(frame, "Erneut prüfen", 130, 30, function()
+        local ok, message = GC.GearAudit:StartRaidScan()
+        frame.status:SetText(message or "")
+        SetTextColor(frame.status, ok and THEME.success or THEME.danger)
+        GC.UI:RefreshGroupGearCheck()
+    end, "PRIMARY")
+    frame.rescan:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
+    frame.status = CreateLabel(frame, "", { muted = true, width = 230, height = 30, vertical = "TOP" })
+    frame.status:SetPoint("LEFT", frame.rescan, "RIGHT", 10, 0)
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 30, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 12)
+
+    frame:Hide()
+    self.groupGearCheck = frame
+    return frame
+end
+
+function GC.UI:ShowGroupGearCheck()
+    local frame = self:CreateGroupGearFrame()
+    frame:Show()
+    self:RefreshGroupGearCheck()
+end
+
+function GC.UI:RefreshGroupGearCheck()
+    local frame = self.groupGearCheck
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local now = GC.Util.Now()
+    local ok, findings, missing = 0, 0, 0
+    local entries = {}
+    -- Dieselbe Gruppenliste wie der Versionsprüfer; solo steht man allein drin.
+    local targets = self:GetVersionCheckTargets("GROUP")
+    if #targets == 0 then
+        targets = { { name = GC:GetPlayerFullName() } }
+    end
+    for _, target in ipairs(targets) do
+        local audit = GC.GearAudit:GetAudit(target.name)
+        local entry = { name = target.name, classFile = target.classFile }
+        if audit then
+            local age = math.max(0, math.floor((now - (audit.inspectedAt or now)) / 60))
+            entry.stand = (GEAR_SOURCE_LABELS[audit.source] or "Daten")
+                .. " · vor " .. age .. " Min."
+            local issues = GC.GearAudit:GetIssueCount(audit)
+            if issues > 0 then
+                entry.befund = GC.GearAudit:DescribeFindings(audit)
+                entry.state = "FINDINGS"
+                findings = findings + 1
+            else
+                entry.befund = "ok"
+                entry.state = "OK"
+                ok = ok + 1
+            end
+        else
+            entry.stand = "–"
+            entry.befund = "keine Daten (kein Addon / außer Reichweite)"
+            entry.state = "NONE"
+            missing = missing + 1
+        end
+        entries[#entries + 1] = entry
+    end
+    local ORDER = { FINDINGS = 1, NONE = 2, OK = 3 }
+    table.sort(entries, function(left, right)
+        if ORDER[left.state] ~= ORDER[right.state] then
+            return ORDER[left.state] < ORDER[right.state]
+        end
+        return tostring(left.name) < tostring(right.name)
+    end)
+    for index, row in ipairs(frame.rows) do
+        local entry = entries[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.name:SetText(GC.Util.PlayerShortName(entry.name))
+            row.name:SetTextColor(ClassColor(entry.classFile))
+            row.stand:SetText(entry.stand)
+            row.befund:SetText(entry.befund)
+            if entry.state == "OK" then
+                SetTextColor(row.befund, THEME.success)
+            elseif entry.state == "FINDINGS" then
+                SetTextColor(row.befund, THEME.danger)
+            else
+                SetTextColor(row.befund, THEME.muted)
+            end
+        end
+    end
+    frame.counts:SetText("|cff59e695" .. ok .. " ok|r · |cffff6266" .. findings
+        .. " mit Funden|r · " .. missing .. " ohne Daten")
+    frame.content:SetHeight(math.max(280, #entries * 26))
+    frame.scroll:UpdateModernThumb()
+end
+
 -- === Versionsprüfer =========================================================
 -- /gcp ver: Wer in Gruppe oder Gilde hat Guild Copilot, und in welcher
 -- Version? Grün ist der eigene Stand, rot ist älter, gelb wartet noch,
@@ -7634,4 +7881,7 @@ GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
     -- Die eigene Ausruestung steht auch auf der Profilseite.
     self:Invalidate("GEAR", "ROSTER")
     self:RefreshMinimapMarker()
+    -- Eintreffende Inspects und Addon-Daten füllen die offene
+    -- Gruppenübersicht live.
+    self:RefreshGroupGearCheck()
 end)

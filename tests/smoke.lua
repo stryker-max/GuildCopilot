@@ -4460,6 +4460,51 @@ do
 end
 
 do
+    -- Instanzbeitritt: Wer Sitzungen steuern darf, bekommt beim Betreten
+    -- einer Raidinstanz das Fragefenster mit "Sitzung starten" und
+    -- "Gruppe prüfen"; ohne Berechtigung oder außerhalb bleibt es stumm.
+    raidRoster = {
+        { "Tester", 2, "HUNTER" },
+        { "Heiler", 1, "PRIEST" },
+    }
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor.sessionPromptShown = nil
+    function IsInInstance()
+        return true, "raid"
+    end
+    addon.RaidMonitor:OnZoneEntered()
+    assert(addon.UI.sessionPrompt ~= nil and addon.UI.sessionPrompt.shown == true,
+        "Das Instanz-Fragefenster erschien nicht")
+    assert(addon.UI.sessionPrompt.startButton ~= nil
+        and addon.UI.sessionPrompt.gearButton ~= nil,
+        "Dem Fragefenster fehlen die beiden Aktionen")
+    -- Nur einmal je Besuch.
+    addon.UI.sessionPrompt:Hide()
+    addon.RaidMonitor:OnZoneEntered()
+    assert(addon.UI.sessionPrompt.shown == false,
+        "Das Fragefenster erschien im selben Besuch erneut")
+    -- Draußen setzt sich der Merker zurück.
+    function IsInInstance()
+        return false, "none"
+    end
+    addon.RaidMonitor:OnZoneEntered()
+    assert(addon.RaidMonitor.sessionPromptShown == nil,
+        "Der Besuchs-Merker wurde beim Verlassen nicht zurückgesetzt")
+    IsInInstance = nil
+    raidRoster = {}
+
+    -- Gruppenprüfung im eigenen Fenster: öffnet, listet, zählt.
+    addon.UI:ShowGroupGearCheck()
+    assert(addon.UI.groupGearCheck ~= nil and addon.UI.groupGearCheck.shown == true,
+        "Das Gruppenprüfungs-Fenster öffnet nicht")
+    assert(addon.UI.groupGearCheck.rows[1].shown == true,
+        "Die Gruppenprüfung zeigt keine Zeile")
+    assert(addon.UI.groupGearCheck.counts:GetText():find("ok", 1, true) ~= nil,
+        "Die Gruppenprüfungs-Zusammenfassung fehlt")
+    addon.UI.groupGearCheck:Hide()
+end
+
+do
     -- Die Berufe-Karte zählt normalisiert: Alt-Schreibweise "Alchemie" und
     -- der "Unbekannt"-Platzhalter erzeugen keine Phantom-Berufe.
     addon.Workshop:ClaimRecipes({
