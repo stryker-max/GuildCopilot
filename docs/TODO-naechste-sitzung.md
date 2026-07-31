@@ -191,6 +191,25 @@ Sitzung.)*
 
 ---
 
+## 5. Gildenaufträge in der Werkstatt – Konzept liegt vor, Umsetzung offen
+
+**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md` (Stand 31.07.2026).
+Kern: Aufträge auf Katalogrezepte, genau ein Auftragnehmer (Account, nicht
+Charakter – Twink nimmt an, Main fertigt), Statusmodell mit Verlauf, drei
+Materialmodelle (Auftraggeber liefert / Gildenbank / Beschaffung mit
+Kostenrahmen und zweiseitigem Abschluss), Übergabe persönlich oder per Post,
+Unterreiter in der Werkstatt statt Pop-out-Fenster.
+
+**Vor der Umsetzung:** die fünf „Offenen Fragen an den Owner" am Ende des
+Konzepts klären (Name im UI, Offiziers-Abbruchrecht, Gildenbank-Rangangabe,
+Grenzen, Kompakt-Tracker in Stufe 1?).
+
+**Aufwand:** groß – neue Nachrichtenfamilie `O` mit Manifest-Abgleich,
+Rechteprüfung über `accountTag`, neuer Unterreiter. In Etappen bauen
+(Stufe 1 laut Konzept), nicht in einer Sitzung.
+
+---
+
 ## Bleibt bewusst offen
 
 - **Aldor-Schulterinschriften** im Verzauberungs-Regelsatz. Ihre Enchant-IDs
