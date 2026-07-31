@@ -6815,7 +6815,7 @@ function GC.UI:CreateVersionCheckFrame()
         return self.versionCheck
     end
     local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotVersionCheck")
-    frame:SetSize(470, 432)
+    frame:SetSize(470, 458)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
@@ -6845,7 +6845,7 @@ function GC.UI:CreateVersionCheckFrame()
 
     local body = CreatePanel(frame, THEME.input)
     body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -80)
-    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 52)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 78)
     frame.scroll = CreateModernScrollFrame(body)
     frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
     frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
@@ -6869,17 +6869,19 @@ function GC.UI:CreateVersionCheckFrame()
         frame.rows[index] = row
     end
 
-    frame.modeGuild = CreateButton(frame, "Gilde", 96, 30, function()
+    -- Die Zusammenfassung hat ihre eigene Zeile über den Knöpfen - zwischen
+    -- den Knöpfen wurde sie zerquetscht und "ohne Addon" abgeschnitten.
+    frame.counts = CreateLabel(frame, "", { width = 440, height = 18 })
+    frame.counts:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 52)
+    frame.modeGuild = CreateButton(frame, "Gilde", 110, 30, function()
         GC.UI:SetVersionCheckMode("GUILD")
     end)
     frame.modeGuild:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
-    frame.modeGroup = CreateButton(frame, "Gruppe", 96, 30, function()
+    frame.modeGroup = CreateButton(frame, "Gruppe", 110, 30, function()
         GC.UI:SetVersionCheckMode("GROUP")
     end)
     frame.modeGroup:SetPoint("LEFT", frame.modeGuild, "RIGHT", 8, 0)
-    frame.counts = CreateLabel(frame, "", { align = "CENTER", width = 210, height = 30 })
-    frame.counts:SetPoint("LEFT", frame.modeGroup, "RIGHT", 4, 0)
-    frame.closeButton = CreateButton(frame, "Schließen", 100, 30, function()
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 30, function()
         frame:Hide()
     end)
     frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 12)

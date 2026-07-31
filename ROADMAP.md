@@ -298,6 +298,10 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.60 – Versionsprüfer: Luft in der Fußzeile
+
+Owner-Screenshot: Zwischen den Knöpfen wurde die Zusammenfassung zerquetscht und „ohne Addon" abgeschnitten. Sie steht jetzt in voller Breite auf einer eigenen Zeile über den Knöpfen; das Fenster ist entsprechend höher, die Knöpfe etwas breiter.
+
 ## 0.9.59 – /gcp ver: der Versionsprüfer
 
 Owner-Wunsch nach dem Vorbild des RCLootCouncil-Versionsprüfers, im eigenen Design:
