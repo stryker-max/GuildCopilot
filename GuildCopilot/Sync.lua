@@ -1143,17 +1143,56 @@ function GC.Sync:BuildVersionMessage(requestReply)
     return table.concat(fields, "|")
 end
 
-function GC.Sync:AnnounceVersion(requestReply, minimumInterval)
+function GC.Sync:AnnounceVersion(requestReply, minimumInterval, distribution)
     minimumInterval = tonumber(minimumInterval) or 0
     local now = GC.Util.Now()
     if minimumInterval > 0 and (now - (self.lastAnnounceAt or 0)) < minimumInterval then
         return false
     end
-    if not self:Send(self:BuildVersionMessage(requestReply)) then
+    if not self:Send(self:BuildVersionMessage(requestReply), distribution) then
         return false
     end
     self.lastAnnounceAt = now
     return true
+end
+
+-- Der Versionsprüfer (/gcp ver) fragt gezielt an: in der Gilde über den
+-- Gildenkanal, in der Gruppe über RAID/PARTY - dort erreichen die Antworten
+-- auch Mitglieder fremder Gilden.
+function GC.Sync:RequestVersionCheck(mode)
+    if mode == "GROUP" then
+        if not (IsInGroup and IsInGroup()) then
+            return false
+        end
+        local channel = (IsInRaid and IsInRaid()) and "RAID" or "PARTY"
+        return self:Send(self:BuildVersionMessage(true), channel)
+    end
+    return self:AnnounceVersion(true, 5)
+end
+
+-- Frische Antworten der laufenden Sitzung, auch von Gruppenmitgliedern
+-- fremder Gilden. Der Gildenbestand (addonUsers) bleibt der Langzeitspeicher.
+function GC.Sync:NoteVersionReply(sender, version)
+    self.versionReplies = self.versionReplies or {}
+    self.versionReplies[GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))] = {
+        version = GC.Util.Trim(version),
+        at = GC.Util.Now(),
+    }
+    GC:FireCallback("VERSION_REPLIES_UPDATED")
+end
+
+function GC.Sync:GetKnownVersion(name, since)
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    local reply = self.versionReplies and self.versionReplies[key]
+    if reply and reply.version ~= "" and (not since or reply.at >= since) then
+        return reply.version, true
+    end
+    local users = GC.DB:GetGuild().addonUsers or {}
+    local entry = users[key] or users[GC.Util.NormalizeName(name)]
+    if entry and GC.Util.Trim(entry.version) ~= "" then
+        return entry.version, false
+    end
+    return nil, false
 end
 
 function GC.Sync:NoteAddonUser(sender, info)
@@ -1204,23 +1243,33 @@ function GC.Sync:NoteAddonUser(sender, info)
     return changed
 end
 
-function GC.Sync:ReceiveVersion(fields, sender)
+function GC.Sync:ReceiveVersion(fields, sender, distribution)
     local schemaVersion = tonumber(fields[2])
     if not schemaVersion then
         return
     end
-    self:NoteAddonUser(sender, {
-        schemaVersion = schemaVersion,
-        version = fields[3],
-        capabilities = fields[4],
-        accountTag = fields[6],
-        source = "HANDSHAKE",
-    })
+    distribution = distribution or "GUILD"
+    self:NoteVersionReply(sender, fields[3])
+    -- In den Gildenbestand gehoeren nur Gildenmitglieder. Ueber RAID/PARTY
+    -- melden sich auch Gruppenmitglieder fremder Gilden - deren Antworten
+    -- leben nur im Sitzungsspeicher des Versionspruefers.
+    if distribution == "GUILD" or GC.Roster:IsGuildMember(sender)
+        or #GC.Roster.members == 0 then
+        self:NoteAddonUser(sender, {
+            schemaVersion = schemaVersion,
+            version = fields[3],
+            capabilities = fields[4],
+            accountTag = fields[6],
+            source = "HANDSHAKE",
+        })
+    end
 
-    -- Nur auf ausdrückliche Anfragen antworten, niemals auf eine Antwort.
+    -- Nur auf ausdrückliche Anfragen antworten, niemals auf eine Antwort -
+    -- und zwar auf demselben Kanal, auf dem gefragt wurde: Die Antwort in
+    -- die eigene Gilde erreicht einen gildenfremden Frager nie.
     if fields[5] == "1" then
         C_Timer.After(0.5 + math.random() * 4, function()
-            self:AnnounceVersion(false, MIN_REPLY_INTERVAL)
+            self:AnnounceVersion(false, MIN_REPLY_INTERVAL, distribution)
         end)
         -- Das eigene Profil gleich mitschicken. Ohne diese Antwort erfaehrt ein
         -- Client nur von denen etwas, die sich nach ihm einloggen oder ihr
@@ -1425,6 +1474,14 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         return
     end
 
+    -- Der Versionsprüfer fragt auch über RAID/PARTY - diese V-Nachrichten
+    -- müssen VOR dem Raid-Sammelzweig abbiegen, der sie sonst schluckt.
+    if messageType == "V"
+        and (distribution == "RAID" or distribution == "PARTY") then
+        self:ReceiveVersion(GC.Util.SplitFields(message), sender, distribution)
+        return
+    end
+
     -- Raidauswertungen verwenden RAID/PARTY sowie gezielte WHISPER-Antworten.
     -- Erst nachdem die gildenweiten Direkttransfers oben geroutet wurden,
     -- landet der restliche Verkehr beim Raidmodul.
@@ -1445,7 +1502,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     elseif fields[1] == "V" then
         -- Bewusst ohne Schemaprüfung: gerade abweichende Versionen sollen
         -- erkannt werden.
-        self:ReceiveVersion(fields, sender)
+        self:ReceiveVersion(fields, sender, distribution)
     end
 end
 

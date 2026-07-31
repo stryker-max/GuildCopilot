@@ -3991,14 +3991,23 @@ run("recruit")
 assert(addon.DB:GetSettings().postBar.hidden == false, "Der Vertipper /gcp recruit greift nicht")
 addon.UI:SetPostBarShown(false)
 
--- Die Hilfe nennt jeden Befehl, den der Handler kennt.
+-- Die Hilfe nennt jeden Befehl, den der Handler kennt. "/gcp phase" ist auf
+-- Owner-Wunsch entfallen (0.9.59), "/gcp ver" kam dazu.
 local printedBefore = #chatMessages
 run("help")
 local help = table.concat(chatMessages, "\n", printedBefore + 1)
-for _, expected in ipairs({ "/gcp welcome", "/gcp recruite", "/gcp phase", "/gcp debug", "/gcp help" }) do
+for _, expected in ipairs({ "/gcp ver", "/gcp welcome", "/gcp recruite", "/gcp debug", "/gcp help" }) do
     assert(help:find(expected, 1, true) ~= nil,
         "Die Hilfe nennt " .. expected .. " nicht")
 end
+assert(help:find("/gcp phase", 1, true) == nil,
+    "Der entfernte Befehl /gcp phase steht noch in der Hilfe")
+
+-- "/gcp ver" öffnet den Versionsprüfer.
+run("ver")
+assert(addon.UI.versionCheck ~= nil and addon.UI.versionCheck.shown == true,
+    "/gcp ver öffnet den Versionsprüfer nicht")
+addon.UI.versionCheck:Hide()
 end
 
 -- === Erste Schritte: abgeleiteter Zustand statt Merker =====================
@@ -4486,6 +4495,47 @@ do
     GetGuildRosterInfo = orders_realRosterInfo
     addon.Roster:ScanNow()
     addon.DB:GetGuild().workshop.orders = {}
+end
+
+do
+    -- Versionsprüfer (/gcp ver): V-Nachrichten über RAID/PARTY erreichen den
+    -- Empfänger (der Raid-Sammelzweig schluckte sie früher), Antworten gehen
+    -- auf demselben Kanal zurück, und das Fenster färbt nach Vergleich.
+    addon.Roster:ScanNow()
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|0.1.0|profile|0|gggggggggg", "PARTY", "Fremdling-Realm")
+    orders_result = addon.Sync:GetKnownVersion("Fremdling-Realm")
+    assert(orders_result == "0.1.0", "Die Gruppenantwort wurde nicht vermerkt")
+    assert(addon.DB:GetGuild().addonUsers["fremdling-realm"] == nil,
+        "Ein Gildenfremder wurde in den Gildenbestand geschrieben")
+
+    -- Eine Anfrage über PARTY wird über PARTY beantwortet.
+    addon.Sync.lastAnnounceAt = 0
+    orders_sentBefore = #sentAddon
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|0.1.0|profile|1|gggggggggg", "PARTY", "Fremdling-Realm")
+    assert(#sentAddon > orders_sentBefore, "Die Gruppenanfrage blieb unbeantwortet")
+    orders_result = nil
+    for index = orders_sentBefore + 1, #sentAddon do
+        if tostring(sentAddon[index][2] or ""):sub(1, 2) == "V|" then
+            orders_result = sentAddon[index][3]
+        end
+    end
+    assert(orders_result == "PARTY", "Die Versionsantwort lief nicht über den Anfragekanal")
+
+    -- Das Fenster: Gildenmodus zählt Online-Mitglieder, färbt sich selbst grün
+    -- und meldet den bekannten Altstand rot, sobald die Frist abgelaufen ist.
+    addon.UI:ShowVersionCheck("GUILD")
+    orders_page = addon.UI.versionCheck
+    assert(orders_page ~= nil and orders_page.shown == true, "Der Versionsprüfer öffnet nicht")
+    assert(orders_page.settled == false or orders_page.settled == true,
+        "Der Prüfzustand fehlt")
+    orders_page.settled = true
+    addon.UI:RefreshVersionCheck()
+    assert(orders_page.rows[1].shown == true, "Der Versionsprüfer zeigt keine Zeile")
+    assert(orders_page.counts:GetText():find("aktuell", 1, true) ~= nil,
+        "Die Zusammenfassung fehlt")
+    orders_page:Hide()
 end
 
 do

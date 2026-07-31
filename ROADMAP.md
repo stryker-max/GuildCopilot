@@ -298,6 +298,14 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.59 – /gcp ver: der Versionsprüfer
+
+Owner-Wunsch nach dem Vorbild des RCLootCouncil-Versionsprüfers, im eigenen Design:
+
+- **`/gcp ver`** öffnet ein verschiebbares Fenster mit Name (Klassenfarbe), Gildenrang und Version. **Grün** ist der eigene Stand, **rot** ist älter, **gelb „Warte auf Antwort …"** bis zur Antwort, nach acht Sekunden **„Nicht installiert"**. Rot steht oben – wer prüft, sucht die Veralteten. Unten die Umschalter **Gilde** (alle Online-Mitglieder) und **Gruppe** (Raid/Party) samt Zusammenfassung „x aktuell · y veraltet · z ohne Addon";
+- dafür zwei Lücken im Handshake geschlossen: **V-Nachrichten über RAID/PARTY** wurden vom Raid-Sammelzweig verschluckt und erreichen jetzt den Empfänger, und **Antworten gehen auf dem Anfragekanal zurück** statt in die eigene Gilde – erst damit sehen sich auch Gruppenmitglieder fremder Gilden. Deren Antworten bleiben im Sitzungsspeicher und landen nicht im Gildenbestand;
+- **`/gcp phase` ist entfallen** (Owner: „komplett unnötig"). Die Content-Phase läuft intern mit Voreinstellung und Gildenabgleich weiter; der Befehl war ihr einziger Handschalter.
+
 ## 0.9.58 – Raidauswertung: Teilnehmer von Hand ordnen
 
 Owner-Wunsch: Die Teilnehmerliste soll sich zusätzlich zur Spaltensortierung per **Ziehen mit der Maus** frei ordnen lassen (etwa nach Gruppen fürs Besprechen).

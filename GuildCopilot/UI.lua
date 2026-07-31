@@ -6805,11 +6805,241 @@ end
 -- "/gcp help" und die Liste auf der Addon-Optionsseite: Zwei getrennte
 -- Aufzaehlungen laufen auseinander, sobald ein Befehl dazukommt - und die
 -- Liste, die niemand pflegt, ist dann die falsche.
+-- === Versionsprüfer =========================================================
+-- /gcp ver: Wer in Gruppe oder Gilde hat Guild Copilot, und in welcher
+-- Version? Grün ist der eigene Stand, rot ist älter, gelb wartet noch,
+-- "Nicht installiert" hat nach acht Sekunden nicht geantwortet.
+
+function GC.UI:CreateVersionCheckFrame()
+    if self.versionCheck then
+        return self.versionCheck
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotVersionCheck")
+    frame:SetSize(470, 432)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "Versionsprüfer", { title = true, width = 280 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.ownVersion = CreateLabel(frame, "Deine Version: " .. GC.Constants.VERSION,
+        { muted = true, width = 280, height = 15 })
+    frame.ownVersion:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+
+    CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 140, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -62)
+    CreateLabel(frame, "RANG", { muted = true, font = "GameFontNormalSmall", width = 120, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 190, -62)
+    CreateLabel(frame, "VERSION", { muted = true, font = "GameFontNormalSmall",
+        align = "RIGHT", width = 130, height = 14 })
+        :SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -62)
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -80)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 52)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(420)
+    frame.content:SetHeight(280)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 40 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(420, 24)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 26))
+        row.name = CreateLabel(row, "", { width = 160, height = 24 })
+        row.name:SetPoint("LEFT", row, "LEFT", 4, 0)
+        row.rank = CreateLabel(row, "", { muted = true, width = 120, height = 24 })
+        row.rank:SetPoint("LEFT", row, "LEFT", 172, 0)
+        row.version = CreateLabel(row, "", { align = "RIGHT", width = 124, height = 24 })
+        row.version:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.modeGuild = CreateButton(frame, "Gilde", 96, 30, function()
+        GC.UI:SetVersionCheckMode("GUILD")
+    end)
+    frame.modeGuild:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
+    frame.modeGroup = CreateButton(frame, "Gruppe", 96, 30, function()
+        GC.UI:SetVersionCheckMode("GROUP")
+    end)
+    frame.modeGroup:SetPoint("LEFT", frame.modeGuild, "RIGHT", 8, 0)
+    frame.counts = CreateLabel(frame, "", { align = "CENTER", width = 210, height = 30 })
+    frame.counts:SetPoint("LEFT", frame.modeGroup, "RIGHT", 4, 0)
+    frame.closeButton = CreateButton(frame, "Schließen", 100, 30, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 12)
+
+    frame:Hide()
+    self.versionCheck = frame
+    return frame
+end
+
+function GC.UI:ShowVersionCheck(mode)
+    local frame = self:CreateVersionCheckFrame()
+    frame:Show()
+    self:SetVersionCheckMode(mode
+        or ((IsInGroup and IsInGroup()) and "GROUP" or "GUILD"))
+end
+
+function GC.UI:SetVersionCheckMode(mode)
+    local frame = self:CreateVersionCheckFrame()
+    frame.mode = mode == "GROUP" and "GROUP" or "GUILD"
+    frame.requestedAt = GC.Util.Now()
+    frame.settled = false
+    GC.Sync:RequestVersionCheck(frame.mode)
+    if C_Timer and type(C_Timer.After) == "function" then
+        local requestedAt = frame.requestedAt
+        C_Timer.After(8, function()
+            local current = GC.UI.versionCheck
+            if current and current.requestedAt == requestedAt then
+                current.settled = true
+                GC.UI:RefreshVersionCheck()
+            end
+        end)
+    else
+        frame.settled = true
+    end
+    self:RefreshVersionCheck()
+end
+
+function GC.UI:GetVersionCheckTargets(mode)
+    local targets = {}
+    if mode == "GROUP" and IsInGroup and IsInGroup() then
+        if IsInRaid and IsInRaid() then
+            for index = 1, (GetNumGroupMembers and GetNumGroupMembers() or 0) do
+                local name, _, _, _, _, classFile = GetRaidRosterInfo(index)
+                if name then
+                    targets[#targets + 1] = { name = name, classFile = classFile }
+                end
+            end
+        else
+            local _, ownClass = UnitClass("player")
+            targets[#targets + 1] = { name = GC:GetPlayerFullName(), classFile = ownClass }
+            for index = 1, math.max(0, (GetNumGroupMembers and GetNumGroupMembers() or 1) - 1) do
+                local unit = "party" .. index
+                if UnitExists and UnitExists(unit) then
+                    local _, classFile = UnitClass(unit)
+                    targets[#targets + 1] = { name = UnitName(unit), classFile = classFile }
+                end
+            end
+        end
+    else
+        for _, member in ipairs(GC.Roster.members) do
+            if member.online then
+                targets[#targets + 1] = {
+                    name = member.name,
+                    classFile = member.classFile,
+                    rank = member.rank,
+                }
+            end
+        end
+    end
+    for _, target in ipairs(targets) do
+        if not target.rank then
+            local member = GC.Roster:GetMember(target.name)
+            target.rank = (member and member.rank) or "–"
+        end
+    end
+    return targets
+end
+
+local VERSION_STATE_ORDER = { OLD = 1, NONE = 2, WAITING = 3, CURRENT = 4 }
+
+function GC.UI:RefreshVersionCheck()
+    local frame = self.versionCheck
+    if not frame or not frame:IsShown() then
+        return
+    end
+    frame.modeGuild:SetActive(frame.mode ~= "GROUP")
+    frame.modeGroup:SetActive(frame.mode == "GROUP")
+
+    local ownKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
+    local ownVersion = GC.Constants.VERSION
+    local current, outdated, missing = 0, 0, 0
+    local entries = {}
+    for _, target in ipairs(self:GetVersionCheckTargets(frame.mode)) do
+        local entry = { name = target.name, classFile = target.classFile, rank = target.rank }
+        if GC.Util.NormalizeName(GC.Util.PlayerShortName(target.name)) == ownKey then
+            entry.version = ownVersion
+            entry.state = "CURRENT"
+        else
+            local version, fresh = GC.Sync:GetKnownVersion(target.name, frame.requestedAt)
+            if fresh or (frame.settled and version) then
+                entry.version = version
+                entry.state = version == ownVersion and "CURRENT" or "OLD"
+            elseif frame.settled then
+                entry.state = "NONE"
+            else
+                entry.state = "WAITING"
+            end
+        end
+        if entry.state == "CURRENT" then
+            current = current + 1
+        elseif entry.state == "OLD" then
+            outdated = outdated + 1
+        elseif entry.state == "NONE" then
+            missing = missing + 1
+        end
+        entries[#entries + 1] = entry
+    end
+
+    -- Rot zuerst: Wer prüft, sucht die Veralteten.
+    table.sort(entries, function(left, right)
+        if VERSION_STATE_ORDER[left.state] ~= VERSION_STATE_ORDER[right.state] then
+            return VERSION_STATE_ORDER[left.state] < VERSION_STATE_ORDER[right.state]
+        end
+        return tostring(left.name) < tostring(right.name)
+    end)
+
+    for index, row in ipairs(frame.rows) do
+        local entry = entries[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.name:SetText(GC.Util.PlayerShortName(entry.name))
+            row.name:SetTextColor(ClassColor(entry.classFile))
+            row.rank:SetText(entry.rank or "–")
+            if entry.state == "CURRENT" then
+                row.version:SetText(entry.version)
+                SetTextColor(row.version, THEME.success)
+            elseif entry.state == "OLD" then
+                row.version:SetText(entry.version or "?")
+                SetTextColor(row.version, THEME.danger)
+            elseif entry.state == "WAITING" then
+                row.version:SetText("Warte auf Antwort …")
+                SetTextColor(row.version, THEME.warning)
+            else
+                row.version:SetText("Nicht installiert")
+                SetTextColor(row.version, THEME.muted)
+            end
+        end
+    end
+
+    frame.counts:SetText("|cff59e695" .. current .. " aktuell|r · |cffff6266"
+        .. outdated .. " veraltet|r · " .. missing .. " ohne Addon")
+    frame.content:SetHeight(math.max(280, #entries * 26))
+    frame.scroll:UpdateModernThumb()
+end
+
 local SLASH_COMMANDS = {
     { command = "/gcp", description = "öffnet und schließt Guild Copilot" },
+    { command = "/gcp ver", description = "prüft, wer in Gruppe oder Gilde das Addon hat und in welcher Version" },
     { command = "/gcp welcome", description = "zeigt das Willkommensfenster mit der Einrichtung" },
     { command = "/gcp recruite", description = "blendet den Werbebalken ein oder aus" },
-    { command = "/gcp phase", description = "zeigt die Content-Phase der Gilde; „/gcp phase T5“ stellt sie um" },
     { command = "/gcp debug", description = "misst die Laufzeit; ein zweiter Aufruf zeigt das Ergebnis" },
     { command = "/gcp help", description = "zeigt diese Liste im Chat" },
 }
@@ -6943,38 +7173,12 @@ SlashCmdList.GUILDCOPILOT = function(input)
         return
     end
 
-    -- Die Content-Phase der Gilde. Sie entscheidet, welche Regeln des
-    -- ausgelieferten Verzauberungs-Regelsatzes schon gelten, und wird
-    -- gildenweit geteilt - deshalb darf sie nur aendern, wer auch den
-    -- Regelsatz aendern darf.
-    local phaseArgument = command:match("^phase%s*(.*)$")
-    if phaseArgument then
-        if phaseArgument == "" then
-            local current = GC.GearAudit:GetContentPhase()
-            local names = {}
-            for _, phase in ipairs(GC.ContentPhases) do
-                names[#names + 1] = phase.key
-            end
-            local label = GC.ContentPhaseByKey[current]
-                and GC.ContentPhaseByKey[current].label
-                or current
-            GC:Print("Aktuelle Phase: " .. label
-                .. ". Umstellen mit /gcp phase <" .. table.concat(names, "|") .. ">.")
-            return
-        end
-        local wanted
-        for _, phase in ipairs(GC.ContentPhases) do
-            if phase.key:lower() == phaseArgument then
-                wanted = phase.key
-                break
-            end
-        end
-        if not wanted then
-            GC:Print("Unbekannte Phase. Möglich sind T4, T5, T6 und T6.5.")
-            return
-        end
-        local ok, message = GC.GearAudit:SetContentPhase(wanted)
-        GC:Print(message)
+    -- Der Versionsprüfer: Wer in Gruppe oder Gilde hat das Addon, und in
+    -- welcher Version? ("/gcp phase" ist auf Owner-Wunsch entfallen; die
+    -- Content-Phase läuft intern mit ihrer Voreinstellung und dem
+    -- Gildenabgleich weiter.)
+    if command == "ver" or command == "version" then
+        GC.UI:ShowVersionCheck()
         return
     end
 
@@ -7002,6 +7206,11 @@ end)
 
 GC:RegisterCallback("ORDERS_BANNER", GC.UI, function(self, text)
     self:ShowOrderBanner(text)
+end)
+
+-- Eintreffende Versionsantworten füllen den offenen Versionsprüfer live.
+GC:RegisterCallback("VERSION_REPLIES_UPDATED", GC.UI, function(self)
+    self:RefreshVersionCheck()
 end)
 
 GC:RegisterCallback("ROSTER_UPDATED", GC.UI, function(self)
