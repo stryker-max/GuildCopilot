@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 31.07.2026, nach Release 0.9.63 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.64 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -203,6 +203,27 @@ Auftragsstatistik. Einzelheiten in den ROADMAP-Abschnitten 0.9.50–0.9.63.
 Vorlagen-Knopf), der Gefertigt-Dialog bei Stückzahlen > 1, der
 Teilzahlungs-Dialog und die Statistik – die Tests decken Logik ab, nicht
 die Pixel.
+
+---
+
+## 6. Rezeptfilter nach benötigter Skill-Stufe – Datenproblem, noch ungelöst
+
+Owner-Wunsch: Im Werkstatt-Filter nach der Berufsstufe filtern, die ein
+Rezept verlangt. **Das Problem:** Für *gelernte* Rezepte verrät die
+WoW-API die Mindeststufe nicht – `GetTradeSkillInfo` liefert nur die
+Schwierigkeitsfarbe relativ zum aktuellen Skill des Scannenden, und die
+ändert sich mit jedem Skillpunkt. Die absolute Anforderung („benötigt
+Verzauberkunst (300)") steht nur im Tooltip *ungelernter* Rezept-Items.
+
+Ehrliche Optionen für später:
+- eine **mitgelieferte Datentabelle** Rezept-ID → Mindeststufe (einmalige
+  Fleißarbeit, je Beruf einige hundert Einträge; extern generierbar aus
+  öffentlichen TBC-Datenbanken und dann statisch im Addon);
+- oder ein **relativer Filter** („für meinen Skill grün/gelb/orange") auf
+  Basis der beim Scan gemerkten Schwierigkeitsfarbe – ehrlich beschriftet
+  als Momentaufnahme des Scannenden, nicht als Mindeststufe.
+
+Vor dem Bau entscheiden, welcher Weg gewollt ist.
 
 ---
 

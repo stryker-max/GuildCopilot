@@ -1233,7 +1233,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1912)
+    content:SetHeight(2000)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1520,7 +1520,7 @@ function GC.UI:BuildSettingsPage()
     -- Klang und Bildschirmmeldung der Gildenaufträge. Jedes Ereignis hat
     -- seinen eigenen Ton aus der bekannten Klangliste; "Aus" schaltet es ab.
     local orderCard = CreateCard(content, "Gildenaufträge")
-    orderCard:SetSize(752, 264)
+    orderCard:SetSize(752, 352)
     orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1432)
     local orderSoundNames = { "Aus" }
     for _, sound in ipairs(GC.SuccessSoundOptions) do
@@ -1548,14 +1548,15 @@ function GC.UI:BuildSettingsPage()
         return dropdown
     end
     page.orderSoundNew = OrderSoundDropdown("Neuer machbarer Auftrag", -48, "newOrder")
-    page.orderSoundProgress = OrderSoundDropdown("Fortschritt an eigenen Aufträgen", -86, "progress")
-    page.orderSoundDone = OrderSoundDropdown("Auftrag abgeschlossen", -124, "done")
+    page.orderSoundAccepted = OrderSoundDropdown("Auftrag angenommen", -86, "accepted")
+    page.orderSoundProgress = OrderSoundDropdown("Fortschritt an eigenen Aufträgen", -124, "progress")
+    page.orderSoundDone = OrderSoundDropdown("Auftrag abgeschlossen", -162, "done")
 
     CreateLabel(orderCard, "Anzeigedauer der Meldung (Sekunden)",
         { muted = true, width = 236, height = 30 })
-        :SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -162)
+        :SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -200)
     page.orderBannerHold = CreateEdit(orderCard, 60, 26)
-    page.orderBannerHold.container:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 262, -164)
+    page.orderBannerHold.container:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 262, -202)
     page.orderBannerHold:SetScript("OnTextChanged", function(edit)
         local seconds = tonumber(GC.Util.Trim(edit:GetText()))
         if seconds then
@@ -1568,8 +1569,8 @@ function GC.UI:BuildSettingsPage()
         "Bildschirmmeldung bei neuen machbaren Aufträgen", function(checked)
         GC.DB:GetSettings().orderBanner.enabled = checked
     end)
-    page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -200)
-    page.orderBannerToggle.text:SetWidth(360)
+    page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -238)
+    page.orderBannerToggle.text:SetWidth(340)
 
     page.orderBannerTest = CreateButton(orderCard, "Meldung testen", 150, 30, function()
         -- Klang und Meldung zusammen, wie im Ernstfall. Der Positionier-Modus
@@ -1579,7 +1580,7 @@ function GC.UI:BuildSettingsPage()
         GC.UI:ShowOrderBanner("Neuer Gildenauftrag von "
             .. GC.Util.PlayerShortName(GC:GetPlayerFullName()), true)
     end)
-    page.orderBannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -158)
+    page.orderBannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -196)
     page.orderBannerReset = CreateButton(orderCard, "Position zurücksetzen", 150, 26, function()
         local bannerSettings = GC.DB:GetSettings().orderBanner
         bannerSettings.x = 0
@@ -1591,20 +1592,34 @@ function GC.UI:BuildSettingsPage()
         GC.UI:ShowOrderBanner("Neuer Gildenauftrag von "
             .. GC.Util.PlayerShortName(GC:GetPlayerFullName()), true)
     end)
-    page.orderBannerReset:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -194)
+    page.orderBannerReset:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -232)
+
+    -- Der Übergabetext fürs Anflüstern: {name} und {rezept} werden ersetzt,
+    -- gesendet wird erst mit Enter im Chat.
+    CreateLabel(orderCard, "Übergabetext ({name} und {rezept} werden ersetzt)",
+        { muted = true, width = 400, height = 15 })
+        :SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -272)
+    page.orderWhisperEdit = CreateEdit(orderCard, 698, 26)
+    page.orderWhisperEdit.container:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -290)
+    page.orderWhisperEdit:SetScript("OnTextChanged", function(edit)
+        local text = GC.Util.Trim(edit:GetText())
+        if text ~= "" then
+            GC.DB:GetSettings().orderWhisperText = text
+        end
+    end)
 
     CreateLabel(orderCard,
         "Die Meldung lässt sich mit der Maus dorthin schieben, wo sie nichts verdeckt.", {
         muted = true,
         width = 716,
         height = 16,
-    }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -236)
+    }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -326)
 
     -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
     local commandCard = CreateCard(content, "Chat-Befehle")
     commandCard:SetSize(752, 156)
-    commandCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1712)
+    commandCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1800)
     for index, entry in ipairs(SLASH_COMMANDS) do
         CreateLabel(commandCard, "|cffffffff" .. entry.command .. "|r – " .. entry.description, {
             muted = true,
@@ -1615,7 +1630,7 @@ function GC.UI:BuildSettingsPage()
     end
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1880)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1968)
 end
 
 function GC.UI:RefreshSettings()
@@ -1719,10 +1734,12 @@ function GC.UI:RefreshSettings()
         return "Aus"
     end
     page.orderSoundNew:SetValue(OrderSoundName("newOrder", "LEVEL_UP"))
+    page.orderSoundAccepted:SetValue(OrderSoundName("accepted", "IG_QUEST_ACTIVATE"))
     page.orderSoundProgress:SetValue(OrderSoundName("progress", "MAP_PING"))
     page.orderSoundDone:SetValue(OrderSoundName("done", "IG_QUEST_LIST_COMPLETE"))
     SetToggle(page.orderBannerToggle, settings.orderBanner.enabled ~= false)
     page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
+    page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
@@ -3020,8 +3037,17 @@ function GC.UI:BuildWorkshopPage()
 
     page.workshopSearch = CreateEdit(searchCard, 238, 34)
     page.workshopSearch.container:SetPoint("LEFT", page.workshopProfession, "RIGHT", 8, 0)
-    page.workshopSearch:SetScript("OnTextChanged", function()
+    -- Das × leert die Suche mit einem Klick; es erscheint nur, wenn etwas
+    -- drinsteht (Owner-Wunsch).
+    page.workshopSearchClear = CreateButton(page.workshopSearch.container, "×", 20, 20, function()
+        page.workshopSearch:SetText("")
+        page.workshopSearch:ClearFocus()
+    end)
+    page.workshopSearchClear:SetPoint("RIGHT", page.workshopSearch.container, "RIGHT", -5, 0)
+    page.workshopSearchClear:Hide()
+    page.workshopSearch:SetScript("OnTextChanged", function(edit)
         page.workshopPage = 1
+        page.workshopSearchClear:SetShown(GC.Util.Trim(edit:GetText()) ~= "")
         GC.UI:RefreshWorkshop()
     end)
     local searchHint = CreateLabel(page.workshopSearch.container, "Rezept oder Spieler suchen", {
@@ -3939,12 +3965,37 @@ function GC.UI:BuildOrderCreateDialog(page)
     dialog.noteEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -223)
 
     -- Gerichteter Auftrag: 24 Stunden nur für diesen Hersteller, danach
-    -- offen für alle. Leer heißt: sofort offen.
+    -- offen für alle. Die Auswahl ist eine Liste der bekannten Hersteller
+    -- des Rezepts (Owner-Wunsch: kein Freitext).
     dialog.preferredCaption = CreateLabel(dialog, "Wunsch-Hersteller (optional, 24 h reserviert)",
         { muted = true, width = 300, height = 15 })
     dialog.preferredCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -258)
-    dialog.preferredEdit = CreateEdit(dialog, 180, 26)
-    dialog.preferredEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -275)
+    dialog.preferredValue = ""
+    dialog.preferredButton = CreateButton(dialog, "(keiner)", 180, 26, function()
+        GC.UI:ToggleOrderCrafterList(dialog)
+    end)
+    dialog.preferredButton:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -275)
+
+    -- Die Aufklappliste: ein Zeilenvorrat, je Öffnen mit den Herstellern des
+    -- Rezepts gefüllt - "(keiner)" steht immer zuoberst.
+    dialog.crafterList = CreatePanel(dialog, THEME.input, THEME.accent)
+    dialog.crafterList:SetSize(180, 10)
+    dialog.crafterList:SetPoint("TOPLEFT", dialog.preferredButton, "BOTTOMLEFT", 0, -2)
+    dialog.crafterList:SetFrameLevel((dialog:GetFrameLevel() or 1) + 10)
+    dialog.crafterList.rows = {}
+    for index = 1, 9 do
+        local rowButton = CreateButton(dialog.crafterList, "", 172, 22, function()
+            local chosen = dialog.crafterList.rows[index].crafterName or ""
+            dialog.preferredValue = chosen
+            dialog.preferredButton:SetText(chosen ~= ""
+                and GC.Util.PlayerShortName(chosen) or "(keiner)")
+            dialog.crafterList:Hide()
+        end)
+        rowButton:SetPoint("TOPLEFT", dialog.crafterList, "TOPLEFT", 4, -4 - ((index - 1) * 24))
+        rowButton:Hide()
+        dialog.crafterList.rows[index] = rowButton
+    end
+    dialog.crafterList:Hide()
     dialog.templateButton = CreateButton(dialog, "Als Vorlage merken", 160, 26, function()
         local saved = GC.Orders:SaveTemplate(dialog.recipeKey, {
             quantity = tonumber(GC.Util.Trim(dialog.quantityEdit:GetText())) or 1,
@@ -3953,7 +4004,7 @@ function GC.UI:BuildOrderCreateDialog(page)
             costLimit = math.floor((tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0) * 10000),
             tip = math.floor((tonumber(GC.Util.Trim(dialog.tipEdit:GetText())) or 0) * 10000),
             note = dialog.noteEdit:GetText(),
-            preferredCrafter = dialog.preferredEdit:GetText(),
+            preferredCrafter = dialog.preferredValue,
         })
         dialog.status:SetText(saved and "Vorlage gemerkt – sie füllt diesen Dialog beim nächsten Mal vor."
             or "Vorlage konnte nicht gemerkt werden.")
@@ -3974,7 +4025,7 @@ function GC.UI:BuildOrderCreateDialog(page)
             costLimit = math.floor(gold * 10000),
             tip = math.floor(tip * 10000),
             note = dialog.noteEdit:GetText(),
-            preferredCrafter = dialog.preferredEdit:GetText(),
+            preferredCrafter = dialog.preferredValue,
         })
         if ok then
             dialog:Hide()
@@ -4029,7 +4080,11 @@ function GC.UI:OpenOrderCreateDialog(recipeKey)
     dialog.tipEdit:SetText(template and template.tip and template.tip > 0
         and tostring(math.floor(template.tip / 10000)) or "")
     dialog.noteEdit:SetText(template and template.note or "")
-    dialog.preferredEdit:SetText(template and template.preferredCrafter or "")
+    dialog.preferredValue = template and template.preferredCrafter or ""
+    dialog.preferredButton:SetText(dialog.preferredValue ~= ""
+        and GC.Util.PlayerShortName(dialog.preferredValue) or "(keiner)")
+    dialog.recipeCrafters = (entry and entry.crafters) or {}
+    dialog.crafterList:Hide()
     dialog.costCaption:SetShown(dialog.materialModel == "C")
     dialog.costEdit.container:SetShown(dialog.materialModel == "C")
     -- Ohne Gegenstelle kein Sync: Die Aufträge reisen nur von Client zu
@@ -4199,17 +4254,56 @@ function GC.UI:OpenOrderPayDialog(orderID)
     dialog:Show()
 end
 
--- Das Chatfenster mit der Gegenseite vorbelegen (Stufe 2). Ohne Chat-API
--- (Tests) bleibt es beim Hinweis mit dem Namen.
+-- Die Wunsch-Hersteller-Liste im Erstellen-Dialog: "(keiner)" plus die
+-- bekannten Hersteller des Rezepts aus dem Katalog.
+function GC.UI:ToggleOrderCrafterList(dialog)
+    local list = dialog.crafterList
+    if list:IsShown() then
+        list:Hide()
+        return
+    end
+    local names = { "" }
+    for _, crafterName in ipairs(dialog.recipeCrafters or {}) do
+        names[#names + 1] = crafterName
+    end
+    local visible = math.min(#names, #list.rows)
+    for index, rowButton in ipairs(list.rows) do
+        local name = names[index]
+        rowButton.crafterName = name
+        rowButton:SetText(name and (name ~= "" and GC.Util.PlayerShortName(name) or "(keiner)") or "")
+        rowButton:SetShown(index <= visible)
+    end
+    list:SetHeight(8 + (visible * 24))
+    list:Show()
+end
+
+-- Der vorbelegte Übergabetext: {name} wird zum Empfänger, {rezept} zum
+-- Rezept. Anpassbar in den Einstellungen; gesendet wird erst mit Enter.
+function GC.UI:BuildOrderWhisper(order)
+    if not order then
+        return nil, nil
+    end
+    local target = GC.Orders:GetCounterpartCharacter(order)
+    if not target then
+        return nil, nil
+    end
+    local text = GC.DB:GetSettings().orderWhisperText or ""
+    text = text:gsub("{name}", GC.Util.PlayerShortName(target))
+        :gsub("{rezept}", order.recipeName or "?")
+    return target, text
+end
+
+-- Das Chatfenster mit der Gegenseite und dem Übergabetext vorbelegen
+-- (Stufe 2). Ohne Chat-API (Tests) bleibt es beim Hinweis mit dem Namen.
 function GC.UI:WhisperOrderCounterpart(orderID)
     local order = GC.Orders:GetOrder(orderID)
-    local target = order and GC.Orders:GetCounterpartCharacter(order)
+    local target, text = self:BuildOrderWhisper(order)
     if not target then
         self:SetOrdersStatus("Kein Charakter der Gegenseite bekannt.", false)
         return false, ""
     end
     if ChatFrame_OpenChat then
-        ChatFrame_OpenChat("/w " .. target .. " ", DEFAULT_CHAT_FRAME)
+        ChatFrame_OpenChat("/w " .. target .. " " .. (text or ""), DEFAULT_CHAT_FRAME)
         return true, ""
     end
     self:SetOrdersStatus("Gegenseite: " .. GC.Util.PlayerShortName(target), true)

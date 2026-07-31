@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.63",
+    VERSION = "0.9.64",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -84,6 +84,9 @@ GC.SuccessSoundOptions = {
     { key = "GROUP_FINDER", name = "Gruppensuche", soundID = 3081 },
     { key = "RAID_WARNING", name = "Raidwarnung", soundID = 8959 },
     { key = "IG_QUEST_LIST_COMPLETE", name = "Quest abgeschlossen", soundID = 619 },
+    -- Der kurze Quest-Annahme-Klang; fehlt der Schluessel im SOUNDKIT der
+    -- Spielfassung, greift die nackte Zahl.
+    { key = "IG_QUEST_ACTIVATE", name = "Quest angenommen", soundID = 618 },
     { key = "MAP_PING", name = "Karten-Ping", soundID = 3175 },
     -- SoundKit 888 heisst in Classic "LEVELUP". Der Schluessel steht wie bei
     -- den anderen Eintraegen zuerst; fehlt er im SOUNDKIT der Spielfassung,

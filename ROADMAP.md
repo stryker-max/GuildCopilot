@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.64 – Gildenaufträge: Klang-Feinschliff, Übergabetext, Herstellerliste
+
+Fünf Owner-Wünsche in einer Runde:
+
+- **Die Annahme klingt wie eine angenommene Quest** – neues Klangereignis „Auftrag angenommen" (Vorgabe „Quest angenommen", Kit 618) mit eigener Zeile in den Einstellungen; der übrige Fortschritt pingt weiter wie die Karte;
+- **Anflüstern legt einen fertigen Übergabetext vor:** „Hallo {name}! Dein Auftrag ‚{rezept}' ist fertig – ich wäre bereit für die Übergabe." Die Platzhalter werden ersetzt, der Text steht in den Einstellungen zum Anpassen, gesendet wird erst mit Enter;
+- **Wunsch-Hersteller als Auswahlliste statt Freitext:** Der Knopf öffnet die Liste der bekannten Hersteller des Rezepts („(keiner)" zuoberst) – vertippte Namen sind damit ausgeschlossen;
+- **der Wunsch-Hersteller bekommt seine eigene Meldung:** „Gildenauftrag für dich von X" samt Klang und Banner, während alle anderen nur die Reserviert-Chatzeile sehen;
+- **× im Werkstatt-Suchfeld** leert die Suche mit einem Klick; es erscheint nur, wenn etwas drinsteht.
+
 ## 0.9.63 – Gildenaufträge: Stufe 2 komplett, plus alles Zurückgestellte
 
 Owner: „Bau alles ein, auch die stufenlosen Sachen." Sechs Bausteine in einem Wurf:

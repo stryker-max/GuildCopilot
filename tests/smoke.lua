@@ -4819,7 +4819,7 @@ do
             .. currentTime .. "|Heiler-Realm|CRT|", "GUILD", "Heiler-Realm")
     playedSoundID = nil
     assert(addon.Orders:Accept("soundtest-1") == true, "Die Klang-Testannahme scheiterte")
-    assert(playedSoundID == 3175, "Der Fortschritt pingt nicht wie die Karte")
+    assert(playedSoundID == 618, "Die Annahme klingt nicht wie eine angenommene Quest")
 
     -- Abgeschaltet bleibt still.
     addon.DB:GetSettings().orderSounds.progress = ""
@@ -4829,7 +4829,18 @@ do
     assert(playedSoundID == nil, "Der abgeschaltete Fortschrittston spielte trotzdem")
     addon.DB:GetSettings().orderSounds.progress = "MAP_PING"
 
+    playedSoundID = nil
     addon.Orders:MarkCrafted("soundtest-1")
+    assert(playedSoundID == 3175, "Der Fortschritt pingt nicht wie die Karte")
+
+    -- Übergabetext: {name} und {rezept} werden ersetzt.
+    orders_result = { addon.UI:BuildOrderWhisper(addon.Orders:GetOrder("soundtest-1")) }
+    assert(orders_result[1] ~= nil, "Der Flüster-Empfänger fehlt")
+    assert(tostring(orders_result[2]):find("Testbrenner", 1, true) ~= nil,
+        "Der Übergabetext ersetzt {rezept} nicht")
+    assert(tostring(orders_result[2]):find("{name}", 1, true) == nil,
+        "Der Übergabetext ersetzt {name} nicht")
+
     playedSoundID = nil
     addon.Sync:OnMessage("GuildCopilot",
         "O|7|U|soundtest-1|" .. (addon.Orders:GetOrder("soundtest-1").rev + 1) .. "|DONE|"

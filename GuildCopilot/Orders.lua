@@ -1121,6 +1121,7 @@ end
 -- Ereignis in den Einstellungen umstellbar oder abschaltbar (leerer Wert).
 local ORDER_SOUND_DEFAULTS = {
     newOrder = "LEVEL_UP",
+    accepted = "IG_QUEST_ACTIVATE",
     progress = "MAP_PING",
     done = "IG_QUEST_LIST_COMPLETE",
 }
@@ -1154,6 +1155,10 @@ function GC.Orders:PlayStatusSound(order, previousStatus)
     end
     if order.status == "DONE" then
         self:PlayEventSound("done")
+    elseif order.status == "ACCEPTED" then
+        -- Die Annahme klingt wie eine angenommene Quest (Owner-Wunsch),
+        -- der uebrige Fortschritt pingt wie die Karte.
+        self:PlayEventSound("accepted")
     elseif PROGRESS_SOUND_STATUSES[order.status] then
         self:PlayEventSound("progress")
     end
@@ -1182,7 +1187,8 @@ function GC.Orders:NotifyNewOrder(order)
         return
     end
     -- Ist der Auftrag für jemand anderen reserviert, gibt es nur die
-    -- Chatzeile - Klang und Meldung gehören dem Wunsch-Hersteller.
+    -- Chatzeile - Klang und Meldung gehören dem Wunsch-Hersteller. Der
+    -- bekommt dafür seine eigene "für dich"-Fassung (Owner-Wunsch).
     if self:IsReserved(order) then
         local mine = false
         for _, candidate in ipairs(candidates) do
@@ -1197,6 +1203,14 @@ function GC.Orders:NotifyNewOrder(order)
                 .. GC.Util.PlayerShortName(order.preferredCrafter) .. ".")
             return
         end
+        GC:Print("Gildenauftrag für dich: „" .. (order.recipeName or "?") .. "“ von "
+            .. GC.Util.PlayerShortName(order.createdBy or "?")
+            .. " – reserviert für deinen "
+            .. GC.Util.PlayerShortName(order.preferredCrafter) .. ".")
+        self:PlayEventSound("newOrder")
+        GC:FireCallback("ORDERS_BANNER", "Gildenauftrag für dich von "
+            .. GC.Util.PlayerShortName(order.createdBy or "?"))
+        return
     end
     GC:Print("Neuer Gildenauftrag: „" .. (order.recipeName or "?") .. "“ von "
         .. GC.Util.PlayerShortName(order.createdBy or "?") .. " – dein "

@@ -50,9 +50,14 @@ local DEFAULTS = {
         -- aus GC.SuccessSoundOptions; leer heisst ausdruecklich aus.
         orderSounds = {
             newOrder = "LEVEL_UP",
+            accepted = "IG_QUEST_ACTIVATE",
             progress = "MAP_PING",
             done = "IG_QUEST_LIST_COMPLETE",
         },
+        -- Der vorbelegte Fluestertext fuer die Uebergabe. {name} wird zum
+        -- Empfaenger, {rezept} zum Rezeptnamen; gesendet wird erst mit Enter.
+        orderWhisperText = "Hallo {name}! Dein Auftrag „{rezept}“ ist fertig – "
+            .. "ich wäre bereit für die Übergabe.",
         -- Die Bildschirmmeldung bei neuen machbaren Auftraegen. Frei
         -- verschiebbar, weil die Standard-Raidwarnungsposition erfahrungsgemaess
         -- von WeakAuras belegt ist.
