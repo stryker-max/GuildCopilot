@@ -4498,6 +4498,115 @@ do
 end
 
 do
+    -- Stufe 2 und die stufenlosen Sachen: Reservierung, Teilfertigung,
+    -- Teilzahlung, Vorlagen, Statistik und der Flüster-Empfänger.
+    addon.Roster:ScanNow()
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.DB:GetGuild().workshop.orderStats = nil
+    addon.Workshop:ClaimRecipes({
+        crafter = "Heiler-Realm", sharedBy = "Heiler-Realm",
+        professionKey = "verzauberkunst", professionName = "Verzauberkunst",
+        recipeKeys = { "I90001" },
+    })
+
+    -- Gerichteter Auftrag: 24 h nur für den Wunsch-Hersteller.
+    assert(addon.Orders:Create("I90001", { preferredCrafter = "Unbekannter" }) == false,
+        "Ein unbekannter Wunsch-Hersteller wurde akzeptiert")
+    assert(addon.Orders:Create("I90001", {
+        quantity = 3, materialModel = "C", preferredCrafter = "Heiler",
+    }) == true, "Der gerichtete Auftrag ließ sich nicht erstellen")
+    orders_orderID, orders_order = nil, nil
+    for id, entry in pairs(addon.Orders:GetStore()) do
+        orders_orderID, orders_order = id, entry
+    end
+    assert(orders_order.preferredCrafter ~= "", "Die Reservierung fehlt am Auftrag")
+    assert(#addon.Orders:BuildCoreMessage(orders_order) <= 255,
+        "Die Kernnachricht mit Wunsch-Hersteller sprengt das Chatlimit")
+
+    -- Zwerg kann das Rezept, ist aber nicht der Wunsch-Hersteller.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Zwerg-Realm", sharedBy = "Zwerg-Realm",
+        professionKey = "verzauberkunst", professionName = "Verzauberkunst",
+        recipeKeys = { "I90001" },
+    })
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|2|ACCEPTED|" .. currentTime .. "|cccccccccc|"
+            .. currentTime .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime
+            .. "|Zwerg-Realm|ACC|", "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "OPEN",
+        "Die Reservierung hat den fremden Annehmer nicht abgehalten")
+    -- Nach Ablauf der Frist darf Zwerg.
+    orders_order.createdAt = currentTime - (25 * 60 * 60)
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|2|ACCEPTED|" .. currentTime .. "|cccccccccc|"
+            .. currentTime .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime
+            .. "|Zwerg-Realm|ACC|", "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "ACCEPTED",
+        "Nach Fristablauf durfte der andere Hersteller nicht annehmen")
+
+    -- Teilfertigung: 2 von 3 hält den Auftrag in Arbeit.
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|3|WORKING|" .. currentTime .. "|cccccccccc|"
+            .. orders_order.acceptedAt .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime
+            .. "|Zwerg-Realm|MAT|", "GUILD", "Zwerg-Realm")
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|4|WORKING|" .. currentTime .. "|cccccccccc|"
+            .. orders_order.acceptedAt .. "|Zwerg-Realm|Zwerg-Realm|500000|0|" .. currentTime
+            .. "|Zwerg-Realm|CRA|2 von 3 gefertigt|0|2", "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "WORKING" and orders_order.craftedCount == 2,
+        "Die Teilfertigung wurde nicht übernommen")
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|5|CRAFTED|" .. currentTime .. "|cccccccccc|"
+            .. orders_order.acceptedAt .. "|Zwerg-Realm|Zwerg-Realm|500000|0|" .. currentTime
+            .. "|Zwerg-Realm|CRA||0|3", "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "CRAFTED" and orders_order.craftedCount == 3,
+        "Die volle Fertigung schloss die Teilfertigung nicht ab")
+
+    -- Teilzahlung: 20 g von 50 g, dann der Rest.
+    assert(addon.Orders:MarkReceived(orders_orderID) == true, "Der Erhalt scheiterte")
+    assert(addon.Orders:MarkReimbursed(orders_orderID, 200000) == true,
+        "Die Teilzahlung scheiterte")
+    assert(orders_order.reimbursedPaid == 200000 and (orders_order.reimbursedAt or 0) == 0,
+        "Die Teilzahlung wurde nicht vermerkt oder schloss zu früh ab")
+    assert(addon.Orders:GetNextActor(orders_order) == "CREATOR",
+        "Nach der Teilzahlung ist nicht mehr der Auftraggeber dran")
+    assert(addon.Orders:MarkReimbursed(orders_orderID) == true, "Die Restzahlung scheiterte")
+    assert((orders_order.reimbursedAt or 0) > 0, "Die volle Zahlung setzte den Abschluss nicht")
+
+    -- Statistik zählt beim Übergang auf ABGESCHLOSSEN, genau einmal.
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|" .. (orders_order.rev + 1) .. "|DONE|" .. currentTime
+            .. "|cccccccccc|" .. orders_order.acceptedAt .. "|Zwerg-Realm|Zwerg-Realm|500000|"
+            .. orders_order.reimbursedAt .. "|" .. currentTime .. "|Zwerg-Realm|RMR||500000|3",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "DONE", "Der Statistik-Testauftrag wurde nicht abgeschlossen")
+    orders_result = addon.Orders:GetStats()
+    assert(orders_result.byCrafter["Zwerg"] == 1, "Der Hersteller wurde nicht gezählt")
+    assert(orders_result.byCreator["Tester"] == 1, "Der Auftraggeber wurde nicht gezählt")
+    assert(addon.Orders:CountCompletion(orders_order, "RECEIVED") == false,
+        "Der Auftrag wurde doppelt gezählt")
+
+    -- Vorlage: merken und wieder lesen.
+    assert(addon.Orders:SaveTemplate("I90001", {
+        quantity = 15, materialModel = "A", delivery = "MAIL", tip = 20000,
+    }) == true, "Die Vorlage ließ sich nicht merken")
+    orders_result = addon.Orders:GetTemplate("I90001")
+    assert(orders_result and orders_result.quantity == 15 and orders_result.delivery == "MAIL",
+        "Die Vorlage kam nicht zurück")
+
+    -- Flüster-Empfänger: Für den Auftraggeber ist es der Hersteller.
+    orders_result = addon.Orders:GetCounterpartCharacter(orders_order)
+    assert(orders_result ~= nil and orders_result:find("Zwerg", 1, true) ~= nil,
+        "Der Flüster-Empfänger ist nicht der Hersteller")
+
+    addon.DB:GetGuild().workshop.orders = {}
+end
+
+do
     -- Ranggeschützte Navigation: Der Mitgliederpflege-Punkt verschwindet
     -- nicht mehr, er trägt ein Schloss und dimmt; ein Klick leitet um.
     orders_summary = addon.DB:GetGuild().memberCare

@@ -27,6 +27,18 @@ local THEME = {
     danger = { 1.00, 0.38, 0.40, 1 },
 }
 
+-- Die eine Quelle aller Chatbefehle: Hilfe im Chat, Addon-Optionen und die
+-- Karte auf der Einstellungsseite lesen alle hier. Zwei Listen liefen
+-- auseinander (Lektion aus 0.9.47).
+local SLASH_COMMANDS = {
+    { command = "/gcp", description = "öffnet und schließt Guild Copilot" },
+    { command = "/gcp ver", description = "prüft, wer in Gruppe oder Gilde das Addon hat und in welcher Version" },
+    { command = "/gcp welcome", description = "zeigt das Willkommensfenster mit der Einrichtung" },
+    { command = "/gcp recruite", description = "blendet den Werbebalken ein oder aus" },
+    { command = "/gcp debug", description = "misst die Laufzeit; ein zweiter Aufruf zeigt das Ergebnis" },
+    { command = "/gcp help", description = "zeigt diese Liste im Chat" },
+}
+
 -- Masse der Seitenleiste. Sie muessen zur Fensterhoehe passen: kommt ein
 -- Navigationspunkt dazu, prueft tests/validate.mjs, ob noch alles hineinpasst.
 local NAV_TOP = 10
@@ -1221,7 +1233,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1740)
+    content:SetHeight(1912)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1588,8 +1600,22 @@ function GC.UI:BuildSettingsPage()
         height = 16,
     }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -236)
 
+    -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
+    -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
+    local commandCard = CreateCard(content, "Chat-Befehle")
+    commandCard:SetSize(752, 156)
+    commandCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1712)
+    for index, entry in ipairs(SLASH_COMMANDS) do
+        CreateLabel(commandCard, "|cffffffff" .. entry.command .. "|r – " .. entry.description, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 716,
+            height = 15,
+        }):SetPoint("TOPLEFT", commandCard, "TOPLEFT", 18, -40 - ((index - 1) * 18))
+    end
+
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1708)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1880)
 end
 
 function GC.UI:RefreshSettings()
@@ -3509,7 +3535,7 @@ local function OrderPrimaryAction(order)
         elseif order.status == "WORKING" then
             return "Gefertigt", function(id)
                 local target = orders:GetOrder(id)
-                if target and target.materialModel == "C" then
+                if target and (target.materialModel == "C" or (target.quantity or 1) > 1) then
                     GC.UI:OpenOrderCostDialog(id)
                     return true, ""
                 end
@@ -3518,6 +3544,12 @@ local function OrderPrimaryAction(order)
         elseif order.status == "CRAFTED" and order.delivery == "MAIL" then
             return "Versandt", function(id)
                 return orders:MarkShipped(id)
+            end
+        elseif order.status == "CRAFTED" and order.delivery == "TRADE" then
+            -- Übergabe vereinbaren: das Chatfenster mit dem richtigen
+            -- Empfänger vorbelegen (Stufe 2).
+            return "Anflüstern", function(id)
+                return GC.UI:WhisperOrderCounterpart(id)
             end
         elseif order.status == "RECEIVED" and (order.reimbursedAt or 0) > 0 then
             return "Erstattung erhalten", function(id)
@@ -3532,7 +3564,8 @@ local function OrderPrimaryAction(order)
             end
         elseif order.status == "RECEIVED" and (order.reimbursedAt or 0) == 0 then
             return "Erstattet", function(id)
-                return orders:MarkReimbursed(id)
+                GC.UI:OpenOrderPayDialog(id)
+                return true, ""
             end
         elseif (order.status == "ACCEPTED" or order.status == "WORKING")
             and orders:IsStale(order) then
@@ -3677,10 +3710,17 @@ function GC.UI:BuildOrdersView(page)
     view.status = CreateLabel(view, "", { muted = true, width = 640, height = 30, vertical = "TOP" })
     view.status:SetPoint("BOTTOMLEFT", view, "BOTTOMLEFT", 0, 0)
 
+    view.statsButton = CreateButton(view, "Statistik", 96, 24, function()
+        GC.UI:OpenOrderStatsDialog()
+    end)
+    view.statsButton:SetPoint("RIGHT", view.trackerToggle, "LEFT", -8, 0)
+
     self:BuildOrderCreateDialog(page)
     self:BuildOrderLogDialog(page)
     self:BuildOrderCostDialog(page)
+    self:BuildOrderPayDialog(page)
     self:BuildOrderAcceptDialog(page)
+    self:BuildOrderStatsDialog(page)
 end
 
 function GC.UI:SetOrdersStatus(message, success)
@@ -3703,7 +3743,11 @@ local function FillOrderRow(row, boardRow, isOpenSection)
         end
         row.primary:SetText("Annehmen")
         row.primary:SetShown(boardRow.canAccept == true)
-        if not boardRow.canAccept then
+        if boardRow.reserved then
+            row.detail:SetText("|cffe8b84bReserviert für "
+                .. GC.Util.PlayerShortName(order.preferredCrafter or "?")
+                .. "|r  ·  " .. OrderOfferLine(order))
+        elseif not boardRow.canAccept then
             row.detail:SetText("Kein Charakter deines Accounts kann dieses Rezept  ·  "
                 .. OrderOfferLine(order))
         end
@@ -3836,7 +3880,7 @@ local function BuildOrderDialogFrame(page, width, height, titleText)
 end
 
 function GC.UI:BuildOrderCreateDialog(page)
-    local dialog = BuildOrderDialogFrame(page, 452, 372, "Gildenauftrag erstellen")
+    local dialog = BuildOrderDialogFrame(page, 452, 428, "Gildenauftrag erstellen")
     page.orderCreateDialog = dialog
 
     local function RadioRow(labelText, y, options, field)
@@ -3894,8 +3938,31 @@ function GC.UI:BuildOrderCreateDialog(page)
     dialog.noteEdit = CreateEdit(dialog, 398, 26)
     dialog.noteEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -223)
 
+    -- Gerichteter Auftrag: 24 Stunden nur für diesen Hersteller, danach
+    -- offen für alle. Leer heißt: sofort offen.
+    dialog.preferredCaption = CreateLabel(dialog, "Wunsch-Hersteller (optional, 24 h reserviert)",
+        { muted = true, width = 300, height = 15 })
+    dialog.preferredCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -258)
+    dialog.preferredEdit = CreateEdit(dialog, 180, 26)
+    dialog.preferredEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -275)
+    dialog.templateButton = CreateButton(dialog, "Als Vorlage merken", 160, 26, function()
+        local saved = GC.Orders:SaveTemplate(dialog.recipeKey, {
+            quantity = tonumber(GC.Util.Trim(dialog.quantityEdit:GetText())) or 1,
+            materialModel = dialog.materialModel,
+            delivery = dialog.delivery,
+            costLimit = math.floor((tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0) * 10000),
+            tip = math.floor((tonumber(GC.Util.Trim(dialog.tipEdit:GetText())) or 0) * 10000),
+            note = dialog.noteEdit:GetText(),
+            preferredCrafter = dialog.preferredEdit:GetText(),
+        })
+        dialog.status:SetText(saved and "Vorlage gemerkt – sie füllt diesen Dialog beim nächsten Mal vor."
+            or "Vorlage konnte nicht gemerkt werden.")
+        SetTextColor(dialog.status, saved and THEME.success or THEME.danger)
+    end)
+    dialog.templateButton:SetPoint("TOPLEFT", dialog, "TOPLEFT", 252, -273)
+
     dialog.status = CreateLabel(dialog, "", { muted = true, width = 398, height = 46, vertical = "TOP" })
-    dialog.status:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -258)
+    dialog.status:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -312)
 
     dialog.submit = CreateButton(dialog, "Erstellen", 150, 32, function()
         local gold = tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0
@@ -3907,6 +3974,7 @@ function GC.UI:BuildOrderCreateDialog(page)
             costLimit = math.floor(gold * 10000),
             tip = math.floor(tip * 10000),
             note = dialog.noteEdit:GetText(),
+            preferredCrafter = dialog.preferredEdit:GetText(),
         })
         if ok then
             dialog:Hide()
@@ -3945,20 +4013,25 @@ function GC.UI:OpenOrderCreateDialog(recipeKey)
     end
     dialog.recipeKey = recipeKey
     dialog.title:SetText("Gildenauftrag: " .. ((entry and entry.name) or recipeKey))
-    dialog.materialModel = "A"
-    dialog.delivery = "TRADE"
+    -- Vorlage des Rezepts, falls gemerkt - sonst die Grundeinstellung.
+    local template = GC.Orders:GetTemplate(recipeKey)
+    dialog.materialModel = template and template.materialModel or "A"
+    dialog.delivery = template and template.delivery or "TRADE"
     for _, button in ipairs(dialog.materialModelButtons or {}) do
-        button:SetActive(button.optionValue == "A")
+        button:SetActive(button.optionValue == dialog.materialModel)
     end
     for _, button in ipairs(dialog.deliveryButtons or {}) do
-        button:SetActive(button.optionValue == "TRADE")
+        button:SetActive(button.optionValue == dialog.delivery)
     end
-    dialog.quantityEdit:SetText("1")
-    dialog.costEdit:SetText("")
-    dialog.tipEdit:SetText("")
-    dialog.noteEdit:SetText("")
-    dialog.costCaption:Hide()
-    dialog.costEdit.container:Hide()
+    dialog.quantityEdit:SetText(tostring(template and template.quantity or 1))
+    dialog.costEdit:SetText(template and template.costLimit and template.costLimit > 0
+        and tostring(math.floor(template.costLimit / 10000)) or "")
+    dialog.tipEdit:SetText(template and template.tip and template.tip > 0
+        and tostring(math.floor(template.tip / 10000)) or "")
+    dialog.noteEdit:SetText(template and template.note or "")
+    dialog.preferredEdit:SetText(template and template.preferredCrafter or "")
+    dialog.costCaption:SetShown(dialog.materialModel == "C")
+    dialog.costEdit.container:SetShown(dialog.materialModel == "C")
     -- Ohne Gegenstelle kein Sync: Die Aufträge reisen nur von Client zu
     -- Client. Wer allein online ist, soll das VOR dem Erstellen wissen -
     -- der Auftrag geht nicht verloren, aber er erreicht die Gilde erst
@@ -3979,7 +4052,7 @@ function GC.UI:BuildOrderLogDialog(page)
     page.orderLogDialog = dialog
     dialog.body = CreateLabel(dialog, "", { width = 434, height = 220, vertical = "TOP" })
     dialog.body:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
-    dialog.noteEdit = CreateEdit(dialog, 314, 26)
+    dialog.noteEdit = CreateEdit(dialog, 212, 26)
     dialog.noteEdit.container:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
     dialog.noteSend = CreateButton(dialog, "Notiz senden", 118, 26, function()
         local ok, message = GC.Orders:AddNote(dialog.orderID, dialog.noteEdit:GetText())
@@ -3990,6 +4063,10 @@ function GC.UI:BuildOrderLogDialog(page)
         GC.UI:SetOrdersStatus(message, ok)
     end, "PRIMARY")
     dialog.noteSend:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -16, 14)
+    dialog.whisper = CreateButton(dialog, "Anflüstern", 96, 26, function()
+        GC.UI:WhisperOrderCounterpart(dialog.orderID)
+    end)
+    dialog.whisper:SetPoint("RIGHT", dialog.noteSend, "LEFT", -6, 0)
 end
 
 function GC.UI:RefreshOrderLogDialog()
@@ -4035,7 +4112,7 @@ function GC.UI:OpenOrderLogDialog(orderID)
 end
 
 function GC.UI:BuildOrderCostDialog(page)
-    local dialog = BuildOrderDialogFrame(page, 360, 170, "Gefertigt – Kosten melden")
+    local dialog = BuildOrderDialogFrame(page, 360, 210, "Gefertigt melden")
     page.orderCostDialog = dialog
     dialog.caption = CreateLabel(dialog,
         "Tatsächliche Materialkosten in Gold (0, wenn nichts anfiel):",
@@ -4043,9 +4120,18 @@ function GC.UI:BuildOrderCostDialog(page)
     dialog.caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
     dialog.costEdit = CreateEdit(dialog, 100, 26)
     dialog.costEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -80)
-    dialog.submit = CreateButton(dialog, "Gefertigt melden", 150, 30, function()
+    -- Teilfertigung: Bei Stückzahlen > 1 fragt der Dialog den Gesamtstand ab;
+    -- unter der vollen Menge bleibt der Auftrag in Arbeit.
+    dialog.countCaption = CreateLabel(dialog, "Stück insgesamt fertig:",
+        { muted = true, width = 180, height = 15 })
+    dialog.countCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -114)
+    dialog.countEdit = CreateEdit(dialog, 70, 26)
+    dialog.countEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 200, -110)
+    dialog.submit = CreateButton(dialog, "Melden", 150, 30, function()
         local gold = tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0
-        local ok, message = GC.Orders:MarkCrafted(dialog.orderID, math.floor(gold * 10000))
+        local ok, message = GC.Orders:MarkCrafted(dialog.orderID,
+            math.floor(gold * 10000), nil,
+            tonumber(GC.Util.Trim(dialog.countEdit:GetText())))
         GC.UI:SetOrdersStatus(message, ok)
         if ok then
             dialog:Hide()
@@ -4060,8 +4146,120 @@ function GC.UI:OpenOrderCostDialog(orderID)
     if not dialog then
         return
     end
+    local order = GC.Orders:GetOrder(orderID)
     dialog.orderID = orderID
     dialog.costEdit:SetText("")
+    local isC = order and order.materialModel == "C"
+    dialog.caption:SetShown(isC == true)
+    dialog.costEdit.container:SetShown(isC == true)
+    local multi = order and (order.quantity or 1) > 1
+    dialog.countCaption:SetShown(multi == true)
+    dialog.countEdit.container:SetShown(multi == true)
+    if multi then
+        dialog.countCaption:SetText("Stück insgesamt fertig (von " .. order.quantity .. "):")
+        dialog.countEdit:SetText(tostring(order.quantity))
+    end
+    dialog:Show()
+end
+
+-- Teilzahlungs-Dialog des Auftraggebers: vorgefüllt mit dem offenen Rest.
+function GC.UI:BuildOrderPayDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 360, 170, "Erstattung überweisen")
+    page.orderPayDialog = dialog
+    dialog.caption = CreateLabel(dialog, "", { muted = true, width = 324, height = 30, vertical = "TOP" })
+    dialog.caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
+    dialog.amountEdit = CreateEdit(dialog, 100, 26)
+    dialog.amountEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -80)
+    dialog.submit = CreateButton(dialog, "Gezahlt melden", 150, 30, function()
+        local gold = tonumber(GC.Util.Trim(dialog.amountEdit:GetText())) or 0
+        local ok, message = GC.Orders:MarkReimbursed(dialog.orderID, math.floor(gold * 10000))
+        GC.UI:SetOrdersStatus(message, ok)
+        if ok then
+            dialog:Hide()
+        end
+    end, "PRIMARY")
+    dialog.submit:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+end
+
+function GC.UI:OpenOrderPayDialog(orderID)
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderPayDialog
+    if not dialog then
+        return
+    end
+    local order = GC.Orders:GetOrder(orderID)
+    if not order then
+        return
+    end
+    local rest = math.max(0, (order.actualCost or 0) - (order.reimbursedPaid or 0))
+    dialog.orderID = orderID
+    dialog.caption:SetText("Offen sind " .. GC.Orders.FormatMoney(rest)
+        .. ". Betrag in Gold (Teilzahlungen sind erlaubt):")
+    dialog.amountEdit:SetText(tostring(math.floor(rest / 10000)))
+    dialog:Show()
+end
+
+-- Das Chatfenster mit der Gegenseite vorbelegen (Stufe 2). Ohne Chat-API
+-- (Tests) bleibt es beim Hinweis mit dem Namen.
+function GC.UI:WhisperOrderCounterpart(orderID)
+    local order = GC.Orders:GetOrder(orderID)
+    local target = order and GC.Orders:GetCounterpartCharacter(order)
+    if not target then
+        self:SetOrdersStatus("Kein Charakter der Gegenseite bekannt.", false)
+        return false, ""
+    end
+    if ChatFrame_OpenChat then
+        ChatFrame_OpenChat("/w " .. target .. " ", DEFAULT_CHAT_FRAME)
+        return true, ""
+    end
+    self:SetOrdersStatus("Gegenseite: " .. GC.Util.PlayerShortName(target), true)
+    return true, ""
+end
+
+-- Auftragsstatistik: erledigte Aufträge je Hersteller, erstellte je
+-- Auftraggeber. Auf Owner-Wunsch trotz des Konzept-Vorbehalts (sozialer
+-- Druck) eingebaut.
+function GC.UI:BuildOrderStatsDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 400, 360, "Auftragsstatistik")
+    page.orderStatsDialog = dialog
+    dialog.body = CreateLabel(dialog, "", { width = 364, height = 290, vertical = "TOP" })
+    dialog.body:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
+end
+
+function GC.UI:OpenOrderStatsDialog()
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderStatsDialog
+    if not dialog then
+        return
+    end
+    local stats = GC.Orders:GetStats()
+    local names = {}
+    local merged = {}
+    local function Bucket(map, field)
+        for name, count in pairs(map or {}) do
+            if not merged[name] then
+                merged[name] = { fulfilled = 0, created = 0 }
+                names[#names + 1] = name
+            end
+            merged[name][field] = count
+        end
+    end
+    Bucket(stats.byCrafter, "fulfilled")
+    Bucket(stats.byCreator, "created")
+    table.sort(names, function(left, right)
+        if merged[left].fulfilled ~= merged[right].fulfilled then
+            return merged[left].fulfilled > merged[right].fulfilled
+        end
+        return left < right
+    end)
+    local lines = {}
+    for index = 1, math.min(#names, 16) do
+        local name = names[index]
+        lines[#lines + 1] = name .. "  –  |cff59e695" .. merged[name].fulfilled
+            .. " erledigt|r · " .. merged[name].created .. " erstellt"
+    end
+    dialog.body:SetText(#lines > 0 and table.concat(lines, "\n")
+        or "Noch keine abgeschlossenen Aufträge gezählt.")
     dialog:Show()
 end
 
@@ -7084,15 +7282,8 @@ function GC.UI:RefreshVersionCheck()
     frame.scroll:UpdateModernThumb()
 end
 
-local SLASH_COMMANDS = {
-    { command = "/gcp", description = "öffnet und schließt Guild Copilot" },
-    { command = "/gcp ver", description = "prüft, wer in Gruppe oder Gilde das Addon hat und in welcher Version" },
-    { command = "/gcp welcome", description = "zeigt das Willkommensfenster mit der Einrichtung" },
-    { command = "/gcp recruite", description = "blendet den Werbebalken ein oder aus" },
-    { command = "/gcp debug", description = "misst die Laufzeit; ein zweiter Aufruf zeigt das Ergebnis" },
-    { command = "/gcp help", description = "zeigt diese Liste im Chat" },
-}
-
+-- Die Befehlstabelle steht oben in der Datei, damit auch die
+-- Einstellungsseite sie lesen kann.
 function GC.UI:PrintSlashHelp()
     GC:Print("Verfügbare Befehle:")
     for _, entry in ipairs(SLASH_COMMANDS) do

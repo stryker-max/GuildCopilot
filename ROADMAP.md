@@ -298,6 +298,19 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.63 – Gildenaufträge: Stufe 2 komplett, plus alles Zurückgestellte
+
+Owner: „Bau alles ein, auch die stufenlosen Sachen." Sechs Bausteine in einem Wurf:
+
+- **Anflüstern (Übergabe vereinbaren):** Bei fertiger persönlicher Übergabe ist „Anflüstern" die Primäraktion des Auftragnehmers, und im Verlauf-Dialog gibt es den Knopf für beide Seiten. Vorbelegt wird der beste Empfänger der Gegenseite – bevorzugt ein gerade online sichtbarer Charakter ihres Accounts (über den accountTag), sonst der benannte;
+- **Erstattung mit Restbetrag und Teilzahlungen:** „Erstattet" öffnet einen Dialog mit dem offenen Rest vorbelegt; Teilzahlungen sind erlaubt, der Verlauf vermerkt „x gezahlt, offen y", und erst bei null Rest wandert der Auftrag zur Bestätigung des Auftragnehmers;
+- **Wunsch-Hersteller (gerichteter Auftrag):** Optionales Feld im Erstellen-Dialog, validiert gegen die bekannten Hersteller des Rezepts. 24 Stunden lang darf nur er annehmen (empfangsseitig geprüft), danach ist der Auftrag offen für alle. Die Frist wird nie gesendet – jeder Client rechnet „erstellt + 24 h" selbst; andere sehen „Reserviert für X" und bekommen keinen Neuer-Auftrag-Klang;
+- **Teilfertigung bei Stückzahlen > 1:** Der Gefertigt-Dialog fragt den Gesamtstand ab; unter der vollen Menge bleibt der Auftrag „in Arbeit" mit Zähler („Fertigen (2/3) …"). Bewusst nur Fertigungs-, keine Lieferlogistik – übergeben wird am Ende einmal;
+- **Vorlagen:** „Als Vorlage merken" im Erstellen-Dialog speichert die Einstellungen je Rezept (lokal im Account); das nächste Öffnen für dasselbe Rezept ist vorausgefüllt – der Wochenauftrag „15 Sphären" ist ein Klick;
+- **Auftragsstatistik:** Der Statistik-Knopf auf dem Board zeigt je Spieler erledigte und erstellte Aufträge. Gezählt wird beim Übergang auf „abgeschlossen", je Auftrag genau einmal (Kurierpakete zählen nicht doppelt). Auf Owner-Wunsch trotz des Konzept-Vorbehalts zum sozialen Druck;
+- außerdem (eigener Owner-Wunsch nebenbei): Die **Chat-Befehle stehen jetzt als Karte auf der Einstellungsseite**, gespeist aus derselben Tabelle wie `/gcp help` und die Addon-Optionen;
+- Wire-Detail: Kern +Wunsch-Hersteller (Feld 16), Zustand +Teilzahlung/Teilfertigung (Felder 18/19) – Altclients ignorieren die Felder. Damit die Kernnachricht ausgereizt unter 255 Bytes bleibt, ist die Notiz auf 48 Bytes gekürzt.
+
 ## 0.9.62 – Kompakt-Tracker: zwei Zeilen je Auftrag
 
 Owner-Screenshot: „Materialien an Silverssoul li…" – Rezept und Aufgabe in einer Zeile schnitten die Aufgabe ab. Jeder Auftrag hat jetzt zwei Zeilen (Rezept ×Menge oben, Aufgabe gedämpft darunter), der Tracker ist etwas breiter und wächst weiterhin nur so hoch wie sein Inhalt.

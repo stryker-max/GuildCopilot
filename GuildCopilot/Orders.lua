@@ -20,9 +20,16 @@ local HISTORY_CAP = 20
 local TOTAL_CAP = 60
 local STALE_ACCEPT_SECONDS = 3 * 24 * 60 * 60
 local MAX_LOG_ENTRIES = 12
-local MAX_NOTE_BYTES = 60
+-- 48 statt 60: Seit dem Wunsch-Hersteller-Feld braucht die Kernnachricht
+-- Luft, damit sie auch voll ausgereizt unter 255 Bytes bleibt.
+local MAX_NOTE_BYTES = 48
 local MAX_NAME_BYTES = 30
 local MIN_ANSWER_INTERVAL = 30
+-- Ein gerichteter Auftrag ("Wunsch-Hersteller") ist so lange reserviert,
+-- danach offen fuer alle. Die Frist wird nie gesendet - jeder Client rechnet
+-- createdAt + RESERVATION_SECONDS selbst.
+local RESERVATION_SECONDS = 24 * 60 * 60
+local MAX_STATS_COUNTED = 200
 
 -- Reihenfolge = Lebenslauf. RECEIVED gibt es nur, wenn nach dem Erhalt noch
 -- eine Erstattung offen ist (Materialmodell C mit gemeldeten Kosten).
@@ -207,6 +214,128 @@ function GC.Orders:CanAdministrate(characterName)
     return GC.Roster:CanAccessMemberCare(characterName)
 end
 
+-- Gerichteter Auftrag: 24 Stunden lang darf nur der Wunsch-Hersteller
+-- annehmen, danach ist er offen fuer alle.
+function GC.Orders:IsReserved(order, at)
+    if not order or GC.Util.Trim(order.preferredCrafter) == "" then
+        return false
+    end
+    return ((at or GC.Util.Now()) - (order.createdAt or 0)) < RESERVATION_SECONDS
+end
+
+function GC.Orders:IsReservedForOther(order, crafterName, at)
+    return self:IsReserved(order, at)
+        and not SameCharacter(order.preferredCrafter, crafterName)
+end
+
+-- Der beste Fluester-Empfaenger der Gegenseite: bevorzugt ein gerade
+-- online sichtbarer Charakter des anderen Accounts, sonst der benannte.
+function GC.Orders:GetCounterpartCharacter(order)
+    if not order then
+        return nil
+    end
+    local isCreator = self:IsCreatorCharacter(order, GC:GetPlayerFullName())
+    local candidates
+    if isCreator then
+        candidates = { order.crafter, order.acceptedVia }
+    else
+        candidates = { order.createdBy }
+    end
+    local tag = isCreator and order.acceptedByTag or order.createdByTag
+    if GC.Util.Trim(tag) ~= "" then
+        for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+            if type(entry) == "table" and GC.Util.Trim(entry.accountTag) == tag then
+                candidates[#candidates + 1] = entry.name
+            end
+        end
+    end
+    local fallback
+    for _, name in ipairs(candidates) do
+        if GC.Util.Trim(name or "") ~= "" then
+            fallback = fallback or name
+            local member = GC.Roster:GetMember(name)
+            if member and member.online then
+                return member.name
+            end
+        end
+    end
+    return fallback
+end
+
+-- === Statistik ==============================================================
+-- Zaehlt abgeschlossene Auftraege je Hersteller und Auftraggeber. Gezaehlt
+-- wird beim Uebergang auf ABGESCHLOSSEN, je Auftrag genau einmal (die Liste
+-- der bereits gezaehlten IDs verhindert Doppelzaehlung durch Kurierpakete).
+function GC.Orders:GetStats()
+    local workshop = GC.DB:GetGuild().workshop
+    workshop.orderStats = workshop.orderStats or {
+        counted = {},
+        byCrafter = {},
+        byCreator = {},
+    }
+    workshop.orderStats.counted = workshop.orderStats.counted or {}
+    workshop.orderStats.byCrafter = workshop.orderStats.byCrafter or {}
+    workshop.orderStats.byCreator = workshop.orderStats.byCreator or {}
+    return workshop.orderStats
+end
+
+function GC.Orders:CountCompletion(order, previousStatus)
+    if not order or order.status ~= "DONE" or previousStatus == "DONE" then
+        return false
+    end
+    local stats = self:GetStats()
+    for _, countedID in ipairs(stats.counted) do
+        if countedID == order.id then
+            return false
+        end
+    end
+    stats.counted[#stats.counted + 1] = order.id
+    while #stats.counted > MAX_STATS_COUNTED do
+        table.remove(stats.counted, 1)
+    end
+    local crafterKey = GC.Util.PlayerShortName(order.crafter or "")
+    if crafterKey ~= "" then
+        stats.byCrafter[crafterKey] = (stats.byCrafter[crafterKey] or 0) + 1
+    end
+    local creatorKey = GC.Util.PlayerShortName(order.createdBy or "")
+    if creatorKey ~= "" then
+        stats.byCreator[creatorKey] = (stats.byCreator[creatorKey] or 0) + 1
+    end
+    return true
+end
+
+-- Klang und Statistik an einer Stelle: Jede Statusaenderung laeuft hier durch.
+function GC.Orders:NoteStatusChanged(order, previousStatus)
+    self:PlayStatusSound(order, previousStatus)
+    self:CountCompletion(order, previousStatus)
+end
+
+-- === Vorlagen ===============================================================
+-- Eine Vorlage je Rezept, lokal im Account: Wiederkehrende Auftraege ("jede
+-- Woche 15 Sphaeren") sind mit einem Klick wieder ausgefuellt.
+function GC.Orders:SaveTemplate(recipeKey, options)
+    if GC.Util.Trim(recipeKey) == "" or type(options) ~= "table" then
+        return false
+    end
+    local settings = GC.DB:GetSettings()
+    settings.orderTemplates = settings.orderTemplates or {}
+    settings.orderTemplates[recipeKey] = {
+        quantity = tonumber(options.quantity) or 1,
+        materialModel = options.materialModel,
+        delivery = options.delivery,
+        costLimit = tonumber(options.costLimit) or 0,
+        tip = tonumber(options.tip) or 0,
+        note = tostring(options.note or ""),
+        preferredCrafter = tostring(options.preferredCrafter or ""),
+    }
+    return true
+end
+
+function GC.Orders:GetTemplate(recipeKey)
+    local templates = GC.DB:GetSettings().orderTemplates
+    return templates and templates[recipeKey] or nil
+end
+
 -- === Verlauf ================================================================
 
 local function AppendLog(order, at, by, event, note)
@@ -249,6 +378,12 @@ function GC.Orders:GetNextActor(order)
         return "ACCEPTOR", "Materialien beschaffen und „vollständig“ melden."
     end
     if order.status == "WORKING" then
+        local quantity = tonumber(order.quantity) or 1
+        local crafted = tonumber(order.craftedCount) or 0
+        if quantity > 1 then
+            return "ACCEPTOR", "Fertigen (" .. crafted .. "/" .. quantity
+                .. ") und „gefertigt“ melden."
+        end
         return "ACCEPTOR", "Fertigen und „gefertigt“ melden."
     end
     if order.status == "CRAFTED" then
@@ -262,7 +397,9 @@ function GC.Orders:GetNextActor(order)
     end
     if order.status == "RECEIVED" then
         if (order.reimbursedAt or 0) == 0 then
-            return "CREATOR", "Erstattung von " .. GC.Orders.FormatMoney(order.actualCost) .. " überweisen."
+            local rest = math.max(0, (order.actualCost or 0) - (tonumber(order.reimbursedPaid) or 0))
+            return "CREATOR", "Erstattung überweisen – offen: "
+                .. GC.Orders.FormatMoney(rest) .. "."
         end
         return "ACCEPTOR", "„Erstattung erhalten“ bestätigen."
     end
@@ -295,6 +432,8 @@ local function ClearAcceptor(order)
     order.acceptedVia = ""
     order.actualCost = 0
     order.reimbursedAt = 0
+    order.reimbursedPaid = 0
+    order.craftedCount = 0
 end
 
 -- Eine Zustandsänderung, lokal ausgeführt und anschließend gesendet. Alle
@@ -316,6 +455,10 @@ local function Transition(self, order, event, actor, at, extra, remote)
         if crafter == "" or not self:IsKnownCrafter(crafter, order.recipeKey) then
             return false, "Laut Katalog beherrscht dieser Charakter das Rezept nicht."
         end
+        if self:IsReservedForOther(order, crafter, at) then
+            return false, "Der Auftrag ist noch für "
+                .. GC.Util.PlayerShortName(order.preferredCrafter) .. " reserviert."
+        end
         order.status = "ACCEPTED"
         order.acceptedByTag = Sanitized(extra.accountTag, 12)
         order.acceptedAt = at
@@ -336,10 +479,21 @@ local function Transition(self, order, event, actor, at, extra, remote)
         if not self:IsAcceptorCharacter(order, actor) then
             return false, "Nur der Auftragnehmer meldet die Fertigung."
         end
-        order.status = "CRAFTED"
         local cost = tonumber(extra.actualCost)
         if order.materialModel == "C" and cost and cost > 0 then
             order.actualCost = math.floor(cost)
+        end
+        -- Teilfertigung bei Stueckzahlen > 1: Der Auftrag bleibt in Arbeit,
+        -- bis alle Stuecke gemeldet sind; der Zaehler steht an der Zeile.
+        local quantity = tonumber(order.quantity) or 1
+        local crafted = math.floor(tonumber(extra.craftedCount) or quantity)
+        crafted = math.max(tonumber(order.craftedCount) or 0, math.min(crafted, quantity))
+        order.craftedCount = crafted
+        if crafted < quantity then
+            extra.note = GC.Util.Trim(extra.note or "") ~= "" and extra.note
+                or (crafted .. " von " .. quantity .. " gefertigt")
+        else
+            order.status = "CRAFTED"
         end
     elseif event == "SNT" then
         if status ~= "CRAFTED" or order.delivery ~= "MAIL" then
@@ -368,7 +522,21 @@ local function Transition(self, order, event, actor, at, extra, remote)
         if not self:IsCreatorCharacter(order, actor) then
             return false, "Nur der Auftraggeber meldet die Erstattung."
         end
-        order.reimbursedAt = at
+        -- Teilzahlungen: Jede Meldung erhoeht den gezahlten Betrag; erst wenn
+        -- nichts mehr offen ist, gilt die Erstattung als ueberwiesen und der
+        -- Auftragnehmer ist mit der Bestaetigung dran.
+        local paid = tonumber(order.reimbursedPaid) or 0
+        local amount = math.floor(tonumber(extra.amount)
+            or math.max(0, (order.actualCost or 0) - paid))
+        paid = math.max(0, math.min(order.actualCost or 0, paid + math.max(0, amount)))
+        order.reimbursedPaid = paid
+        if paid >= (order.actualCost or 0) then
+            order.reimbursedAt = at
+        else
+            extra.note = GC.Util.Trim(extra.note or "") ~= "" and extra.note
+                or (GC.Orders.FormatMoney(amount) .. " gezahlt, offen "
+                    .. GC.Orders.FormatMoney((order.actualCost or 0) - paid))
+        end
     elseif event == "RMR" then
         if status ~= "RECEIVED" then
             return false, "Es ist keine Erstattung offen."
@@ -450,6 +618,9 @@ function GC.Orders:BuildCoreMessage(order)
         tostring(order.costLimit or 0),
         tostring(order.tip or 0),
         order.note or "",
+        -- Feld 16, von Altclients ignoriert: der Wunsch-Hersteller. Die
+        -- 24-Stunden-Frist wird nie gesendet, sie folgt aus createdAt.
+        order.preferredCrafter or "",
     })
 end
 
@@ -471,6 +642,10 @@ function GC.Orders:BuildStateMessage(order, logEntry)
         logEntry and (logEntry.by or "") or "",
         logEntry and (logEntry.event or "") or "",
         logEntry and (logEntry.note or "") or "",
+        -- Felder 18/19, von Altclients ignoriert: Teilzahlung und
+        -- Teilfertigung.
+        tostring(order.reimbursedPaid or 0),
+        tostring(order.craftedCount or 0),
     })
 end
 
@@ -524,6 +699,24 @@ function GC.Orders:Create(recipeKey, options)
         model = "A"
     end
     local delivery = options.delivery == "MAIL" and "MAIL" or "TRADE"
+
+    -- Wunsch-Hersteller (optional): muss ein bekannter Hersteller des
+    -- Rezepts sein, sonst waere die Reservierung eine Sackgasse.
+    local preferred = GC.Util.Trim(options.preferredCrafter or "")
+    if preferred ~= "" then
+        local valid = false
+        for _, crafterName in ipairs(entry.crafters) do
+            if GC.Util.NormalizeName(crafterName)
+                == GC.Util.NormalizeName(GC.Util.PlayerShortName(preferred)) then
+                preferred = crafterName
+                valid = true
+                break
+            end
+        end
+        if not valid then
+            return false, "„" .. preferred .. "“ ist kein bekannter Hersteller dieses Rezepts."
+        end
+    end
     local now = GC.Util.Now()
     local order = {
         id = GC.Util.PlayerShortName(ownName) .. "-" .. tostring(now)
@@ -548,9 +741,13 @@ function GC.Orders:Create(recipeKey, options)
         acceptedVia = "",
         actualCost = 0,
         reimbursedAt = 0,
+        reimbursedPaid = 0,
+        craftedCount = 0,
+        preferredCrafter = Sanitized(preferred, 20),
         log = {},
     }
-    AppendLog(order, now, ownName, "CRT", order.note)
+    AppendLog(order, now, ownName, "CRT",
+        preferred ~= "" and ("Reserviert für " .. GC.Util.PlayerShortName(preferred)) or order.note)
     self:GetStore()[order.id] = order
     self:BroadcastOrder(order)
     NotifyChanged()
@@ -594,7 +791,7 @@ function GC.Orders:Accept(orderID, crafterName)
         return false, message
     end
     self:BroadcastOrder(order)
-    self:PlayStatusSound(order, previousStatus)
+    self:NoteStatusChanged(order, previousStatus)
     NotifyChanged()
     return true, "Angenommen. Es fertigt: " .. GC.Util.PlayerShortName(crafterName) .. "."
 end
@@ -603,7 +800,6 @@ local SIMPLE_ACTIONS = {
     MarkMaterialsComplete = { event = "MAT", done = "Materialien als vollständig gemeldet." },
     MarkShipped = { event = "SNT", done = "Als versandt gemeldet." },
     MarkReceived = { event = "RCV", done = "Erhalt bestätigt." },
-    MarkReimbursed = { event = "RMB", done = "Erstattung als überwiesen gemeldet." },
     ConfirmReimbursed = { event = "RMR", done = "Erstattung bestätigt – Auftrag abgeschlossen." },
     Cancel = { event = "CXL", done = "Auftrag abgebrochen." },
 }
@@ -621,13 +817,13 @@ for methodName, definition in pairs(SIMPLE_ACTIONS) do
             return false, message
         end
         self:BroadcastOrder(order)
-        self:PlayStatusSound(order, previousStatus)
+        self:NoteStatusChanged(order, previousStatus)
         NotifyChanged()
         return true, definition.done
     end
 end
 
-function GC.Orders:MarkCrafted(orderID, actualCost, note)
+function GC.Orders:MarkCrafted(orderID, actualCost, note, craftedCount)
     local order = self:GetOrder(orderID)
     if not order then
         return false, "Der Auftrag ist nicht mehr bekannt."
@@ -636,14 +832,45 @@ function GC.Orders:MarkCrafted(orderID, actualCost, note)
     local ok, message = Transition(self, order, "CRA", GC:GetPlayerFullName(), nil, {
         actualCost = actualCost,
         note = note,
+        craftedCount = craftedCount,
     })
     if not ok then
         return false, message
     end
     self:BroadcastOrder(order)
-    self:PlayStatusSound(order, previousStatus)
+    self:NoteStatusChanged(order, previousStatus)
     NotifyChanged()
+    if order.status == "WORKING" then
+        return true, "Zwischenstand gemeldet: " .. (order.craftedCount or 0)
+            .. " von " .. (order.quantity or 1) .. "."
+    end
     return true, "Als gefertigt gemeldet."
+end
+
+-- Erstattung mit Betrag: ohne Angabe der offene Rest, mit Angabe eine
+-- Teilzahlung. Erst wenn nichts mehr offen ist, wandert der Auftrag zum
+-- Auftragnehmer zur Bestätigung.
+function GC.Orders:MarkReimbursed(orderID, amount, note)
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local previousStatus = order.status
+    local ok, message = Transition(self, order, "RMB", GC:GetPlayerFullName(), nil, {
+        amount = amount,
+        note = note,
+    })
+    if not ok then
+        return false, message
+    end
+    self:BroadcastOrder(order)
+    self:NoteStatusChanged(order, previousStatus)
+    NotifyChanged()
+    if (order.reimbursedAt or 0) > 0 then
+        return true, "Erstattung vollständig überwiesen."
+    end
+    return true, "Teilzahlung vermerkt – offen: "
+        .. GC.Orders.FormatMoney((order.actualCost or 0) - (order.reimbursedPaid or 0)) .. "."
 end
 
 function GC.Orders:Return(orderID, note, acceptorLeft)
@@ -751,6 +978,9 @@ function GC.Orders:ReceiveCore(fields, sender)
         acceptedVia = "",
         actualCost = 0,
         reimbursedAt = 0,
+        reimbursedPaid = 0,
+        craftedCount = 0,
+        preferredCrafter = Sanitized(fields[16], 20),
         log = {},
     }
     AppendLog(store[orderID], createdAt, createdBy, "CRT", store[orderID].note)
@@ -821,7 +1051,8 @@ function GC.Orders:ReceiveState(fields, sender)
     if logEvent == "ACC" then
         local crafter = Sanitized(fields[10], MAX_NAME_BYTES)
         if not SameCharacter(fields[11], sender)
-            or not self:IsKnownCrafter(crafter, order.recipeKey) then
+            or not self:IsKnownCrafter(crafter, order.recipeKey)
+            or self:IsReservedForOther(order, crafter, tonumber(fields[9])) then
             return false
         end
     elseif logEvent == "MAT" or logEvent == "CRA" or logEvent == "SNT"
@@ -856,12 +1087,14 @@ function GC.Orders:ReceiveState(fields, sender)
     order.acceptedVia = Sanitized(fields[11], MAX_NAME_BYTES)
     order.actualCost = math.max(0, math.floor(tonumber(fields[12]) or 0))
     order.reimbursedAt = tonumber(fields[13]) or 0
+    order.reimbursedPaid = math.max(0, math.floor(tonumber(fields[18]) or 0))
+    order.craftedCount = math.max(0, math.floor(tonumber(fields[19]) or 0))
     if logEvent ~= "" then
         AppendLog(order, logAt, logBy, logEvent, logNote)
     end
 
     self:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
-    self:PlayStatusSound(order, previousStatus)
+    self:NoteStatusChanged(order, previousStatus)
     NotifyChanged()
     return true
 end
@@ -947,6 +1180,23 @@ function GC.Orders:NotifyNewOrder(order)
     local candidates = self:GetOwnCrafters(order.recipeKey)
     if #candidates == 0 then
         return
+    end
+    -- Ist der Auftrag für jemand anderen reserviert, gibt es nur die
+    -- Chatzeile - Klang und Meldung gehören dem Wunsch-Hersteller.
+    if self:IsReserved(order) then
+        local mine = false
+        for _, candidate in ipairs(candidates) do
+            if SameCharacter(candidate, order.preferredCrafter) then
+                mine = true
+                break
+            end
+        end
+        if not mine then
+            GC:Print("Neuer Gildenauftrag „" .. (order.recipeName or "?")
+                .. "“ – 24 h reserviert für "
+                .. GC.Util.PlayerShortName(order.preferredCrafter) .. ".")
+            return
+        end
     end
     GC:Print("Neuer Gildenauftrag: „" .. (order.recipeName or "?") .. "“ von "
         .. GC.Util.PlayerShortName(order.createdBy or "?") .. " – dein "
@@ -1176,7 +1426,19 @@ function GC.Orders:GetBoard()
                 closed[#closed + 1] = row
             end
         elseif order.status == "OPEN" and not isCreator then
-            row.canAccept = #self:GetOwnCrafters(order.recipeKey) > 0
+            local candidates = self:GetOwnCrafters(order.recipeKey)
+            row.canAccept = #candidates > 0
+            if row.canAccept and self:IsReserved(order) then
+                local mine = false
+                for _, candidate in ipairs(candidates) do
+                    if SameCharacter(candidate, order.preferredCrafter) then
+                        mine = true
+                        break
+                    end
+                end
+                row.reserved = not mine
+                row.canAccept = mine
+            end
             open[#open + 1] = row
         else
             mine[#mine + 1] = row

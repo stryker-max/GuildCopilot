@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 31.07.2026, nach Release 0.9.62 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.63 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -191,22 +191,18 @@ Sitzung.)*
 
 ---
 
-## 5. Gildenaufträge – Stufe 1 UMGESETZT in 0.9.50, Stufe 2 offen
+## 5. Gildenaufträge – VOLLSTÄNDIG UMGESETZT (Stufe 1 in 0.9.50, Stufe 2 und alles Zurückgestellte in 0.9.63)
 
-**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md`. Stufe 1 ist mit
-0.9.50 vollständig ausgeliefert (Modul `Orders.lua`, Board als zweiter
-Werkstatt-Reiter, Erstellen-/Kosten-/Annahme-Dialoge, Verlauf mit Notizen,
-Kompakt-Tracker, `O`-Sync mit Login-Abgleich, alle Grenzen). Abweichungen
-stehen im ROADMAP-Abschnitt „0.9.50".
+**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md`. Ausgeliefert:
+Board, Dialoge, Verlauf, Tracker, Kuriernetz-Sync, Klänge und
+Bildschirmmeldung, Anflüstern, Teilzahlungen mit Restbetrag,
+Wunsch-Hersteller (24-h-Reservierung), Teilfertigung, Vorlagen je Rezept,
+Auftragsstatistik. Einzelheiten in den ROADMAP-Abschnitten 0.9.50–0.9.63.
 
-**Offen für Stufe 2:**
-- Flüster-Knopf „Übergabe vereinbaren" mit Vorbelegung auf den zuletzt
-  online gesehenen Charakter des anderen Accounts;
-- „Erstattung erhalten"-Feinschliff mit Restbetragsanzeige;
-- gerichteter Auftrag („Wunsch-Hersteller" mit 24 h Vorrang);
-- **im Spiel gegentesten:** Layout des Boards bei vollen Abschnitten, die
-  Dialog-Positionen und der Tracker im Zusammenspiel mit dem Werbebalken –
-  die Tests decken Logik und Sichtbarkeit ab, nicht die Pixel.
+**Im Spiel gegentesten:** der gewachsene Erstellen-Dialog (Wunsch-Hersteller,
+Vorlagen-Knopf), der Gefertigt-Dialog bei Stückzahlen > 1, der
+Teilzahlungs-Dialog und die Statistik – die Tests decken Logik ab, nicht
+die Pixel.
 
 ---
 
