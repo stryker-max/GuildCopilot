@@ -4410,7 +4410,7 @@ do
     -- die Gilde, damit auch Clients ohne rechtzeitige Anfrage sie lernen.
     addon.Sync.bulkAllowance = 4000
     orders_sentBefore = #sentAddon
-    assert(addon.Orders:PushOwnOrders() == 5, "Der Login-Push zählt die eigenen Aufträge falsch")
+    assert(addon.Orders:PushOpenOrders() == 5, "Der Login-Push zählt die laufenden Aufträge falsch")
     assert(#sentAddon == orders_sentBefore + 10,
         "Der Login-Push sendet nicht Kern und Zustand je Auftrag")
 
@@ -4448,6 +4448,44 @@ do
 
     addon.DB:GetGuild().workshop.orders = {}
     addon.DB.data.characters["twinky-realm"] = nil
+end
+
+do
+    -- Kurier-Prinzip: Ein Kernpaket darf auch von einem Dritten kommen, der
+    -- den Auftrag nur weiterträgt - sonst brächten Abgleich-Antworten und
+    -- Login-Push nur die eigenen Aufträge durch.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|kurier-1|I90001|Testrezept|1|Dritter-Realm|eeeeeeeeee|"
+            .. currentTime .. "|A|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    assert(addon.Orders:GetOrder("kurier-1") ~= nil,
+        "Der von einem Dritten weitergetragene Auftrag wurde verworfen")
+
+    -- Der Login-Push trägt auch fremde laufende Aufträge weiter.
+    addon.Sync.bulkAllowance = 4000
+    orders_sentBefore = #sentAddon
+    assert(addon.Orders:PushOpenOrders() == 1, "Der Kurier-Push zählt fremde Aufträge nicht mit")
+    assert(#sentAddon == orders_sentBefore + 2, "Der Kurier-Push sendet nicht Kern und Zustand")
+
+    -- Online-Zählung für den Einsam-Hinweis: Heiler ist laut Roster offline.
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|" .. addon.Constants.VERSION .. "|profile|0|ffffffffff",
+        "GUILD", "Heiler-Realm")
+    assert(addon.Orders:GetOnlineAddonUserCount() == 0,
+        "Ein Offline-Mitglied zählt fälschlich als online")
+    orders_realRosterInfo = GetGuildRosterInfo
+    function GetGuildRosterInfo(index)
+        if index == 2 then
+            return "Heiler-Realm", "Mitglied", 5, 70, "Priester", "Shattrath", "", "", true, 0, "PRIEST", 0, 0, false, false, 0, "Player-2"
+        end
+        return orders_realRosterInfo(index)
+    end
+    addon.Roster:ScanNow()
+    assert(addon.Orders:GetOnlineAddonUserCount() == 1,
+        "Der online gegangene Addon-Nutzer wird nicht gezählt")
+    GetGuildRosterInfo = orders_realRosterInfo
+    addon.Roster:ScanNow()
+    addon.DB:GetGuild().workshop.orders = {}
 end
 
 do

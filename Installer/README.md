@@ -84,4 +84,4 @@ Eine laufende `.exe` kann sich nicht selbst überschreiben. Beim Selbstupdate wi
 
 Gebraucht wird das SDK zur `<TargetFramework>`-Zeile der `.csproj` – aktuell **net10.0-windows**, also .NET-SDK 10. Ein älteres SDK bricht den Bau mit einer Meldung über das unbekannte Zielframework ab.
 
-Aktueller Stand: Installer 1.0.5, Addon 0.9.56.
+Aktueller Stand: Installer 1.0.5, Addon 0.9.57.

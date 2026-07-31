@@ -713,10 +713,13 @@ function GC.Orders:ReceiveCore(fields, sender)
         return false
     end
     local createdBy = fields[8]
-    -- Aufträge erstellt jeder nur für sich selbst.
-    if not SameCharacter(createdBy, sender) then
-        return false
-    end
+    -- Kerne duerfen auch von Dritten kommen: Jeder Client ist Kurier fuer
+    -- Auftraege, die er kennt (Login-Push und Abgleich-Antworten). Das ist
+    -- dieselbe Vertrauensbasis wie beim Werkstatt-Sync, der Rezeptdaten
+    -- anderer ebenfalls weiterreicht - Absender sind immer Gildenmitglieder
+    -- (Gildenkanal bzw. gepruefte Fluesternachricht). Die fruehere Regel
+    -- "Absender muss der Auftraggeber sein" verwarf genau diese Kurierpakete
+    -- und liess Abgleich-Antworten nur eigene Auftraege durchbringen.
     local store = self:GetStore()
     if store[orderID] then
         return true
@@ -956,6 +959,30 @@ function GC.Orders:NotifyNewOrder(order)
         "Neuer Gildenauftrag von " .. GC.Util.PlayerShortName(order.createdBy or "?"))
 end
 
+-- Wie viele andere Gildenmitglieder mit Guild Copilot sind laut Roster gerade
+-- online? Die Zahl traegt den Hinweis im Erstellen-Dialog: Ohne gemeinsame
+-- Onlinezeit erreicht ein Auftrag niemanden - es gibt keinen Server, nur
+-- Clients, die sich gegenseitig erzaehlen, was sie wissen.
+function GC.Orders:GetOnlineAddonUserCount()
+    local ownKey = GC.Util.NormalizeName(GC:GetPlayerFullName())
+    local ownShortKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
+    local counted = {}
+    local count = 0
+    for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+        if type(entry) == "table" and not counted[entry] then
+            counted[entry] = true
+            local key = GC.Util.NormalizeName(entry.name)
+            if key ~= ownKey and key ~= ownShortKey then
+                local member = GC.Roster:GetMember(entry.name)
+                if member and member.online then
+                    count = count + 1
+                end
+            end
+        end
+    end
+    return count
+end
+
 -- === Abgleich ===============================================================
 
 function GC.Orders:RequestSync()
@@ -970,20 +997,19 @@ function GC.Orders:RequestSync()
     return GC.Sync:Send(Join({ "O", SCHEMA(), "Q", "0" }))
 end
 
--- Beim Login zusaetzlich der Gegenweg: die eigenen laufenden Auftraege als
--- Push in den Gildenkanal. Damit lernt die Gilde meine Auftraege auch dann,
--- wenn ihre Live-Broadcasts an mir vorbeigingen (alte Version, Ladebildschirm)
--- und niemand rechtzeitig gefragt hat. Klein und gedeckelt: nur eigene, nur
--- nicht abgeschlossene, ohne Verlaufszeilen.
-function GC.Orders:PushOwnOrders()
+-- Beim Login zusaetzlich der Gegenweg: ALLE bekannten laufenden Auftraege als
+-- Push in den Gildenkanal - nicht nur die eigenen. Jeder Client ist damit
+-- Kurier: Wer einen Auftrag einmal empfangen hat, traegt ihn zu jedem
+-- weiter, mit dem er online ist. So erreicht auch der Auftrag von jemandem,
+-- der allein online war, die Gilde ueber Dritte. Gedeckelt durch die
+-- Bestandsgrenzen, ohne Verlaufszeilen, ueber die Bulk-Warteschlange.
+function GC.Orders:PushOpenOrders()
     if not GC.Sync then
         return 0
     end
-    local ownTag = GC.DB:GetAccountTag()
     local pushed = 0
     for _, order in pairs(self:GetStore()) do
-        if not TERMINAL[order.status]
-            and (order.createdByTag == ownTag or order.acceptedByTag == ownTag) then
+        if not TERMINAL[order.status] then
             GC.Sync:SendBulk(self:BuildCoreMessage(order), "GUILD")
             GC.Sync:SendBulk(self:BuildStateMessage(order, nil), "GUILD")
             pushed = pushed + 1

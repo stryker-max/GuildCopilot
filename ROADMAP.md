@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.57 – Gildenaufträge: das Kuriernetz
+
+Owner-Frage: „Wenn nur einer alleine online ist und Aufträge reinstellt, empfängt die ja keiner – oder hättest du da noch eine Lösung?" Die Antwort in drei Teilen:
+
+- **Verloren geht nie etwas:** Ein allein erstellter Auftrag liegt in den eigenen SavedVariables und verteilt sich beim nächsten gemeinsamen Online-Moment (Login-Push und Abgleich seit 0.9.52);
+- **jeder Client ist jetzt Kurier:** Der Login-Push sendet nicht mehr nur die eigenen, sondern **alle bekannten laufenden Aufträge**. Wer einen Auftrag einmal empfangen hat, trägt ihn zu jedem weiter, mit dem er online ist – ein Auftrag braucht damit nicht mehr den Ersteller online, sondern irgendeinen Träger. Dabei behoben: Der Empfang verlangte bisher „Absender = Auftraggeber" und verwarf genau solche Kurierpakete – auch in den Abgleich-Antworten, die deshalb nur eigene Aufträge durchbrachten. Kerne von Dritten gelten jetzt, mit derselben Vertrauensbasis wie beim Werkstatt-Sync (Absender sind immer Gildenmitglieder);
+- **der Einsam-Hinweis:** Erstellt man einen Auftrag, während laut Roster kein anderes Gildenmitglied mit Guild Copilot online ist, sagt der Dialog es vorab und die Erfolgsmeldung wiederholt es – gespeichert ja, verteilt erst beim nächsten gemeinsamen Login.
+
+Ausdrücklich verworfen: ein externer Umweg (Companion lädt Aufträge zu GitHub o. ä. hoch). Das wäre echte Offline-Zustellung, hieße aber Gildendaten im Internet und einen laufenden Zweitprozess – für ein WoW-Addon die falsche Abwägung.
+
 ## 0.9.56 – Feinschliff aus dem laufenden Test
 
 Sechs Owner-Rückmeldungen in einer Runde:

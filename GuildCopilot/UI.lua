@@ -3829,7 +3829,13 @@ function GC.UI:BuildOrderCreateDialog(page)
         if ok then
             dialog:Hide()
             GC.UI:SetWorkshopView("ORDERS")
-            GC.UI:SetOrdersStatus(message, true)
+            if GC.Orders:GetOnlineAddonUserCount() == 0 then
+                GC.UI:SetOrdersStatus((message or "")
+                    .. " |cffe8b84bGerade ist niemand mit Guild Copilot online - "
+                    .. "verteilt wird beim nächsten gemeinsamen Login.|r", true)
+            else
+                GC.UI:SetOrdersStatus(message, true)
+            end
         else
             dialog.status:SetText(message or "")
             SetTextColor(dialog.status, THEME.danger)
@@ -3871,7 +3877,18 @@ function GC.UI:OpenOrderCreateDialog(recipeKey)
     dialog.noteEdit:SetText("")
     dialog.costCaption:Hide()
     dialog.costEdit.container:Hide()
-    dialog.status:SetText("")
+    -- Ohne Gegenstelle kein Sync: Die Aufträge reisen nur von Client zu
+    -- Client. Wer allein online ist, soll das VOR dem Erstellen wissen -
+    -- der Auftrag geht nicht verloren, aber er erreicht die Gilde erst
+    -- beim nächsten gemeinsamen Online-Moment.
+    if GC.Orders:GetOnlineAddonUserCount() == 0 then
+        dialog.status:SetText("|cffe8b84bHinweis:|r Gerade ist niemand mit Guild Copilot online. "
+            .. "Der Auftrag wird gespeichert und verteilt sich, sobald du gemeinsam "
+            .. "mit anderen Addon-Nutzern online bist.")
+        SetTextColor(dialog.status, THEME.text)
+    else
+        dialog.status:SetText("")
+    end
     dialog:Show()
 end
 

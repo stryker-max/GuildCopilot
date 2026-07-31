@@ -1497,7 +1497,7 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
         -- ... und der Gegenweg: die eigenen laufenden Aufträge in die Gilde
         -- drücken, für alle, an denen die Live-Broadcasts vorbeigingen.
         if GC.Orders then
-            GC.Orders:PushOwnOrders()
+            GC.Orders:PushOpenOrders()
         end
     end)
 end)
