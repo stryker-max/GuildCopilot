@@ -1,8 +1,10 @@
 # Konzept: Gildenaufträge in der Gildenwerkstatt
 
-> **Status: Entwurf, nicht umgesetzt.** Dieses Dokument ist das Ergebnis des
-> Konzeptauftrags vom 31.07.2026. Datei- und Zeilenangaben beziehen sich auf
-> Addon **0.9.49** (Commit `9dde916`).
+> **Status: Entwurf, vom Owner abgenommen, nicht umgesetzt.** Dieses Dokument
+> ist das Ergebnis des Konzeptauftrags vom 31.07.2026; die fünf offenen Fragen
+> hat der Owner am selben Tag entschieden (siehe „Entscheidungen des Owners"
+> am Ende). Datei- und Zeilenangaben beziehen sich auf Addon **0.9.49**
+> (Commit `9dde916`).
 
 ## Auftrag des Repository-Owners (Zusammenfassung)
 
@@ -95,7 +97,10 @@ Daraus folgen drei Grundsätze, die sich durch das ganze Konzept ziehen:
                     └──────────────────────────────┘
 
   Jederzeit durch den Auftraggeber: ABGEBROCHEN (mit Pflicht-Hinweis im
-  Verlauf, wenn bereits angenommen). OFFENE Aufträge verfallen nach TTL.
+  Verlauf, wenn bereits angenommen). Zusätzlich dürfen freigegebene Ränge
+  fremde Aufträge abbrechen (Aufräumrecht, Owner-Entscheidung) – der Verlauf
+  nennt dann ausdrücklich, wer abgebrochen hat. OFFENE Aufträge verfallen
+  nach TTL.
 ```
 
 Warum **IN ARBEIT** ein eigener Schritt ist: Zwischen Annahme und Fertigung
@@ -336,7 +341,10 @@ Neue Nachrichtenfamilie **`O`** über die vorhandene Infrastruktur:
   Auftraggeber-Charakter; Auftragnehmer-Aktionen von jedem Charakter mit
   passendem `accountTag` (Rückfall: die beiden benannten Charaktere);
   Annahme nur, wenn der ausführende Charakter laut Katalog das Rezept kann.
-  Absendernamen liefert der Server, sie sind nicht fälschbar.
+  Das Offiziers-Abbruchrecht wird gegen den Gildenrang des Absenders im
+  eigenen Roster geprüft, mit derselben Rangfreigabe-Mechanik wie bei der
+  Mitgliederpflege (`memberCare.accessRanks`-Muster). Absendernamen liefert
+  der Server, sie sind nicht fälschbar.
 - **Alte Clients:** Der `O`-Typ fällt bei ihnen durch die bestehende
   Weiche in `Sync.lua` (~1408) in keinen Zweig und wird ignoriert. Kein
   Schema-Bruch; Nutzer alter Versionen sehen schlicht keine Aufträge.
@@ -400,32 +408,34 @@ Roster), fällt der Auftrag automatisch auf OFFEN zurück, mit Logeintrag.
 **Stufe 1 (der eigentliche Vorschlag):** Unterreiter mit den drei
 Abschnitten, Erstellen-Dialog am Katalogrezept (Menge, Modell A/B/C,
 Übergabeart, Kostenrahmen, Trinkgeld, Notiz), Statusmodell mit Verlauf,
-Twink-Regel, Doppelannahme-Auflösung, Manifest-Abgleich, Grenzen und
-Rückfall. Ohne Kompakt-Tracker.
+Twink-Regel, Doppelannahme-Auflösung, Offiziers-Abbruchrecht über die
+Rangfreigabe, Manifest-Abgleich, Grenzen und Rückfall – **und der
+Kompakt-Tracker** (Owner-Entscheidung: gehört von Anfang an dazu).
 
-**Stufe 2:** Kompakt-Tracker; „Erstattung erhalten"-Feinschliff mit
-Restbetragsanzeige; Flüster-Vorbelegung mit Online-Erkennung des richtigen
-Charakters; optional ein gerichteter Auftrag („Wunsch-Hersteller", der 24 h
-Vorrang hat, danach offen für alle").
+**Stufe 2:** „Erstattung erhalten"-Feinschliff mit Restbetragsanzeige;
+Flüster-Vorbelegung mit Online-Erkennung des richtigen Charakters; optional
+ein gerichteter Auftrag („Wunsch-Hersteller", der 24 h Vorrang hat, danach
+offen für alle).
 
 **Ausdrücklich offen gelassen** (erst mit Erfahrungswerten entscheiden):
 Teillieferungen bei Stückzahlen > 1, Auftragsvorlagen, Statistiken („wer hat
 wie viele Aufträge erfüllt") – Letzteres kann sozialen Druck erzeugen, den
 eine Gilde vielleicht gar nicht will.
 
-## Offene Fragen an den Owner
+## Entscheidungen des Owners (31.07.2026)
 
-1. **Name im UI:** „Gildenaufträge" als Reiter- und Featurename – oder
-   lieber Einzahl „Gildenauftrag" als Aktionsbegriff („Gildenauftrag
-   erstellen") und „Aufträge" als Reiter?
-2. Dürfen **Offiziere** fremde Aufträge abbrechen (Aufräumrecht wie bei der
-   Mitgliederpflege, über die bestehende Rangfreigabe), oder bleibt das
-   allein beim Auftraggeber?
-3. Soll Modell B (Gildenbank) eine **Rangbedingung** sichtbar machen („nur
-   wählbar, wenn dein Rang die Bank nutzen darf")? Das Addon kennt die
-   Bankrechte nicht zuverlässig – es wäre eine Angabe der Gilde in den
-   Einstellungen, keine echte Prüfung.
-4. Reichen **5 offene Aufträge je Account und 14 Tage TTL**, oder andere
-   Werte?
-5. Stufe 1 ohne Kompakt-Tracker in Ordnung, oder gehört er von Anfang an
-   dazu?
+Die fünf beim Entwurf offenen Fragen sind entschieden; der Text oben ist
+entsprechend nachgezogen:
+
+1. **Name im UI: „Gildenaufträge"** als Reiter- und Featurename. Als
+   Aktionsbeschriftung am Rezept bleibt „In Auftrag geben".
+2. **Offiziere dürfen fremde Aufträge abbrechen** – Aufräumrecht über die
+   bestehende Rangfreigabe-Mechanik (Muster `memberCare.accessRanks`); der
+   Verlauf nennt, wer abgebrochen hat.
+3. **Keine Rangbedingung an Modell B.** Die Gildenbank-Option zeigt weiter
+   nur, was der geteilte Bestand abdeckt; ob jemand entnehmen darf, bleibt
+   vollständig außerhalb des Addons.
+4. **Grenzen bestätigt:** 5 offene Aufträge je Account, 14 Tage TTL für
+   offene Aufträge, Historie 20, Gesamtdeckel 60.
+5. **Der Kompakt-Tracker gehört in Stufe 1** – von Anfang an, nicht als
+   Ausbau.

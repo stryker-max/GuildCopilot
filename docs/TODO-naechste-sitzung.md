@@ -191,22 +191,22 @@ Sitzung.)*
 
 ---
 
-## 5. Gildenaufträge in der Werkstatt – Konzept liegt vor, Umsetzung offen
+## 5. Gildenaufträge in der Werkstatt – Konzept abgenommen, bereit zur Umsetzung
 
-**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md` (Stand 31.07.2026).
+**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md` (Stand 31.07.2026,
+inklusive der fünf Owner-Entscheidungen am Dokumentende – alle Fragen sind
+geklärt, es gibt keinen offenen Vorbehalt mehr).
 Kern: Aufträge auf Katalogrezepte, genau ein Auftragnehmer (Account, nicht
 Charakter – Twink nimmt an, Main fertigt), Statusmodell mit Verlauf, drei
 Materialmodelle (Auftraggeber liefert / Gildenbank / Beschaffung mit
 Kostenrahmen und zweiseitigem Abschluss), Übergabe persönlich oder per Post,
-Unterreiter in der Werkstatt statt Pop-out-Fenster.
-
-**Vor der Umsetzung:** die fünf „Offenen Fragen an den Owner" am Ende des
-Konzepts klären (Name im UI, Offiziers-Abbruchrecht, Gildenbank-Rangangabe,
-Grenzen, Kompakt-Tracker in Stufe 1?).
+Offiziers-Abbruchrecht über die Rangfreigabe, Unterreiter in der Werkstatt
+statt Pop-out-Fenster, **Kompakt-Tracker bereits in Stufe 1**.
 
 **Aufwand:** groß – neue Nachrichtenfamilie `O` mit Manifest-Abgleich,
-Rechteprüfung über `accountTag`, neuer Unterreiter. In Etappen bauen
-(Stufe 1 laut Konzept), nicht in einer Sitzung.
+Rechteprüfung über `accountTag`, neuer Unterreiter, Tracker. In Etappen
+bauen (Reihenfolge laut Konzept „Stufe 1"), nicht in einer Sitzung. Sinnvoller
+erster Schnitt: Datenmodell + Sync + Statusmodell mit Tests, dann UI.
 
 ---
 
