@@ -1185,6 +1185,16 @@ function GC.GearAudit:GetAudit(name)
     return GC.DB:GetGuild().gearAudits[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
 end
 
+-- Leert die Dauerliste der geprüften Spieler auf Knopfdruck. Nur der lokale
+-- Zwischenspeicher - fremde Clients behalten ihre eigenen Daten, und die
+-- eigene Ausrüstung sowie eintreffende Abgleiche füllen die Liste neu.
+function GC.GearAudit:ClearAudits()
+    GC.DB:GetGuild().gearAudits = {}
+    self.selectedName = nil
+    GC:FireCallback("GEAR_AUDIT_UPDATED")
+    return true, "Liste geleert. „Eigene Ausrüstung“ oder eine Gruppenprüfung füllt sie neu."
+end
+
 function GC.GearAudit:Prune()
     local cutoff = GC.Util.Now() - AUDIT_TTL
     local audits = GC.DB:GetGuild().gearAudits or {}

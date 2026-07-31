@@ -298,6 +298,23 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.70 – Import-Rätsel gelöst, Prüfliste mit Rangfilter, Berufe-Nachlese
+
+**Das „keine Raidauswertung"-Rätsel ist gelöst.** Der Import funktionierte die ganze Zeit – aber die Aufbewahrung hielt nur 12 Sitzungen und warf beim Aufräumen strikt nach Alter hinaus. Zwölf in der Stadt gestartete Probe-Sitzungen (Orgrimmar, Shattrath …) waren „neuer" als der Raidabend: Der frisch importierte Report wurde gespeichert, einsortiert – und als Nummer 13 sofort wieder gelöscht, während der Import Erfolg meldete.
+
+- **Aufbewahrung nach Wert:** Beim Aufräumen fliegen zuerst Abende ohne einen einzigen Bosskampf. Ein echter Raid überlebt jetzt jede Stadt-Mini. Kappe von 12 auf 24 (ein Abend kann drei Quellen belegen);
+- **der Import zählt nur, was hinterher wirklich da ist** – und meldet ausdrücklich, wenn die Aufbewahrung etwas verworfen hat, statt still Erfolg zu behaupten;
+- **Kopfzeilen-Bruchstück toleriert:** Beim Einfügen riss „GCPWCL3|1" gelegentlich in „GCPWCL3" und „|1" auseinander; die Zahlzeile wird jetzt erkannt statt als „unlesbar" gemeldet.
+
+**Ausrüstungsseite** (Owner-Wünsche):
+
+- **Rangfilter:** Der Knopf über der Liste schaltet durch („Ränge: alle" → „bis Offizier" → …) und blendet alle darunter aus – der eigene Charakter bleibt immer sichtbar;
+- **„Leeren":** wirft die komplette Dauerliste weg; „Eigene Ausrüstung" und Gruppenprüfungen füllen sie neu;
+- **kein Sprung-Scrollen mehr:** Der Klick auf einen Spieler scrollte die Liste automatisch „mit" – weg damit, die Liste bleibt stehen;
+- Detailfenster der Gruppenprüfung: „←"/„└"/„↔" gibt es in der WoW-Schrift nicht (Kästchen) – ersetzt durch Text; leere Befundzellen zeigen „–", die Fußzeile kürzt „keine Funde".
+
+**Berufe-Nachlese beim Login:** Die Fähigkeitsliste ist beim Einloggen oft noch leer, und auf fertig geskillten Charakteren feuert das Nachlade-Ereignis nie – darum wirkten die Berufe „nie automatisch gewählt". Jetzt liest das Addon 5 und 20 Sekunden nach dem Login nach.
+
 ## 0.9.69 – Berufe-Karte: Werkstatt-Stand statt Übernehmen-Knopf
 
 Der Knopf „Aus Fähigkeiten übernehmen" ist weg – er verwirrte nur, denn die Übernahme läuft ohnehin automatisch (bei jedem Fähigkeiten-Update und beim Öffnen des Berufsfensters). An seiner Stelle zeigt die Karte jetzt etwas Nützliches:

@@ -8,7 +8,9 @@ GC.RaidMonitor = {
     combatLogTracking = false,
 }
 
-local MAX_STORED_SESSIONS = 12
+-- Ein Abend kann bis zu drei Quellen belegen (Live, Warcraft Logs, Logdatei);
+-- mit 12 Plätzen waren das nur vier Abende. 24 hält acht volle Abende.
+local MAX_STORED_SESSIONS = 24
 local MIN_SEGMENT_SECONDS = 15
 local WIPE_RATIO = 0.5
 local MAX_PAYLOAD_BYTES = 165
@@ -352,8 +354,21 @@ function GC.RaidMonitor:StoreSummary(summary)
     table.sort(sessions, function(left, right)
         return (left.endedAt or 0) > (right.endedAt or 0)
     end)
+    -- Beim Aufräumen fliegen zuerst Abende OHNE Bosskampf (in der Stadt
+    -- gestartete Probe-Sitzungen). Vorher galt reine Aktualität - zwölf
+    -- Orgrimmar-Minis verdrängten den frisch importierten Raidabend, und der
+    -- Import meldete Erfolg, während die Auswertung sofort wieder verschwand.
     while #sessions > MAX_STORED_SESSIONS do
-        table.remove(sessions)
+        local worstIndex
+        for index = #sessions, 1, -1 do
+            local candidate = sessions[index]
+            local pulls = tonumber(candidate.pulls) or 0
+            if pulls <= 0 then
+                worstIndex = index
+                break
+            end
+        end
+        table.remove(sessions, worstIndex or #sessions)
     end
     GC:FireCallback("RAID_SESSION_UPDATED")
     return true

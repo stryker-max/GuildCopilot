@@ -5134,4 +5134,107 @@ do
     ownWorkshop.professions.verzauberkunst = savedEnchanting
 end
 
+-- === Aufbewahrung: Boss-Abende überleben Stadt-Minis ========================
+do
+    local sessionsRef = addon.DB:GetGuild().raidSessions
+    local savedList = {}
+    for index, stored in ipairs(sessionsRef) do
+        savedList[index] = stored
+    end
+
+    -- Liste bis an die Kappe mit brandneuen Sitzungen OHNE Bosskampf füllen.
+    local filler = 0
+    while #sessionsRef < 24 do
+        filler = filler + 1
+        table.insert(sessionsRef, 1, {
+            id = "LIVE:mini" .. filler, source = "LIVE",
+            startedAt = currentTime + filler, endedAt = currentTime + filler + 60,
+            zone = "Orgrimmar", pulls = 0, kills = 0, wipes = 0,
+            participants = { { name = "Tester" } },
+        })
+    end
+    -- Ein ÄLTERER Abend mit Bosskämpfen muss die Minis verdrängen - vorher
+    -- flog er als Nummer 25 sofort wieder hinaus ("keine Raidauswertung").
+    local storedOk = addon.RaidMonitor:StoreSummary({
+        id = "WCL:keeper", source = "WCL",
+        startedAt = currentTime - 90000, endedAt = currentTime - 86400,
+        zone = "Karazhan", pulls = 7, kills = 5, wipes = 2,
+        participants = { { name = "Alphax" }, { name = "Betax" } },
+    })
+    assert(storedOk == true, "Der Boss-Abend wurde nicht gespeichert")
+    assert(addon.RaidMonitor:GetSummary("WCL:keeper") ~= nil,
+        "Der ältere Boss-Abend wurde von neueren Stadt-Minis verdrängt")
+
+    for index = #sessionsRef, 1, -1 do
+        sessionsRef[index] = nil
+    end
+    for index, stored in ipairs(savedList) do
+        sessionsRef[index] = stored
+    end
+end
+
+-- === Import: Kopfzeilen-Bruchstück "|1" stört nicht mehr ====================
+do
+    local okImport, importMessage = addon.WarcraftLogs:Import(table.concat({
+        "GCPWCL3",
+        "|1",
+        "S|fragRept77|1753200000|1753210000|Karazhan|6|5|1",
+        "P|Fragmenta|MAGE|3600|1|0|0||0",
+    }, "\n"))
+    assert(okImport == true, "Der Import mit zerrissener Kopfzeile schlug fehl: " .. tostring(importMessage))
+    assert(tostring(importMessage):find("unlesbare", 1, true) == nil,
+        "Das Kopfzeilen-Bruchstück wurde weiter als unlesbar gemeldet")
+    assert(addon.RaidMonitor:GetSummary("WCL:fragRept77") ~= nil,
+        "Die Sitzung hinter dem Bruchstück fehlt")
+end
+
+-- === Ausrüstungsseite: Rangfilter und Leeren ================================
+do
+    addon.UI:ShowPage("GEAR")
+    local gearPage = addon.UI.pages.GEAR
+    addon.GearAudit:StoreAudit({
+        name = "Detailix", classFile = "MAGE", inspectedAt = currentTime,
+        source = "SYNC", missingEnchants = 0, emptySockets = 0,
+        emptySlots = 0, unreadableSlots = 0, slots = {},
+    })
+    addon.Roster.membersByName = addon.Roster.membersByName or {}
+    local savedMember = addon.Roster.membersByName[addon.Util.NormalizeName("detailix")]
+    addon.Roster.membersByName[addon.Util.NormalizeName("detailix")] = { rankIndex = 5, rank = "Twink" }
+
+    addon.DB:GetSettings().gearRankLimit = 2
+    addon.UI:RefreshGear()
+    local seen = false
+    for _, audit in ipairs(gearPage.gearAuditList or {}) do
+        if audit.name == "Detailix" then
+            seen = true
+        end
+    end
+    assert(seen == false, "Der Rangfilter lässt einen zu niedrigen Rang durch")
+    assert(tostring(gearPage.gearRankButton.label:GetText()):find("bis ", 1, true) ~= nil,
+        "Der Rangfilter-Knopf nennt die Grenze nicht")
+
+    addon.DB:GetSettings().gearRankLimit = nil
+    addon.UI:RefreshGear()
+    seen = false
+    for _, audit in ipairs(gearPage.gearAuditList or {}) do
+        if audit.name == "Detailix" then
+            seen = true
+        end
+    end
+    assert(seen == true, "Ohne Rangfilter fehlt der Spieler in der Liste")
+    assert(gearPage.gearRankButton.label:GetText() == "Ränge: alle",
+        "Der Rangfilter-Knopf zeigt den Alle-Zustand nicht")
+
+    -- Leeren wirft alles raus; die Karte meldet den leeren Zustand.
+    local savedAudits = addon.DB:GetGuild().gearAudits
+    local okClear = addon.GearAudit:ClearAudits()
+    assert(okClear == true and #addon.GearAudit:GetAudits() == 0,
+        "Das Leeren der Prüfliste wirkt nicht")
+    addon.UI:RefreshGear()
+    assert(gearPage.gearEmpty.shown == true, "Die geleerte Liste zeigt keinen Leerhinweis")
+    addon.DB:GetGuild().gearAudits = savedAudits
+    addon.Roster.membersByName[addon.Util.NormalizeName("detailix")] = savedMember
+    addon.UI:RefreshGear()
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

@@ -411,4 +411,17 @@ end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Profile, function(self)
     self:Refresh()
+    -- Die Fähigkeitsliste ist direkt beim Login oft noch leer; der Client
+    -- füllt sie erst Sekunden später nach. Auf einem fertig geskillten
+    -- Charakter feuert SKILL_LINES_CHANGED danach nie wieder - ohne diese
+    -- Nachlese blieben die Berufe dann dauerhaft ungelesen, und es sah so
+    -- aus, als würde die Automatik gar nicht existieren.
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(5, function()
+            GC.Profile:Refresh()
+        end)
+        C_Timer.After(20, function()
+            GC.Profile:Refresh()
+        end)
+    end
 end)

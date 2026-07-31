@@ -2483,18 +2483,22 @@ function GC.UI:RefreshRoster()
             for _ in pairs((stored and stored.recipes) or {}) do
                 recipeCount = recipeCount + 1
             end
+            -- Knapp halten: Die Karte ist 388 Pixel breit, und
+            -- "Verzauberkunst 375/375" braucht davon schon die Hälfte.
+            -- Dass die Rezepte in der Werkstatt liegen, erklärt der Text
+            -- direkt darunter.
             if recipeCount > 0 then
                 local ageMinutes = math.max(0,
                     math.floor((GC.Util.Now() - (stored.updatedAt or 0)) / 60))
                 local ageText = ageMinutes < 120 and (ageMinutes .. " Min.")
                     or ageMinutes < 2880 and (math.floor(ageMinutes / 60) .. " Std.")
                     or (math.floor(ageMinutes / 1440) .. " Tagen")
-                line:SetText(professionName .. skillText .. "  ·  |cff59e695"
-                    .. recipeCount .. " Rezepte|r in der Werkstatt  ·  vor " .. ageText)
+                line:SetText(professionName .. skillText .. " · |cff59e695"
+                    .. recipeCount .. " Rezepte|r · vor " .. ageText)
                 SetTextColor(line, THEME.text)
             else
                 line:SetText(professionName .. skillText
-                    .. "  ·  |cffffb840Rezepte fehlen|r – Berufsfenster einmal öffnen.")
+                    .. " · |cffffb840Rezepte fehlen|r – Beruf einmal öffnen.")
                 SetTextColor(line, THEME.text)
             end
         end
@@ -6422,8 +6426,41 @@ function GC.UI:BuildGearPage()
     listCard:SetSize(238, 358)
     listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
 
+    -- Aufräumen auf Knopfdruck: Die Dauerliste sammelt sonst jeden je
+    -- gesehenen Charakter, bis niemand mehr das Wesentliche findet.
+    page.gearClearButton = CreateButton(listCard, "Leeren", 70, 22, function()
+        local ok, message = GC.GearAudit:ClearAudits()
+        page:SetGearStatus(message, ok)
+        GC.UI:RefreshGear()
+    end)
+    page.gearClearButton:SetPoint("TOPRIGHT", listCard, "TOPRIGHT", -12, -10)
+
+    -- Rangfilter als Durchschalt-Knopf: "Ränge: alle" oder "bis <Rang>".
+    -- Ein Dropdown ginge nicht - die Rangnamen stehen erst nach dem
+    -- Rosterabruf fest, und CreateChoiceDropdown kennt nur feste Listen.
+    page.gearRankButton = CreateButton(listCard, "Ränge: alle", 214, 26, function()
+        local ranks = GC.Roster:GetRankDefinitions()
+        local current = GC.DB:GetSettings().gearRankLimit
+        local nextLimit
+        if current == nil then
+            nextLimit = ranks[1] and ranks[1].index
+        else
+            local position
+            for index, rank in ipairs(ranks) do
+                if rank.index == current then
+                    position = index
+                end
+            end
+            local nextRank = position and ranks[position + 1]
+            nextLimit = nextRank and nextRank.index or nil
+        end
+        GC.DB:GetSettings().gearRankLimit = nextLimit
+        GC.UI:RefreshGear()
+    end)
+    page.gearRankButton:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -42)
+
     local playerScroll = CreateModernScrollFrame(listCard)
-    playerScroll:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -44)
+    playerScroll:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -76)
     playerScroll:SetPoint("BOTTOMRIGHT", listCard, "BOTTOMRIGHT", -12, 12)
     local playerContent = CreateFrame("Frame", nil, playerScroll)
     playerContent:SetWidth(202)
@@ -6448,7 +6485,10 @@ function GC.UI:BuildGearPage()
             return self.gearRows[index]
         end
         local row = CreateButton(playerContent, "", 198, 23, function()
-            local audit = GC.GearAudit:GetAudits()[index]
+            -- Die Zeile zeigt die GEFILTERTE Liste; der Klick muss dieselbe
+            -- Liste lesen, sonst wählt er bei aktivem Rangfilter den
+            -- falschen Spieler.
+            local audit = (page.gearAuditList or {})[index]
             if audit then
                 GC.GearAudit.selectedName = audit.name
                 -- Beim Spielerwechsel oben anfangen, sonst haengt die Liste
@@ -6469,7 +6509,7 @@ function GC.UI:BuildGearPage()
         return row
     end
     page.gearEmpty = CreateLabel(listCard, "Noch niemand geprüft.", { muted = true, width = 200, height = 40, vertical = "TOP" })
-    page.gearEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
+    page.gearEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -84)
 
     local detailCard = CreateCard(page, "Slots")
     detailCard:SetSize(526, 358)
@@ -6655,25 +6695,57 @@ function GC.UI:RefreshGear()
     end
     page.gearStatus:SetText(statusText .. "\n" .. ruleLine)
 
+    -- Rangfilter: Nur Gildenmitglieder bis zum eingestellten Rang bleiben in
+    -- der Liste; der eigene Charakter steht immer drin. Wer nicht (mehr) im
+    -- Roster auftaucht, fällt bei aktivem Filter heraus.
+    local rankLimit = GC.DB:GetSettings().gearRankLimit
+    if rankLimit ~= nil then
+        local ownKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
+        local filtered = {}
+        for _, audit in ipairs(audits) do
+            local member = GC.Roster:GetMember(audit.name)
+            local rankIndex = member and tonumber(member.rankIndex)
+            if (rankIndex ~= nil and rankIndex <= rankLimit)
+                or GC.Util.NormalizeName(GC.Util.PlayerShortName(audit.name or "")) == ownKey then
+                filtered[#filtered + 1] = audit
+            end
+        end
+        audits = filtered
+    end
+    page.gearAuditList = audits
+
+    local rankLabel = "Ränge: alle"
+    if rankLimit ~= nil then
+        local rankName = "Rang " .. (rankLimit + 1)
+        for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
+            if rank.index == rankLimit then
+                rankName = rank.name
+            end
+        end
+        rankLabel = "bis " .. rankName
+    end
+    page.gearRankButton:SetText(rankLabel)
+
     page.gearEmpty:SetShown(#audits == 0)
     local selectedName = GC.GearAudit.selectedName
-    if not GC.GearAudit:GetAudit(selectedName) then
+    local selectedVisible = false
+    for _, audit in ipairs(audits) do
+        if audit.name == selectedName then
+            selectedVisible = true
+        end
+    end
+    if not selectedVisible then
         selectedName = audits[1] and audits[1].name
         GC.GearAudit.selectedName = selectedName
     end
 
-    local selectedIndex
     for index = 1, #audits do
         page:EnsureGearPlayerRow(index)
-        if audits[index].name == selectedName then
-            selectedIndex = index
-        end
     end
     page.gearPlayerContent:SetHeight(math.max(1, #audits * 25))
-    if selectedIndex and page.lastGearSelectedName ~= selectedName then
-        page.gearPlayerScroll:SetVerticalScroll(math.max(0, (selectedIndex - 2) * 25))
-        page.lastGearSelectedName = selectedName
-    end
+    -- Kein automatisches Mitscrollen mehr: Wer einen Spieler anklickt, hat
+    -- ihn bereits vor Augen - der Sprung riss die Liste nur unter der Hand
+    -- weg (Owner-Rückmeldung).
     page.gearPlayerScroll:UpdateModernThumb()
 
     for index, row in ipairs(page.gearRows) do
@@ -7383,7 +7455,9 @@ function GC.UI:CreateGroupGearFrame()
         GC.UI:RefreshGroupGearCheck()
     end, "PRIMARY")
     frame.rescan:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
-    frame.back = CreateButton(frame, "← Zur Gruppe", 130, 30, function()
+    -- Kein Pfeilzeichen: "←" fehlt in der WoW-Schrift und wird als Kästchen
+    -- gezeichnet.
+    frame.back = CreateButton(frame, "Zur Gruppe", 130, 30, function()
         frame.detailName = nil
         GC.UI:RefreshGroupGearCheck()
     end)
@@ -7437,7 +7511,7 @@ function GC.UI:RefreshGroupGearCheck()
     frame.back:SetShown(detail ~= nil)
     frame.rescan:SetShown(detail == nil)
     if detail then
-        frame.subtitle:SetText("Klick auf „← Zur Gruppe“ führt zurück zur Übersicht.")
+        frame.subtitle:SetText("„Zur Gruppe“ führt zurück zur Übersicht.")
         frame.headName:SetText("SLOT")
         frame.headStand:SetText("BEWERTUNG")
         frame.headBefund:SetText("VERZAUBERUNG & SOCKEL")
@@ -7456,10 +7530,13 @@ function GC.UI:RefreshGroupGearCheck()
                 SetTextColor(row.stand, style.color)
                 local text = GC.Util.Trim(entry.enchantName or "")
                 if text == "" then
-                    text = entry.reason or ""
+                    text = GC.Util.Trim(entry.reason or "")
                 end
                 if (entry.emptySockets or 0) > 0 then
                     text = text .. " |cffff6166· " .. entry.emptySockets .. " Sockel leer|r"
+                end
+                if GC.Util.Trim(text) == "" then
+                    text = "–"
                 end
                 row.befund:SetText(text)
                 if entry.verdict == "MISSING" then
@@ -7472,9 +7549,13 @@ function GC.UI:RefreshGroupGearCheck()
             end
         end
         local age = math.max(0, math.floor((now - (detail.inspectedAt or now)) / 60))
+        -- Kurzform, sonst schneidet die Fußzeile ab: "keine Funde" statt des
+        -- ganzen Satzes aus DescribeFindings.
+        local findingsText = GC.GearAudit:GetIssueCount(detail) > 0
+            and GC.GearAudit:DescribeFindings(detail) or "keine Funde"
         frame.counts:SetText("|cff4ec9ff" .. GC.Util.PlayerShortName(detail.name or "")
-            .. "|r  ·  " .. (GEAR_SOURCE_LABELS[detail.source] or "Daten")
-            .. " vor " .. age .. " Min.  ·  " .. GC.GearAudit:DescribeFindings(detail))
+            .. "|r · " .. (GEAR_SOURCE_LABELS[detail.source] or "Daten")
+            .. " vor " .. age .. " Min. · " .. findingsText)
         frame.content:SetHeight(math.max(280, #slots * 26))
         frame.scroll:UpdateModernThumb()
         return
@@ -7833,8 +7914,10 @@ function GC.UI:RefreshSessionReview()
         local zone = evening.summary.zone ~= "" and evening.summary.zone or "Raid"
         local firstLabel = SESSION_SOURCE_LABEL[first.source or "LIVE"] or "?"
         local secondLabel = SESSION_SOURCE_LABEL[second.source or "LIVE"] or "?"
+        -- "gegen" statt eines Pfeilsymbols: Sonderzeichen wie "↔" fehlen in
+        -- der WoW-Schrift.
         frame.headline:SetText(FormatSessionDate(evening.summary) .. "  •  " .. zone
-            .. "  •  Vergleich: " .. firstLabel .. " ↔ " .. secondLabel)
+            .. "  •  Vergleich: " .. firstLabel .. " gegen " .. secondLabel)
 
         -- Beide Teilnehmerlisten über den Kurznamen vereinigen; wer nur in
         -- einer Quelle steht, bekommt auf der anderen Seite Striche.
@@ -7881,7 +7964,7 @@ function GC.UI:RefreshSessionReview()
             firstRow.name:SetText(entry.name)
             firstRow.name:SetTextColor(ClassColor(entry.classFile))
             secondRow:Show()
-            secondRow.name:SetText("   └ " .. (entry.second and secondLabel or (secondLabel .. ": fehlt")))
+            secondRow.name:SetText("   > " .. (entry.second and secondLabel or (secondLabel .. ": fehlt")))
             SetTextColor(secondRow.name, THEME.muted)
 
             for _, col in ipairs(REVIEW_COLS) do

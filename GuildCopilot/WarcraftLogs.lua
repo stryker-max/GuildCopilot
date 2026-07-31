@@ -428,6 +428,14 @@ function GC.WarcraftLogs:Import(text)
                 elseif participant then
                     pendingParticipants[#pendingParticipants + 1] = participant
                 end
+            elseif line:match("^|%d*$") then
+                -- Bruchstück der Kopfzeile: Beim Einfügen riss "GCPWCL3|1"
+                -- zwischen Marker und Reportzahl auseinander. Die Zahl ist
+                -- verzichtbar - überspringen statt als unlesbar melden.
+                local fragment = tonumber(line:match("^|(%d+)$"))
+                if headerSeen and reportCount == 0 and fragment then
+                    reportCount = fragment
+                end
             else
                 local name, classFile, primarySpecKey, secondarySpecKey = line:match("^([^;]+);([^;]+);([^;]*);?([^;]*)$")
                 name = GC.Util.Trim(name)
@@ -540,9 +548,12 @@ function GC.WarcraftLogs:Import(text)
     local storedSessionIDs = {}
     for _, session in ipairs(sessions) do
         if #session.participants > 0 then
-            local stored = GC.RaidMonitor:StoreSummary(session)
-            local current = GC.RaidMonitor:GetSummary(session.id)
-            if stored or (current and current.source == sessionSource) then
+            GC.RaidMonitor:StoreSummary(session)
+            -- Gezählt wird, was hinterher wirklich DA ist. StoreSummary kann
+            -- "erfolgreich" speichern und die Aufbewahrung wirft den Eintrag
+            -- gleich wieder hinaus - genau das darf nie mehr als Erfolg
+            -- durchgehen.
+            if GC.RaidMonitor:GetSummary(session.id) ~= nil then
                 storedSessionIDs[session.id] = true
             end
         end
@@ -590,6 +601,10 @@ function GC.WarcraftLogs:Import(text)
     end
     if headerSeen and storedSessions == 0 and participantLines == 0 then
         hints[#hints + 1] = "keine Raidauswertung enthalten"
+    end
+    if usableSessions > storedSessions then
+        hints[#hints + 1] = (usableSessions - storedSessions)
+            .. " Auswertungen erkannt, aber nicht behalten – die Aufbewahrung hat sie verworfen; bitte melden"
     end
     if unknownSample and (orphanParticipants > 0 or storedSessions == 0) then
         hints[#hints + 1] = "erste unlesbare Zeile: „" .. unknownSample .. "“"
