@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.72 – Raidauswertung: klare Quellen, roter Proviant, löschbare Sitzungen
+
+Feinschliff nach dem ersten Abend mit Live+Logs nebeneinander:
+
+- **Quellenknöpfe eindeutig:** Die gerade angezeigte Quelle ist als aktiv markiert statt ausgegraut („ausgegraut" las sich wie „nicht verfügbar"). Kurze Namen („Logs (11)" statt „Warcraft Logs (11)"), rechtsbündig – und der Hinweis „Zeilen ziehen ordnet von Hand" wandert nach unten, statt sich mit den Knöpfen zu quetschen;
+- **„Vergleich" direkt auf der Seite:** Ein Knopf neben den Quellen öffnet das Detailfenster sofort im Vergleichsmodus Live gegen Logs (gelb, wo die Quellen sich widersprechen);
+- **Sitzungsliste einzeilig:** „31.07. 21:26 Karazhan +Logs" statt eines zweizeilig umbrechenden „[Live+Logs]";
+- **Roter Proviant** (Owner-Wunsch): In der Teilnehmertabelle färben sich FLASK und ELIXIR rot, wenn **beides** null ist (ein Fläschchen ersetzt beide Elixiere – wer eines von beiden hat, ist versorgt); FOOD färbt sich rot, sobald es null ist. Gilt auf der Seite und im Detailfenster;
+- **Sitzungen löschen:** Der Knopf unter der Sitzungsliste löscht den gewählten Abend mit allen Quellen – mit Scharfschalt-Klick („Wirklich löschen?") und entschärft sich beim Wechsel der Auswahl. Löschen dürfen nur die Ränge mit Mitgliederpflege-Zugriff (Standard: Offiziere oder höher) – **einstellbar in den Einstellungen**, die Karte heißt es jetzt ausdrücklich. Gelöscht wird nur lokal; „Auswertung anfordern" kann Gelöschtes bewusst zurückholen.
+
 ## 0.9.71 – Die wahre Import-Ursache: WoW verdoppelt Pipes; Ränge echt wählbar
 
 **Die eigentliche Ursache des Import-Dramas, endlich bewiesen** (durch die neue Diagnosezeile): Der WoW-Client verdoppelt beim Einfügen jede Pipe – aus `S|code|…` wird `S||code||…`. Der Parser las dann ein leeres Feld und verwarf Sitzungs- wie Teilnehmerzeilen stumm; nur die Profilzeilen (Semikolons statt Pipes) überlebten. Daher immer „11 Profile, keine Raidauswertung", und daher auch die ominöse „|1"-Zeile (der abgerissene Rest der verdoppelten Kopfzeile).

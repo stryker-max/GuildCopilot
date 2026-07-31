@@ -1303,7 +1303,8 @@ function GC.UI:BuildSettingsPage()
     accessCard:SetSize(752, 180)
     accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -252)
     local accessHelp = CreateLabel(accessCard,
-        "Nur diese Ränge sehen die Mitgliederpflege. Die Freigabe wird gildenweit synchronisiert.",
+        "Nur diese Ränge sehen die Mitgliederpflege - und nur sie dürfen Raidauswertungen löschen. "
+        .. "Die Freigabe wird gildenweit synchronisiert.",
         { muted = true, width = 716, height = 28, vertical = "TOP" })
     accessHelp:SetPoint("TOPLEFT", accessCard, "TOPLEFT", 18, -47)
     page.memberCareAccessToggles = {}
@@ -5922,7 +5923,7 @@ function GC.UI:BuildStatisticsPage()
     listCard:SetSize(238, 358)
     listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
     page.sessionRows = {}
-    for index = 1, 12 do
+    for index = 1, 11 do
         local row = CreateButton(listCard, "", 206, 23, function()
             -- Ein Eintrag ist ein Abend, nicht eine Quelle. Gewaehlt wird die
             -- vollstaendigste Auswertung; auf die anderen Quellen fuehren die
@@ -5943,6 +5944,22 @@ function GC.UI:BuildStatisticsPage()
     page.sessionEmpty = CreateLabel(listCard, "Noch keine Auswertung vorhanden.", { muted = true, width = 200, height = 40, vertical = "TOP" })
     page.sessionEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -52)
 
+    -- Löschen mit Scharfschalt-Klick, beschränkt auf die Ränge mit
+    -- Mitgliederpflege-Zugriff (in den Einstellungen einstellbar).
+    page.deleteSessionButton = CreateButton(listCard, "Sitzung löschen", 206, 26, function()
+        if not page.deleteArmed then
+            page.deleteArmed = GC.RaidMonitor.selectedSessionID
+            page.deleteSessionButton:SetText("Wirklich löschen?")
+            return
+        end
+        page.deleteArmed = nil
+        page.deleteSessionButton:SetText("Sitzung löschen")
+        local ok, message = GC.RaidMonitor:DeleteEvening(GC.RaidMonitor.selectedSessionID)
+        page:SetActionStatus(message, ok)
+        GC.UI:RefreshStatistics()
+    end)
+    page.deleteSessionButton:SetPoint("BOTTOMLEFT", listCard, "BOTTOMLEFT", 16, 10)
+
     local detailCard = CreateCard(page, "Teilnehmer")
     detailCard:SetSize(526, 358)
     detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
@@ -5955,17 +5972,28 @@ function GC.UI:BuildStatisticsPage()
     -- Tabellenkoepfe beginnen und dazwischen kein Platz ist.
     page.sessionSourceButtons = {}
     for index = 1, 3 do
-        local button = CreateButton(detailCard, "", 118, 20, function()
+        local button = CreateButton(detailCard, "", 96, 20, function()
             local target = GC.UI.pages.STATISTICS.sessionSourceButtons[index].summaryID
             if target then
                 GC.RaidMonitor.selectedSessionID = target
                 GC.UI:RefreshStatistics()
             end
         end)
-        button:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 146 + ((index - 1) * 122), -14)
+        button:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 146 + ((index - 1) * 100), -14)
         button:Hide()
         page.sessionSourceButtons[index] = button
     end
+    -- Direkt neben den Quellen: öffnet das Detailfenster gleich im
+    -- Vergleichsmodus Live gegen Logs (Owner-Wunsch).
+    page.sessionCompareButton = CreateButton(detailCard, "Vergleich", 96, 20, function()
+        GC.UI:ShowSessionReview()
+        local review = GC.UI.sessionReview
+        if review then
+            review.compare = true
+            GC.UI:RefreshSessionReview()
+        end
+    end)
+    page.sessionCompareButton:Hide()
 
     -- Elixiere haben eine eigene Spalte. Sie mit Flaeschchen zusammenzufassen
     -- war ein Fehler: In einem Raid, in dem niemand Flaeschchen nimmt, stand
@@ -6019,7 +6047,7 @@ function GC.UI:BuildStatisticsPage()
 
     local scroll = CreateModernScrollFrame(detailCard)
     scroll:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 14, -86)
-    scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 14)
+    scroll:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 30)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(492)
     content:SetHeight(1100)
@@ -6030,12 +6058,15 @@ function GC.UI:BuildStatisticsPage()
     -- Auswertung und schaltet die Spaltensortierung ab. Ein Klick auf einen
     -- Spaltenkopf sortiert wieder nach Spalte; die Handordnung bleibt
     -- gemerkt, bis erneut gezogen wird.
+    --
+    -- Der Hinweis steht unten: Oben rechts sitzen jetzt die Quellenknöpfe,
+    -- und beide zusammen quetschten sich gegenseitig.
     CreateLabel(detailCard, "Zeilen ziehen ordnet von Hand", {
         muted = true,
         font = "GameFontNormalSmall",
         align = "RIGHT",
         width = 220,
-    }):SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -16, -20)
+    }):SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -16, 8)
 
     page.participantRows = {}
     for index = 1, 40 do
@@ -6187,18 +6218,32 @@ function GC.UI:RefreshStatistics()
         monitor.selectedSessionID = selectedID
     end
 
+    -- Der scharfgeschaltete Löschknopf entschärft sich, sobald eine andere
+    -- Sitzung gewählt wird - sonst löschte der zweite Klick die falsche.
+    if page.deleteArmed and page.deleteArmed ~= selectedID then
+        page.deleteArmed = nil
+        page.deleteSessionButton:SetText("Sitzung löschen")
+    end
+    SetButtonEnabled(page.deleteSessionButton,
+        #evenings > 0 and GC.Roster:CanAccessMemberCare())
+
     for index, row in ipairs(page.sessionRows) do
         local evening = evenings[index]
         row:SetShown(evening ~= nil)
         if evening then
             local summary = evening.summary
             local zone = summary.zone ~= "" and summary.zone or "Raid"
-            local marks = {}
+            -- Kompakt und einzeilig: Nur die Zusatzquellen ("+Logs"), nicht
+            -- die volle Liste - "[Live+Logs]" brach in die zweite Zeile um.
+            local extras = {}
             for _, candidate in ipairs(evening.sources) do
-                marks[#marks + 1] = SESSION_SOURCE_MARK[candidate.source or "LIVE"] or "?"
+                if (candidate.source or "LIVE") ~= "LIVE" then
+                    extras[#extras + 1] = SESSION_SOURCE_MARK[candidate.source] or "?"
+                end
             end
             row:SetText(FormatSessionDate(summary) .. "  " .. zone
-                .. (#marks > 1 and ("  [" .. table.concat(marks, "+") .. "]") or ""))
+                .. (#evening.sources > 1 and #extras > 0
+                    and ("  |cff4ec9ff+" .. table.concat(extras, "+") .. "|r") or ""))
             local active = false
             for _, candidate in ipairs(evening.sources) do
                 active = active or candidate.id == selectedID
@@ -6220,15 +6265,32 @@ function GC.UI:RefreshStatistics()
     end
 
     -- Die Quellenknöpfe erscheinen nur, wenn es wirklich mehr als eine gibt.
+    -- Rechtsbündig, kurze Namen ("Logs" statt "Warcraft Logs"), und die
+    -- gerade angezeigte Quelle ist als aktiv MARKIERT statt ausgegraut -
+    -- ausgegraut las sich wie "nicht verfügbar", nicht wie "gewählt".
     local evening = selected and monitor:GetEveningOf(selectedID)
-    for index, button in ipairs(page.sessionSourceButtons) do
-        local candidate = evening and #evening.sources > 1 and evening.sources[index] or nil
+    local multiSource = evening ~= nil and #evening.sources > 1
+    page.sessionCompareButton:SetShown(multiSource)
+    local rightOffset = -16
+    if multiSource then
+        page.sessionCompareButton:ClearAllPoints()
+        page.sessionCompareButton:SetPoint("TOPRIGHT", page.sessionCompareButton:GetParent(),
+            "TOPRIGHT", rightOffset, -14)
+        rightOffset = rightOffset - 100
+    end
+    for index = #page.sessionSourceButtons, 1, -1 do
+        local button = page.sessionSourceButtons[index]
+        local candidate = multiSource and evening.sources[index] or nil
         button.summaryID = candidate and candidate.id or nil
         button:SetShown(candidate ~= nil)
         if candidate then
-            button:SetText((SESSION_SOURCE_LABEL[candidate.source or "LIVE"] or "?")
+            button:ClearAllPoints()
+            button:SetPoint("TOPRIGHT", button:GetParent(), "TOPRIGHT", rightOffset, -14)
+            rightOffset = rightOffset - 100
+            button:SetText((SESSION_SOURCE_MARK[candidate.source or "LIVE"] or "?")
                 .. " (" .. #(candidate.participants or {}) .. ")")
-            SetButtonEnabled(button, candidate.id ~= selectedID)
+            SetButtonEnabled(button, true)
+            button:SetActive(candidate.id == selectedID)
         end
     end
 
@@ -6336,10 +6398,21 @@ function GC.UI:RefreshStatistics()
             -- Runen laufen bei den Traenken mit, Elixiere haben eine eigene
             -- Spalte. Oele und Steine stehen im Tooltip.
             row.potions:SetText((consumables.POTION or 0) + (consumables.RUNE or 0))
-            row.flasks:SetText(consumables.FLASK or 0)
-            row.elixirs:SetText(consumables.ELIXIR or 0)
-            row.food:SetText(consumables.FOOD or 0)
+            local flaskCount = consumables.FLASK or 0
+            local elixirCount = consumables.ELIXIR or 0
+            local foodCount = consumables.FOOD or 0
+            row.flasks:SetText(flaskCount)
+            row.elixirs:SetText(elixirCount)
+            row.food:SetText(foodCount)
             row.drums:SetText(consumables.DRUM or 0)
+            -- Rot, wo die Raidvorbereitung fehlt (Owner-Wunsch): Essen zählt
+            -- für sich; Fläschchen und Elixiere decken einander - ein
+            -- Fläschchen ersetzt beide Elixiere, also ist nur BEIDES auf
+            -- null wirklich unversorgt.
+            local uncovered = flaskCount == 0 and elixirCount == 0
+            SetTextColor(row.flasks, uncovered and THEME.danger or THEME.text)
+            SetTextColor(row.elixirs, uncovered and THEME.danger or THEME.text)
+            SetTextColor(row.food, foodCount == 0 and THEME.danger or THEME.text)
         else
             row.participant = nil
         end
@@ -7950,6 +8023,9 @@ function GC.UI:RefreshSessionReview()
                 row.name:SetText(participant.name)
                 row.name:SetTextColor(ClassColor(participant.classFile))
                 local values = ReviewValues(participant)
+                -- Wie auf der Seite: FLASK/ELIXIR rot nur wenn BEIDES fehlt
+                -- (ein Fläschchen ersetzt beide Elixiere), FOOD rot bei null.
+                local uncovered = (values.flask or 0) == 0 and (values.elix or 0) == 0
                 for _, col in ipairs(REVIEW_COLS) do
                     local cell = row.cells[col.key]
                     cell:SetText(ReviewCellText(col.key, values))
@@ -7962,6 +8038,10 @@ function GC.UI:RefreshSessionReview()
                         else
                             SetTextColor(cell, THEME.text)
                         end
+                    elseif (col.key == "flask" or col.key == "elix") and uncovered then
+                        SetTextColor(cell, THEME.danger)
+                    elseif col.key == "food" and (values.food or 0) == 0 then
+                        SetTextColor(cell, THEME.danger)
                     else
                         SetTextColor(cell, THEME.text)
                     end

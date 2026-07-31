@@ -374,6 +374,42 @@ function GC.RaidMonitor:StoreSummary(summary)
     return true
 end
 
+-- Löscht einen ganzen Abend mit allen Quellen (Live, Logs, Datei) aus dem
+-- lokalen Bestand. Nur lokal: Andere Clients behalten ihre Kopien, und
+-- "Auswertung anfordern" kann Gelöschtes bewusst zurückholen.
+--
+-- Löschen dürfen nur die Ränge, die auch die Mitgliederpflege öffnen
+-- (Standard: Offiziere oder höher). Der Kreis ist in den Einstellungen
+-- einstellbar und wird gildenweit synchronisiert.
+function GC.RaidMonitor:DeleteEvening(sessionID)
+    if not GC.Roster:CanAccessMemberCare() then
+        return false, "Nur die in den Einstellungen freigegebenen Ränge dürfen Auswertungen löschen."
+    end
+    local evening = self:GetEveningOf(sessionID)
+    if not evening then
+        return false, "Keine Auswertung gewählt."
+    end
+    local drop = {}
+    local dropped = 0
+    for _, summary in ipairs(evening.sources) do
+        drop[summary.id] = true
+        dropped = dropped + 1
+    end
+    local sessions = GC.DB:GetGuild().raidSessions
+    for index = #sessions, 1, -1 do
+        if drop[sessions[index].id] then
+            table.remove(sessions, index)
+        end
+    end
+    if self.selectedSessionID and drop[self.selectedSessionID] then
+        self.selectedSessionID = nil
+    end
+    GC:FireCallback("RAID_SESSION_UPDATED")
+    return true, dropped > 1
+        and ("Abend gelöscht (" .. dropped .. " Quellen).")
+        or "Auswertung gelöscht."
+end
+
 function GC.RaidMonitor:GetSummaries()
     return GC.DB:GetGuild().raidSessions or {}
 end

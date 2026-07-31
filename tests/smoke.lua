@@ -5284,4 +5284,63 @@ do
     addon.UI:RefreshGear()
 end
 
+-- === Sitzungen löschen: nur freigegebene Ränge, ganzer Abend ================
+-- Blockvariablen als del_-Globals: Die Hauptfunktion steht am 200-Locals-Limit.
+do
+    del_sessionsRef = addon.DB:GetGuild().raidSessions
+    del_savedList = {}
+    for index, stored in ipairs(del_sessionsRef) do
+        del_savedList[index] = stored
+    end
+    del_memberCare = addon.DB:GetGuild().memberCare
+    del_savedConfigured = del_memberCare.accessRanksConfigured
+    del_savedRanks = del_memberCare.accessRanks
+    -- GetMember probiert zwei Schlüssel (voller Name und Kurzname); für den
+    -- Verbotsfall müssen beide leer sein.
+    del_ownKey = addon.Util.NormalizeName(addon.Util.PlayerShortName(addon:GetPlayerFullName()))
+    del_ownFullKey = addon.Util.NormalizeName(addon:GetPlayerFullName())
+    addon.Roster.membersByName = addon.Roster.membersByName or {}
+    del_savedOwnMember = addon.Roster.membersByName[del_ownKey]
+    del_savedOwnFullMember = addon.Roster.membersByName[del_ownFullKey]
+
+    addon.RaidMonitor:StoreSummary({
+        id = "LIVE:delA", source = "LIVE", startedAt = 1753400000, endedAt = 1753410000,
+        zone = "Karazhan", pulls = 3, kills = 3, wipes = 0,
+        participants = { { name = "Alphax" } },
+    })
+    addon.RaidMonitor:StoreSummary({
+        id = "WCL:delB", source = "WCL", startedAt = 1753400100, endedAt = 1753409900,
+        zone = "Karazhan", pulls = 3, kills = 3, wipes = 0,
+        participants = { { name = "Alphax" } },
+    })
+
+    -- Ohne freigegebenen Rang wird abgelehnt.
+    addon.Roster.membersByName[del_ownKey] = nil
+    addon.Roster.membersByName[del_ownFullKey] = nil
+    del_okDenied = addon.RaidMonitor:DeleteEvening("LIVE:delA")
+    assert(del_okDenied == false, "Das Löschen lief ohne Berechtigung durch")
+    assert(addon.RaidMonitor:GetSummary("LIVE:delA") ~= nil, "Die Ablehnung löschte trotzdem")
+
+    -- Mit Mitgliederpflege-Rang verschwindet der ganze Abend (beide Quellen).
+    addon.Roster.membersByName[del_ownKey] = { rankIndex = 1, rank = "Offizier" }
+    del_memberCare.accessRanksConfigured = true
+    del_memberCare.accessRanks = { ["1"] = true }
+    del_okDelete, del_message = addon.RaidMonitor:DeleteEvening("LIVE:delA")
+    assert(del_okDelete == true, "Das Löschen schlug fehl: " .. tostring(del_message))
+    assert(addon.RaidMonitor:GetSummary("LIVE:delA") == nil
+        and addon.RaidMonitor:GetSummary("WCL:delB") == nil,
+        "Das Löschen entfernte nicht beide Quellen des Abends")
+
+    del_memberCare.accessRanksConfigured = del_savedConfigured
+    del_memberCare.accessRanks = del_savedRanks
+    addon.Roster.membersByName[del_ownKey] = del_savedOwnMember
+    addon.Roster.membersByName[del_ownFullKey] = del_savedOwnFullMember
+    for index = #del_sessionsRef, 1, -1 do
+        del_sessionsRef[index] = nil
+    end
+    for index, stored in ipairs(del_savedList) do
+        del_sessionsRef[index] = stored
+    end
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
