@@ -298,6 +298,22 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.50 – Gildenaufträge: die Werkstatt nimmt Bestellungen an
+
+Stufe 1 des abgenommenen Konzepts (`docs/KONZEPT-werkstatt-gildenauftraege.md`), umgesetzt in einem neuen Modul `GuildCopilot/Orders.lua` plus Board, Dialogen und Kompakt-Tracker in `UI.lua`:
+
+- **Aufträge auf Katalogrezepte:** „In Auftrag geben" sitzt direkt an der Rezeptkarte der bestehenden Suche. Menge, Materialmodell (A: Auftraggeber liefert / B: Gildenbank / C: Beschaffung mit Kostenrahmen), Übergabeart (persönlich/Post), Trinkgeld und Notiz werden beim Erstellen festgelegt – die Annahme ist die Zustimmung zu genau diesen Bedingungen;
+- **Auftragnehmer ist der Account, nicht der Charakter:** Angenommen werden darf vom Twink, gefertigt wird mit dem Charakter, der das Rezept laut geteiltem Katalog kann; bei mehreren fragt ein Dialog. Wer das Rezept nirgends hat, bekommt keinen Annehmen-Knopf. Fremde Clients prüfen Annahmen gegen den Katalog und spätere Schritte gegen den `accountTag` aus dem Handshake;
+- **genau einer gleichzeitig:** Die Doppelannahme löst dieselbe deterministische Regel wie überall im Addon – frühester Zeitstempel gewinnt, bei Gleichstand die kleinere Kennung; der Unterlegene bekommt eine klare Meldung;
+- **Statusmodell mit Verlauf:** Offen → angenommen → in Arbeit → gefertigt → (versandt) → erhalten → abgeschlossen, bei gemeldeten Kosten mit zweiseitigem Abschluss (erst „erstattet", dann „Erstattung erhalten"). Jeder Schritt steht mit Zeit, Charakter und optionaler Notiz im Verlauf (12 Einträge je Auftrag); an jedem Auftrag steht, wer als Nächstes dran ist;
+- **Board als zweiter Werkstatt-Reiter:** „Du bist dran" oben, offene Aufträge der Gilde mit „nur machbare"-Filter, Abgeschlossenes darunter. Offiziers-Abbruchrecht über die Mitgliederpflege-Rangfreigabe, Rückfall-Knopf nach 3 Tagen Stillstand oder Gildenaustritt des Auftragnehmers;
+- **Kompakt-Tracker** nach dem Werbebalken-Muster (Owner-Entscheidung: Stufe 1): frei verschiebbar, zeigt bis zu drei „du bist dran"-Zeilen und nur dann sich selbst; Klick öffnet das Board;
+- **Synchronisierung als `O`-Familie:** Jede Änderung sendet Kern + Zustand (jede Nachricht ≤ 255 Bytes, ein Test wacht darüber), beim Login gleicht eine Anfrage mit Zeitstempel ab, Antworten laufen gedrosselt und gezielt per Flüstern über die Bulk-Warteschlange. Alte Clients ignorieren die Familie einfach;
+- **Grenzen aus dem Konzept:** höchstens 5 offene Aufträge je Account, offene verfallen nach 14 Tagen, Historie 20, Gesamtdeckel 60;
+- abgesichert durch zwei neue Testblöcke: der komplette Modell-C-Lebenslauf über die echte Sync-Weiche, Twink-Annahme, Doppelannahme, Rechteprüfung (Fremd-Actor, Offiziers-Abbruch), Drosselung, Verfall und Deckel sowie Board-/Tracker-Sichtbarkeit.
+
+**Abweichungen vom Konzept, bewusst:** Der Flüster-Knopf zur Übergabe-Vereinbarung und die Vorbelegung des Chatfensters fehlen noch (Stufe 2); die Notiz ist auf 60 statt 120 Bytes begrenzt, damit jede Zustandsnachricht sicher in eine Chatnachricht passt; ein automatischer Sprung von „angenommen" zu „in Arbeit" bei vollständigen eigenen Materialien entfiel zugunsten eines einheitlichen Ablaufs – „Materialien vollständig" ist immer ein bewusster Klick.
+
 ## 0.9.49 – Performance von Grund auf: Schuebe sammeln statt pro Ereignis zeichnen
 
 Die systematische Durchsicht aller Ereignispfade nach den Meldungen aus der Gilde. Geprueft wurde jede Ereignisregistrierung, jeder OnUpdate-Handler und jeder Callback-Trichter; vieles war bereits richtig geloest (Roster-Entprellung, Taschen-Scans, Chat-Gates, Fremdpraefix-Verwurf im Sync). Fuenf Stellen waren es nicht:

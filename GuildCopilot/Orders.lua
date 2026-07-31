@@ -1,0 +1,1091 @@
+local _, GC = ...
+
+-- Gildenaufträge: dokumentierte Absprachen über Katalogrezepte.
+-- Konzept und Owner-Entscheidungen: docs/KONZEPT-werkstatt-gildenauftraege.md.
+--
+-- Das Modul ist eine Koordinationsschicht. Es bewegt weder Gold noch Waren;
+-- es hält fest, was vereinbart wurde, wer als Nächstes dran ist, und
+-- protokolliert jeden Schritt. Auftragnehmer ist immer der Account, nicht
+-- der Charakter: Angenommen werden darf vom Twink, gefertigt wird mit dem
+-- Charakter, der das Rezept laut Katalog beherrscht.
+
+GC.Orders = {
+    lastAnswerAt = 0,
+    lastRequestAt = 0,
+}
+
+local MAX_OPEN_PER_ACCOUNT = 5
+local OPEN_TTL = 14 * 24 * 60 * 60
+local HISTORY_CAP = 20
+local TOTAL_CAP = 60
+local STALE_ACCEPT_SECONDS = 3 * 24 * 60 * 60
+local MAX_LOG_ENTRIES = 12
+local MAX_NOTE_BYTES = 60
+local MAX_NAME_BYTES = 30
+local MIN_ANSWER_INTERVAL = 30
+
+-- Reihenfolge = Lebenslauf. RECEIVED gibt es nur, wenn nach dem Erhalt noch
+-- eine Erstattung offen ist (Materialmodell C mit gemeldeten Kosten).
+local STATUS = {
+    OPEN = true, ACCEPTED = true, WORKING = true, CRAFTED = true,
+    SHIPPED = true, RECEIVED = true, DONE = true, CANCELLED = true,
+}
+
+local TERMINAL = { DONE = true, CANCELLED = true }
+
+GC.OrderStatusLabels = {
+    OPEN = "Offen",
+    ACCEPTED = "Angenommen",
+    WORKING = "In Arbeit",
+    CRAFTED = "Gefertigt",
+    SHIPPED = "Versandt",
+    RECEIVED = "Erhalten – Erstattung offen",
+    DONE = "Abgeschlossen",
+    CANCELLED = "Abgebrochen",
+}
+
+GC.OrderModelLabels = {
+    A = "Auftraggeber liefert Materialien",
+    B = "Materialien aus der Gildenbank",
+    C = "Auftragnehmer besorgt, wird erstattet",
+}
+
+GC.OrderDeliveryLabels = {
+    TRADE = "Persönliche Übergabe",
+    MAIL = "Per Post",
+}
+
+-- Logereignisse. NOT ist die freie Notiz an die Gegenseite.
+local EVENT_LABELS = {
+    CRT = "Auftrag erstellt",
+    ACC = "Angenommen",
+    MAT = "Materialien vollständig",
+    CRA = "Gefertigt",
+    SNT = "Versandt",
+    RCV = "Erhalten",
+    RMB = "Erstattung überwiesen",
+    RMR = "Erstattung erhalten",
+    RET = "Zurückgelegt",
+    CXL = "Abgebrochen",
+    NOT = "Notiz",
+}
+GC.OrderEventLabels = EVENT_LABELS
+
+local function Sanitized(value, maximumBytes)
+    value = GC.Util.Trim(value)
+    value = value:gsub("[|]", " ")
+    return GC.Util.SafeChatText(value, maximumBytes or MAX_NOTE_BYTES)
+end
+
+function GC.Orders.FormatMoney(copper)
+    copper = math.max(0, math.floor(tonumber(copper) or 0))
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor((copper % 10000) / 100)
+    local rest = copper % 100
+    local parts = {}
+    if gold > 0 then parts[#parts + 1] = gold .. "g" end
+    if silver > 0 then parts[#parts + 1] = silver .. "s" end
+    if rest > 0 or #parts == 0 then parts[#parts + 1] = rest .. "k" end
+    return table.concat(parts, " ")
+end
+
+function GC.Orders:GetStore()
+    local workshop = GC.DB:GetGuild().workshop
+    workshop.orders = workshop.orders or {}
+    return workshop.orders
+end
+
+function GC.Orders:GetOrder(orderID)
+    return self:GetStore()[tostring(orderID or "")]
+end
+
+local function SameCharacter(left, right)
+    if not left or not right then
+        return false
+    end
+    local a = GC.Util.NormalizeName(left)
+    local b = GC.Util.NormalizeName(right)
+    if a == b then
+        return true
+    end
+    return GC.Util.NormalizeName(GC.Util.PlayerShortName(left))
+        == GC.Util.NormalizeName(GC.Util.PlayerShortName(right))
+end
+
+-- === Wer kann was fertigen? =================================================
+
+-- Eigene Charaktere (Account-lokal, aus den gemeinsamen SavedVariables), die
+-- das Rezept beherrschen. Grundlage der Twink-Regel auf der Annehmen-Seite.
+function GC.Orders:GetOwnCrafters(recipeKey)
+    recipeKey = tostring(recipeKey or "")
+    local candidates = {}
+    local seen = {}
+    for _, entry in ipairs(GC.Workshop:GetAccountProfessions()) do
+        local recipes = entry.profession and entry.profession.recipes
+        if recipes and recipes[recipeKey] then
+            local key = GC.Util.NormalizeName(entry.crafter)
+            if not seen[key] then
+                seen[key] = true
+                candidates[#candidates + 1] = entry.crafter
+            end
+        end
+    end
+    table.sort(candidates)
+    return candidates
+end
+
+-- Kann dieser Charakter das Rezept laut geteiltem Wissen fertigen? Prüft den
+-- gildenweiten Herstellerindex und die eigenen Charaktere. Das ist die
+-- Empfangsprüfung für Annahmen: nur Katalogwissen zählt, keine Behauptung.
+function GC.Orders:IsKnownCrafter(characterName, recipeKey)
+    recipeKey = tostring(recipeKey or "")
+    if GC.Util.Trim(characterName) == "" or recipeKey == "" then
+        return false
+    end
+    for _, own in ipairs(self:GetOwnCrafters(recipeKey)) do
+        if SameCharacter(own, characterName) then
+            return true
+        end
+    end
+    local crafters = GC.Workshop:GetGuildWorkshop().crafters or {}
+    local entry = crafters[GC.Util.NormalizeName(characterName)]
+        or crafters[GC.Util.NormalizeName(GC.Util.PlayerShortName(characterName))]
+    if not entry then
+        return false
+    end
+    for _, profession in pairs(entry.professions or {}) do
+        if profession.recipeKeys and profession.recipeKeys[recipeKey] then
+            return true
+        end
+        if profession.recipes and profession.recipes[recipeKey] then
+            return true
+        end
+    end
+    return false
+end
+
+-- Gehört der Absender zum Auftragnehmer-Account? Erst der accountTag aus dem
+-- Handshake, ersatzweise die beiden im Auftrag benannten Charaktere.
+function GC.Orders:IsAcceptorCharacter(order, characterName)
+    if not order or GC.Util.Trim(characterName) == "" then
+        return false
+    end
+    if SameCharacter(order.crafter, characterName)
+        or SameCharacter(order.acceptedVia, characterName) then
+        return true
+    end
+    local tag = GC.Util.Trim(order.acceptedByTag)
+    if tag == "" then
+        return false
+    end
+    if tag == GC.DB:GetAccountTag() then
+        -- Eigene Charaktere kennt der Client selbst.
+        local ownName = GC:GetPlayerFullName()
+        if SameCharacter(ownName, characterName) then
+            return true
+        end
+        for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
+            local name = (type(character) == "table" and character.fullName) or characterKey
+            if SameCharacter(name, characterName) then
+                return true
+            end
+        end
+    end
+    local users = GC.DB:GetGuild().addonUsers or {}
+    local entry = users[GC.Util.NormalizeName(characterName)]
+        or users[GC.Util.NormalizeName(GC.Util.PlayerShortName(characterName))]
+    return entry ~= nil and GC.Util.Trim(entry.accountTag) == tag
+end
+
+function GC.Orders:IsCreatorCharacter(order, characterName)
+    return order ~= nil and SameCharacter(order.createdBy, characterName)
+end
+
+-- Offiziers-Abbruchrecht (Owner-Entscheidung 2): dieselbe Rangfreigabe wie
+-- die Mitgliederpflege.
+function GC.Orders:CanAdministrate(characterName)
+    return GC.Roster:CanAccessMemberCare(characterName)
+end
+
+-- === Verlauf ================================================================
+
+local function AppendLog(order, at, by, event, note)
+    order.log = order.log or {}
+    at = tonumber(at) or GC.Util.Now()
+    by = Sanitized(by, MAX_NAME_BYTES)
+    note = Sanitized(note, MAX_NOTE_BYTES)
+    for _, entry in ipairs(order.log) do
+        if entry.at == at and entry.event == event
+            and GC.Util.NormalizeName(entry.by) == GC.Util.NormalizeName(by) then
+            return false
+        end
+    end
+    order.log[#order.log + 1] = { at = at, by = by, event = event, note = note }
+    table.sort(order.log, function(left, right)
+        return (left.at or 0) < (right.at or 0)
+    end)
+    while #order.log > MAX_LOG_ENTRIES do
+        table.remove(order.log, 1)
+    end
+    return true
+end
+
+-- === Wer ist dran? ==========================================================
+
+-- Liefert "CREATOR", "ACCEPTOR" oder nil (terminal/offen) plus die passende
+-- Handlungsaufforderung. Das ist die eine Wahrheit für Board, Reiterzähler,
+-- Tracker und Minimap-Punkt.
+function GC.Orders:GetNextActor(order)
+    if not order or TERMINAL[order.status] then
+        return nil, ""
+    end
+    if order.status == "OPEN" then
+        return nil, "Wartet auf einen Hersteller."
+    end
+    if order.status == "ACCEPTED" then
+        if order.materialModel == "A" then
+            return "CREATOR", "Materialien an " .. GC.Util.PlayerShortName(order.crafter or "?") .. " liefern."
+        end
+        return "ACCEPTOR", "Materialien beschaffen und „vollständig“ melden."
+    end
+    if order.status == "WORKING" then
+        return "ACCEPTOR", "Fertigen und „gefertigt“ melden."
+    end
+    if order.status == "CRAFTED" then
+        if order.delivery == "MAIL" then
+            return "ACCEPTOR", "An " .. GC.Util.PlayerShortName(order.createdBy or "?") .. " versenden."
+        end
+        return "CREATOR", "Übergabe vereinbaren und „erhalten“ bestätigen."
+    end
+    if order.status == "SHIPPED" then
+        return "CREATOR", "Post prüfen und „erhalten“ bestätigen."
+    end
+    if order.status == "RECEIVED" then
+        if (order.reimbursedAt or 0) == 0 then
+            return "CREATOR", "Erstattung von " .. GC.Orders.FormatMoney(order.actualCost) .. " überweisen."
+        end
+        return "ACCEPTOR", "„Erstattung erhalten“ bestätigen."
+    end
+    return nil, ""
+end
+
+-- Zählt Aufträge, bei denen der eigene Account als Nächstes dran ist.
+function GC.Orders:GetActionableCount()
+    local count = 0
+    local ownTag = GC.DB:GetAccountTag()
+    local ownName = GC:GetPlayerFullName()
+    for _, order in pairs(self:GetStore()) do
+        local actor = self:GetNextActor(order)
+        if actor == "CREATOR" and self:IsCreatorCharacter(order, ownName) then
+            count = count + 1
+        elseif actor == "ACCEPTOR" and GC.Util.Trim(order.acceptedByTag) ~= ""
+            and order.acceptedByTag == ownTag then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- === Übergänge ==============================================================
+
+local function ClearAcceptor(order)
+    order.acceptedByTag = ""
+    order.acceptedAt = 0
+    order.crafter = ""
+    order.acceptedVia = ""
+    order.actualCost = 0
+    order.reimbursedAt = 0
+end
+
+-- Eine Zustandsänderung, lokal ausgeführt und anschließend gesendet. Alle
+-- eigenen Aktionen und alle Empfangswege laufen durch dieselbe Prüfung.
+local function Transition(self, order, event, actor, at, extra, remote)
+    at = tonumber(at) or GC.Util.Now()
+    extra = extra or {}
+    local status = order.status
+
+    if TERMINAL[status] and event ~= "NOT" then
+        return false, "Der Auftrag ist bereits abgeschlossen."
+    end
+
+    if event == "ACC" then
+        if status ~= "OPEN" then
+            return false, "Der Auftrag ist nicht mehr offen."
+        end
+        local crafter = GC.Util.Trim(extra.crafter)
+        if crafter == "" or not self:IsKnownCrafter(crafter, order.recipeKey) then
+            return false, "Laut Katalog beherrscht dieser Charakter das Rezept nicht."
+        end
+        order.status = "ACCEPTED"
+        order.acceptedByTag = Sanitized(extra.accountTag, 12)
+        order.acceptedAt = at
+        order.crafter = Sanitized(crafter, MAX_NAME_BYTES)
+        order.acceptedVia = Sanitized(actor, MAX_NAME_BYTES)
+    elseif event == "MAT" then
+        if status ~= "ACCEPTED" then
+            return false, "Materialien lassen sich nur nach der Annahme melden."
+        end
+        if not self:IsAcceptorCharacter(order, actor) then
+            return false, "Nur der Auftragnehmer meldet Materialien."
+        end
+        order.status = "WORKING"
+    elseif event == "CRA" then
+        if status ~= "WORKING" then
+            return false, "Gefertigt setzt „in Arbeit“ voraus."
+        end
+        if not self:IsAcceptorCharacter(order, actor) then
+            return false, "Nur der Auftragnehmer meldet die Fertigung."
+        end
+        order.status = "CRAFTED"
+        local cost = tonumber(extra.actualCost)
+        if order.materialModel == "C" and cost and cost > 0 then
+            order.actualCost = math.floor(cost)
+        end
+    elseif event == "SNT" then
+        if status ~= "CRAFTED" or order.delivery ~= "MAIL" then
+            return false, "Versandt gilt nur für fertige Postaufträge."
+        end
+        if not self:IsAcceptorCharacter(order, actor) then
+            return false, "Nur der Auftragnehmer meldet den Versand."
+        end
+        order.status = "SHIPPED"
+    elseif event == "RCV" then
+        if status ~= "CRAFTED" and status ~= "SHIPPED" then
+            return false, "Erhalten gilt erst nach der Fertigung."
+        end
+        if not self:IsCreatorCharacter(order, actor) then
+            return false, "Nur der Auftraggeber bestätigt den Erhalt."
+        end
+        if order.materialModel == "C" and (order.actualCost or 0) > 0 then
+            order.status = "RECEIVED"
+        else
+            order.status = "DONE"
+        end
+    elseif event == "RMB" then
+        if status ~= "RECEIVED" then
+            return false, "Es ist keine Erstattung offen."
+        end
+        if not self:IsCreatorCharacter(order, actor) then
+            return false, "Nur der Auftraggeber meldet die Erstattung."
+        end
+        order.reimbursedAt = at
+    elseif event == "RMR" then
+        if status ~= "RECEIVED" then
+            return false, "Es ist keine Erstattung offen."
+        end
+        if not self:IsAcceptorCharacter(order, actor) then
+            return false, "Nur der Auftragnehmer bestätigt die Erstattung."
+        end
+        order.status = "DONE"
+    elseif event == "RET" then
+        if status ~= "ACCEPTED" and status ~= "WORKING" then
+            return false, "Nur angenommene Aufträge lassen sich zurücklegen."
+        end
+        -- Zurücklegen darf der Auftragnehmer selbst - oder der Auftraggeber,
+        -- wenn der Auftrag lange stillsteht oder der Account die Gilde
+        -- verlassen hat (Rückfall laut Konzept).
+        local isAcceptor = self:IsAcceptorCharacter(order, actor)
+        local isCreator = self:IsCreatorCharacter(order, actor)
+        if not isAcceptor and not isCreator then
+            return false, "Zurücklegen dürfen nur die Beteiligten."
+        end
+        if isCreator and not isAcceptor and not remote then
+            local idle = at - (order.changedAt or order.acceptedAt or 0)
+            if idle < STALE_ACCEPT_SECONDS and not extra.acceptorLeft then
+                return false, "Der Rückfall steht erst nach "
+                    .. math.floor(STALE_ACCEPT_SECONDS / 86400) .. " Tagen Stillstand offen."
+            end
+        end
+        order.status = "OPEN"
+        ClearAcceptor(order)
+    elseif event == "CXL" then
+        if not self:IsCreatorCharacter(order, actor)
+            and not self:CanAdministrate(actor) then
+            return false, "Abbrechen darf der Auftraggeber oder ein freigegebener Rang."
+        end
+        order.status = "CANCELLED"
+    elseif event == "NOT" then
+        if not self:IsCreatorCharacter(order, actor)
+            and not self:IsAcceptorCharacter(order, actor) then
+            return false, "Notizen dürfen nur die Beteiligten hinterlassen."
+        end
+        if GC.Util.Trim(extra.note or "") == "" then
+            return false, "Die Notiz ist leer."
+        end
+    else
+        return false, "Unbekanntes Ereignis."
+    end
+
+    order.rev = (tonumber(order.rev) or 0) + 1
+    order.changedAt = at
+    AppendLog(order, at, actor, event, extra.note)
+    return true
+end
+
+-- === Serialisierung =========================================================
+
+local SCHEMA = function() return tostring(GC.Constants.SCHEMA_VERSION) end
+
+local function Join(parts)
+    for index = 1, #parts do
+        parts[index] = GC.Util.EscapeField(parts[index])
+    end
+    return table.concat(parts, "|")
+end
+
+-- C: der unveränderliche Kern. Wird bei jeder Änderung mitgesendet, damit
+-- kein Empfänger je vor einem unbekannten Auftrag steht.
+function GC.Orders:BuildCoreMessage(order)
+    return Join({
+        "O", SCHEMA(), "C",
+        order.id,
+        order.recipeKey,
+        order.recipeName or "",
+        tostring(order.quantity or 1),
+        order.createdBy or "",
+        order.createdByTag or "",
+        tostring(order.createdAt or 0),
+        order.materialModel or "A",
+        order.delivery or "TRADE",
+        tostring(order.costLimit or 0),
+        tostring(order.tip or 0),
+        order.note or "",
+    })
+end
+
+-- U: der veränderliche Zustand samt der einen neuen Verlaufszeile.
+function GC.Orders:BuildStateMessage(order, logEntry)
+    return Join({
+        "O", SCHEMA(), "U",
+        order.id,
+        tostring(order.rev or 1),
+        order.status or "OPEN",
+        tostring(order.changedAt or 0),
+        order.acceptedByTag or "",
+        tostring(order.acceptedAt or 0),
+        order.crafter or "",
+        order.acceptedVia or "",
+        tostring(order.actualCost or 0),
+        tostring(order.reimbursedAt or 0),
+        logEntry and tostring(logEntry.at or 0) or "",
+        logEntry and (logEntry.by or "") or "",
+        logEntry and (logEntry.event or "") or "",
+        logEntry and (logEntry.note or "") or "",
+    })
+end
+
+function GC.Orders:BroadcastOrder(order)
+    if not GC.Sync then
+        return
+    end
+    local logEntry = order.log and order.log[#order.log]
+    GC.Sync:Send(self:BuildCoreMessage(order))
+    GC.Sync:Send(self:BuildStateMessage(order, logEntry))
+end
+
+-- === Eigene Aktionen ========================================================
+
+local function NotifyChanged()
+    GC:FireCallback("ORDERS_UPDATED")
+end
+
+function GC.Orders:Create(recipeKey, options)
+    options = options or {}
+    recipeKey = tostring(recipeKey or "")
+    local catalog = GC.Workshop:GetCatalog()
+    local entry
+    for _, candidate in ipairs(catalog) do
+        if candidate.key == recipeKey then
+            entry = candidate
+            break
+        end
+    end
+    if not entry then
+        return false, "Dieses Rezept steht nicht im Katalog der Gilde."
+    end
+    if #entry.crafters == 0 then
+        return false, "Für dieses Rezept ist kein Hersteller bekannt."
+    end
+
+    local ownName = GC:GetPlayerFullName()
+    local ownTag = GC.DB:GetAccountTag()
+    local openCount = 0
+    for _, order in pairs(self:GetStore()) do
+        if order.status == "OPEN" and order.createdByTag == ownTag then
+            openCount = openCount + 1
+        end
+    end
+    if openCount >= MAX_OPEN_PER_ACCOUNT then
+        return false, "Höchstens " .. MAX_OPEN_PER_ACCOUNT .. " offene Aufträge je Account."
+    end
+
+    local model = options.materialModel
+    if model ~= "A" and model ~= "B" and model ~= "C" then
+        model = "A"
+    end
+    local delivery = options.delivery == "MAIL" and "MAIL" or "TRADE"
+    local now = GC.Util.Now()
+    local order = {
+        id = GC.Util.PlayerShortName(ownName) .. "-" .. tostring(now)
+            .. "-" .. tostring(math.random(1000, 9999)),
+        rev = 1,
+        status = "OPEN",
+        recipeKey = recipeKey,
+        recipeName = Sanitized(entry.name, MAX_NAME_BYTES),
+        quantity = math.max(1, math.min(99, math.floor(tonumber(options.quantity) or 1))),
+        createdBy = ownName,
+        createdByTag = ownTag,
+        createdAt = now,
+        changedAt = now,
+        materialModel = model,
+        delivery = delivery,
+        costLimit = model == "C" and math.max(0, math.floor(tonumber(options.costLimit) or 0)) or 0,
+        tip = math.max(0, math.floor(tonumber(options.tip) or 0)),
+        note = Sanitized(options.note, MAX_NOTE_BYTES),
+        acceptedByTag = "",
+        acceptedAt = 0,
+        crafter = "",
+        acceptedVia = "",
+        actualCost = 0,
+        reimbursedAt = 0,
+        log = {},
+    }
+    AppendLog(order, now, ownName, "CRT", order.note)
+    self:GetStore()[order.id] = order
+    self:BroadcastOrder(order)
+    NotifyChanged()
+    return true, "Gildenauftrag erstellt: " .. order.recipeName .. " ×" .. order.quantity .. "."
+end
+
+function GC.Orders:Accept(orderID, crafterName)
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local candidates = self:GetOwnCrafters(order.recipeKey)
+    if #candidates == 0 then
+        return false, "Kein Charakter deines Accounts beherrscht dieses Rezept."
+    end
+    crafterName = GC.Util.Trim(crafterName)
+    if crafterName == "" then
+        crafterName = candidates[1]
+    end
+    local valid = false
+    for _, candidate in ipairs(candidates) do
+        if SameCharacter(candidate, crafterName) then
+            valid = true
+            crafterName = candidate
+            break
+        end
+    end
+    if not valid then
+        return false, "Dieser Charakter gehört nicht zu deinem Account oder kann das Rezept nicht."
+    end
+    if order.createdByTag ~= "" and order.createdByTag == GC.DB:GetAccountTag() then
+        return false, "Den eigenen Auftrag nimmt man nicht selbst an."
+    end
+
+    local ok, message = Transition(self, order, "ACC", GC:GetPlayerFullName(), nil, {
+        crafter = crafterName,
+        accountTag = GC.DB:GetAccountTag(),
+    })
+    if not ok then
+        return false, message
+    end
+    self:BroadcastOrder(order)
+    NotifyChanged()
+    return true, "Angenommen. Es fertigt: " .. GC.Util.PlayerShortName(crafterName) .. "."
+end
+
+local SIMPLE_ACTIONS = {
+    MarkMaterialsComplete = { event = "MAT", done = "Materialien als vollständig gemeldet." },
+    MarkShipped = { event = "SNT", done = "Als versandt gemeldet." },
+    MarkReceived = { event = "RCV", done = "Erhalt bestätigt." },
+    MarkReimbursed = { event = "RMB", done = "Erstattung als überwiesen gemeldet." },
+    ConfirmReimbursed = { event = "RMR", done = "Erstattung bestätigt – Auftrag abgeschlossen." },
+    Cancel = { event = "CXL", done = "Auftrag abgebrochen." },
+}
+
+for methodName, definition in pairs(SIMPLE_ACTIONS) do
+    GC.Orders[methodName] = function(self, orderID, note)
+        local order = self:GetOrder(orderID)
+        if not order then
+            return false, "Der Auftrag ist nicht mehr bekannt."
+        end
+        local ok, message = Transition(self, order, definition.event,
+            GC:GetPlayerFullName(), nil, { note = note })
+        if not ok then
+            return false, message
+        end
+        self:BroadcastOrder(order)
+        NotifyChanged()
+        return true, definition.done
+    end
+end
+
+function GC.Orders:MarkCrafted(orderID, actualCost, note)
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local ok, message = Transition(self, order, "CRA", GC:GetPlayerFullName(), nil, {
+        actualCost = actualCost,
+        note = note,
+    })
+    if not ok then
+        return false, message
+    end
+    self:BroadcastOrder(order)
+    NotifyChanged()
+    return true, "Als gefertigt gemeldet."
+end
+
+function GC.Orders:Return(orderID, note, acceptorLeft)
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local ok, message = Transition(self, order, "RET", GC:GetPlayerFullName(), nil, {
+        note = note,
+        acceptorLeft = acceptorLeft == true,
+    })
+    if not ok then
+        return false, message
+    end
+    self:BroadcastOrder(order)
+    NotifyChanged()
+    return true, "Der Auftrag ist wieder offen."
+end
+
+function GC.Orders:AddNote(orderID, note)
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local ok, message = Transition(self, order, "NOT", GC:GetPlayerFullName(), nil, { note = note })
+    if not ok then
+        return false, message
+    end
+    self:BroadcastOrder(order)
+    NotifyChanged()
+    return true, "Notiz hinterlassen."
+end
+
+-- Steht der Rückfall-Knopf dem Auftraggeber offen? (3 Tage Stillstand oder
+-- Auftragnehmer nicht mehr in der Gilde.)
+function GC.Orders:IsStale(order)
+    if not order or (order.status ~= "ACCEPTED" and order.status ~= "WORKING") then
+        return false
+    end
+    if (GC.Util.Now() - (order.changedAt or 0)) >= STALE_ACCEPT_SECONDS then
+        return true
+    end
+    return self:HasAcceptorLeftGuild(order)
+end
+
+function GC.Orders:HasAcceptorLeftGuild(order)
+    if not order or GC.Util.Trim(order.crafter) == "" then
+        return false
+    end
+    if #GC.Roster.members == 0 then
+        -- Ohne geladenen Roster keine Aussage - lieber kein falscher Rückfall.
+        return false
+    end
+    return GC.Roster:GetMember(order.crafter) == nil
+        and GC.Roster:GetMember(order.acceptedVia) == nil
+end
+
+-- === Empfang ================================================================
+
+local function OrderExpired(createdAt)
+    return (GC.Util.Now() - (tonumber(createdAt) or 0)) > OPEN_TTL
+end
+
+function GC.Orders:ReceiveCore(fields, sender)
+    local orderID = GC.Util.Trim(fields[4])
+    if orderID == "" then
+        return false
+    end
+    local createdBy = fields[8]
+    -- Aufträge erstellt jeder nur für sich selbst.
+    if not SameCharacter(createdBy, sender) then
+        return false
+    end
+    local store = self:GetStore()
+    if store[orderID] then
+        return true
+    end
+    local createdAt = tonumber(fields[10]) or 0
+    if OrderExpired(createdAt) then
+        -- Verspätete Wiederbelebung eines längst verfallenen Auftrags.
+        return false
+    end
+    store[orderID] = {
+        id = orderID,
+        rev = 0, -- der Zustand kommt mit der U-Nachricht
+        status = "OPEN",
+        recipeKey = GC.Util.Trim(fields[5]),
+        recipeName = Sanitized(fields[6], MAX_NAME_BYTES),
+        quantity = math.max(1, math.min(99, math.floor(tonumber(fields[7]) or 1))),
+        createdBy = Sanitized(createdBy, MAX_NAME_BYTES),
+        createdByTag = Sanitized(fields[9], 12),
+        createdAt = createdAt,
+        changedAt = createdAt,
+        materialModel = (fields[11] == "B" or fields[11] == "C") and fields[11] or "A",
+        delivery = fields[12] == "MAIL" and "MAIL" or "TRADE",
+        costLimit = math.max(0, math.floor(tonumber(fields[13]) or 0)),
+        tip = math.max(0, math.floor(tonumber(fields[14]) or 0)),
+        note = Sanitized(fields[15], MAX_NOTE_BYTES),
+        acceptedByTag = "",
+        acceptedAt = 0,
+        crafter = "",
+        acceptedVia = "",
+        actualCost = 0,
+        reimbursedAt = 0,
+        log = {},
+    }
+    AppendLog(store[orderID], createdAt, createdBy, "CRT", store[orderID].note)
+    return true
+end
+
+-- Die Doppelannahme: gleiche Revision, zwei Annehmende. Es gewinnt der
+-- frühere Zeitstempel, bei Gleichstand die kleinere Account-Kennung - jeder
+-- Client kommt ohne Rückfrage zum selben Ergebnis.
+local function IncomingAcceptWins(order, incomingAt, incomingTag)
+    local localAt = tonumber(order.acceptedAt) or 0
+    incomingAt = tonumber(incomingAt) or 0
+    if incomingAt ~= localAt then
+        return incomingAt < localAt
+    end
+    return tostring(incomingTag) < tostring(order.acceptedByTag)
+end
+
+function GC.Orders:ReceiveState(fields, sender)
+    local orderID = GC.Util.Trim(fields[4])
+    local order = self:GetOrder(orderID)
+    if not order then
+        return false
+    end
+    local rev = tonumber(fields[5]) or 0
+    local status = GC.Util.Trim(fields[6])
+    if not STATUS[status] then
+        return false
+    end
+
+    local incomingTag = Sanitized(fields[8], 12)
+    local logAt = tonumber(fields[14])
+    local logBy = GC.Util.Trim(fields[15])
+    local logEvent = GC.Util.Trim(fields[16])
+    local logNote = fields[17]
+
+    if rev <= (tonumber(order.rev) or 0) then
+        -- Gleiche Revision, widersprüchliche Annahme: die deterministische
+        -- Regel entscheidet, und der lokale Verlierer räumt den Platz.
+        if rev == (tonumber(order.rev) or 0)
+            and status == "ACCEPTED" and order.status == "ACCEPTED"
+            and incomingTag ~= "" and incomingTag ~= order.acceptedByTag
+            and SameCharacter(fields[11], sender)
+            and self:IsKnownCrafter(Sanitized(fields[10], MAX_NAME_BYTES), order.recipeKey)
+            and IncomingAcceptWins(order, fields[9], incomingTag) then
+            local lostOwn = order.acceptedByTag == GC.DB:GetAccountTag()
+            order.acceptedByTag = incomingTag
+            order.acceptedAt = tonumber(fields[9]) or 0
+            order.crafter = Sanitized(fields[10], MAX_NAME_BYTES)
+            order.acceptedVia = Sanitized(fields[11], MAX_NAME_BYTES)
+            if logEvent ~= "" then
+                AppendLog(order, logAt, logBy, logEvent, logNote)
+            end
+            if lostOwn then
+                GC:Print(GC.Util.PlayerShortName(order.crafter)
+                    .. " war schneller – der Auftrag „" .. (order.recipeName or "?")
+                    .. "“ liegt wieder bei ihm.")
+            end
+            NotifyChanged()
+            return true
+        end
+        return false
+    end
+
+    -- Berechtigung: Wer meldet diesen Schritt?
+    if logEvent == "ACC" then
+        local crafter = Sanitized(fields[10], MAX_NAME_BYTES)
+        if not SameCharacter(fields[11], sender)
+            or not self:IsKnownCrafter(crafter, order.recipeKey) then
+            return false
+        end
+    elseif logEvent == "MAT" or logEvent == "CRA" or logEvent == "SNT"
+        or logEvent == "RMR" or logEvent == "RET" then
+        if not self:IsAcceptorCharacter(order, sender)
+            and not (logEvent == "RET" and self:IsCreatorCharacter(order, sender)) then
+            return false
+        end
+    elseif logEvent == "RCV" or logEvent == "RMB" then
+        if not self:IsCreatorCharacter(order, sender) then
+            return false
+        end
+    elseif logEvent == "CXL" then
+        if not self:IsCreatorCharacter(order, sender)
+            and not self:CanAdministrate(sender) then
+            return false
+        end
+    elseif logEvent == "NOT" then
+        if not self:IsCreatorCharacter(order, sender)
+            and not self:IsAcceptorCharacter(order, sender) then
+            return false
+        end
+    end
+
+    local previousStatus = order.status
+    order.rev = rev
+    order.status = status
+    order.changedAt = tonumber(fields[7]) or GC.Util.Now()
+    order.acceptedByTag = incomingTag
+    order.acceptedAt = tonumber(fields[9]) or 0
+    order.crafter = Sanitized(fields[10], MAX_NAME_BYTES)
+    order.acceptedVia = Sanitized(fields[11], MAX_NAME_BYTES)
+    order.actualCost = math.max(0, math.floor(tonumber(fields[12]) or 0))
+    order.reimbursedAt = tonumber(fields[13]) or 0
+    if logEvent ~= "" then
+        AppendLog(order, logAt, logBy, logEvent, logNote)
+    end
+
+    self:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
+    NotifyChanged()
+    return true
+end
+
+function GC.Orders:ReceiveLog(fields)
+    local order = self:GetOrder(GC.Util.Trim(fields[4]))
+    if not order then
+        return false
+    end
+    local event = GC.Util.Trim(fields[7])
+    if event == "" or not EVENT_LABELS[event] then
+        return false
+    end
+    if AppendLog(order, tonumber(fields[5]), fields[6], event, fields[8]) then
+        NotifyChanged()
+        return true
+    end
+    return false
+end
+
+-- Dezente Chat-Hinweise: neue machbare Aufträge und Bewegungen an eigenen.
+function GC.Orders:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
+    local ownTag = GC.DB:GetAccountTag()
+    local ownName = GC:GetPlayerFullName()
+    local involved = self:IsCreatorCharacter(order, ownName)
+        or (GC.Util.Trim(order.acceptedByTag) ~= "" and order.acceptedByTag == ownTag)
+    if not involved or order.status == previousStatus then
+        return
+    end
+    local label = GC.OrderStatusLabels[order.status] or order.status
+    GC:Print("Gildenauftrag „" .. (order.recipeName or "?") .. "“: " .. label
+        .. (logBy ~= "" and (" (" .. GC.Util.PlayerShortName(logBy) .. ")") or "") .. ".")
+end
+
+function GC.Orders:NotifyNewOrder(order)
+    if self:IsCreatorCharacter(order, GC:GetPlayerFullName()) then
+        return
+    end
+    local candidates = self:GetOwnCrafters(order.recipeKey)
+    if #candidates == 0 then
+        return
+    end
+    GC:Print("Neuer Gildenauftrag: „" .. (order.recipeName or "?") .. "“ von "
+        .. GC.Util.PlayerShortName(order.createdBy or "?") .. " – dein "
+        .. GC.Util.PlayerShortName(candidates[1]) .. " kann das Rezept.")
+end
+
+-- === Abgleich ===============================================================
+
+function GC.Orders:GetNewestChangeAt()
+    local newest = 0
+    for _, order in pairs(self:GetStore()) do
+        if (order.changedAt or 0) > newest then
+            newest = order.changedAt
+        end
+    end
+    return newest
+end
+
+function GC.Orders:RequestSync()
+    if not GC.Sync then
+        return false
+    end
+    self.lastRequestAt = GC.Util.Now()
+    return GC.Sync:Send(Join({ "O", SCHEMA(), "Q", tostring(self:GetNewestChangeAt()) }))
+end
+
+-- Antwort auf eine Q-Anfrage: alles, was der Anfragende noch nicht kennt,
+-- über die Bulk-Warteschlange - Kern, Zustand und Verlaufszeilen. Mehrere
+-- Antwortende stören nicht: Revisionen und der Verlaufs-Dedup räumen
+-- Doppeltes weg. Der Zufallsversatz verhindert den gleichzeitigen Chor.
+function GC.Orders:AnswerRequest(sinceTimestamp, requester)
+    local now = GC.Util.Now()
+    if (now - (self.lastAnswerAt or 0)) < MIN_ANSWER_INTERVAL then
+        return false
+    end
+    sinceTimestamp = tonumber(sinceTimestamp) or 0
+    local pending = {}
+    for _, order in pairs(self:GetStore()) do
+        if (order.changedAt or 0) > sinceTimestamp then
+            pending[#pending + 1] = order
+        end
+    end
+    if #pending == 0 then
+        return false
+    end
+    self.lastAnswerAt = now
+
+    local function SendAll()
+        for _, order in ipairs(pending) do
+            GC.Sync:SendBulk(self:BuildCoreMessage(order), "WHISPER", requester)
+            GC.Sync:SendBulk(self:BuildStateMessage(order, nil), "WHISPER", requester)
+            for _, entry in ipairs(order.log or {}) do
+                GC.Sync:SendBulk(Join({
+                    "O", SCHEMA(), "L", order.id,
+                    tostring(entry.at or 0), entry.by or "", entry.event or "", entry.note or "",
+                }), "WHISPER", requester)
+            end
+        end
+    end
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(1 + math.random() * 4, SendAll)
+    else
+        SendAll()
+    end
+    return true
+end
+
+function GC.Orders:OnMessage(message, sender, distribution)
+    local fields = GC.Util.SplitFields(message)
+    if fields[1] ~= "O" or tonumber(fields[2]) ~= GC.Constants.SCHEMA_VERSION then
+        return false
+    end
+    local kind = fields[3]
+    if kind == "C" then
+        if self:ReceiveCore(fields, sender) then
+            local order = self:GetOrder(fields[4])
+            if order and (order.rev or 0) == 0 then
+                self:NotifyNewOrder(order)
+                NotifyChanged()
+            end
+            return true
+        end
+        return false
+    elseif kind == "U" then
+        return self:ReceiveState(fields, sender)
+    elseif kind == "L" then
+        return self:ReceiveLog(fields)
+    elseif kind == "Q" and distribution == "GUILD" then
+        return self:AnswerRequest(fields[4], sender)
+    end
+    return false
+end
+
+-- === Aufräumen ==============================================================
+
+function GC.Orders:Prune()
+    local store = self:GetStore()
+    local now = GC.Util.Now()
+
+    -- Offene Aufträge verfallen nach der TTL - bei jedem Client zur gleichen
+    -- Regel, deshalb ohne Netznachricht.
+    for orderID, order in pairs(store) do
+        if order.status == "OPEN" and (now - (order.createdAt or 0)) > OPEN_TTL then
+            store[orderID] = nil
+        end
+    end
+
+    local terminal = {}
+    local total = 0
+    for _, order in pairs(store) do
+        total = total + 1
+        if TERMINAL[order.status] then
+            terminal[#terminal + 1] = order
+        end
+    end
+    table.sort(terminal, function(left, right)
+        if (left.changedAt or 0) ~= (right.changedAt or 0) then
+            return (left.changedAt or 0) < (right.changedAt or 0)
+        end
+        return tostring(left.id) < tostring(right.id)
+    end)
+    local removeTerminal = math.max(#terminal - HISTORY_CAP, total - TOTAL_CAP)
+    for index = 1, math.min(removeTerminal, #terminal) do
+        store[terminal[index].id] = nil
+        total = total - 1
+    end
+
+    if total > TOTAL_CAP then
+        local open = {}
+        for _, order in pairs(store) do
+            if order.status == "OPEN" then
+                open[#open + 1] = order
+            end
+        end
+        table.sort(open, function(left, right)
+            if (left.createdAt or 0) ~= (right.createdAt or 0) then
+                return (left.createdAt or 0) < (right.createdAt or 0)
+            end
+            return tostring(left.id) < tostring(right.id)
+        end)
+        for index = 1, math.min(#open, total - TOTAL_CAP) do
+            store[open[index].id] = nil
+        end
+    end
+end
+
+-- Sortierte Sichten für Board und Tracker.
+function GC.Orders:GetBoard()
+    local ownTag = GC.DB:GetAccountTag()
+    local ownName = GC:GetPlayerFullName()
+    local mine = {}
+    local open = {}
+    local closed = {}
+    for _, order in pairs(self:GetStore()) do
+        local actor, action = self:GetNextActor(order)
+        local isCreator = self:IsCreatorCharacter(order, ownName)
+        local isAcceptor = GC.Util.Trim(order.acceptedByTag) ~= ""
+            and order.acceptedByTag == ownTag
+        local row = {
+            order = order,
+            action = action,
+            yourTurn = (actor == "CREATOR" and isCreator)
+                or (actor == "ACCEPTOR" and isAcceptor),
+            involved = isCreator or isAcceptor,
+        }
+        if TERMINAL[order.status] then
+            if row.involved then
+                closed[#closed + 1] = row
+            end
+        elseif order.status == "OPEN" and not isCreator then
+            row.canAccept = #self:GetOwnCrafters(order.recipeKey) > 0
+            open[#open + 1] = row
+        else
+            mine[#mine + 1] = row
+        end
+    end
+    local function ByTurnThenTime(left, right)
+        if left.yourTurn ~= right.yourTurn then
+            return left.yourTurn
+        end
+        return (left.order.changedAt or 0) > (right.order.changedAt or 0)
+    end
+    table.sort(mine, ByTurnThenTime)
+    table.sort(open, function(left, right)
+        if left.canAccept ~= right.canAccept then
+            return left.canAccept == true
+        end
+        return (left.order.createdAt or 0) > (right.order.createdAt or 0)
+    end)
+    table.sort(closed, function(left, right)
+        return (left.order.changedAt or 0) > (right.order.changedAt or 0)
+    end)
+    return { mine = mine, open = open, closed = closed }
+end
+
+GC:RegisterCallback("PLAYER_LOGIN", GC.Orders, function(self)
+    self:Prune()
+end)

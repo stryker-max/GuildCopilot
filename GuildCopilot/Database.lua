@@ -38,6 +38,14 @@ local DEFAULTS = {
             x = 0,
             y = -220,
         },
+        -- Kompakt-Tracker der Gildenauftraege (Owner-Entscheidung: Stufe 1).
+        -- Er zeigt sich nur, wenn es "du bist dran"-Auftraege gibt; hidden
+        -- merkt sich das ausdrueckliche Wegklicken.
+        orderTracker = {
+            hidden = false,
+            x = 0,
+            y = -300,
+        },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         -- Lokale Automatik des Gear Audits. Bewusst nicht gildenweit: Beides

@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 31.07.2026, nach Release 0.9.49 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.50 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -191,22 +191,22 @@ Sitzung.)*
 
 ---
 
-## 5. Gildenaufträge in der Werkstatt – Konzept abgenommen, bereit zur Umsetzung
+## 5. Gildenaufträge – Stufe 1 UMGESETZT in 0.9.50, Stufe 2 offen
 
-**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md` (Stand 31.07.2026,
-inklusive der fünf Owner-Entscheidungen am Dokumentende – alle Fragen sind
-geklärt, es gibt keinen offenen Vorbehalt mehr).
-Kern: Aufträge auf Katalogrezepte, genau ein Auftragnehmer (Account, nicht
-Charakter – Twink nimmt an, Main fertigt), Statusmodell mit Verlauf, drei
-Materialmodelle (Auftraggeber liefert / Gildenbank / Beschaffung mit
-Kostenrahmen und zweiseitigem Abschluss), Übergabe persönlich oder per Post,
-Offiziers-Abbruchrecht über die Rangfreigabe, Unterreiter in der Werkstatt
-statt Pop-out-Fenster, **Kompakt-Tracker bereits in Stufe 1**.
+**Konzept:** `docs/KONZEPT-werkstatt-gildenauftraege.md`. Stufe 1 ist mit
+0.9.50 vollständig ausgeliefert (Modul `Orders.lua`, Board als zweiter
+Werkstatt-Reiter, Erstellen-/Kosten-/Annahme-Dialoge, Verlauf mit Notizen,
+Kompakt-Tracker, `O`-Sync mit Login-Abgleich, alle Grenzen). Abweichungen
+stehen im ROADMAP-Abschnitt „0.9.50".
 
-**Aufwand:** groß – neue Nachrichtenfamilie `O` mit Manifest-Abgleich,
-Rechteprüfung über `accountTag`, neuer Unterreiter, Tracker. In Etappen
-bauen (Reihenfolge laut Konzept „Stufe 1"), nicht in einer Sitzung. Sinnvoller
-erster Schnitt: Datenmodell + Sync + Statusmodell mit Tests, dann UI.
+**Offen für Stufe 2:**
+- Flüster-Knopf „Übergabe vereinbaren" mit Vorbelegung auf den zuletzt
+  online gesehenen Charakter des anderen Accounts;
+- „Erstattung erhalten"-Feinschliff mit Restbetragsanzeige;
+- gerichteter Auftrag („Wunsch-Hersteller" mit 24 h Vorrang);
+- **im Spiel gegentesten:** Layout des Boards bei vollen Abschnitten, die
+  Dialog-Positionen und der Tracker im Zusammenspiel mit dem Werbebalken –
+  die Tests decken Logik und Sichtbarkeit ab, nicht die Pixel.
 
 ---
 

@@ -668,6 +668,7 @@ local files = {
     "RaidMonitor.lua",
     "GearAudit.lua",
     "Sync.lua",
+    "Orders.lua",
     "Recruitment.lua",
     "Chat.lua",
     "Onboarding.lua",
@@ -4179,6 +4180,310 @@ profile.professionAuto = savedAuto
 profile.professions = savedProfessions
 profile.workshop = savedWorkshop
 guildData.gearAudits = savedAudits
+end
+
+-- === Gildenaufträge =========================================================
+-- Konzept: docs/KONZEPT-werkstatt-gildenauftraege.md. Getestet wird der Kern:
+-- Katalogbindung, Twink-Regel, Doppelannahme, Rechteprüfung, Materialmodell C
+-- mit zweiseitigem Abschluss, Offiziers-Abbruch, Grenzen und Drahtformat.
+-- Blockvariablen sind wegen des 200-Locals-Limits global (orders_-Präfix).
+
+do
+    addon.Roster:Scan()
+    addon.DB:GetGuild().workshop.orders = {}
+    orders_ownTag = addon.DB:GetAccountTag()
+
+    -- Heiler kann das Testrezept laut gildenweitem Katalog.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Heiler-Realm",
+        sharedBy = "Heiler-Realm",
+        professionKey = "verzauberkunst",
+        professionName = "Verzauberkunst",
+        recipeKeys = { "I90001" },
+    })
+
+    -- Ohne Katalogeintrag kein Auftrag.
+    orders_result = addon.Orders:Create("UNBEKANNT123")
+    assert(orders_result == false, "Ein Auftrag ohne Katalogrezept wurde angenommen")
+
+    orders_sentBefore = #sentAddon
+    orders_result, orders_message = addon.Orders:Create("I90001", {
+        materialModel = "C", delivery = "MAIL",
+        costLimit = 500000, tip = 10000, quantity = 2, note = "Bitte bis Mittwoch",
+    })
+    assert(orders_result == true, "Der Gildenauftrag wurde nicht erstellt: " .. tostring(orders_message))
+    assert(#sentAddon == orders_sentBefore + 2, "Erstellen hat nicht Kern und Zustand gesendet")
+
+    orders_orderID, orders_order = nil, nil
+    for id, entry in pairs(addon.Orders:GetStore()) do
+        orders_orderID, orders_order = id, entry
+    end
+    assert(orders_order ~= nil and orders_order.status == "OPEN", "Der neue Auftrag ist nicht offen")
+    assert(orders_order.createdBy == "Tester-Realm" and orders_order.createdByTag == orders_ownTag,
+        "Auftraggeber oder Kennzeichen stimmen nicht")
+    assert(#orders_order.log == 1 and orders_order.log[1].event == "CRT",
+        "Der Verlauf beginnt nicht mit dem Erstellen")
+    assert(#addon.Orders:BuildCoreMessage(orders_order) <= 255,
+        "Die Kernnachricht sprengt das Chatlimit")
+    assert(#addon.Orders:BuildStateMessage(orders_order, orders_order.log[1]) <= 255,
+        "Die Zustandsnachricht sprengt das Chatlimit")
+
+    -- Der eigene Account kann das Rezept nicht und ist außerdem Auftraggeber.
+    orders_result = addon.Orders:Accept(orders_orderID)
+    assert(orders_result == false, "Der Auftraggeber konnte den eigenen Auftrag annehmen")
+
+    -- Heiler nimmt an (Fremdclient über die Sync-Weiche).
+    orders_acceptAt = currentTime
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|2|ACCEPTED|" .. orders_acceptAt .. "|bbbbbbbbbb|"
+            .. orders_acceptAt .. "|Heiler-Realm|Heiler-Realm|0|0|" .. orders_acceptAt
+            .. "|Heiler-Realm|ACC|",
+        "GUILD", "Heiler-Realm")
+    assert(orders_order.status == "ACCEPTED" and orders_order.crafter == "Heiler-Realm",
+        "Die Annahme über den Gildenkanal kam nicht an")
+    assert(orders_order.acceptedByTag == "bbbbbbbbbb", "Das Annehmer-Kennzeichen fehlt")
+
+    -- Doppelannahme: Zwerg war früher dran und gewinnt dieselbe Revision.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Zwerg-Realm",
+        sharedBy = "Zwerg-Realm",
+        professionKey = "verzauberkunst",
+        professionName = "Verzauberkunst",
+        recipeKeys = { "I90001" },
+    })
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|2|ACCEPTED|" .. (orders_acceptAt - 5) .. "|cccccccccc|"
+            .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. (orders_acceptAt - 5)
+            .. "|Zwerg-Realm|ACC|",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.crafter == "Zwerg-Realm" and orders_order.acceptedByTag == "cccccccccc",
+        "Die frühere Annahme hat sich nicht durchgesetzt")
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|2|ACCEPTED|" .. (orders_acceptAt + 9) .. "|dddddddddd|"
+            .. (orders_acceptAt + 9) .. "|Heiler-Realm|Heiler-Realm|0|0|" .. (orders_acceptAt + 9)
+            .. "|Heiler-Realm|ACC|",
+        "GUILD", "Heiler-Realm")
+    assert(orders_order.acceptedByTag == "cccccccccc",
+        "Eine spätere Annahme hat die frühere verdrängt")
+
+    -- Ein Fremder darf keine Auftragnehmer-Schritte melden.
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|3|WORKING|" .. currentTime .. "|cccccccccc|"
+            .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime
+            .. "|Heiler-Realm|MAT|",
+        "GUILD", "Heiler-Realm")
+    assert(orders_order.status == "ACCEPTED" and orders_order.rev == 2,
+        "Ein Fremder konnte den Auftrag weiterschalten")
+
+    -- Der echte Auftragnehmer arbeitet: Material, Fertigung mit Kosten, Versand.
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|3|WORKING|" .. currentTime .. "|cccccccccc|"
+            .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime
+            .. "|Zwerg-Realm|MAT|",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "WORKING", "Materialien vollständig kam nicht an")
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|4|CRAFTED|" .. currentTime .. "|cccccccccc|"
+            .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|432100|0|" .. currentTime
+            .. "|Zwerg-Realm|CRA|",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "CRAFTED" and orders_order.actualCost == 432100,
+        "Fertigung oder Kostenmeldung kamen nicht an")
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|5|SHIPPED|" .. currentTime .. "|cccccccccc|"
+            .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|432100|0|" .. currentTime
+            .. "|Zwerg-Realm|SNT|",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "SHIPPED", "Der Versand kam nicht an")
+
+    -- Auftraggeber: erhalten -> Erstattung offen -> überwiesen -> bestätigt.
+    orders_result = addon.Orders:MarkReceived(orders_orderID)
+    assert(orders_result == true and orders_order.status == "RECEIVED",
+        "Der Erhalt führte nicht zur offenen Erstattung")
+    orders_actor = addon.Orders:GetNextActor(orders_order)
+    assert(orders_actor == "CREATOR", "Nach dem Erhalt ist nicht der Auftraggeber dran")
+    assert(addon.Orders:MarkReimbursed(orders_orderID) == true,
+        "Die Erstattung ließ sich nicht melden")
+    orders_actor = addon.Orders:GetNextActor(orders_order)
+    assert(orders_actor == "ACCEPTOR", "Nach der Überweisung ist nicht der Auftragnehmer dran")
+    currentTime = currentTime + 60
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_orderID .. "|" .. (orders_order.rev + 1) .. "|DONE|" .. currentTime
+            .. "|cccccccccc|" .. (orders_acceptAt - 5) .. "|Zwerg-Realm|Zwerg-Realm|432100|"
+            .. orders_order.reimbursedAt .. "|" .. currentTime .. "|Zwerg-Realm|RMR|",
+        "GUILD", "Zwerg-Realm")
+    assert(orders_order.status == "DONE", "Die bestätigte Erstattung schloss den Auftrag nicht ab")
+
+    -- Twink-Regel: Der eigene Twink kann das zweite Rezept, der Main nicht.
+    addon.DB.data.characters["twinky-realm"] = {
+        fullName = "Twinky-Realm",
+        workshop = { professions = { verzauberkunst = {
+            key = "verzauberkunst", name = "Verzauberkunst",
+            recipes = { I90002 = { name = "Testbrenner" } },
+        } } },
+    }
+    orders_twinkOrderID = "H" .. currentTime .. "-1"
+    -- Modell B: Nach der Annahme ist der Auftragnehmer dran (Materialien aus
+    -- der Gildenbank besorgen) - so zählt der Auftrag gleich als "du bist dran".
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|" .. orders_twinkOrderID .. "|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|B|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_twinkOrderID .. "|1|OPEN|" .. currentTime .. "||0|||0|0|"
+            .. currentTime .. "|Heiler-Realm|CRT|", "GUILD", "Heiler-Realm")
+    orders_twinkOrder = addon.Orders:GetOrder(orders_twinkOrderID)
+    assert(orders_twinkOrder ~= nil and orders_twinkOrder.status == "OPEN",
+        "Der Fremdauftrag kam nicht an")
+    orders_result, orders_message = addon.Orders:Accept(orders_twinkOrderID)
+    assert(orders_result == true, "Die Twink-Annahme scheiterte: " .. tostring(orders_message))
+    assert(orders_twinkOrder.crafter == "Twinky-Realm"
+        and orders_twinkOrder.acceptedVia == "Tester-Realm",
+        "Es fertigt nicht der Twink mit dem Rezept")
+    assert(orders_twinkOrder.acceptedByTag == orders_ownTag,
+        "Die Annahme trägt nicht das eigene Kennzeichen")
+    assert(addon.Orders:GetActionableCount() >= 1,
+        "Der angenommene Auftrag zählt nicht als „du bist dran“")
+
+    -- Ohne Rezept auf irgendeinem eigenen Charakter gibt es keine Annahme.
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|" .. orders_twinkOrderID .. "b|I90003|Unbekanntes Rezept|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|A|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    orders_result = addon.Orders:Accept(orders_twinkOrderID .. "b")
+    assert(orders_result == false, "Eine Annahme ohne Rezept wurde durchgelassen")
+
+    -- Offiziers-Abbruch: Tester (Rang 1) bricht den fremden Auftrag auf.
+    orders_result = addon.Orders:Cancel(orders_twinkOrderID)
+    assert(orders_result == true and orders_twinkOrder.status == "CANCELLED",
+        "Der freigegebene Rang durfte den fremden Auftrag nicht abbrechen")
+    -- Ein Fremder ohne Rang scheitert am Abbruch.
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|" .. orders_twinkOrderID .. "b|2|CANCELLED|" .. currentTime .. "||0|||0|0|"
+            .. currentTime .. "|Zwerg-Realm|CXL|", "GUILD", "Zwerg-Realm")
+    assert(addon.Orders:GetOrder(orders_twinkOrderID .. "b").status == "OPEN",
+        "Ein Fremder ohne Rangfreigabe konnte abbrechen")
+
+    -- Abgleich: Eine Anfrage liefert Kern, Zustand und Verlauf per Flüstern.
+    addon.Orders.lastAnswerAt = 0
+    orders_sentBefore = #sentAddon
+    addon.Sync:OnMessage("GuildCopilot", "O|7|Q|0", "GUILD", "Heiler-Realm")
+    assert(#sentAddon > orders_sentBefore, "Die Abgleichanfrage blieb unbeantwortet")
+    assert(sentAddon[#sentAddon][3] == "WHISPER", "Die Abgleichantwort lief nicht über Flüstern")
+    orders_sentBefore = #sentAddon
+    addon.Sync:OnMessage("GuildCopilot", "O|7|Q|0", "GUILD", "Zwerg-Realm")
+    assert(#sentAddon == orders_sentBefore, "Die Antwortdrossel für den Abgleich fehlt")
+
+    -- Grenzen: Höchstens fünf offene Aufträge je Account.
+    addon.DB:GetGuild().workshop.orders = {}
+    for index = 1, 5 do
+        assert(addon.Orders:Create("I90001", { quantity = index }) == true,
+            "Auftrag " .. index .. " ließ sich nicht erstellen")
+    end
+    orders_result = addon.Orders:Create("I90001")
+    assert(orders_result == false, "Der sechste offene Auftrag wurde nicht abgewiesen")
+
+    -- Verfall: Ein alter offener Auftrag verschwindet beim Aufräumen.
+    for _, entry in pairs(addon.Orders:GetStore()) do
+        entry.createdAt = currentTime - (15 * 24 * 60 * 60)
+    end
+    addon.Orders:Prune()
+    orders_remaining = 0
+    for _ in pairs(addon.Orders:GetStore()) do
+        orders_remaining = orders_remaining + 1
+    end
+    assert(orders_remaining == 0, "Verfallene offene Aufträge blieben liegen")
+
+    -- Historie: Von 23 erledigten bleiben die neuesten 20.
+    for index = 1, 23 do
+        addon.Orders:GetStore()["done-" .. index] = {
+            id = "done-" .. index, rev = 2, status = "DONE",
+            recipeKey = "I90001", recipeName = "Test", quantity = 1,
+            createdBy = "Heiler-Realm", createdByTag = "bbbbbbbbbb",
+            createdAt = currentTime, changedAt = currentTime + index,
+            materialModel = "A", delivery = "TRADE", costLimit = 0, tip = 0,
+            note = "", acceptedByTag = "", acceptedAt = 0, crafter = "",
+            acceptedVia = "", actualCost = 0, reimbursedAt = 0, log = {},
+        }
+    end
+    addon.Orders:Prune()
+    orders_remaining = 0
+    for _ in pairs(addon.Orders:GetStore()) do
+        orders_remaining = orders_remaining + 1
+    end
+    assert(orders_remaining == 20, "Die Historie wurde nicht auf 20 gedeckelt")
+    assert(addon.Orders:GetOrder("done-1") == nil and addon.Orders:GetOrder("done-23") ~= nil,
+        "Beim Deckeln verschwanden nicht die ältesten")
+
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.DB.data.characters["twinky-realm"] = nil
+end
+
+do
+    -- Board und Tracker: Reiterwechsel blendet den Katalog aus, eigene und
+    -- fremde Aufträge landen in den richtigen Abschnitten, der Tracker zeigt
+    -- sich nur mit "du bist dran"-Zeilen.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("WORKSHOP")
+    addon.UI:SetWorkshopView("ORDERS")
+    orders_page = addon.UI.pages.WORKSHOP
+    assert(orders_page.ordersView.shown == true, "Das Auftragsboard erscheint nicht")
+    assert(orders_page.workshopCatalogFrames[1].shown == false,
+        "Der Katalog bleibt hinter dem Board sichtbar")
+
+    assert(addon.Orders:Create("I90001", { materialModel = "A" }) == true,
+        "Der Boardtest-Auftrag ließ sich nicht erstellen")
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.mineRows[1].shown == true,
+        "Der eigene offene Auftrag steht nicht unter den eigenen")
+    assert(orders_page.ordersView.mineRows[1].cancelButton.shown == true,
+        "Der Auftraggeber sieht kein Abbrechen")
+
+    -- Fremder Auftrag, machbar über den Twink: Annehmen-Knopf sichtbar.
+    addon.DB.data.characters["twinky-realm"] = {
+        fullName = "Twinky-Realm",
+        workshop = { professions = { verzauberkunst = {
+            key = "verzauberkunst", name = "Verzauberkunst",
+            recipes = { I90002 = { name = "Testbrenner" } },
+        } } },
+    }
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|board-1|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|B|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|board-1|1|OPEN|" .. currentTime .. "||0|||0|0|"
+            .. currentTime .. "|Heiler-Realm|CRT|", "GUILD", "Heiler-Realm")
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.openRows[1].shown == true,
+        "Der fremde offene Auftrag fehlt auf dem Board")
+    assert(orders_page.ordersView.openRows[1].primary.shown == true,
+        "Der machbare Auftrag zeigt keinen Annehmen-Knopf")
+
+    -- Nach der Annahme (Modell B: Auftragnehmer dran) meldet sich der Tracker.
+    addon.DB:GetSettings().orderTracker.hidden = false
+    assert(addon.Orders:Accept("board-1") == true, "Die Board-Annahme scheiterte")
+    addon.UI:RefreshOrderTracker()
+    assert(addon.UI.orderTracker ~= nil and addon.UI.orderTracker.shown == true,
+        "Der Tracker zeigt sich nicht trotz offener Aufgabe")
+    assert(addon.UI.orderTracker.rows[1].shown == true, "Die Tracker-Zeile fehlt")
+
+    -- Weggeklickt bleibt weggeklickt.
+    addon.DB:GetSettings().orderTracker.hidden = true
+    addon.UI:RefreshOrderTracker()
+    assert(addon.UI.orderTracker.shown == false, "Der ausgeblendete Tracker erscheint trotzdem")
+    addon.DB:GetSettings().orderTracker.hidden = false
+
+    -- Ohne "du bist dran"-Zeilen verschwindet er von selbst.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.UI:RefreshOrderTracker()
+    assert(addon.UI.orderTracker.shown == false, "Der Tracker bleibt ohne Aufgaben stehen")
+
+    addon.UI:SetWorkshopView("CATALOG")
+    assert(orders_page.workshopCatalogFrames[1].shown == true,
+        "Der Katalog kehrt nach dem Reiterwechsel nicht zurück")
+    addon.DB.data.characters["twinky-realm"] = nil
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

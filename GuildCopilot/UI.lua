@@ -1750,7 +1750,10 @@ function GC.UI:RefreshMinimapMarker()
     if not button or not button.pending then
         return
     end
-    button.pending:SetShown(GC.Onboarding:IsPending())
+    -- Der Punkt zeigt "hier wartet etwas auf dich": offene Einrichtung oder
+    -- Gildenaufträge, bei denen der eigene Account dran ist.
+    button.pending:SetShown(GC.Onboarding:IsPending()
+        or (GC.Orders and GC.Orders:GetActionableCount() > 0))
 end
 
 function GC.UI:RefreshOnboarding()
@@ -2722,6 +2725,19 @@ function GC.UI:BuildWorkshopPage()
     CreatePageTitle(page, "Gildenwerkstatt",
         "Rezepte werden automatisch erfasst, sobald ein Spieler sein WoW-Berufsfenster öffnet.")
 
+    -- Zwei Unterreiter: der Katalog und das Auftragsboard
+    -- (docs/KONZEPT-werkstatt-gildenauftraege.md). Beide teilen sich die
+    -- Seite; gewechselt wird über die Knöpfe oben rechts.
+    page.workshopView = "CATALOG"
+    page.workshopTabCatalog = CreateButton(page, "Katalog", 100, 30, function()
+        GC.UI:SetWorkshopView("CATALOG")
+    end)
+    page.workshopTabCatalog:SetPoint("TOPRIGHT", page, "TOPRIGHT", -196, 0)
+    page.workshopTabOrders = CreateButton(page, "Gildenaufträge", 188, 30, function()
+        GC.UI:SetWorkshopView("ORDERS")
+    end)
+    page.workshopTabOrders:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, 0)
+
     page.metricCards = {}
     local metrics = {
         { key = "RECIPES", label = "REZEPTE" },
@@ -2861,6 +2877,15 @@ function GC.UI:BuildWorkshopPage()
         end
     end)
     page.workshopFavorite:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -12)
+    -- Der Einstieg in einen Gildenauftrag sitzt direkt an der Rezeptkarte:
+    -- die bestehende Suche ist die Rezeptauswahl, es gibt keinen zweiten Weg.
+    page.workshopOrderButton = CreateButton(detailCard, "In Auftrag geben", 140, 30, function()
+        if page.selectedWorkshopRecipe then
+            GC.UI:OpenOrderCreateDialog(page.selectedWorkshopRecipe)
+        end
+    end, "PRIMARY")
+    page.workshopOrderButton:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -46)
+    page.workshopOrderButton:Hide()
     page.workshopFavorite.favoriteIcon = page.workshopFavorite:CreateTexture(nil, "ARTWORK")
     page.workshopFavorite.favoriteIcon:SetSize(17, 17)
     page.workshopFavorite.favoriteIcon:SetPoint("LEFT", page.workshopFavorite, "LEFT", 8, 0)
@@ -2913,11 +2938,36 @@ function GC.UI:BuildWorkshopPage()
         "Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.",
         { muted = true, width = 776 })
     page.workshopStatus:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 0)
+
+    -- Alles, was zum Katalog gehört, damit der Reiterwechsel es gemeinsam
+    -- ein- und ausblenden kann.
+    page.workshopCatalogFrames = {
+        page.metricCards.RECIPES, page.metricCards.CRAFTERS, page.metricCards.PROFESSIONS,
+        searchCard, listCard, detailCard, page.workshopStatus,
+    }
+
+    self:BuildOrdersView(page)
 end
 
 function GC.UI:RefreshWorkshop()
     local page = self.pages.WORKSHOP
     if not page then
+        return
+    end
+
+    -- Reiterzustand und "du bist dran"-Zähler zuerst: beides gilt für beide
+    -- Ansichten. Im Auftragsboard endet der Aufbau danach - die Katalogkarten
+    -- sind dort ausgeblendet, ihre Auffrischung wäre reine Verschwendung.
+    if page.workshopTabOrders then
+        local actionable = GC.Orders and GC.Orders:GetActionableCount() or 0
+        page.workshopTabOrders:SetText(actionable > 0
+            and ("Gildenaufträge (" .. actionable .. ")")
+            or "Gildenaufträge")
+        page.workshopTabOrders:SetActive(page.workshopView == "ORDERS")
+        page.workshopTabCatalog:SetActive(page.workshopView ~= "ORDERS")
+    end
+    if page.workshopView == "ORDERS" then
+        self:RefreshOrdersBoard()
         return
     end
 
@@ -2996,6 +3046,7 @@ function GC.UI:RefreshWorkshop()
 
     if not selected then
         page.workshopFavorite:Hide()
+        page.workshopOrderButton:Hide()
         if not hasScope then
             page.workshopRecipeTitle:SetText("Wonach suchst du?")
             page.workshopDetails:SetText(
@@ -3030,6 +3081,8 @@ function GC.UI:RefreshWorkshop()
         page.workshopFavorite:Show()
         page.workshopFavorite:SetText(GC.Workshop:IsFavorite(selected.key) and "Gemerkt" or "Merken")
         page.workshopFavorite:SetActive(GC.Workshop:IsFavorite(selected.key))
+        -- Ohne bekannten Hersteller gibt es nichts zu beauftragen.
+        page.workshopOrderButton:SetShown(#selected.crafters > 0)
         page.workshopRecipeTitle:SetText(selected.name)
         local lines = {
             "|cff91a3b8Beruf|r  " .. selected.profession,
@@ -3195,6 +3248,687 @@ function GC.UI:RefreshWorkshop()
         page.workshopStatus:SetText("Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.")
         SetTextColor(page.workshopStatus, THEME.muted)
     end
+end
+
+-- === Gildenaufträge: Board, Dialoge, Ansicht ================================
+-- Konzept: docs/KONZEPT-werkstatt-gildenauftraege.md. Das Board ersetzt bei
+-- aktivem Reiter die Katalogkarten; die Logik liegt vollständig in Orders.lua,
+-- hier wird nur gezeichnet und geklickt.
+
+function GC.UI:SetWorkshopView(view)
+    local page = self.pages.WORKSHOP
+    if not page then
+        return
+    end
+    page.workshopView = view == "ORDERS" and "ORDERS" or "CATALOG"
+    local catalog = page.workshopView == "CATALOG"
+    for _, frame in ipairs(page.workshopCatalogFrames or {}) do
+        frame:SetShown(catalog)
+    end
+    if page.ordersView then
+        page.ordersView:SetShown(not catalog)
+    end
+    self:RefreshWorkshop()
+end
+
+-- Die Handlungsaufforderung als Knopf: je Auftrag und Rolle genau eine
+-- Primäraktion. Liefert Beschriftung und Ausführung oder nil.
+local function OrderPrimaryAction(order)
+    local orders = GC.Orders
+    local ownName = GC:GetPlayerFullName()
+    local isCreator = orders:IsCreatorCharacter(order, ownName)
+    local isAcceptor = GC.Util.Trim(order.acceptedByTag) ~= ""
+        and order.acceptedByTag == GC.DB:GetAccountTag()
+
+    if isAcceptor then
+        if order.status == "ACCEPTED" then
+            return "Material vollständig", function(id)
+                return orders:MarkMaterialsComplete(id)
+            end
+        elseif order.status == "WORKING" then
+            return "Gefertigt", function(id)
+                local target = orders:GetOrder(id)
+                if target and target.materialModel == "C" then
+                    GC.UI:OpenOrderCostDialog(id)
+                    return true, ""
+                end
+                return orders:MarkCrafted(id)
+            end
+        elseif order.status == "CRAFTED" and order.delivery == "MAIL" then
+            return "Versandt", function(id)
+                return orders:MarkShipped(id)
+            end
+        elseif order.status == "RECEIVED" and (order.reimbursedAt or 0) > 0 then
+            return "Erstattung erhalten", function(id)
+                return orders:ConfirmReimbursed(id)
+            end
+        end
+    end
+    if isCreator then
+        if order.status == "CRAFTED" or order.status == "SHIPPED" then
+            return "Erhalten", function(id)
+                return orders:MarkReceived(id)
+            end
+        elseif order.status == "RECEIVED" and (order.reimbursedAt or 0) == 0 then
+            return "Erstattet", function(id)
+                return orders:MarkReimbursed(id)
+            end
+        elseif (order.status == "ACCEPTED" or order.status == "WORKING")
+            and orders:IsStale(order) then
+            return "Zurücklegen", function(id)
+                return orders:Return(id, "Rückfall durch den Auftraggeber",
+                    orders:HasAcceptorLeftGuild(orders:GetOrder(id)))
+            end
+        end
+    end
+    return nil
+end
+
+local function OrderRowTitle(order)
+    local ownName = GC:GetPlayerFullName()
+    local isCreator = GC.Orders:IsCreatorCharacter(order, ownName)
+    local counterpart
+    if isCreator then
+        counterpart = GC.Util.Trim(order.crafter) ~= ""
+            and ("Hersteller: " .. GC.Util.PlayerShortName(order.crafter))
+            or "noch ohne Hersteller"
+    else
+        counterpart = "von " .. GC.Util.PlayerShortName(order.createdBy or "?")
+    end
+    return (order.recipeName or order.recipeKey or "?")
+        .. " ×" .. (order.quantity or 1)
+        .. "  ·  " .. counterpart
+        .. "  ·  " .. (GC.OrderStatusLabels[order.status] or order.status)
+end
+
+local function OrderOfferLine(order)
+    local parts = { GC.OrderModelLabels[order.materialModel] or "?" }
+    parts[#parts + 1] = GC.OrderDeliveryLabels[order.delivery] or "?"
+    if (order.costLimit or 0) > 0 then
+        parts[#parts + 1] = "bis " .. GC.Orders.FormatMoney(order.costLimit)
+    end
+    if (order.tip or 0) > 0 then
+        parts[#parts + 1] = "Trinkgeld " .. GC.Orders.FormatMoney(order.tip)
+    end
+    if GC.Util.Trim(order.note) ~= "" then
+        parts[#parts + 1] = "„" .. order.note .. "“"
+    end
+    return table.concat(parts, "  ·  ")
+end
+
+local function BuildOrderRow(parent, height, withPrimary)
+    local row = CreatePanel(parent, THEME.card)
+    row:SetSize(776, height)
+    row.title = CreateLabel(row, "", { width = 470, height = 16 })
+    row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -7)
+    row.detail = CreateLabel(row, "", { muted = true, width = 470, height = 15 })
+    row.detail:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -25)
+    row.logButton = CreateButton(row, "Verlauf", 74, 28, function()
+        if row.orderID then
+            GC.UI:OpenOrderLogDialog(row.orderID)
+        end
+    end)
+    row.logButton:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+    row.cancelButton = CreateButton(row, "×", 28, 28, function()
+        if row.orderID then
+            local ok, message = GC.Orders:Cancel(row.orderID)
+            GC.UI:SetOrdersStatus(message, ok)
+        end
+    end)
+    row.cancelButton:SetPoint("RIGHT", row.logButton, "LEFT", -6, 0)
+    if withPrimary then
+        row.primary = CreateButton(row, "", 168, 28, function()
+            if row.orderID and row.primaryHandler then
+                local ok, message = row.primaryHandler(row.orderID)
+                GC.UI:SetOrdersStatus(message, ok)
+            end
+        end, "PRIMARY")
+        row.primary:SetPoint("RIGHT", row.cancelButton, "LEFT", -6, 0)
+    end
+    row:Hide()
+    return row
+end
+
+function GC.UI:BuildOrdersView(page)
+    local view = CreateFrame("Frame", nil, page)
+    view:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    view:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 0)
+    view:Hide()
+    page.ordersView = view
+
+    view.mineHeader = CreateLabel(view, "DU BIST DRAN", { muted = true, width = 500, height = 15 })
+    view.mineHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
+    view.mineRows = {}
+    for index = 1, 3 do
+        local row = BuildOrderRow(view, 44, true)
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -19 - ((index - 1) * 48))
+        view.mineRows[index] = row
+    end
+
+    view.openHeader = CreateLabel(view, "OFFENE AUFTRÄGE DER GILDE",
+        { muted = true, width = 500, height = 15 })
+    view.openHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -168)
+    view.openFilter = CreateButton(view, "nur machbare", 128, 24, function()
+        page.ordersShowAll = not page.ordersShowAll
+        GC.UI:RefreshOrdersBoard()
+    end)
+    view.openFilter:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, -164)
+    view.openRows = {}
+    for index = 1, 3 do
+        local row = BuildOrderRow(view, 44, true)
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -191 - ((index - 1) * 48))
+        view.openRows[index] = row
+    end
+
+    view.closedHeader = CreateLabel(view, "ABGESCHLOSSEN", { muted = true, width = 500, height = 15 })
+    view.closedHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -340)
+    view.closedRows = {}
+    for index = 1, 3 do
+        local row = CreateLabel(view, "", { muted = true, width = 700, height = 15 })
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 14, -359 - ((index - 1) * 17))
+        view.closedRows[index] = row
+    end
+
+    view.trackerToggle = CreateButton(view, "Tracker", 96, 24, function()
+        GC.UI:ToggleOrderTracker()
+    end)
+    view.trackerToggle:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", 0, 0)
+
+    view.status = CreateLabel(view, "", { muted = true, width = 640, height = 30, vertical = "TOP" })
+    view.status:SetPoint("BOTTOMLEFT", view, "BOTTOMLEFT", 0, 0)
+
+    self:BuildOrderCreateDialog(page)
+    self:BuildOrderLogDialog(page)
+    self:BuildOrderCostDialog(page)
+    self:BuildOrderAcceptDialog(page)
+end
+
+function GC.UI:SetOrdersStatus(message, success)
+    local page = self.pages.WORKSHOP
+    if not page or not page.ordersView then
+        return
+    end
+    page.ordersView.status:SetText(message or "")
+    SetTextColor(page.ordersView.status, success and THEME.success or THEME.danger)
+end
+
+local function FillOrderRow(row, boardRow, isOpenSection)
+    local order = boardRow.order
+    row.orderID = order.id
+    row.title:SetText(OrderRowTitle(order))
+    if isOpenSection then
+        row.detail:SetText(OrderOfferLine(order))
+        row.primaryHandler = function(id)
+            return GC.UI:AcceptOrder(id)
+        end
+        row.primary:SetText("Annehmen")
+        row.primary:SetShown(boardRow.canAccept == true)
+        if not boardRow.canAccept then
+            row.detail:SetText("Kein Charakter deines Accounts kann dieses Rezept  ·  "
+                .. OrderOfferLine(order))
+        end
+    else
+        row.detail:SetText(boardRow.yourTurn and boardRow.action or OrderOfferLine(order))
+        local label, handler = OrderPrimaryAction(order)
+        row.primaryHandler = handler
+        if row.primary then
+            row.primary:SetText(label or "")
+            row.primary:SetShown(label ~= nil)
+        end
+    end
+    local ownName = GC:GetPlayerFullName()
+    row.cancelButton:SetShown(order.status ~= "DONE" and order.status ~= "CANCELLED"
+        and (GC.Orders:IsCreatorCharacter(order, ownName) or GC.Orders:CanAdministrate(ownName)))
+    row:Show()
+end
+
+function GC.UI:RefreshOrdersBoard()
+    local page = self.pages.WORKSHOP
+    local view = page and page.ordersView
+    if not view then
+        return
+    end
+    local board = GC.Orders:GetBoard()
+
+    view.mineHeader:SetText("DU BIST DRAN  ·  MEINE AUFTRÄGE (" .. #board.mine .. ")")
+    for index, row in ipairs(view.mineRows) do
+        local boardRow = board.mine[index]
+        if boardRow then
+            FillOrderRow(row, boardRow, false)
+        else
+            row:Hide()
+        end
+    end
+
+    local open = {}
+    for _, boardRow in ipairs(board.open) do
+        if page.ordersShowAll or boardRow.canAccept then
+            open[#open + 1] = boardRow
+        end
+    end
+    view.openFilter:SetActive(not page.ordersShowAll)
+    view.openHeader:SetText("OFFENE AUFTRÄGE DER GILDE (" .. #open .. ")")
+    for index, row in ipairs(view.openRows) do
+        local boardRow = open[index]
+        if boardRow then
+            FillOrderRow(row, boardRow, true)
+        else
+            row:Hide()
+        end
+    end
+
+    view.closedHeader:SetText("ABGESCHLOSSEN (" .. #board.closed .. ")")
+    for index, label in ipairs(view.closedRows) do
+        local boardRow = board.closed[index]
+        if boardRow then
+            local order = boardRow.order
+            label:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1)
+                .. "  ·  " .. (GC.OrderStatusLabels[order.status] or order.status)
+                .. "  ·  " .. GC.Util.PlayerShortName(order.createdBy or "?"))
+            label:Show()
+        else
+            label:Hide()
+        end
+    end
+
+    local settings = GC.DB:GetSettings().orderTracker
+    view.trackerToggle:SetText(settings.hidden and "Tracker einblenden" or "Tracker ausblenden")
+    view.trackerToggle:SetActive(not settings.hidden)
+end
+
+-- Annehmen mit Twink-Wahl: Ein Charakter nimmt direkt an, bei mehreren
+-- fragt ein kleiner Dialog, wer fertigt (Konzept, Owner-Abnahme).
+function GC.UI:AcceptOrder(orderID)
+    local order = GC.Orders:GetOrder(orderID)
+    if not order then
+        return false, "Der Auftrag ist nicht mehr bekannt."
+    end
+    local candidates = GC.Orders:GetOwnCrafters(order.recipeKey)
+    if #candidates > 1 then
+        self:OpenOrderAcceptDialog(orderID, candidates)
+        return true, ""
+    end
+    local ok, message = GC.Orders:Accept(orderID, candidates[1])
+    self:SetOrdersStatus(message, ok)
+    return ok, message
+end
+
+local function BuildOrderDialogFrame(page, width, height, titleText)
+    local dialog = CreatePanel(page, THEME.window, THEME.accent)
+    dialog:SetSize(width, height)
+    dialog:SetPoint("CENTER", page, "CENTER", 0, 10)
+    local pageLevel = page.GetFrameLevel and page:GetFrameLevel() or 1
+    dialog:SetFrameLevel((pageLevel or 1) + 40)
+    dialog:EnableMouse(true)
+    dialog.title = CreateLabel(dialog, titleText, { title = true, width = width - 60 })
+    dialog.title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -12)
+    dialog.close = CreateButton(dialog, "×", 24, 24, function()
+        dialog:Hide()
+    end)
+    dialog.close:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -8, -8)
+    dialog:Hide()
+    return dialog
+end
+
+function GC.UI:BuildOrderCreateDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 430, 372, "Gildenauftrag erstellen")
+    page.orderCreateDialog = dialog
+
+    local function RadioRow(labelText, y, options, field)
+        local caption = CreateLabel(dialog, labelText, { muted = true, width = 120, height = 15 })
+        caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, y)
+        local buttons = {}
+        for index, option in ipairs(options) do
+            local button = CreateButton(dialog, option.label, option.width, 24, function()
+                dialog[field] = option.value
+                for _, sibling in ipairs(buttons) do
+                    sibling:SetActive(dialog[field] == sibling.optionValue)
+                end
+                dialog.costCaption:SetShown(dialog.materialModel == "C")
+                dialog.costEdit.container:SetShown(dialog.materialModel == "C")
+            end)
+            button.optionValue = option.value
+            button:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16 + ((index - 1) * (option.width + 6)), y - 17)
+            buttons[index] = button
+        end
+        dialog[field .. "Buttons"] = buttons
+    end
+
+    RadioRow("Materialien", -40, {
+        { value = "A", label = "Ich liefere", width = 100 },
+        { value = "B", label = "Gildenbank", width = 100 },
+        { value = "C", label = "Wird besorgt, ich erstatte", width = 190 },
+    }, "materialModel")
+
+    RadioRow("Übergabe", -94, {
+        { value = "TRADE", label = "Persönlich", width = 100 },
+        { value = "MAIL", label = "Per Post", width = 100 },
+    }, "delivery")
+
+    dialog.quantityCaption = CreateLabel(dialog, "Menge", { muted = true, width = 90, height = 15 })
+    dialog.quantityCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -148)
+    dialog.quantityEdit = CreateEdit(dialog, 66, 26)
+    dialog.quantityEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -165)
+
+    dialog.costCaption = CreateLabel(dialog, "Kostenrahmen (Gold)", { muted = true, width = 150, height = 15 })
+    dialog.costCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 100, -148)
+    dialog.costEdit = CreateEdit(dialog, 90, 26)
+    dialog.costEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 100, -165)
+
+    dialog.tipCaption = CreateLabel(dialog, "Trinkgeld (Gold)", { muted = true, width = 120, height = 15 })
+    dialog.tipCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 268, -148)
+    dialog.tipEdit = CreateEdit(dialog, 90, 26)
+    dialog.tipEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 268, -165)
+
+    dialog.noteCaption = CreateLabel(dialog, "Notiz (optional)", { muted = true, width = 200, height = 15 })
+    dialog.noteCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -206)
+    dialog.noteEdit = CreateEdit(dialog, 398, 26)
+    dialog.noteEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -223)
+
+    dialog.status = CreateLabel(dialog, "", { muted = true, width = 398, height = 46, vertical = "TOP" })
+    dialog.status:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -258)
+
+    dialog.submit = CreateButton(dialog, "Erstellen", 150, 32, function()
+        local gold = tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0
+        local tip = tonumber(GC.Util.Trim(dialog.tipEdit:GetText())) or 0
+        local ok, message = GC.Orders:Create(dialog.recipeKey, {
+            quantity = tonumber(GC.Util.Trim(dialog.quantityEdit:GetText())) or 1,
+            materialModel = dialog.materialModel,
+            delivery = dialog.delivery,
+            costLimit = math.floor(gold * 10000),
+            tip = math.floor(tip * 10000),
+            note = dialog.noteEdit:GetText(),
+        })
+        if ok then
+            dialog:Hide()
+            GC.UI:SetWorkshopView("ORDERS")
+            GC.UI:SetOrdersStatus(message, true)
+        else
+            dialog.status:SetText(message or "")
+            SetTextColor(dialog.status, THEME.danger)
+        end
+    end, "PRIMARY")
+    dialog.submit:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+    dialog.cancel = CreateButton(dialog, "Abbrechen", 110, 32, function()
+        dialog:Hide()
+    end)
+    dialog.cancel:SetPoint("LEFT", dialog.submit, "RIGHT", 10, 0)
+end
+
+function GC.UI:OpenOrderCreateDialog(recipeKey)
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderCreateDialog
+    if not dialog then
+        return
+    end
+    local entry
+    for _, candidate in ipairs(GC.Workshop:GetCatalog()) do
+        if candidate.key == recipeKey then
+            entry = candidate
+            break
+        end
+    end
+    dialog.recipeKey = recipeKey
+    dialog.title:SetText("Gildenauftrag: " .. ((entry and entry.name) or recipeKey))
+    dialog.materialModel = "A"
+    dialog.delivery = "TRADE"
+    for _, button in ipairs(dialog.materialModelButtons or {}) do
+        button:SetActive(button.optionValue == "A")
+    end
+    for _, button in ipairs(dialog.deliveryButtons or {}) do
+        button:SetActive(button.optionValue == "TRADE")
+    end
+    dialog.quantityEdit:SetText("1")
+    dialog.costEdit:SetText("")
+    dialog.tipEdit:SetText("")
+    dialog.noteEdit:SetText("")
+    dialog.costCaption:Hide()
+    dialog.costEdit.container:Hide()
+    dialog.status:SetText("")
+    dialog:Show()
+end
+
+function GC.UI:BuildOrderLogDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 470, 360, "Verlauf")
+    page.orderLogDialog = dialog
+    dialog.body = CreateLabel(dialog, "", { width = 434, height = 220, vertical = "TOP" })
+    dialog.body:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
+    dialog.noteEdit = CreateEdit(dialog, 314, 26)
+    dialog.noteEdit.container:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+    dialog.noteSend = CreateButton(dialog, "Notiz senden", 118, 26, function()
+        local ok, message = GC.Orders:AddNote(dialog.orderID, dialog.noteEdit:GetText())
+        if ok then
+            dialog.noteEdit:SetText("")
+            GC.UI:RefreshOrderLogDialog()
+        end
+        GC.UI:SetOrdersStatus(message, ok)
+    end, "PRIMARY")
+    dialog.noteSend:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -16, 14)
+end
+
+function GC.UI:RefreshOrderLogDialog()
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderLogDialog
+    if not dialog or not dialog:IsShown() then
+        return
+    end
+    local order = GC.Orders:GetOrder(dialog.orderID)
+    if not order then
+        dialog:Hide()
+        return
+    end
+    dialog.title:SetText("Verlauf: " .. (order.recipeName or "?"))
+    local lines = {}
+    for index = #order.log, 1, -1 do
+        local entry = order.log[index]
+        local stamp = date and date("%d.%m. %H:%M", entry.at) or tostring(entry.at)
+        lines[#lines + 1] = "|cff91a3b8" .. stamp .. "|r  "
+            .. GC.Util.PlayerShortName(entry.by or "?") .. ": "
+            .. (GC.OrderEventLabels[entry.event] or entry.event)
+            .. (GC.Util.Trim(entry.note or "") ~= "" and ("  –  " .. entry.note) or "")
+    end
+    if (order.actualCost or 0) > 0 then
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = "Gemeldete Kosten: " .. GC.Orders.FormatMoney(order.actualCost)
+            .. ((order.costLimit or 0) > 0 and order.actualCost > order.costLimit
+                and "  |cffff6266(über dem Kostenrahmen)|r" or "")
+    end
+    dialog.body:SetText(table.concat(lines, "\n"))
+end
+
+function GC.UI:OpenOrderLogDialog(orderID)
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderLogDialog
+    if not dialog then
+        return
+    end
+    dialog.orderID = orderID
+    dialog.noteEdit:SetText("")
+    dialog:Show()
+    self:RefreshOrderLogDialog()
+end
+
+function GC.UI:BuildOrderCostDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 360, 170, "Gefertigt – Kosten melden")
+    page.orderCostDialog = dialog
+    dialog.caption = CreateLabel(dialog,
+        "Tatsächliche Materialkosten in Gold (0, wenn nichts anfiel):",
+        { muted = true, width = 324, height = 30, vertical = "TOP" })
+    dialog.caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
+    dialog.costEdit = CreateEdit(dialog, 100, 26)
+    dialog.costEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -80)
+    dialog.submit = CreateButton(dialog, "Gefertigt melden", 150, 30, function()
+        local gold = tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0
+        local ok, message = GC.Orders:MarkCrafted(dialog.orderID, math.floor(gold * 10000))
+        GC.UI:SetOrdersStatus(message, ok)
+        if ok then
+            dialog:Hide()
+        end
+    end, "PRIMARY")
+    dialog.submit:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+end
+
+function GC.UI:OpenOrderCostDialog(orderID)
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderCostDialog
+    if not dialog then
+        return
+    end
+    dialog.orderID = orderID
+    dialog.costEdit:SetText("")
+    dialog:Show()
+end
+
+function GC.UI:BuildOrderAcceptDialog(page)
+    local dialog = BuildOrderDialogFrame(page, 360, 216, "Wer fertigt?")
+    page.orderAcceptDialog = dialog
+    dialog.caption = CreateLabel(dialog,
+        "Mehrere deiner Charaktere beherrschen das Rezept.",
+        { muted = true, width = 324, height = 16 })
+    dialog.caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -42)
+    dialog.candidateButtons = {}
+    for index = 1, 4 do
+        local button = CreateButton(dialog, "", 200, 24, function()
+            local chosen = dialog.candidateButtons[index].crafterName
+            if chosen then
+                dialog.selectedCrafter = chosen
+                for _, sibling in ipairs(dialog.candidateButtons) do
+                    sibling:SetActive(sibling.crafterName == chosen)
+                end
+            end
+        end)
+        button:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -64 - ((index - 1) * 26))
+        button:Hide()
+        dialog.candidateButtons[index] = button
+    end
+    dialog.submit = CreateButton(dialog, "Annehmen", 120, 30, function()
+        local ok, message = GC.Orders:Accept(dialog.orderID, dialog.selectedCrafter)
+        GC.UI:SetOrdersStatus(message, ok)
+        if ok then
+            dialog:Hide()
+        end
+    end, "PRIMARY")
+    dialog.submit:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+end
+
+function GC.UI:OpenOrderAcceptDialog(orderID, candidates)
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderAcceptDialog
+    if not dialog then
+        return
+    end
+    dialog.orderID = orderID
+    dialog.selectedCrafter = candidates[1]
+    for index, button in ipairs(dialog.candidateButtons) do
+        local name = candidates[index]
+        button.crafterName = name
+        button:SetText(name and GC.Util.PlayerShortName(name) or "")
+        button:SetShown(name ~= nil)
+        button:SetActive(name == dialog.selectedCrafter)
+    end
+    dialog:Show()
+end
+
+-- === Kompakt-Tracker ========================================================
+-- Frei verschiebbarer Mini-Rahmen nach dem Muster des Werbebalkens: bis zu
+-- drei "du bist dran"-Zeilen, Klick öffnet die Werkstatt am Auftragsboard.
+-- Er zeigt sich nur, wenn es etwas zu tun gibt (Owner-Entscheidung: Stufe 1).
+
+function GC.UI:CreateOrderTracker()
+    if self.orderTracker then
+        return self.orderTracker
+    end
+    local tracker = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotOrderTracker")
+    tracker:SetSize(312, 118)
+    local settings = GC.DB:GetSettings().orderTracker
+    tracker:SetPoint("CENTER", UIParent, "CENTER", tonumber(settings.x) or 0, tonumber(settings.y) or -300)
+    tracker:SetClampedToScreen(true)
+    tracker:SetMovable(true)
+    tracker:EnableMouse(true)
+    tracker:RegisterForDrag("LeftButton")
+    tracker:SetScript("OnDragStart", tracker.StartMoving)
+    tracker:SetScript("OnDragStop", function(frame)
+        frame:StopMovingOrSizing()
+        local point, _, _, x, y = frame:GetPoint()
+        if point then
+            GC.DB:GetSettings().orderTracker.x = math.floor(tonumber(x) or 0)
+            GC.DB:GetSettings().orderTracker.y = math.floor(tonumber(y) or 0)
+        end
+    end)
+    tracker:SetFrameStrata("MEDIUM")
+    tracker:Hide()
+
+    tracker.title = CreateLabel(tracker, "Gildenaufträge – du bist dran",
+        { font = "GameFontNormalSmall" })
+    tracker.title:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -9)
+    tracker.close = CreateButton(tracker, "×", 20, 20, function()
+        GC.DB:GetSettings().orderTracker.hidden = true
+        GC.UI:RefreshOrderTracker()
+    end)
+    tracker.close:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -8, -7)
+
+    tracker.rows = {}
+    for index = 1, 3 do
+        local row = CreateButton(tracker, "", 288, 26, function()
+            GC.UI:CreateMainFrame()
+            GC.UI.frame:Show()
+            GC.UI:ShowPage("WORKSHOP")
+            GC.UI:SetWorkshopView("ORDERS")
+        end)
+        row:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -28 - ((index - 1) * 28))
+        row.label:ClearAllPoints()
+        row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        row.label:SetJustifyH("LEFT")
+        row:Hide()
+        tracker.rows[index] = row
+    end
+
+    self.orderTracker = tracker
+    return tracker
+end
+
+function GC.UI:RefreshOrderTracker()
+    local settings = GC.DB:GetSettings().orderTracker
+    local rows = {}
+    if GC.Orders then
+        for _, boardRow in ipairs(GC.Orders:GetBoard().mine) do
+            if boardRow.yourTurn then
+                rows[#rows + 1] = boardRow
+            end
+        end
+    end
+    if settings.hidden or #rows == 0 then
+        if self.orderTracker then
+            self.orderTracker:Hide()
+        end
+        return
+    end
+
+    local tracker = self:CreateOrderTracker()
+    for index, row in ipairs(tracker.rows) do
+        local boardRow = rows[index]
+        if boardRow then
+            local order = boardRow.order
+            row:SetText((order.recipeName or "?") .. "  ·  " .. boardRow.action)
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+    if #rows > #tracker.rows then
+        tracker.title:SetText("Gildenaufträge – du bist dran (" .. #rows .. ")")
+    else
+        tracker.title:SetText("Gildenaufträge – du bist dran")
+    end
+    tracker:Show()
+end
+
+function GC.UI:ToggleOrderTracker()
+    local settings = GC.DB:GetSettings().orderTracker
+    settings.hidden = not settings.hidden
+    self:RefreshOrderTracker()
+    self:RefreshOrdersBoard()
 end
 
 function GC.UI:BuildRecruitmentPage()
@@ -5721,6 +6455,16 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.UI, function(self)
     end
     self:AddMinimapButton()
     self:RegisterInterfaceOptions()
+    self:RefreshOrderTracker()
+end)
+
+GC:RegisterCallback("ORDERS_UPDATED", GC.UI, function(self)
+    self:Invalidate("WORKSHOP")
+    self:RefreshMinimapMarker()
+    self:RefreshOrderTracker()
+    if self.pages.WORKSHOP and self.pages.WORKSHOP.orderLogDialog then
+        self:RefreshOrderLogDialog()
+    end
 end)
 
 GC:RegisterCallback("ROSTER_UPDATED", GC.UI, function(self)

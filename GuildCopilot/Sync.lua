@@ -1361,7 +1361,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     local messageType, messageSchema = message:match("^(%a+)|(%d+)")
     if messageType == "P" or messageType == "W" or messageType == "G"
         or messageType == "GQ" or messageType == "E" or messageType == "L"
-        or messageType == "B" then
+        or messageType == "B" or messageType == "O" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
@@ -1369,7 +1369,8 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- nach dem Login ist der Roster noch leer; dann greift diese Zusatzpruefung
     -- bewusst noch nicht.
     if distribution == "WHISPER" and #GC.Roster.members > 0
-        and (messageType == "A" or messageType == "W" or messageType == "L" or messageType == "E")
+        and (messageType == "A" or messageType == "W" or messageType == "L"
+            or messageType == "E" or messageType == "O")
         and not GC.Roster:IsGuildMember(sender) then
         return
     end
@@ -1412,6 +1413,15 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         return
     elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
         self:ReplyToGuildProfileRequest()
+        return
+    end
+
+    -- Gildenaufträge: Broadcasts über den Gildenkanal, Abgleichantworten
+    -- gezielt per Flüstern. Vor dem Raid-Sammelzweig, der WHISPER schluckt.
+    if messageType == "O" and (distribution == "GUILD" or distribution == "WHISPER") then
+        if GC.Orders then
+            GC.Orders:OnMessage(message, sender, distribution)
+        end
         return
     end
 
@@ -1475,6 +1485,12 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
     C_Timer.After(9, function()
         if GC.WarcraftLogs then
             GC.WarcraftLogs:RequestRecruitmentData()
+        end
+    end)
+    C_Timer.After(13, function()
+        -- Gildenaufträge abgleichen: Wer Neueres kennt, liefert es nach.
+        if GC.Orders then
+            GC.Orders:RequestSync()
         end
     end)
 end)
