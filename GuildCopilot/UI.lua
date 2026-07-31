@@ -1958,8 +1958,10 @@ end
 -- raus). NAME bleibt fest vorn, die Reihenfolge der übrigen Spalten liegt in
 -- den Einstellungen und gilt damit für alle Auswertungen.
 
-local STAT_COLUMN_DEFAULTS = { "presence", "deaths", "interrupts", "dispels",
-    "potions", "flasks", "elixirs", "food", "drums" }
+-- Die Standardreihenfolge ist die vom Owner eingerichtete: Proviant direkt
+-- neben der Anwesenheit, die Kampfwerte dahinter.
+local STAT_COLUMN_DEFAULTS = { "presence", "elixirs", "food", "flasks",
+    "drums", "deaths", "potions", "dispels", "interrupts" }
 
 function GC.UI:GetStatColumnOrder()
     local saved = GC.DB:GetSettings().statColumnOrder
@@ -2025,7 +2027,9 @@ function GC.UI:ApplyStatColumnLayout()
                 cell:SetPoint("LEFT", row, "LEFT", cursor, 0)
             end
         end
-        cursor = cursor + width + 3
+        -- 2 Pixel Fuge: Bei einheitlichen 40er-Spalten endet die letzte
+        -- damit bei 486 und bleibt innerhalb der 490er-Zeile.
+        cursor = cursor + width + 2
     end
 end
 
@@ -5895,10 +5899,8 @@ end
 function GC.UI:BuildStatisticsPage()
     local page = self.pages.STATISTICS
     CreatePageTitle(page, "Raidauswertung",
-        "Sitzungen laufen ausdrücklich durch Raidleiter, Assistenten oder berechtigte Gildenränge."
-        .. " Es werden nur Zusammenfassungen gespeichert, keine Rohdaten."
-        .. " TIME ist die Anwesenheit, INT sind Unterbrechungen, DISP entfernte Effekte."
-        .. " Klick auf einen Spaltenkopf sortiert; die Maus über einer Zeile zeigt alles im Detail.")
+        "Sitzungen starten nur berechtigte Ränge; gespeichert werden Zusammenfassungen, keine Rohdaten."
+        .. " Spaltenkopf: Klick sortiert, Ziehen ordnet um. Maus über einer Zeile zeigt alles im Detail.")
 
     local controlCard = CreateCard(page)
     controlCard:SetSize(776, 96)
@@ -6030,17 +6032,21 @@ function GC.UI:BuildStatisticsPage()
     -- gebraeuchlich. Der gewonnene Platz geht an die Namensspalte, die vorher
     -- laengere Namen abschnitt. Was die Kuerzel bedeuten, steht im Seitentext
     -- und ausgeschrieben im Tooltip der Zeile.
+    -- Einheitliche Breiten: Früher hatte jede Spalte ihr Maß (ELIXIR 48,
+    -- INT 32) - nach dem Umsortieren wirkte das Raster dadurch ungleichmäßig.
+    -- Jetzt sind alle Wertespalten gleich breit, nur TIME braucht mehr Platz
+    -- ("1h 33m"), und ELIXIR heißt wie im Detailfenster kurz ELIX.
     local detailHeaders = {
-        { text = "NAME",   key = "name",       x = 18,  width = 96 },
-        { text = "TIME",   key = "presence",   x = 117, width = 44 },
-        { text = "DEATH",  key = "deaths",     x = 164, width = 42 },
-        { text = "INT",    key = "interrupts", x = 209, width = 32 },
-        { text = "DISP",   key = "dispels",    x = 244, width = 38 },
-        { text = "POT",    key = "potions",    x = 285, width = 36 },
-        { text = "FLASK",  key = "flasks",     x = 324, width = 44 },
-        { text = "ELIXIR", key = "elixirs",    x = 371, width = 48 },
-        { text = "FOOD",   key = "food",       x = 422, width = 40 },
-        { text = "DRUM",   key = "drums",      x = 465, width = 38 },
+        { text = "NAME",  key = "name",       x = 18,  width = 96 },
+        { text = "TIME",  key = "presence",   x = 117, width = 46 },
+        { text = "DEATH", key = "deaths",     x = 165, width = 40 },
+        { text = "INT",   key = "interrupts", x = 207, width = 40 },
+        { text = "DISP",  key = "dispels",    x = 249, width = 40 },
+        { text = "POT",   key = "potions",    x = 291, width = 40 },
+        { text = "FLASK", key = "flasks",     x = 333, width = 40 },
+        { text = "ELIX",  key = "elixirs",    x = 375, width = 40 },
+        { text = "FOOD",  key = "food",       x = 417, width = 40 },
+        { text = "DRUM",  key = "drums",      x = 459, width = 40 },
     }
 
     -- Die Kopfzeile sortiert. Erster Klick absteigend, zweiter aufsteigend -
@@ -6075,6 +6081,18 @@ function GC.UI:BuildStatisticsPage()
         page.sortHeaders[#page.sortHeaders + 1] = header
         page.sortHeaderByKey[sortKey] = header
         page.statColumnWidths[sortKey] = headerDefinition.width
+        -- Anfass-Feedback: Unter der Maus leuchtet der Kopf auf - vorher gab
+        -- es kein Zeichen, dass man ihn packen kann (Owner-Rückmeldung).
+        header:SetScript("OnEnter", function(self)
+            SetTextColor(self.label, THEME.accent)
+        end)
+        header:SetScript("OnLeave", function(self)
+            if page.sortKey == self.sortKey then
+                SetTextColor(self.label, THEME.accent)
+            else
+                SetTextColor(self.label, THEME.muted)
+            end
+        end)
         if sortKey ~= "name" then
             header:RegisterForDrag("LeftButton")
             header:SetScript("OnDragStart", function(self)
@@ -6137,17 +6155,19 @@ function GC.UI:BuildStatisticsPage()
         row:SetSize(490, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
         row.rowIndex = index
+        -- Nur Erzeugung mit einheitlichen Breiten; die Positionen setzt
+        -- ApplyStatColumnLayout nach der gespeicherten Ordnung.
         local columns = {
             { key = "name", x = 5, width = 96 },
-            { key = "presence", x = 104, width = 44 },
-            { key = "deaths", x = 151, width = 42 },
-            { key = "interrupts", x = 196, width = 32 },
-            { key = "dispels", x = 231, width = 38 },
-            { key = "potions", x = 272, width = 36 },
-            { key = "flasks", x = 311, width = 44 },
-            { key = "elixirs", x = 358, width = 48 },
-            { key = "food", x = 409, width = 40 },
-            { key = "drums", x = 452, width = 38 },
+            { key = "presence", x = 104, width = 46 },
+            { key = "elixirs", x = 152, width = 40 },
+            { key = "food", x = 194, width = 40 },
+            { key = "flasks", x = 236, width = 40 },
+            { key = "drums", x = 278, width = 40 },
+            { key = "deaths", x = 320, width = 40 },
+            { key = "potions", x = 362, width = 40 },
+            { key = "dispels", x = 404, width = 40 },
+            { key = "interrupts", x = 446, width = 40 },
         }
         for _, column in ipairs(columns) do
             row[column.key] = CreateLabel(row, "", { width = column.width, height = 25 })
@@ -7800,17 +7820,19 @@ end
 -- Der Vergleich zeigt je Spieler zwei Zeilen - oben die erste Quelle, unten
 -- die zweite - und färbt Werte gelb, wo die Quellen sich widersprechen.
 
+-- Gleiche Reihenfolge wie die Standardordnung der Raidauswertungsseite:
+-- Proviant direkt neben der Anwesenheit, Kampfwerte dahinter.
 local REVIEW_COLS = {
     { key = "time",  head = "TIME",  x = 166, w = 56 },
-    { key = "death", head = "DEATH", x = 226, w = 48 },
-    { key = "res",   head = "RES",   x = 278, w = 40 },
-    { key = "int",   head = "INT",   x = 322, w = 40 },
-    { key = "disp",  head = "DISP",  x = 366, w = 44 },
-    { key = "pot",   head = "POT",   x = 414, w = 40 },
-    { key = "flask", head = "FLASK", x = 458, w = 48 },
-    { key = "elix",  head = "ELIX",  x = 510, w = 44 },
-    { key = "food",  head = "FOOD",  x = 558, w = 44 },
-    { key = "drum",  head = "DRUM",  x = 606, w = 46 },
+    { key = "elix",  head = "ELIX",  x = 226, w = 44 },
+    { key = "food",  head = "FOOD",  x = 274, w = 44 },
+    { key = "flask", head = "FLASK", x = 322, w = 48 },
+    { key = "drum",  head = "DRUM",  x = 374, w = 46 },
+    { key = "death", head = "DEATH", x = 424, w = 48 },
+    { key = "res",   head = "RES",   x = 476, w = 40 },
+    { key = "pot",   head = "POT",   x = 520, w = 40 },
+    { key = "disp",  head = "DISP",  x = 564, w = 44 },
+    { key = "int",   head = "INT",   x = 612, w = 40 },
 }
 
 -- Rohwerte eines Teilnehmers je Spalte. TIME vergleicht auf Minutenbasis,

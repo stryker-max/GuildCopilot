@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.74 – Spalten-Feinschliff: gleichmäßig, fühlbar, Proviant-Standard
+
+Drei Rückmeldungen aus der ersten Runde Spalten-Schieben:
+
+- **Gleichmäßiges Raster:** Jede Spalte hatte ihr eigenes Maß (ELIXIR 48, INT 32) – nach dem Umsortieren wirkten die Abstände krumm. Jetzt sind alle Wertespalten einheitlich 40 breit (TIME 46 für „1h 33m"), mit fester 2-Pixel-Fuge; ELIXIR heißt wie im Detailfenster kurz ELIX;
+- **Anfass-Feedback:** Unter der Maus leuchtet der Spaltenkopf auf – vorher gab es kein Zeichen, dass man ihn packen kann; beim Ziehen dimmt er wie gehabt;
+- **Proviant-Standard:** Die vom Owner eingerichtete Reihenfolge ist jetzt die Standardordnung für alle: TIME, ELIX, FOOD, FLASK, DRUM, DEATH, POT, DISP, INT – Proviant direkt neben der Anwesenheit. Das Detailfenster zeigt dieselbe Reihenfolge;
+- der abgeschnittene Einleitungstext der Seite ist gekürzt und erklärt jetzt Klick (sortieren) und Ziehen (umordnen).
+
 ## 0.9.73 – Spalten verschieben statt Zeilen ziehen
 
 Owner-Urteil über das Zeilen-Ziehen: „Blödsinn" – raus damit, ersatzlos (samt Handordnung je Auswertung). Stattdessen das, was wirklich fehlte:

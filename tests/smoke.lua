@@ -4780,8 +4780,9 @@ do
     orders_page = addon.UI.pages.STATISTICS
     addon.DB:GetSettings().statColumnOrder = nil
     orders_list = addon.UI:GetStatColumnOrder()
-    assert(orders_list[1] == "presence" and orders_list[#orders_list] == "drums",
-        "Die Standard-Spaltenordnung stimmt nicht")
+    assert(orders_list[1] == "presence" and orders_list[2] == "elixirs"
+        and orders_list[#orders_list] == "interrupts",
+        "Die Standard-Spaltenordnung (Proviant vorn) stimmt nicht")
 
     assert(addon.UI:MoveStatColumn("food", 2) == true, "Das Spaltenverschieben scheiterte")
     orders_list = addon.UI:GetStatColumnOrder()
