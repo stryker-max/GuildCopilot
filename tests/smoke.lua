@@ -2692,6 +2692,122 @@ do
     addon.Perf:Reset()
 end
 
+do
+    -- Datenschuebe (Gildenabgleich, Item-Cache) zeichnen die sichtbare Seite
+    -- einmal gesammelt neu, nicht einmal pro Paket. Klicks (ShowPage) bleiben
+    -- davon unberuehrt und zeichnen sofort.
+    local realStatistics = addon.UI.RefreshStatistics
+    local coalescedDraws = 0
+    addon.UI.RefreshStatistics = function(self)
+        coalescedDraws = coalescedDraws + 1
+        return realStatistics(self)
+    end
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("STATISTICS")
+    coalescedDraws = 0
+
+    timerDelayThreshold = 0.2
+    local repaintTimerStart = #pendingTimers
+    addon.UI:Invalidate("STATISTICS")
+    addon.UI:Invalidate("STATISTICS")
+    addon.UI:Invalidate("STATISTICS")
+    assert(coalescedDraws == 0, "Der Datenschub wurde sofort gezeichnet statt gesammelt")
+    assert(#pendingTimers == repaintTimerStart + 1,
+        "Drei Datenpakete haben nicht genau einen Sammel-Timer geplant")
+    assert(addon.UI.stalePages.STATISTICS == true,
+        "Die sichtbare Seite wurde waehrend des Sammelns nicht als veraltet vorgemerkt")
+    pendingTimers[repaintTimerStart + 1]()
+    assert(coalescedDraws == 1, "Der gesammelte Schub wurde nicht genau einmal gezeichnet")
+    assert(addon.UI.stalePages.STATISTICS == nil,
+        "Der Veraltet-Merker blieb nach dem gesammelten Zeichnen stehen")
+    timerDelayThreshold = math.huge
+
+    addon.UI:ShowPage("OVERVIEW")
+    addon.UI.RefreshStatistics = realStatistics
+end
+
+do
+    -- Tausende nachgeladene Item-Daten beim Login ergeben hoechstens zwei
+    -- Werkstatt-Auffrischungen pro Sekunde, nicht tausende.
+    local workshopFires = 0
+    addon:RegisterCallback("WORKSHOP_UPDATED", nil, function()
+        workshopFires = workshopFires + 1
+    end)
+    timerDelayThreshold = 0.4
+    local refreshTimerStart = #pendingTimers
+    addon.Workshop:ScheduleNameRefresh()
+    addon.Workshop:ScheduleNameRefresh()
+    addon.Workshop:ScheduleNameRefresh()
+    assert(workshopFires == 0, "Die Item-Auffrischung feuerte sofort statt gesammelt")
+    assert(#pendingTimers == refreshTimerStart + 1,
+        "Drei Item-Meldungen haben nicht genau einen Sammel-Timer geplant")
+    pendingTimers[refreshTimerStart + 1]()
+    assert(workshopFires == 1, "Die gesammelte Item-Auffrischung feuerte nicht genau einmal")
+    assert(addon.Workshop.nameRefreshPending == false,
+        "Der Sammel-Merker der Werkstatt wurde nicht zurueckgesetzt")
+    timerDelayThreshold = math.huge
+end
+
+do
+    -- Eine leere Bulk-Warteschlange legt ihren Antrieb schlafen; das Einreihen
+    -- weckt ihn und bucht die verstrichene Pause als Sendebudget nach.
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkAllowance = 4000
+    addon.Sync:PumpBulk(1)
+    assert(addon.Sync.bulkIdleAt ~= nil,
+        "Die leere Warteschlange hat den Antrieb nicht schlafen gelegt")
+
+    inCombat = true
+    addon.Sync:SendBulk("WKIDLE|1", "GUILD")
+    assert(addon.Sync.bulkIdleAt == nil, "Das Einreihen hat die Leerlaufpause nicht beendet")
+    assert(#addon.Sync.bulkQueue > 0, "Das im Kampf eingereihte Paket ging verloren")
+    inCombat = false
+    addon.Sync:PumpBulk(5)
+    assert(#addon.Sync.bulkQueue == 0, "Die Warteschlange lief nach dem Kampf nicht weiter")
+    assert(addon.Sync.bulkIdleAt ~= nil,
+        "Nach dem Leerlaufen wurde keine neue Pause begonnen")
+end
+
+do
+    -- Das Item-Daten-Abo des Gear Audits ist zustandsgetrieben: an, solange
+    -- die letzte Selbstpruefung unlesbare Slots hatte, sonst aus.
+    addon.GearAudit:SetItemInfoWatch(false)
+    addon.GearAudit:SetItemInfoWatch(true)
+    assert(addon.GearAudit.itemInfoWatch == true, "Das Item-Abo liess sich nicht einschalten")
+    addon.GearAudit:SetItemInfoWatch(false)
+    assert(addon.GearAudit.itemInfoWatch == false, "Das Item-Abo liess sich nicht abschalten")
+    -- Nach einer vollstaendig lesbaren Selbstpruefung ist das Abo aus.
+    addon.GearAudit:AuditSelf()
+    local ownAudit = addon.GearAudit:GetAudit(addon:GetPlayerFullName())
+    if ownAudit and (ownAudit.unreadableSlots or 0) == 0 then
+        assert(addon.GearAudit.itemInfoWatch == false,
+            "Nach vollstaendiger Selbstpruefung blieb das Item-Abo eingeschaltet")
+    end
+end
+
+do
+    -- Der Namens-Memo der Raidsitzung: Fehltreffer werden gemerkt und beim
+    -- Eintreffen eines neuen Teilnehmers verworfen, damit ein Nachzuegler
+    -- nicht fuer den Rest der Sitzung unsichtbar bleibt.
+    local session = addon.RaidMonitor:StartSession("perfmemo", "Tester", 1000, "Testzone")
+    assert(addon.RaidMonitor.combatLogTracking == true,
+        "Die Memo-Testsitzung hat das Combat-Log-Abo nicht eingeschaltet")
+    assert(addon.RaidMonitor:FindParticipant(session, "Nachzuegler") == nil,
+        "Ein Unbekannter wurde faelschlich gefunden")
+    assert(session.nameLookup ~= nil and session.nameLookup["Nachzuegler"] == false,
+        "Der Fehltreffer wurde nicht gemerkt")
+    addon.RaidMonitor:GetParticipant(session, "Nachzuegler", "MAGE")
+    assert(session.nameLookup == nil,
+        "Ein neuer Teilnehmer hat die gemerkten Fehltreffer nicht verworfen")
+    local found = addon.RaidMonitor:FindParticipant(session, "Nachzuegler")
+    assert(found ~= nil and found.classFile == "MAGE",
+        "Der Nachzuegler wurde nach dem Verwerfen des Memos nicht gefunden")
+    assert(session.nameLookup["Nachzuegler"] == found,
+        "Der Treffer wurde nicht neu gemerkt")
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:SetCombatLogTracking(false)
+end
+
 -- === Offline-Import aus der Combat-Log-Datei ===============================
 --
 -- Der Installer wertet WoWCombatLog.txt aus und schickt GCPLOG1. Es ist eine

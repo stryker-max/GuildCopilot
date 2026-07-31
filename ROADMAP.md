@@ -298,6 +298,20 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.49 – Performance von Grund auf: Schuebe sammeln statt pro Ereignis zeichnen
+
+Die systematische Durchsicht aller Ereignispfade nach den Meldungen aus der Gilde. Geprueft wurde jede Ereignisregistrierung, jeder OnUpdate-Handler und jeder Callback-Trichter; vieles war bereits richtig geloest (Roster-Entprellung, Taschen-Scans, Chat-Gates, Fremdpraefix-Verwurf im Sync). Fuenf Stellen waren es nicht:
+
+- **Der teuerste Fund: `GET_ITEM_INFO_RECEIVED` zeichnete die offene Seite pro Item neu.** Der Client meldet beim Login jeden nachgeladenen Gegenstand einzeln - tausende Ereignisse, und jedes feuerte `WORKSHOP_UPDATED`; bei offener Werkstatt- oder Rosterseite zeichnete jedes einzelne die komplette Seite. Jetzt sammelt `ScheduleNameRefresh` auf hoechstens zwei Auffrischungen pro Sekunde;
+- **Datenschuebe zeichnen die sichtbare Seite einmal, nicht pro Paket.** `Invalidate` wird nur von Datenaenderungen gerufen, nie von Klicks - ein kurzer Sammel-Timer (0,25 s) fasst den Schub zusammen. Ein Gildenabgleich zur Prime Time bei offenem Fenster kostet damit einen Neuaufbau statt einem pro Paket. Klicks zeichnen unveraendert sofort;
+- **Das Item-Daten-Abo des Gear Audits ist zustandsgetrieben.** `GET_ITEM_INFO_RECEIVED` ist nur noch registriert, solange die letzte Selbstpruefung unlesbare Slots hatte - vorher fragte jeder der tausenden Login-Treffer die Datenbank nach dem eigenen Audit;
+- **Die Bulk-Warteschlange legt ihren Antrieb schlafen.** Ihr OnUpdate lief jeden Frame, auch mit leerer Warteschlange. Der Rahmen versteckt sich jetzt bei Leerlauf (versteckte Frames bekommen kein OnUpdate) und bucht beim Aufwachen die verstrichene Pause als Sendebudget nach;
+- **Der Sitzungspfad spart sich Stringarbeit.** Die Sattgegessen-Erkennung prueft Namen nur noch bei Aura-Ereignissen (Essen ist nie ein Cast), und ein Namens-Memo je Sitzung ersetzt die zweifache Normalisierung pro Kampfereignis; Fehltreffer werden verworfen, sobald ein neuer Teilnehmer auftaucht.
+
+**Bewusst nicht angefasst:** die Bank-Scans (ein verzoegerter Scan koennte nach dem Schliessen des Bankfensters eine leere Bank lesen und den Bestand ausloeschen), `GetGuild()`-Caching (Semantikrisiko ohne belegten Engpass) und die Mengenobergrenzen der Datenbank (weiter Messfrage, siehe TODO Punkt 4). Fuenf neue Testbloecke sichern das Sammelverhalten ab, darunter die Zusicherung, dass ein Nachzuegler den Namens-Memo verwirft.
+
+Zur Ursachensuche bei den Betroffenen: **`/gcp debug`** schaltet die eingebaute Messung ein; sie protokolliert die schlimmste Einzeldauer je Vorgang und gehoert zuerst zu den Spielern mit Einbruechen.
+
 ## 0.9.48 – Zwei Ereignisse, die zu oft zugestellt wurden
 
 Aus der Gilde gemeldet: Performance-Einbrüche bei einzelnen Spielern, dazu ein Fall, in dem nach dem Aktivieren von Guild Copilot alle übrigen Addons deaktiviert waren. Die Ursache beider Meldungen ist **nicht** gefunden – die Suche danach hat aber zwei Stellen zutage gefördert, die unabhängig davon falsch waren:

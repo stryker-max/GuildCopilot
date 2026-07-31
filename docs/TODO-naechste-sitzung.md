@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 31.07.2026, nach Release 0.9.48 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.49 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -149,8 +149,11 @@ Zwei Wege:
 
 Gemeldet wurden Bildraten-Einbrüche bei mehreren Spielern sowie ein Fall, in
 dem nach dem Aktivieren von Guild Copilot **alle anderen Addons deaktiviert**
-waren. Mit 0.9.48 sind zwei Ereignisabos korrigiert – die Ursache ist damit
-aber **nicht** gefunden.
+waren. Mit 0.9.48 sind zwei Ereignisabos korrigiert, mit 0.9.49 kam die
+systematische Durchsicht aller Ereignispfade (fünf Funde behoben, der größte:
+Seitenneuaufbau pro nachgeladenem Item bei offenem Fenster – das erklärt
+Einbrüche **bei offenem Fenster** plausibel). Ob damit auch die gemeldeten
+Fälle erklärt sind, ist **offen**, bis ein Betroffener misst.
 
 **Ausgeschlossen ist bereits:** Das Addon ruft nirgends `DisableAddOn`,
 `EnableAddOn` oder `C_AddOns` auf, und es legt außer `SLASH_GUILDCOPILOT1/2`
@@ -164,6 +167,9 @@ deaktiviert aus. Zu klären: Ist der Client des Betroffenen abgestürzt, und
 liegen Einträge im `Errors`- bzw. `Crashes`-Verzeichnis?
 
 **Vor weiteren Codeänderungen erst messen:**
+- **`/gcp debug`** beim Betroffenen: eingebaute Messung, protokolliert die
+  schlimmste Einzeldauer je Vorgang (Roster-Scan, Seitenaufbau). Erste Wahl,
+  weil ohne Zusatzaddon;
 - BugSack + BugGrabber bei den Betroffenen, um Lua-Fehler statt Vermutungen zu
   bekommen;
 - AddonProfiler im Raid, um zu belegen, ob GCP überhaupt die CPU-Zeit zieht;
@@ -171,14 +177,17 @@ liegen Einträge im `Errors`- bzw. `Crashes`-Verzeichnis?
   reale Datenmenge ist unbekannt.
 
 **Danach zu bewerten, aber nicht vorher zu optimieren:**
-- `ResolveConsumable` in `RaidMonitor.lua` ruft `tostring(spellName):lower()`
-  für jedes `SPELL_AURA_APPLIED`/`_REFRESH`/`SPELL_CAST_SUCCESS` auf, dessen
-  Spell-ID kein bekanntes Verbrauchsgut ist – also im Regelfall. Dazu
-  normalisiert `FindParticipant` bei jedem Aufruf den Namen. Nur relevant,
-  solange eine Sitzung läuft;
 - `GC.DB:Prune()` räumt rein zeitbasiert auf. `remoteProfiles` und
   `workshop.crafters` haben **keine Mengenobergrenze**; nur `inbox` (100) und
-  `postHistory` (50) sind gedeckelt. In einer großen Gilde kann das wachsen.
+  `postHistory` (50) sind gedeckelt. In einer großen Gilde kann das wachsen;
+- `GetGuild()` läuft pro Aufruf durch den Defaults-Baum (`MergeDefaults`).
+  Nach den 0.9.49-Entprellungen liegt es auf keinem heißen Pfad mehr; Caching
+  wäre ein Semantikrisiko (Tests tauschen die Datenbank aus, nil-gesetzte
+  Zweige würden nicht mehr repariert) und braucht erst einen Messbeleg.
+
+*(Die 0.9.48er-Punkte zu `ResolveConsumable` und `FindParticipant` sind mit
+0.9.49 umgesetzt: Namensprüfung nur noch bei Aura-Ereignissen, Namens-Memo je
+Sitzung.)*
 
 ---
 

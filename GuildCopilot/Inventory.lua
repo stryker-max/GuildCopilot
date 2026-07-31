@@ -734,6 +734,10 @@ inventoryEvents:SetScript("OnEvent", function(_, event)
     if event == "BAG_UPDATE" then
         GC.Inventory:ScheduleBagScan()
     elseif event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" then
+        -- Bewusst ohne Entprellung: Die Bank ist nur bei offenem Fenster
+        -- lesbar. Ein verzoegerter Scan koennte nach dem Schliessen laufen,
+        -- eine leere Bank lesen und den gemerkten Bestand ausloeschen. Die
+        -- Serie beim Einsortieren ist klein, lokal und harmlos.
         GC.Inventory:ScanBank()
     elseif event == "GUILDBANKFRAME_OPENED" then
         GC.Inventory:QueryGuildBankTabs()

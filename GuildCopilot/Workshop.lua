@@ -1950,6 +1950,29 @@ function GC.Workshop:GetSummary()
     }
 end
 
+-- GET_ITEM_INFO_RECEIVED meldet jeden einzelnen Gegenstand, den der Client in
+-- seinen Item-Cache nachlaedt - beim Login mit kaltem Cache sind das tausende
+-- Ereignisse in kurzer Zeit. Jedes davon feuerte bisher WORKSHOP_UPDATED, und
+-- bei offener Werkstattseite zeichnete jedes einzelne die komplette Seite neu.
+-- Fuer die Oberflaeche zaehlt nur "demnaechst neu zeichnen", nicht jedes Item:
+-- gesammelt wird auf hoechstens zwei Auffrischungen pro Sekunde.
+local NAME_REFRESH_DELAY = 0.5
+
+function GC.Workshop:ScheduleNameRefresh()
+    if self.nameRefreshPending then
+        return
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        GC:FireCallback("WORKSHOP_UPDATED")
+        return
+    end
+    self.nameRefreshPending = true
+    C_Timer.After(NAME_REFRESH_DELAY, function()
+        GC.Workshop.nameRefreshPending = false
+        GC:FireCallback("WORKSHOP_UPDATED")
+    end)
+end
+
 local workshopEvents = CreateFrame("Frame")
 workshopEvents:RegisterEvent("TRADE_SKILL_SHOW")
 workshopEvents:RegisterEvent("TRADE_SKILL_UPDATE")
@@ -1958,7 +1981,7 @@ workshopEvents:RegisterEvent("CRAFT_UPDATE")
 workshopEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 workshopEvents:SetScript("OnEvent", function(_, event)
     if event == "GET_ITEM_INFO_RECEIVED" then
-        GC:FireCallback("WORKSHOP_UPDATED")
+        GC.Workshop:ScheduleNameRefresh()
     else
         if event == "TRADE_SKILL_SHOW" then
             GC.Workshop.preparedProfession = nil

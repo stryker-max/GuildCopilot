@@ -113,6 +113,9 @@ function GC.RaidMonitor:GetParticipant(session, name, classFile)
         }
         session.participants[key] = participant
         session.participantOrder[#session.participantOrder + 1] = key
+        -- Ein neuer Teilnehmer macht gemerkte Fehltreffer ungueltig: Wer bis
+        -- eben unbekannt war, koennte jetzt genau dieser Neue sein.
+        session.nameLookup = nil
     end
     if classFile and not participant.classFile then
         participant.classFile = classFile
@@ -120,11 +123,27 @@ function GC.RaidMonitor:GetParticipant(session, name, classFile)
     return participant
 end
 
+-- Der Combat Log nennt Namen roh ("Schurke" oder "Schurke-Realm"), die
+-- Teilnehmer sind normalisiert abgelegt. Statt bei jedem der vielen tausend
+-- Kampfereignisse zwei Stringfunktionen zu durchlaufen, merkt sich die Sitzung
+-- das Ergebnis je roher Schreibweise - Fehltreffer (NPCs, Fremde) als false,
+-- denn gerade sie sind der haeufigste Fall.
 function GC.RaidMonitor:FindParticipant(session, name)
     if not session or not name then
         return nil
     end
-    return session.participants[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
+    local lookup = session.nameLookup
+    if lookup then
+        local cached = lookup[name]
+        if cached ~= nil then
+            return cached or nil
+        end
+    end
+    local participant = session.participants[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
+    lookup = lookup or {}
+    session.nameLookup = lookup
+    lookup[name] = participant or false
+    return participant
 end
 
 function GC.RaidMonitor:SyncParticipants()
@@ -554,20 +573,22 @@ local WELL_FED_AURAS = {
     ["well fed"] = true,
 }
 
-local function ResolveConsumable(spellID, spellName)
+local function ResolveConsumable(spellID, spellName, isAura)
     local consumable = GC.Consumables[tonumber(spellID) or 0]
     if consumable then
         return consumable.category
     end
-    local normalized = tostring(spellName or ""):lower()
-    if WELL_FED_AURAS[normalized] then
+    -- Die Sattgegessen-Aura ist immer eine Aura, nie ein gewirkter Zauber.
+    -- Cast-Ereignisse sparen sich damit das Kleinschreiben des Namens - im
+    -- Raid ist der unbekannte Cast der haeufigste Fall dieser Funktion.
+    if isAura and WELL_FED_AURAS[tostring(spellName or ""):lower()] then
         return "FOOD"
     end
     return nil
 end
 
-local function CountConsumable(monitor, session, playerName, spellID, spellName)
-    local categoryKey = ResolveConsumable(spellID, spellName)
+local function CountConsumable(monitor, session, playerName, spellID, spellName, isAura)
+    local categoryKey = ResolveConsumable(spellID, spellName, isAura)
     if not categoryKey then
         return
     end
@@ -661,9 +682,9 @@ function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, d
     -- Tränke, Runen und Trommeln werden gewirkt, dauerhafte Buffs erscheinen
     -- als Aura auf dem Ziel.
     if subevent == "SPELL_CAST_SUCCESS" then
-        CountConsumable(self, session, sourceName, spellID, spellName)
+        CountConsumable(self, session, sourceName, spellID, spellName, false)
     elseif subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" then
-        CountConsumable(self, session, destName, spellID, spellName)
+        CountConsumable(self, session, destName, spellID, spellName, true)
     end
 end
 

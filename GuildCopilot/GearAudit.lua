@@ -7,6 +7,7 @@ GC.GearAudit = {
     selectedName = nil,
     status = "",
     equipmentIncoming = {},
+    itemInfoWatch = false,
 }
 
 local INSPECT_INTERVAL = 1.5
@@ -1208,6 +1209,9 @@ function GC.GearAudit:AuditSelf(automatic, forceSnapshot)
     end)
     self:StoreAudit(audit)
     self.selectedName = audit.name
+    -- Solange Slots unlesbar sind, lauscht die Pruefung auf nachgeladene
+    -- Item-Daten; ist alles gelesen, wird das Abo wieder beendet.
+    self:SetItemInfoWatch((audit.unreadableSlots or 0) > 0)
     if (audit.unreadableSlots or 0) > 0 then
         self.unreadableRetryCount = (self.unreadableRetryCount or 0) + 1
         if self.unreadableRetryCount <= MAX_SELF_READ_RETRIES then
@@ -1562,7 +1566,6 @@ end
 local gearEvents = CreateFrame("Frame")
 gearEvents:RegisterEvent("INSPECT_READY")
 gearEvents:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-gearEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 
 -- UNIT_INVENTORY_CHANGED feuert fuer jede Einheit in der Gruppe; interessant
 -- ist ausschliesslich der eigene Charakter. Ungefiltert liefe der Handler im
@@ -1573,6 +1576,26 @@ if gearEvents.RegisterUnitEvent then
 else
     gearEvents:RegisterEvent("UNIT_INVENTORY_CHANGED")
 end
+
+-- GET_ITEM_INFO_RECEIVED feuert beim Login fuer jeden nachgeladenen Gegenstand
+-- im Item-Cache - tausendfach, und fast immer geht es dabei nicht um die
+-- eigene Ausruestung. Bisher fragte jeder einzelne Treffer die Datenbank nach
+-- dem eigenen Audit. Abonniert wird jetzt nur noch, solange die letzte
+-- Selbstpruefung unlesbare Slots hatte und wirklich auf Item-Daten wartet;
+-- danach meldet sich der Handler wieder ab.
+function GC.GearAudit:SetItemInfoWatch(enabled)
+    enabled = enabled and true or false
+    if self.itemInfoWatch == enabled then
+        return
+    end
+    self.itemInfoWatch = enabled
+    if enabled then
+        gearEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    else
+        gearEvents:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+    end
+end
+
 gearEvents:SetScript("OnEvent", function(_, event, value)
     if event == "INSPECT_READY" then
         GC.GearAudit:OnInspectReady(value)
@@ -1583,10 +1606,9 @@ gearEvents:SetScript("OnEvent", function(_, event, value)
         GC.GearAudit.unreadableRetryCount = 0
         GC.GearAudit:QueueSelfAudit()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
-        local own = GC.GearAudit:GetAudit(GC:GetPlayerFullName())
-        if own and (own.unreadableSlots or 0) > 0 then
-            GC.GearAudit:QueueSelfAudit(0.5)
-        end
+        -- Nur registriert, solange die letzte Selbstpruefung unvollstaendig
+        -- war - die Datenbankabfrage pro Ereignis ist damit ueberfluessig.
+        GC.GearAudit:QueueSelfAudit(0.5)
     end
 end)
 

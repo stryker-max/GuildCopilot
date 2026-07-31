@@ -5123,23 +5123,51 @@ function GC.UI:RefreshPage(pageKey)
     GC.Perf:Measure("Seite " .. pageKey, self[method], self)
 end
 
--- Eine Seite gilt als veraltet. Ist sie gerade zu sehen, wird sofort neu
--- gezeichnet, sonst beim naechsten Aufschlagen.
+-- Eine Seite gilt als veraltet. Ist sie gerade zu sehen, wird sie kurz darauf
+-- neu gezeichnet, sonst beim naechsten Aufschlagen.
+--
+-- "Kurz darauf" statt sofort: Invalidate wird ausschliesslich von
+-- Datenaenderungen gerufen, nie von Klicks - und Daten kommen in Schueben.
+-- Ein Gildenabgleich zur Prime Time liefert mehrere Pakete pro Sekunde, und
+-- jedes zeichnete die offene Seite komplett neu. Jetzt sammelt ein kurzer
+-- Timer den Schub ein und zeichnet einmal. Klicks gehen weiter ueber
+-- ShowPage/RefreshPage und bleiben unmittelbar.
+local REPAINT_DELAY = 0.25
+
 function GC.UI:Invalidate(...)
     if not self.frame then
         return
     end
     self.stalePages = self.stalePages or {}
+    local repaint = false
     for index = 1, select("#", ...) do
         local pageKey = select(index, ...)
         if PAGE_REFRESH[pageKey] then
+            self.stalePages[pageKey] = true
             if pageKey == self.activePage and self:IsVisible() then
-                self:RefreshPage(pageKey)
-            else
-                self.stalePages[pageKey] = true
+                repaint = true
             end
         end
     end
+    if not repaint or self.repaintPending then
+        return
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:RefreshPage(self.activePage)
+        return
+    end
+    self.repaintPending = true
+    C_Timer.After(REPAINT_DELAY, function()
+        GC.UI.repaintPending = false
+        -- Inzwischen kann die Seite gewechselt oder das Fenster zu sein.
+        -- RefreshPage raeumt den Veraltet-Merker der gezeichneten Seite ab;
+        -- eine nicht mehr aktive Seite behaelt ihren und wird beim naechsten
+        -- Aufschlagen nachgeholt.
+        local active = GC.UI.activePage
+        if GC.UI:IsVisible() and GC.UI.stalePages and GC.UI.stalePages[active] then
+            GC.UI:RefreshPage(active)
+        end
+    end)
 end
 
 function GC.UI:Refresh()

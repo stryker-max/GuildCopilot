@@ -35,6 +35,12 @@ local BULK_MAX_RETRIES = 8
 -- wachsenden zeitlichen Abstand, statt im selben Frame zu verbrennen.
 local BULK_RETRY_BACKOFF = 0.75
 local BULK_MAX_RETRY_DELAY = 4
+-- Der Rahmen, dessen OnUpdate die Bulk-Warteschlange antreibt. Er steht hier
+-- oben, damit SendBulk und PumpBulk ihn zeigen und verstecken koennen: Ein
+-- verstecktes Frame bekommt kein OnUpdate, eine leere Warteschlange kostet
+-- damit keinen einzigen Handleraufruf pro Frame. Verdrahtet wird das Skript
+-- unten bei den uebrigen Ereignisrahmen.
+local bulkFrame = CreateFrame("Frame")
 local RELIABLE_WINDOW = 4
 local RELIABLE_RETRY_DELAY = 1.5
 -- Der Whisper-Transfer teilt sich das Kanalbudget mit ChatThrottleLib und dem
@@ -344,7 +350,15 @@ function GC.Sync:SendBulk(payload, distribution, target, callback)
         callback = callback,
         retries = 0,
     }
-    self:PumpBulk(0)
+    -- Waehrend der Leerlaufpause hat sich das Sendebudget weiter gefuellt;
+    -- die verstrichene Zeit wird beim Aufwachen in einem Schritt nachgebucht.
+    local idle = 0
+    if self.bulkIdleAt then
+        idle = math.max(0, GC.Util.Now() - self.bulkIdleAt)
+        self.bulkIdleAt = nil
+    end
+    bulkFrame:Show()
+    self:PumpBulk(idle)
     return true
 end
 
@@ -415,6 +429,12 @@ function GC.Sync:PumpBulk(elapsed)
             end
         end
     end
+
+    -- Die Warteschlange ist leer: schlafen legen, bis SendBulk wieder etwas
+    -- einreiht. Der Zeitstempel merkt sich den Beginn der Pause fuer die
+    -- Budget-Nachbuchung beim Aufwachen.
+    self.bulkIdleAt = self.bulkIdleAt or GC.Util.Now()
+    bulkFrame:Hide()
 end
 
 local function ReliableEntryID(kind, token, target)
@@ -1434,7 +1454,8 @@ syncEvents:SetScript("OnEvent", function(_, event, prefix, message, distribution
     GC.Sync:OnMessage(prefix, message, distribution, sender)
 end)
 
-local bulkFrame = CreateFrame("Frame")
+-- Der Rahmen selbst steht oben bei den BULK-Konstanten; er ist nur sichtbar,
+-- solange die Warteschlange Arbeit hat.
 bulkFrame:SetScript("OnUpdate", function(_, elapsed)
     GC.Sync:PumpBulk(elapsed)
 end)
