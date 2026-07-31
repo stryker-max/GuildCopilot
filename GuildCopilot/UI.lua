@@ -6184,6 +6184,14 @@ function GC.UI:BuildStatisticsPage()
             row[column.key]:SetPoint("LEFT", row, "LEFT", column.x, 0)
         end
 
+        -- Klick auf die Zeile: das Verbrauchsprotokoll des Spielers (was
+        -- genau, wann - Owner-Wunsch).
+        row:SetScript("OnMouseUp", function(self)
+            if self.participant then
+                GC.UI:ShowConsumableLog(self.participant)
+            end
+        end)
+
         -- Die Spaltenkoepfe muessen kurz sein. Was sie bedeuten und was in den
         -- zusammengefassten Spalten steckt, steht hier vollstaendig.
         row:EnableMouse(true)
@@ -6215,6 +6223,8 @@ function GC.UI:BuildStatisticsPage()
                 end
                 GameTooltip:AddDoubleLine(category.label, tostring(count), red, green, blue, red, green, blue)
             end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Klick: Verbrauch im Detail", 0.31, 0.79, 1)
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function()
@@ -8192,6 +8202,188 @@ GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
 end)
 GC:RegisterCallback("WCL_UPDATED", GC.UI, function(self)
     self:RefreshSessionReview()
+end)
+
+-- === Verbrauchsprotokoll ====================================================
+-- Klick auf einen Teilnehmer der Raidauswertung: Was genau hat er wann
+-- eingeworfen? Live mitgeschriebene Sitzungen haben ein Protokoll mit
+-- Uhrzeiten; Warcraft-Logs-Quellen liefern die exakten Gegenstände mit
+-- Anzahl (Uhrzeiten kennt der Export nicht); für fremde Zusammenfassungen
+-- bleiben die Kategoriezähler.
+
+function GC.UI:CreateConsumableLogFrame()
+    if self.consumableLogFrame then
+        return self.consumableLogFrame
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotConsumableLog")
+    frame:SetSize(430, 470)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 60, 20)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "", { title = true, width = 340 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+    frame.subtitle = CreateLabel(frame, "", { muted = true, width = 398, height = 28, vertical = "TOP" })
+    frame.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
+
+    CreateLabel(frame, "ZEIT", { muted = true, font = "GameFontNormalSmall", width = 66, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -72)
+    CreateLabel(frame, "WAS", { muted = true, font = "GameFontNormalSmall", width = 220, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 92, -72)
+    CreateLabel(frame, "ART", { muted = true, font = "GameFontNormalSmall", width = 80, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 322, -72)
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -90)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 44)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(380)
+    frame.content:SetHeight(320)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 100 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(380, 18)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 20))
+        row.time = CreateLabel(row, "", { muted = true, width = 66, height = 18 })
+        row.time:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.name = CreateLabel(row, "", { width = 224, height = 18 })
+        row.name:SetPoint("LEFT", row, "LEFT", 78, 0)
+        row.cat = CreateLabel(row, "", { muted = true, width = 74, height = 18 })
+        row.cat:SetPoint("LEFT", row, "LEFT", 308, 0)
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.note = CreateLabel(frame, "", { muted = true, width = 280, height = 18 })
+    frame.note:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 12)
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 28, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 8)
+
+    frame:Hide()
+    self.consumableLogFrame = frame
+    return frame
+end
+
+function GC.UI:ShowConsumableLog(participant)
+    if not participant then
+        return
+    end
+    local frame = self:CreateConsumableLogFrame()
+    frame.participant = participant
+    frame:Show()
+    if frame.Raise then
+        frame:Raise()
+    end
+    self:RefreshConsumableLog()
+end
+
+function GC.UI:RefreshConsumableLog()
+    local frame = self.consumableLogFrame
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local participant = frame.participant
+    if not participant then
+        frame:Hide()
+        return
+    end
+    frame.title:SetText("Verbrauch: " .. tostring(participant.name or "?"))
+    frame.title:SetTextColor(ClassColor(participant.classFile))
+
+    local function CategoryLabel(key)
+        local category = GC.ConsumableCategoryByKey[key]
+        return (category and category.label) or tostring(key or "?")
+    end
+
+    local entries = {}
+    local log = participant.consumableLog
+    local items = participant.consumableItems
+    if log and #log > 0 then
+        for _, event in ipairs(log) do
+            entries[#entries + 1] = {
+                time = (date and date("%H:%M:%S", event.t)) or tostring(event.t or "?"),
+                name = tostring(event.n or "?"),
+                cat = CategoryLabel(event.c),
+            }
+        end
+        frame.subtitle:SetText("Live mitgeschrieben: jeder gezählte Einwurf mit Uhrzeit.")
+        local dropped = tonumber(participant.consumableLogDropped) or 0
+        frame.note:SetText(#entries .. " Einträge"
+            .. (dropped > 0 and ("  ·  " .. dropped .. " ältere verworfen") or ""))
+    elseif items and #items > 0 then
+        for _, item in ipairs(items) do
+            entries[#entries + 1] = {
+                time = (item.count or 0) .. "×",
+                name = tostring(item.n or "?"),
+                cat = CategoryLabel(item.c),
+            }
+        end
+        frame.subtitle:SetText("Aus Warcraft Logs: exakte Gegenstände mit Anzahl - Uhrzeiten kennt der Export nicht.")
+        frame.note:SetText(#entries .. " verschiedene Gegenstände")
+    else
+        for _, category in ipairs(GC.ConsumableCategories) do
+            local count = (participant.consumables or {})[category.key] or 0
+            if count > 0 then
+                entries[#entries + 1] = { time = count .. "×", name = category.label, cat = "" }
+            end
+        end
+        frame.subtitle:SetText("Diese Quelle liefert nur Kategoriezähler ohne Einzelheiten.")
+        frame.note:SetText(#entries > 0 and (#entries .. " Kategorien") or "")
+    end
+    if #entries == 0 then
+        frame.subtitle:SetText("Für diesen Teilnehmer wurde kein Verbrauch erfasst.")
+        frame.note:SetText("")
+    end
+
+    for index, row in ipairs(frame.rows) do
+        local entry = entries[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.time:SetText(entry.time)
+            row.name:SetText(entry.name)
+            row.cat:SetText(entry.cat)
+        end
+    end
+    frame.content:SetHeight(math.max(320, #entries * 20))
+    frame.scroll:UpdateModernThumb()
+end
+
+-- Der Antwortzähler zu "Auswertung anfordern": Ohne ihn wirkte der Knopf
+-- wirkungslos - Antworten kamen still an oder still gar nicht.
+GC:RegisterCallback("RAID_SUMMARY_ANSWERS", GC.UI, function(self)
+    local page = self.pages and self.pages.STATISTICS
+    if not page or not page.actionStatus then
+        return
+    end
+    local stats = GC.RaidMonitor.requestStats
+    if not stats then
+        return
+    end
+    if stats.answers == 0 then
+        page.actionStatus:SetText("Auswertung angefragt - warte auf Antworten …")
+        SetTextColor(page.actionStatus, THEME.muted)
+    else
+        page.actionStatus:SetText(stats.answers .. " Antworten empfangen, davon "
+            .. stats.new .. " neu oder vollständiger übernommen.")
+        SetTextColor(page.actionStatus, THEME.success)
+    end
 end)
 
 -- === Versionsprüfer =========================================================

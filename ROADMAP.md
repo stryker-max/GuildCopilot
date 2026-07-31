@@ -298,6 +298,19 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.77 – Verbrauchsprotokoll je Spieler; „Auswertung anfordern" wirkt sichtbar
+
+**Klick auf einen Teilnehmer der Raidauswertung öffnet sein Verbrauchsprotokoll** (Owner-Frage: „was hat der Spieler alles eingeworfen? Maybe mit Timestamp?"):
+
+- **Live-Sitzungen schreiben ab jetzt mit, WAS WANN eingeworfen wurde:** jeder gezählte Einwurf mit Uhrzeit und Gegenstandsnamen („21:26:33 · Hasttrank · Tränke"). Kappe bei 100 Einträgen je Spieler (gegen Trommel-Spam), Verworfenes wird ausgewiesen statt verschwiegen; in die Aufbewahrung wandern die letzten 40. Das Protokoll bleibt rein lokal und wird nie gesendet;
+- **Warcraft-Logs-Quellen** zeigen die exakten Gegenstände mit Anzahl („3× Zerstörungstrank") – Uhrzeiten kennt der Export nicht;
+- fremde Zusammenfassungen fallen auf die Kategoriezähler zurück. Der Zeilen-Tooltip weist auf den Klick hin.
+
+**„Auswertung anfordern" hat jetzt sichtbaren Effekt** (Owner: „der hat gar keinen Effekt?!") – zwei echte Mängel:
+
+- Antworter schickten nur ihre **allerneueste** Zusammenfassung – die hatte der Anfragende fast immer selbst, die Speicherung lehnte ab, nichts passierte. Jetzt antworten Mitglieder mit **bis zu fünf Abenden, Bossabende zuerst**, zeitlich gestaffelt;
+- es gab **keinerlei Rückmeldung**. Jetzt zählt die Seite live mit: „Auswertung angefragt – warte auf Antworten …" → „3 Antworten empfangen, davon 1 neu oder vollständiger übernommen." Auch „0 neu" ist eine Antwort: Du weißt, dass du auf Stand bist.
+
 ## 0.9.76 – TIME-Spalte raus, „Allgemein" nach oben, grünes „ok"
 
 - **TIME ist keine Spalte mehr** (Owner: unnötig): Die Anwesenheit steht weiterhin im Tooltip jeder Zeile („Dabei: 1h 33m von 1h 33m, 100 %") und im Detailfenster – dafür wachsen alle acht Wertespalten von 40 auf 46 Pixel. Alte gespeicherte Spaltenordnungen mit TIME bereinigen sich beim Lesen von selbst;

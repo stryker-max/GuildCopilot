@@ -557,8 +557,24 @@ function time()
     return currentTime
 end
 
-function date()
-    return "2026-07-27"
+-- WoWs date() entspricht os.date. Die Testuhr steht fest auf dem 27.07.2026
+-- (12:00 UTC, damit keine Zeitzone den Tag kippt): Aufrufe ohne Zeitpunkt
+-- bekommen den eingefrorenen Tag. Kleine Zeitpunkte stammen von der
+-- stellbaren time()-Uhr (startet bei 1000) und werden relativ auf den
+-- eingefrorenen Tag gelegt - so rechnet AddDaysISO wie erwartet in die
+-- Zukunft. Nur echte Epochenwerte werden unverändert formatiert.
+function date(format, value)
+    if format == nil then
+        return "2026-07-27"
+    end
+    if value == nil then
+        return os.date(format, 1785153600)
+    end
+    value = tonumber(value) or 0
+    if value < 100000000 then
+        return os.date(format, 1785153600 + value - currentTime)
+    end
+    return os.date(format, value)
 end
 
 -- Zeitgeber laufen sofort. Wer eine echte Verzoegerung braucht, setzt
@@ -5347,6 +5363,93 @@ do
     end
     for index, stored in ipairs(del_savedList) do
         del_sessionsRef[index] = stored
+    end
+end
+
+-- === Verbrauchsprotokoll: Fenster mit drei Datenlagen =======================
+do
+    -- Live-Protokoll mit Uhrzeiten und Hinweis auf Verworfenes.
+    addon.UI:ShowConsumableLog({
+        name = "Trinker", classFile = "MAGE",
+        consumables = { POTION = 2 },
+        consumableLog = {
+            { t = 1753000000, n = "Hasttrank", c = "POTION" },
+            { t = 1753000100, n = "Sattgegessen", c = "FOOD" },
+        },
+        consumableLogDropped = 3,
+    })
+    del2_frame = addon.UI.consumableLogFrame
+    assert(del2_frame ~= nil and del2_frame.shown == true, "Das Verbrauchsfenster öffnet nicht")
+    assert(del2_frame.rows[1].name:GetText() == "Hasttrank"
+        and del2_frame.rows[2].name:GetText() == "Sattgegessen",
+        "Das Live-Protokoll zeigt die Einwürfe nicht")
+    assert(tostring(del2_frame.rows[1].time:GetText()):find(":", 1, true) ~= nil,
+        "Der Zeitstempel fehlt in der Protokollzeile")
+    assert(tostring(del2_frame.note:GetText()):find("3 ältere verworfen", 1, true) ~= nil,
+        "Verworfene Einträge werden nicht ausgewiesen")
+
+    -- Logs-Quelle: exakte Gegenstände mit Anzahl, ohne Uhrzeit.
+    addon.UI:ShowConsumableLog({
+        name = "Logger", classFile = "PRIEST",
+        consumableItems = { { n = "Zerstörungstrank", c = "POTION", count = 3 } },
+    })
+    assert(del2_frame.rows[1].time:GetText() == "3×"
+        and del2_frame.rows[1].name:GetText() == "Zerstörungstrank",
+        "Die Logs-Ansicht zeigt die Gegenstände nicht")
+
+    -- Fremde Zusammenfassung: Rückfall auf Kategoriezähler.
+    addon.UI:ShowConsumableLog({ name = "Zähler", consumables = { FLASK = 1 } })
+    assert(del2_frame.rows[1].time:GetText() == "1×", "Der Zähler-Rückfall fehlt")
+    del2_frame:Hide()
+end
+
+-- === Auswertung anfordern: mehrere Antworten, sichtbare Rückmeldung =========
+do
+    del2_sessionsRef = addon.DB:GetGuild().raidSessions
+    del2_savedList = {}
+    for index, stored in ipairs(del2_sessionsRef) do
+        del2_savedList[index] = stored
+    end
+    addon.RaidMonitor:StoreSummary({
+        id = "LIVE:ansA", source = "LIVE", startedAt = 1753500000, endedAt = 1753510000,
+        zone = "Karazhan", pulls = 4, kills = 4, wipes = 0,
+        participants = { { name = "Alphax" } },
+    })
+    addon.RaidMonitor:StoreSummary({
+        id = "LIVE:ansB", source = "LIVE", startedAt = 1753600000, endedAt = 1753610000,
+        zone = "Orgrimmar", pulls = 0, kills = 0, wipes = 0,
+        participants = { { name = "Alphax" } },
+    })
+
+    -- Die Antwort schickt mehrere Auswertungen, Bossabende zuerst.
+    del2_savedDistribute = addon.Sync.DistributeSummary
+    del2_count = 0
+    del2_firstID = nil
+    addon.Sync.DistributeSummary = function(_, summary)
+        del2_count = del2_count + 1
+        if del2_firstID == nil then
+            del2_firstID = summary.id
+        end
+    end
+    addon.RaidMonitor.lastAnswerAt = nil
+    addon.RaidMonitor:AnswerSummaryRequest("Frager-Realm")
+    addon.Sync.DistributeSummary = del2_savedDistribute
+    assert(del2_count >= 2, "Die Antwort schickt nicht mehrere Auswertungen")
+    assert(del2_firstID == "LIVE:ansA", "Bossabende werden nicht zuerst beantwortet")
+
+    -- Der Antwortzähler erscheint auf der Seite.
+    addon.RaidMonitor.requestStats = { at = currentTime, answers = 2, new = 1 }
+    addon:FireCallback("RAID_SUMMARY_ANSWERS")
+    assert(tostring(addon.UI.pages.STATISTICS.actionStatus:GetText())
+        :find("2 Antworten", 1, true) ~= nil,
+        "Der Antwortzähler erscheint nicht auf der Seite")
+    addon.RaidMonitor.requestStats = nil
+
+    for index = #del2_sessionsRef, 1, -1 do
+        del2_sessionsRef[index] = nil
+    end
+    for index, stored in ipairs(del2_savedList) do
+        del2_sessionsRef[index] = stored
     end
 end
 

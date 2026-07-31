@@ -254,6 +254,10 @@ local function DecodeConsumables(payload)
         counters[category.key] = 0
     end
 
+    -- Neben den Zählern bleiben die exakten Gegenstände erhalten (Name und
+    -- Anzahl): Der Klick auf einen Teilnehmer zeigt sie im Detail. Uhrzeiten
+    -- kennt der Logs-Export nicht.
+    local items = {}
     for token in tostring(payload or ""):gmatch("[^,]+") do
         local spellID, count = token:match("^(%d+):(%d+)$")
         local consumable = spellID and GC.Consumables[tonumber(spellID)]
@@ -266,9 +270,16 @@ local function DecodeConsumables(payload)
                 -- Dauerhafte Buffs zählen wie in der Livesitzung einmal je Spieler.
                 counters[category.key] = 1
             end
+            if count > 0 then
+                items[#items + 1] = {
+                    n = consumable.name,
+                    c = category.key,
+                    count = count,
+                }
+            end
         end
     end
-    return counters
+    return counters, items
 end
 
 -- Feste Suchmuster brechen, sobald das Format ein Feld dazubekommt. Deshalb
@@ -340,6 +351,7 @@ local function ParseParticipantLine(line)
     if name == "" then
         return nil
     end
+    local consumables, consumableItems = DecodeConsumables(fields[8])
     -- Feld 9 kam mit GCPWCL3 dazu; ältere Exporte lassen es weg.
     return {
         name = name,
@@ -349,7 +361,8 @@ local function ParseParticipantLine(line)
         resurrects = tonumber(fields[9]) or 0,
         interrupts = tonumber(fields[6]) or 0,
         dispels = tonumber(fields[7]) or 0,
-        consumables = DecodeConsumables(fields[8]),
+        consumables = consumables,
+        consumableItems = consumableItems,
     }
 end
 

@@ -318,6 +318,20 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
             for _, category in ipairs(GC.ConsumableCategories) do
                 entry.consumables[category.key] = participant.consumables[category.key] or 0
             end
+            -- Das Verbrauchsprotokoll wandert gekappt in die Aufbewahrung:
+            -- die letzten 40 Einträge je Teilnehmer. Es bleibt lokal - die
+            -- Zusammenfassung wird ohne dieses Feld gesendet.
+            local log = participant.consumableLog
+            if log and #log > 0 then
+                local kept = {}
+                local start = math.max(1, #log - 39)
+                for index = start, #log do
+                    kept[#kept + 1] = log[index]
+                end
+                entry.consumableLog = kept
+                entry.consumableLogDropped = (participant.consumableLogDropped or 0)
+                    + (start - 1)
+            end
             summary.participants[#summary.participants + 1] = entry
         end
     end
@@ -720,6 +734,28 @@ local function CountConsumable(monitor, session, playerName, spellID, spellName,
         participant.seenConsumables[seenKey] = true
     end
     participant.consumables[category.key] = (participant.consumables[category.key] or 0) + 1
+
+    -- Zusaetzlich zum Zaehler ein Protokoll: WAS wurde WANN eingeworfen.
+    -- Bleibt rein lokal (wird nie gesendet) und zeigt sich beim Klick auf
+    -- den Teilnehmer. Die Kappe schuetzt vor Trommel-Spam; Verworfenes wird
+    -- gezaehlt statt verschwiegen.
+    local log = participant.consumableLog
+    if not log then
+        log = {}
+        participant.consumableLog = log
+    end
+    local consumable = GC.Consumables[tonumber(spellID) or 0]
+    log[#log + 1] = {
+        t = GC.Util.Now(),
+        n = (consumable and consumable.name)
+            or (spellName and tostring(spellName))
+            or ("Zauber " .. tostring(spellID or "?")),
+        c = category.key,
+    }
+    if #log > 100 then
+        table.remove(log, 1)
+        participant.consumableLogDropped = (participant.consumableLogDropped or 0) + 1
+    end
 end
 
 -- Der Combat Log liefert im Raid tausende Schadensereignisse pro Kampf. Sie
@@ -954,7 +990,18 @@ function GC.RaidMonitor:ReceiveSummaryChunk(message, sender)
     if not summary then
         return false
     end
-    return self:StoreSummary(summary)
+    local stored = self:StoreSummary(summary)
+    -- Antwortzähler für "Auswertung anfordern": auch eine Antwort, die
+    -- nichts Neues bringt, ist eine sichtbare Antwort.
+    local stats = self.requestStats
+    if stats and (GC.Util.Now() - (stats.at or 0)) < 180 then
+        stats.answers = stats.answers + 1
+        if stored then
+            stats.new = stats.new + 1
+        end
+        GC:FireCallback("RAID_SUMMARY_ANSWERS")
+    end
+    return stored
 end
 
 function GC.RaidMonitor:OnMessage(message, sender, distribution)
@@ -1004,12 +1051,31 @@ function GC.RaidMonitor:RequestSummaries()
     if not GC.Sync:Send("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION), "GUILD") then
         return false, "Die Anfrage konnte nicht gesendet werden."
     end
+    -- Ab jetzt zählen eintreffende Antworten mit, damit der Knopf sichtbar
+    -- etwas tut - vorher kam entweder still etwas an oder still nichts.
+    self.requestStats = { at = GC.Util.Now(), answers = 0, new = 0 }
+    GC:FireCallback("RAID_SUMMARY_ANSWERS")
     return true, "Auswertung angefragt. Berechtigte Mitglieder antworten gleich."
 end
 
 function GC.RaidMonitor:AnswerSummaryRequest(requester)
-    local summary = self:GetSummaries()[1]
-    if not summary then
+    -- Beantwortet wird mit bis zu fünf Abenden, Bossabende zuerst - nur die
+    -- allerneueste Zusammenfassung zu schicken war sinnlos: Die hatte der
+    -- Anfragende fast immer selbst, die Speicherung lehnte ab, und der Knopf
+    -- wirkte völlig wirkungslos.
+    local candidates = {}
+    for _, summary in ipairs(self:GetSummaries()) do
+        candidates[#candidates + 1] = summary
+    end
+    table.sort(candidates, function(left, right)
+        local leftBoss = (tonumber(left.pulls) or 0) > 0 and 1 or 0
+        local rightBoss = (tonumber(right.pulls) or 0) > 0 and 1 or 0
+        if leftBoss ~= rightBoss then
+            return leftBoss > rightBoss
+        end
+        return (left.endedAt or 0) > (right.endedAt or 0)
+    end)
+    if #candidates == 0 then
         return false
     end
     local now = GC.Util.Now()
@@ -1018,9 +1084,14 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester)
     end
     self.lastAnswerAt = now
 
-    C_Timer.After(1 + math.random() * 4, function()
-        GC.Sync:DistributeSummary(summary, "WHISPER", requester)
-    end)
+    for index = 1, math.min(5, #candidates) do
+        local summary = candidates[index]
+        -- Gestaffelt, damit sich die Antworten mehrerer Mitglieder nicht
+        -- gegenseitig in den Kanal drängen.
+        C_Timer.After(index + math.random() * 4, function()
+            GC.Sync:DistributeSummary(summary, "WHISPER", requester)
+        end)
+    end
     return true
 end
 
