@@ -298,6 +298,14 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.68 – Auswertungsfenster, Gruppenprüfung mit Verzauberungs-Details, Import-Rettung
+
+Drei Owner-Wünsche aus dem laufenden Raidabend:
+
+- **Raidauswertung im eigenen Fenster:** Der neue Knopf „Detailfenster" auf der Raidauswertungsseite öffnet den gewählten Abend groß (720 Pixel breit, verschiebbar, legt sich vor das Addon). Elf Spalten je Teilnehmer – TIME, DEATH, RES, INT, DISP, POT, FLASK, ELIX, FOOD, DRUM – nach Anwesenheit sortiert, TIME färbt sich unter 85 % bzw. 50 %. Liegt der Abend aus mehreren Quellen vor (Live, Warcraft Logs, Combat Log), schaltet je ein Knopf die Quelle um – und der Knopf **„Vergleich"** stellt zwei Quellen gegenüber: je Spieler zwei Zeilen (oben Live, unten Logs), gelb markiert, wo die Quellen sich widersprechen (TIME auf Minutenbasis verglichen). Wer nur in einer Quelle auftaucht, bekommt auf der anderen Seite Striche;
+- **Gruppenprüfung:** Das Fenster legt sich beim Öffnen jetzt vor das Addonfenster (und holt sich per Klick wieder nach vorn). Ein Klick auf einen geprüften Spieler öffnet die Detailansicht mit allen Slots – Bewertung (Optimal/Solide/Verbesserbar/Fehlt), Verzauberungsname und leere Sockel je Slot, wie auf der Ausrüstungsseite. „← Zur Gruppe" führt zurück;
+- **WCL-Import verliert keine Raidauswertung mehr stumm:** Beim Owner kamen Teilnehmerzeilen ohne ihre Sitzungszeile an („keine Raidauswertung", obwohl es ein Raid war). Der Import rettet solche verwaisten Zeilen jetzt in die erste Sitzung des Imports, statt sie zu verwerfen. Bleibt wirklich keine Sitzungszeile übrig, erklärt die Fehlermeldung das ausdrücklich und zeigt die **erste unlesbare Zeile** des Pastes – damit ist beim nächsten Mal sichtbar, was beim Einfügen kaputtging, statt nur „keine Raidauswertung".
+
 ## 0.9.67 – „8 Versuche" nach dem ersten Boss: Trash zählte mit
 
 Owner-Meldung live aus Karazhan: ein Boss lag, die Kopfzeile behauptete 8 Versuche. Ursache: Als Versuch galt bisher **jeder** Kampfabschnitt ab 15 Sekunden – in einer Raidinstanz ist das jede zweite Trashgruppe.

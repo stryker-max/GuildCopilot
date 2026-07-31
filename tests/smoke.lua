@@ -4961,4 +4961,123 @@ do
     addon.DB.data.characters["twinky-realm"] = nil
 end
 
+-- === Import-Rettung: Teilnehmerzeilen vor der Sitzungszeile =================
+do
+    -- Ein zerwürfelter Paste stellt Zeilen um: Die P-Zeile vor der S-Zeile
+    -- gehört trotzdem zur Sitzung, statt verworfen zu werden.
+    local okImport, importMessage = addon.WarcraftLogs:Import(table.concat({
+        "GCPWCL3|1",
+        "P|Orphania|MAGE|3600|1|2|0|28486:2|1",
+        "S|orphanRept99|1753000000|1753010000|Karazhan|5|4|1",
+        "P|Direkta|PRIEST|3500|0|0|8||0",
+    }, "\n"))
+    assert(okImport == true,
+        "Der Import mit vorgezogener Teilnehmerzeile schlug fehl: " .. tostring(importMessage))
+    local rescued = addon.RaidMonitor:GetSummary("WCL:orphanRept99")
+    assert(rescued ~= nil, "Die Sitzung aus dem Import fehlt")
+    assert(#rescued.participants == 2,
+        "Die verwaiste Teilnehmerzeile wurde nicht der Sitzung zugeschlagen")
+    assert(tostring(importMessage):find("verworfen", 1, true) == nil,
+        "Die gerettete Teilnehmerzeile wurde trotzdem als verworfen gemeldet")
+
+    -- Fehlt jede Sitzungszeile, bleibt der Fehler - nennt aber die Diagnose
+    -- samt erster unlesbarer Zeile.
+    local okBad, badMessage = addon.WarcraftLogs:Import(table.concat({
+        "P|Verloren|MAGE|3600|1|2|0||1",
+        "Kaputtzeile ohne Format",
+    }, "\n"))
+    assert(okBad == false, "Ein Import ohne Sitzungszeile galt als Erfolg")
+    assert(tostring(badMessage):find("Sitzungszeile", 1, true) ~= nil,
+        "Die Fehlermeldung erklärt die fehlende Sitzungszeile nicht")
+    assert(tostring(badMessage):find("Kaputtzeile", 1, true) ~= nil,
+        "Die Fehlermeldung zeigt die erste unlesbare Zeile nicht")
+end
+
+-- === Gruppenprüfung: Klick öffnet Verzauberungs-Details =====================
+do
+    addon.GearAudit:StoreAudit({
+        name = "Detailix",
+        classFile = "MAGE",
+        inspectedAt = currentTime,
+        source = "SYNC",
+        missingEnchants = 1,
+        emptySockets = 1,
+        emptySlots = 0,
+        unreadableSlots = 0,
+        slots = {
+            { key = "HEAD", label = "Kopf", verdict = "MISSING",
+                reason = "Verzauberung fehlt.", emptySockets = 1 },
+            { key = "CHEST", label = "Brust", verdict = "OPTIMAL",
+                enchantName = "+150 Gesundheit" },
+        },
+    })
+    addon.UI:ShowGroupGearCheck()
+    local gearFrame = addon.UI.groupGearCheck
+    addon.UI:SelectGroupGearPlayer("Detailix")
+    assert(gearFrame.detailName == "Detailix", "Die Detailansicht wurde nicht geöffnet")
+    assert(gearFrame.headName:GetText() == "SLOT",
+        "Die Detailansicht beschriftet die Spalten nicht um")
+    assert(gearFrame.rows[1].shown == true and gearFrame.rows[2].shown == true,
+        "Die Detailansicht zeigt die Slot-Zeilen nicht")
+    assert(tostring(gearFrame.rows[2].befund:GetText()):find("+150 Gesundheit", 1, true) ~= nil,
+        "Der Verzauberungsname fehlt in der Detailzeile")
+    assert(gearFrame.back.shown == true and gearFrame.rescan.shown == false,
+        "Zurück-Knopf und Prüfknopf tauschen nicht")
+    gearFrame.back.scripts.OnClick()
+    assert(gearFrame.detailName == nil and gearFrame.headName:GetText() == "NAME",
+        "Der Zurück-Knopf führt nicht zur Gruppenliste")
+    assert(gearFrame.rescan.shown == true, "Der Prüfknopf kehrt nicht zurück")
+    gearFrame:Hide()
+end
+
+-- === Auswertungsfenster: Einzelansicht und Quellenvergleich =================
+do
+    addon.RaidMonitor:StoreSummary({
+        id = "LIVE:reviewA", source = "LIVE",
+        startedAt = 1753100000, endedAt = 1753110000, zone = "Karazhan",
+        startedBy = "Tester", pulls = 6, kills = 5, wipes = 1, receivedAt = currentTime,
+        participants = {
+            { name = "Alphax", classFile = "MAGE", seconds = 5400, deaths = 2,
+                resurrects = 0, interrupts = 3, dispels = 0, consumables = { POTION = 2 } },
+            { name = "Betax", classFile = "PRIEST", seconds = 5000, deaths = 0,
+                resurrects = 1, interrupts = 0, dispels = 9, consumables = { FLASK = 1 } },
+        },
+    })
+    addon.RaidMonitor:StoreSummary({
+        id = "WCL:reviewB", source = "WCL",
+        startedAt = 1753100100, endedAt = 1753109900, zone = "Karazhan",
+        startedBy = "", pulls = 6, kills = 5, wipes = 1, receivedAt = currentTime,
+        participants = {
+            { name = "Alphax", classFile = "MAGE", seconds = 5460, deaths = 3,
+                resurrects = 0, interrupts = 3, dispels = 0, consumables = { POTION = 2 } },
+            { name = "Betax", classFile = "PRIEST", seconds = 5000, deaths = 0,
+                resurrects = 1, interrupts = 0, dispels = 9, consumables = { FLASK = 1 } },
+            { name = "Gammax", classFile = "WARRIOR", seconds = 400, deaths = 1,
+                resurrects = 0, interrupts = 0, dispels = 0, consumables = {} },
+        },
+    })
+    addon.RaidMonitor.selectedSessionID = "LIVE:reviewA"
+    addon.UI:ShowSessionReview()
+    local review = addon.UI.sessionReview
+    assert(review ~= nil and review.shown == true, "Das Auswertungsfenster öffnet nicht")
+    assert(review.compareButton.shown == true,
+        "Der Vergleichsknopf fehlt trotz zweier Quellen")
+    assert(review.rows[1].shown == true and review.rows[1].cells.death:GetText() == "2",
+        "Die Einzelansicht zeigt die Teilnehmerwerte nicht")
+
+    review.compareButton.scripts.OnClick()
+    assert(review.compare == true, "Der Vergleichsmodus schaltet nicht ein")
+    -- Zwei Zeilen je Spieler: oben Live, unten Logs; Alphax hat die meiste
+    -- Anwesenheit und steht daher oben.
+    assert(review.rows[1].shown == true and review.rows[2].shown == true,
+        "Der Vergleich zeigt keine Doppelzeilen")
+    assert(review.rows[1].cells.death:GetText() == "2"
+        and review.rows[2].cells.death:GetText() == "3",
+        "Der Vergleich stellt die abweichenden Tode nicht gegenüber")
+    -- Gammax steht nur im Log: Die Live-Zeile zeigt Striche.
+    assert(review.rows[5].cells.death:GetText() == "–",
+        "Ein nur im Log erfasster Spieler bekommt keine Striche auf der Live-Seite")
+    review:Hide()
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

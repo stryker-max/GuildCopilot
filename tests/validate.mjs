@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.67",
+  "## Version: 0.9.68",
 ];
 
 for (const entry of requiredMetadata) {
@@ -316,7 +316,9 @@ const requiredImplementations = [
   ["Klick ins Importfeld setzt den Cursor", /container:SetScript\("OnMouseDown", FocusEdit\)/],
   ["Bestätigung vor dem Überschreiben", /Wirklich ersetzen/],
   ["Rückmeldung mit Uhrzeit", /date\("%H:%M:%S"\)/],
-  ["Hinweis auf verwaiste Teilnehmerzeilen", /ohne zugehörige Sitzungszeile/],
+  ["Hinweis auf verwaiste Teilnehmerzeilen", /keine einzige/],
+  ["verwaiste Teilnehmerzeilen werden gerettet", /pendingParticipants/],
+  ["Diagnose nennt die erste unlesbare Zeile", /firstUnknownLine/],
   ["verlorene Zeilenumbrüche werden repariert", /local function RepairLineBreaks/],
   // Warcraft Logs und der Offline-Import bleiben getrennte Quellen; welche
   // gilt, entscheidet die Kopfzeile des Importcodes.

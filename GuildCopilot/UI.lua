@@ -5858,6 +5858,11 @@ function GC.UI:BuildStatisticsPage()
     end)
     page.requestButton:SetPoint("TOPRIGHT", page.sessionButton, "BOTTOMRIGHT", 0, -4)
 
+    page.reviewButton = CreateButton(controlCard, "Detailfenster", 130, 30, function()
+        GC.UI:ShowSessionReview()
+    end)
+    page.reviewButton:SetPoint("RIGHT", page.requestButton, "LEFT", -8, 0)
+
     local listCard = CreateCard(page, "Sitzungen")
     listCard:SetSize(238, 358)
     listCard:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -172)
@@ -7258,6 +7263,9 @@ function GC.UI:CreateGroupGearFrame()
     frame:SetSize(520, 458)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     frame:SetFrameStrata("DIALOG")
+    -- Wie das Hauptfenster: Der letzte Klick holt das Fenster nach vorn.
+    -- Ohne dieses Flag läge es nach einem Klick ins Addon dauerhaft dahinter.
+    frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -7267,20 +7275,19 @@ function GC.UI:CreateGroupGearFrame()
 
     frame.title = CreateLabel(frame, "Gruppenprüfung – Ausrüstung", { title = true, width = 340 })
     frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
-    frame.subtitle = CreateLabel(frame, "Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, "
-        .. "der Rest per Inspect in Reichweite.", { muted = true, width = 470, height = 26, vertical = "TOP" })
+    frame.subtitle = CreateLabel(frame, "", { muted = true, width = 470, height = 26, vertical = "TOP" })
     frame.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -36)
     frame.closeX = CreateButton(frame, "×", 24, 24, function()
         frame:Hide()
     end)
     frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
 
-    CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 120, height = 14 })
-        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -68)
-    CreateLabel(frame, "STAND", { muted = true, font = "GameFontNormalSmall", width = 90, height = 14 })
-        :SetPoint("TOPLEFT", frame, "TOPLEFT", 150, -68)
-    CreateLabel(frame, "BEFUND", { muted = true, font = "GameFontNormalSmall", width = 240, height = 14 })
-        :SetPoint("TOPLEFT", frame, "TOPLEFT", 252, -68)
+    frame.headName = CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 120, height = 14 })
+    frame.headName:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -68)
+    frame.headStand = CreateLabel(frame, "STAND", { muted = true, font = "GameFontNormalSmall", width = 90, height = 14 })
+    frame.headStand:SetPoint("TOPLEFT", frame, "TOPLEFT", 150, -68)
+    frame.headBefund = CreateLabel(frame, "BEFUND", { muted = true, font = "GameFontNormalSmall", width = 240, height = 14 })
+    frame.headBefund:SetPoint("TOPLEFT", frame, "TOPLEFT", 252, -68)
 
     local body = CreatePanel(frame, THEME.input)
     body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -86)
@@ -7304,6 +7311,14 @@ function GC.UI:CreateGroupGearFrame()
         row.stand:SetPoint("LEFT", row, "LEFT", 134, 0)
         row.befund = CreateLabel(row, "", { width = 230, height = 24 })
         row.befund:SetPoint("LEFT", row, "LEFT", 236, 0)
+        -- In der Gruppenliste öffnet ein Klick die Verzauberungs-Details des
+        -- Spielers; in der Detailansicht sind die Zeilen nur Anzeige.
+        row:EnableMouse(true)
+        row:SetScript("OnMouseUp", function()
+            if row.auditName then
+                GC.UI:SelectGroupGearPlayer(row.auditName)
+            end
+        end)
         row:Hide()
         frame.rows[index] = row
     end
@@ -7317,6 +7332,12 @@ function GC.UI:CreateGroupGearFrame()
         GC.UI:RefreshGroupGearCheck()
     end, "PRIMARY")
     frame.rescan:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
+    frame.back = CreateButton(frame, "← Zur Gruppe", 130, 30, function()
+        frame.detailName = nil
+        GC.UI:RefreshGroupGearCheck()
+    end)
+    frame.back:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 12)
+    frame.back:Hide()
     frame.status = CreateLabel(frame, "", { muted = true, width = 230, height = 30, vertical = "TOP" })
     frame.status:SetPoint("LEFT", frame.rescan, "RIGHT", 10, 0)
     frame.closeButton = CreateButton(frame, "Schließen", 110, 30, function()
@@ -7331,7 +7352,23 @@ end
 
 function GC.UI:ShowGroupGearCheck()
     local frame = self:CreateGroupGearFrame()
+    frame.detailName = nil
     frame:Show()
+    -- Vor das Addonfenster legen: gleiche Ebene, aber zuletzt gezeigt.
+    if frame.Raise then
+        frame:Raise()
+    end
+    self:RefreshGroupGearCheck()
+end
+
+-- Klick auf einen Spieler in der Gruppenliste: Detailansicht mit allen
+-- Slots, Verzauberungen und Sockeln dieses Spielers.
+function GC.UI:SelectGroupGearPlayer(name)
+    local frame = self.groupGearCheck
+    if not frame or not GC.GearAudit:GetAudit(name) then
+        return
+    end
+    frame.detailName = name
     self:RefreshGroupGearCheck()
 end
 
@@ -7341,6 +7378,62 @@ function GC.UI:RefreshGroupGearCheck()
         return
     end
     local now = GC.Util.Now()
+
+    -- Detailansicht: alle Slots eines Spielers mit Bewertung, Verzauberung
+    -- und Sockeln - dieselben Daten wie auf der Ausrüstungsseite, nur direkt
+    -- im Gruppenfenster.
+    local detail = frame.detailName and GC.GearAudit:GetAudit(frame.detailName)
+    frame.back:SetShown(detail ~= nil)
+    frame.rescan:SetShown(detail == nil)
+    if detail then
+        frame.subtitle:SetText("Klick auf „← Zur Gruppe“ führt zurück zur Übersicht.")
+        frame.headName:SetText("SLOT")
+        frame.headStand:SetText("BEWERTUNG")
+        frame.headBefund:SetText("VERZAUBERUNG & SOCKEL")
+        local slots = detail.slots or {}
+        for index, row in ipairs(frame.rows) do
+            local entry = slots[index]
+            row:SetShown(entry ~= nil)
+            row.auditName = nil
+            if entry then
+                row.name:SetText(entry.label or entry.key or "?")
+                row.name:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3], 1)
+                local style = entry.verdict == "EXEMPT"
+                    and { label = "Ausnahme", color = THEME.muted }
+                    or GEAR_VERDICT_STYLE[entry.verdict] or GEAR_VERDICT_STYLE.UNKNOWN
+                row.stand:SetText(style.label)
+                SetTextColor(row.stand, style.color)
+                local text = GC.Util.Trim(entry.enchantName or "")
+                if text == "" then
+                    text = entry.reason or ""
+                end
+                if (entry.emptySockets or 0) > 0 then
+                    text = text .. " |cffff6166· " .. entry.emptySockets .. " Sockel leer|r"
+                end
+                row.befund:SetText(text)
+                if entry.verdict == "MISSING" then
+                    SetTextColor(row.befund, THEME.danger)
+                elseif entry.verdict == "OPTIMAL" then
+                    SetTextColor(row.befund, THEME.success)
+                else
+                    SetTextColor(row.befund, THEME.text)
+                end
+            end
+        end
+        local age = math.max(0, math.floor((now - (detail.inspectedAt or now)) / 60))
+        frame.counts:SetText("|cff4ec9ff" .. GC.Util.PlayerShortName(detail.name or "")
+            .. "|r  ·  " .. (GEAR_SOURCE_LABELS[detail.source] or "Daten")
+            .. " vor " .. age .. " Min.  ·  " .. GC.GearAudit:DescribeFindings(detail))
+        frame.content:SetHeight(math.max(280, #slots * 26))
+        frame.scroll:UpdateModernThumb()
+        return
+    end
+
+    frame.subtitle:SetText("Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, der Rest per "
+        .. "Inspect in Reichweite. Klick auf eine Zeile zeigt die Verzauberungen.")
+    frame.headName:SetText("NAME")
+    frame.headStand:SetText("STAND")
+    frame.headBefund:SetText("BEFUND")
     local ok, findings, missing = 0, 0, 0
     local entries = {}
     -- Dieselbe Gruppenliste wie der Versionsprüfer; solo steht man allein drin.
@@ -7383,11 +7476,15 @@ function GC.UI:RefreshGroupGearCheck()
     for index, row in ipairs(frame.rows) do
         local entry = entries[index]
         row:SetShown(entry ~= nil)
+        row.auditName = nil
         if entry then
             row.name:SetText(GC.Util.PlayerShortName(entry.name))
             row.name:SetTextColor(ClassColor(entry.classFile))
             row.stand:SetText(entry.stand)
             row.befund:SetText(entry.befund)
+            if entry.state ~= "NONE" then
+                row.auditName = entry.name
+            end
             if entry.state == "OK" then
                 SetTextColor(row.befund, THEME.success)
             elseif entry.state == "FINDINGS" then
@@ -7402,6 +7499,378 @@ function GC.UI:RefreshGroupGearCheck()
     frame.content:SetHeight(math.max(280, #entries * 26))
     frame.scroll:UpdateModernThumb()
 end
+
+-- === Auswertungsfenster =====================================================
+-- Ein Raidabend im eigenen Fenster: jede Quelle (Live, Warcraft Logs,
+-- Combat Log) einzeln ansehen oder zwei Quellen direkt gegenüberstellen.
+-- Der Vergleich zeigt je Spieler zwei Zeilen - oben die erste Quelle, unten
+-- die zweite - und färbt Werte gelb, wo die Quellen sich widersprechen.
+
+local REVIEW_COLS = {
+    { key = "time",  head = "TIME",  x = 166, w = 56 },
+    { key = "death", head = "DEATH", x = 226, w = 48 },
+    { key = "res",   head = "RES",   x = 278, w = 40 },
+    { key = "int",   head = "INT",   x = 322, w = 40 },
+    { key = "disp",  head = "DISP",  x = 366, w = 44 },
+    { key = "pot",   head = "POT",   x = 414, w = 40 },
+    { key = "flask", head = "FLASK", x = 458, w = 48 },
+    { key = "elix",  head = "ELIX",  x = 510, w = 44 },
+    { key = "food",  head = "FOOD",  x = 558, w = 44 },
+    { key = "drum",  head = "DRUM",  x = 606, w = 46 },
+}
+
+-- Rohwerte eines Teilnehmers je Spalte. TIME vergleicht auf Minutenbasis,
+-- sonst gälte jede Sekunde Abweichung als Widerspruch.
+local function ReviewValues(participant)
+    local consumables = (participant and participant.consumables) or {}
+    return {
+        time = math.floor(((participant and participant.seconds) or 0) / 60),
+        death = (participant and participant.deaths) or 0,
+        res = (participant and participant.resurrects) or 0,
+        int = (participant and participant.interrupts) or 0,
+        disp = (participant and participant.dispels) or 0,
+        pot = (consumables.POTION or 0) + (consumables.RUNE or 0),
+        flask = consumables.FLASK or 0,
+        elix = consumables.ELIXIR or 0,
+        food = consumables.FOOD or 0,
+        drum = consumables.DRUM or 0,
+    }
+end
+
+local function ReviewCellText(key, values)
+    if key == "time" then
+        return values.time .. "m"
+    end
+    return tostring(values[key] or 0)
+end
+
+function GC.UI:CreateSessionReviewFrame()
+    if self.sessionReview then
+        return self.sessionReview
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotSessionReview")
+    frame:SetSize(720, 540)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "Raidauswertung – Detail", { title = true, width = 400 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+    frame.headline = CreateLabel(frame, "", { muted = true, width = 688, height = 16 })
+    frame.headline:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -40)
+
+    frame.sourceButtons = {}
+    for index = 1, 3 do
+        local button = CreateButton(frame, "", 150, 24, function()
+            local target = frame.sourceButtons[index].summaryID
+            if target then
+                frame.selectedID = target
+                frame.compare = false
+                GC.UI:RefreshSessionReview()
+            end
+        end)
+        button:SetPoint("TOPLEFT", frame, "TOPLEFT", 14 + ((index - 1) * 156), -62)
+        button:Hide()
+        frame.sourceButtons[index] = button
+    end
+    frame.compareButton = CreateButton(frame, "Vergleich", 150, 24, function()
+        frame.compare = not frame.compare
+        GC.UI:RefreshSessionReview()
+    end)
+    frame.compareButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 14 + (3 * 156), -62)
+    frame.compareButton:Hide()
+
+    CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 140, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 22, -98)
+    for _, col in ipairs(REVIEW_COLS) do
+        CreateLabel(frame, col.head, { muted = true, font = "GameFontNormalSmall", width = col.w, height = 14 })
+            :SetPoint("TOPLEFT", frame, "TOPLEFT", 14 + col.x, -98)
+    end
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -114)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 46)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(660)
+    frame.content:SetHeight(360)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 64 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(660, 18)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 20))
+        row.name = CreateLabel(row, "", { width = 152, height = 18 })
+        row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
+        row.cells = {}
+        for _, col in ipairs(REVIEW_COLS) do
+            local cell = CreateLabel(row, "", { width = col.w, height = 18 })
+            cell:SetPoint("LEFT", row, "LEFT", col.x, 0)
+            row.cells[col.key] = cell
+        end
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.note = CreateLabel(frame, "", { muted = true, width = 540, height = 26, vertical = "TOP" })
+    frame.note:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 10)
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 30, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 8)
+
+    frame:Hide()
+    self.sessionReview = frame
+    return frame
+end
+
+function GC.UI:ShowSessionReview()
+    local frame = self:CreateSessionReviewFrame()
+    frame.anchorID = GC.RaidMonitor.selectedSessionID
+    frame.selectedID = frame.anchorID
+    frame.compare = false
+    frame:Show()
+    if frame.Raise then
+        frame:Raise()
+    end
+    self:RefreshSessionReview()
+end
+
+-- Zwei Quellen für den Vergleich: Live zuerst, dann Warcraft Logs, dann die
+-- Logdatei - genauere Quellen stehen oben.
+local REVIEW_SOURCE_PRIORITY = { LIVE = 1, WCL = 2, LOG = 3, SYNC = 4 }
+
+local function PickCompareSources(sources)
+    local sorted = {}
+    for index, source in ipairs(sources) do
+        sorted[index] = source
+    end
+    table.sort(sorted, function(left, right)
+        return (REVIEW_SOURCE_PRIORITY[left.source or "LIVE"] or 9)
+            < (REVIEW_SOURCE_PRIORITY[right.source or "LIVE"] or 9)
+    end)
+    return sorted[1], sorted[2]
+end
+
+function GC.UI:RefreshSessionReview()
+    local frame = self.sessionReview
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local monitor = GC.RaidMonitor
+
+    local evening = monitor:GetEveningOf(frame.anchorID)
+    if not evening then
+        -- Der Anker kann verschwinden (Livesitzung beendet und neu abgelegt):
+        -- dann übernimmt die aktuelle Auswahl der Seite.
+        frame.anchorID = monitor.selectedSessionID
+        evening = monitor:GetEveningOf(frame.anchorID)
+    end
+    if not evening then
+        frame.headline:SetText("Keine Auswertung vorhanden. Auf der Seite Raidauswertung einen Abend wählen.")
+        for _, row in ipairs(frame.rows) do
+            row:Hide()
+        end
+        for _, button in ipairs(frame.sourceButtons) do
+            button:Hide()
+        end
+        frame.compareButton:Hide()
+        frame.note:SetText("")
+        return
+    end
+
+    local sources = evening.sources
+    local selectedValid = false
+    for _, candidate in ipairs(sources) do
+        if candidate.id == frame.selectedID then
+            selectedValid = true
+        end
+    end
+    if not selectedValid then
+        frame.selectedID = evening.summary.id
+    end
+    if frame.compare and #sources < 2 then
+        frame.compare = false
+    end
+
+    for index, button in ipairs(frame.sourceButtons) do
+        local candidate = sources[index]
+        button.summaryID = candidate and candidate.id or nil
+        button:SetShown(candidate ~= nil)
+        if candidate then
+            button:SetText((SESSION_SOURCE_LABEL[candidate.source or "LIVE"] or "?")
+                .. " (" .. #(candidate.participants or {}) .. ")")
+            button:SetActive(not frame.compare and candidate.id == frame.selectedID)
+        end
+    end
+    frame.compareButton:SetShown(#sources > 1)
+    if #sources > 1 then
+        frame.compareButton:SetActive(frame.compare == true)
+    end
+
+    local shownRows = 0
+    if not frame.compare then
+        local summary = monitor:GetSummary(frame.selectedID) or evening.summary
+        local zone = summary.zone ~= "" and summary.zone or "Raid"
+        frame.headline:SetText(FormatSessionDate(summary) .. "  •  " .. zone
+            .. "  •  " .. FormatDuration((summary.endedAt or 0) - (summary.startedAt or 0))
+            .. "  •  " .. (summary.pulls or 0) .. " Versuche, " .. (summary.kills or 0)
+            .. " Siege, " .. (summary.wipes or 0) .. " Wipes  •  Quelle: "
+            .. (SESSION_SOURCE_LABEL[summary.source or "LIVE"] or "?"))
+
+        local sessionSeconds = math.max(0, (summary.endedAt or 0) - (summary.startedAt or 0))
+        if ENCOUNTER_TIME_SOURCES[summary.source or ""] then
+            sessionSeconds = 0
+            for _, participant in ipairs(summary.participants or {}) do
+                sessionSeconds = math.max(sessionSeconds, tonumber(participant.seconds) or 0)
+            end
+        end
+
+        local participants = {}
+        for index, participant in ipairs(summary.participants or {}) do
+            participants[index] = participant
+        end
+        table.sort(participants, function(left, right)
+            if (left.seconds or 0) ~= (right.seconds or 0) then
+                return (left.seconds or 0) > (right.seconds or 0)
+            end
+            return tostring(left.name or "") < tostring(right.name or "")
+        end)
+
+        for index, row in ipairs(frame.rows) do
+            local participant = participants[index]
+            row:SetShown(participant ~= nil)
+            if participant then
+                shownRows = index
+                row.name:SetText(participant.name)
+                row.name:SetTextColor(ClassColor(participant.classFile))
+                local values = ReviewValues(participant)
+                for _, col in ipairs(REVIEW_COLS) do
+                    local cell = row.cells[col.key]
+                    cell:SetText(ReviewCellText(col.key, values))
+                    if col.key == "time" and sessionSeconds > 0 then
+                        local share = (participant.seconds or 0) / sessionSeconds
+                        if share < 0.5 then
+                            SetTextColor(cell, THEME.danger)
+                        elseif share < 0.85 then
+                            SetTextColor(cell, THEME.warning)
+                        else
+                            SetTextColor(cell, THEME.text)
+                        end
+                    else
+                        SetTextColor(cell, THEME.text)
+                    end
+                end
+            end
+        end
+        frame.note:SetText(#participants .. " Teilnehmer  •  TIME färbt sich unter 85 % bzw. 50 % Anwesenheit.")
+    else
+        local first, second = PickCompareSources(sources)
+        local zone = evening.summary.zone ~= "" and evening.summary.zone or "Raid"
+        local firstLabel = SESSION_SOURCE_LABEL[first.source or "LIVE"] or "?"
+        local secondLabel = SESSION_SOURCE_LABEL[second.source or "LIVE"] or "?"
+        frame.headline:SetText(FormatSessionDate(evening.summary) .. "  •  " .. zone
+            .. "  •  Vergleich: " .. firstLabel .. " ↔ " .. secondLabel)
+
+        -- Beide Teilnehmerlisten über den Kurznamen vereinigen; wer nur in
+        -- einer Quelle steht, bekommt auf der anderen Seite Striche.
+        local index = {}
+        local merged = {}
+        for _, participant in ipairs(first.participants or {}) do
+            local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(participant.name or ""))
+            local entry = { name = participant.name, classFile = participant.classFile, first = participant }
+            index[key] = entry
+            merged[#merged + 1] = entry
+        end
+        for _, participant in ipairs(second.participants or {}) do
+            local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(participant.name or ""))
+            local entry = index[key]
+            if entry then
+                entry.second = participant
+                entry.classFile = entry.classFile or participant.classFile
+            else
+                entry = { name = participant.name, classFile = participant.classFile, second = participant }
+                index[key] = entry
+                merged[#merged + 1] = entry
+            end
+        end
+        table.sort(merged, function(left, right)
+            local leftSeconds = ((left.first or left.second) or {}).seconds or 0
+            local rightSeconds = ((right.first or right.second) or {}).seconds or 0
+            if leftSeconds ~= rightSeconds then
+                return leftSeconds > rightSeconds
+            end
+            return tostring(left.name or "") < tostring(right.name or "")
+        end)
+
+        for _, entry in ipairs(merged) do
+            local firstRow = frame.rows[shownRows + 1]
+            local secondRow = frame.rows[shownRows + 2]
+            if not firstRow or not secondRow then
+                break
+            end
+            shownRows = shownRows + 2
+            local firstValues = entry.first and ReviewValues(entry.first)
+            local secondValues = entry.second and ReviewValues(entry.second)
+
+            firstRow:Show()
+            firstRow.name:SetText(entry.name)
+            firstRow.name:SetTextColor(ClassColor(entry.classFile))
+            secondRow:Show()
+            secondRow.name:SetText("   └ " .. (entry.second and secondLabel or (secondLabel .. ": fehlt")))
+            SetTextColor(secondRow.name, THEME.muted)
+
+            for _, col in ipairs(REVIEW_COLS) do
+                local firstCell = firstRow.cells[col.key]
+                local secondCell = secondRow.cells[col.key]
+                firstCell:SetText(firstValues and ReviewCellText(col.key, firstValues) or "–")
+                secondCell:SetText(secondValues and ReviewCellText(col.key, secondValues) or "–")
+                local differs = firstValues and secondValues
+                    and firstValues[col.key] ~= secondValues[col.key]
+                if differs then
+                    SetTextColor(firstCell, THEME.warning)
+                    SetTextColor(secondCell, THEME.warning)
+                else
+                    SetTextColor(firstCell, THEME.text)
+                    SetTextColor(secondCell, THEME.muted)
+                end
+            end
+        end
+        for index = shownRows + 1, #frame.rows do
+            frame.rows[index]:Hide()
+        end
+        frame.note:SetText("Obere Zeile " .. firstLabel .. ", untere " .. secondLabel
+            .. ".  Gelb: Die Quellen widersprechen sich (TIME auf Minutenbasis).")
+    end
+
+    if not frame.compare then
+        for index = shownRows + 1, #frame.rows do
+            frame.rows[index]:Hide()
+        end
+    end
+    frame.content:SetHeight(math.max(360, shownRows * 20))
+    frame.scroll:UpdateModernThumb()
+end
+
+GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
+    self:RefreshSessionReview()
+end)
+GC:RegisterCallback("WCL_UPDATED", GC.UI, function(self)
+    self:RefreshSessionReview()
+end)
 
 -- === Versionsprüfer =========================================================
 -- /gcp ver: Wer in Gruppe oder Gilde hat Guild Copilot, und in welcher

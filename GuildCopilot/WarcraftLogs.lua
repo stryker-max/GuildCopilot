@@ -391,7 +391,14 @@ function GC.WarcraftLogs:Import(text)
     -- unterscheiden - genau daran ging eine Nachanalyse stumm verloren.
     local lineCount = 0
     local participantLines = 0
-    local orphanParticipants = 0
+    -- Teilnehmerzeilen, deren Sitzungszeile (noch) fehlt. Sie werden nicht
+    -- mehr sofort verworfen: Taucht im selben Import doch eine Sitzung auf,
+    -- gehören sie zu ihr - ein zerwürfelter Paste stellt Zeilen auch mal um.
+    local pendingParticipants = {}
+    -- Die erste Zeile, die kein bekanntes Format hat, wandert in die
+    -- Fehlermeldung. Ohne sie lässt sich aus der Ferne nie sagen, WAS beim
+    -- Einfügen kaputtging.
+    local firstUnknownLine
 
     for line in (text .. "\n"):gmatch("(.-)\n") do
         line = GC.Util.Trim(line)
@@ -415,11 +422,11 @@ function GC.WarcraftLogs:Import(text)
                 end
             elseif line:sub(1, 2) == "P|" then
                 participantLines = participantLines + 1
-                local participant = currentSession and ParseParticipantLine(line)
-                if participant then
+                local participant = ParseParticipantLine(line)
+                if participant and currentSession then
                     currentSession.participants[#currentSession.participants + 1] = participant
-                elseif not currentSession then
-                    orphanParticipants = orphanParticipants + 1
+                elseif participant then
+                    pendingParticipants[#pendingParticipants + 1] = participant
                 end
             else
                 local name, classFile, primarySpecKey, secondarySpecKey = line:match("^([^;]+);([^;]+);([^;]*);?([^;]*)$")
@@ -446,9 +453,33 @@ function GC.WarcraftLogs:Import(text)
                         receivedAt = GC.Util.Now(),
                     }
                     PutImportedProfile(imported, name, profile)
+                elseif not firstUnknownLine then
+                    firstUnknownLine = line
                 end
             end
         end
+    end
+
+    -- Rettung statt Müll: Standen Teilnehmerzeilen vor ihrer Sitzungszeile,
+    -- gehören sie zur ersten Sitzung dieses Imports. Nur wenn der ganze Paste
+    -- keine einzige Sitzungszeile enthielt, bleibt es beim Fehlerhinweis.
+    local orphanParticipants = 0
+    if #pendingParticipants > 0 then
+        if sessions[1] then
+            for index = #pendingParticipants, 1, -1 do
+                table.insert(sessions[1].participants, 1, pendingParticipants[index])
+            end
+        else
+            orphanParticipants = #pendingParticipants
+        end
+    end
+
+    -- In Chatnachrichten wäre "|" der Beginn einer Escape-Sequenz; für die
+    -- Diagnosezeile wird das Zeichen deshalb ersetzt und die Zeile gekürzt.
+    local unknownSample
+    if firstUnknownLine then
+        unknownSample = firstUnknownLine:sub(1, 44):gsub("|", "/")
+            .. (#firstUnknownLine > 44 and "…" or "")
     end
 
     local uniqueCount = 0
@@ -473,14 +504,17 @@ function GC.WarcraftLogs:Import(text)
 
     if uniqueCount == 0 and usableSessions == 0 then
         if orphanParticipants > 0 then
-            return false, orphanParticipants .. " Teilnehmerzeilen ohne zugehörige Sitzungszeile. "
-                .. "Der Anfang der Datei fehlt – bitte das Feld leeren und den kompletten Inhalt einfügen."
+            return false, orphanParticipants .. " Teilnehmerzeilen angekommen, aber keine einzige "
+                .. "Sitzungszeile (S|…). Bitte das Feld leeren und die Importdatei KOMPLETT neu "
+                .. "kopieren und einfügen."
+                .. (unknownSample and (" Erste unlesbare Zeile: „" .. unknownSample .. "“") or "")
         end
         if headerSeen then
             -- Die Kopfzeile kam an, der Rest nicht: typischerweise wurde beim
             -- Einfügen abgeschnitten oder der Companion hat nur den Kopf
             -- geschrieben.
             return false, "Companion-Kopfzeile erkannt, aber keine Datenzeilen. Bitte den kompletten Inhalt der Importdatei einfügen."
+                .. (unknownSample and (" Erste unlesbare Zeile: „" .. unknownSample .. "“") or "")
         end
         return false, "Keine gültigen Profile gefunden. Format: Name;Klasse;Primär-Spec;Dual-Spec"
     end
@@ -551,10 +585,14 @@ function GC.WarcraftLogs:Import(text)
         hints[#hints + 1] = "ohne Companion-Kopfzeile"
     end
     if orphanParticipants > 0 then
-        hints[#hints + 1] = orphanParticipants .. " Teilnehmerzeilen ohne Sitzungszeile verworfen"
+        hints[#hints + 1] = orphanParticipants .. " Teilnehmerzeilen ohne Sitzungszeile (S|…) verworfen"
+            .. " – bitte die Datei komplett neu einfügen"
     end
     if headerSeen and storedSessions == 0 and participantLines == 0 then
         hints[#hints + 1] = "keine Raidauswertung enthalten"
+    end
+    if unknownSample and (orphanParticipants > 0 or storedSessions == 0) then
+        hints[#hints + 1] = "erste unlesbare Zeile: „" .. unknownSample .. "“"
     end
     if #hints > 0 then
         message = message .. " Hinweis: " .. GC.Util.JoinGerman(hints) .. "."
