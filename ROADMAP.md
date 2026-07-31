@@ -298,6 +298,12 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.76 – TIME-Spalte raus, „Allgemein" nach oben, grünes „ok"
+
+- **TIME ist keine Spalte mehr** (Owner: unnötig): Die Anwesenheit steht weiterhin im Tooltip jeder Zeile („Dabei: 1h 33m von 1h 33m, 100 %") und im Detailfenster – dafür wachsen alle acht Wertespalten von 40 auf 46 Pixel. Alte gespeicherte Spaltenordnungen mit TIME bereinigen sich beim Lesen von selbst;
+- **Einstellungen:** Die Karte „Allgemein" steht jetzt direkt unter den Chat-Befehlen, vor den Gildenaufträgen;
+- **Ausrüstungsliste:** „ok" hinter geprüften Spielern ist grün, die Fundzahl rot – der Zustand der Gruppe ist damit auf einen Blick lesbar.
+
 ## 0.9.75 – Einstellungen neu sortiert: Alltag oben, Verwaltung unten
 
 Die Einstellungsseite folgt jetzt der Owner-Ordnung, in logischen Blöcken:

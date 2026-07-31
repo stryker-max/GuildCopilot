@@ -1268,7 +1268,7 @@ function GC.UI:BuildSettingsPage()
 
     page.activeRankCard, page.activeRankToggles = BuildRankCard(
         "Aktive Raider",
-        0, 1602,
+        0, 1604,
         "Diese Ränge erscheinen als Level-70-Raider in der Übersicht.",
         function(rankIndex, checked)
             GC.Roster:SetRankActive(rankIndex, checked)
@@ -1276,7 +1276,7 @@ function GC.UI:BuildSettingsPage()
     )
     page.editorRankCard, page.editorRankToggles = BuildRankCard(
         "Gildenweite Einstellungen bearbeiten",
-        382, 1602,
+        382, 1604,
         "Nur diese Ränge dürfen Profil, Regeln, Rangfreigaben und Vorlagen ändern.",
         function(rankIndex, checked)
             local success, reason = GC.Roster:SetGuildProfileRankActive(rankIndex, checked)
@@ -1301,7 +1301,7 @@ function GC.UI:BuildSettingsPage()
 
     local accessCard = CreateCard(content, "Mitgliederpflege öffnen")
     accessCard:SetSize(752, 180)
-    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1854)
+    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1856)
     local accessHelp = CreateLabel(accessCard,
         "Nur diese Ränge sehen die Mitgliederpflege - und nur sie dürfen Raidauswertungen löschen. "
         .. "Die Freigabe wird gildenweit synchronisiert.",
@@ -1332,7 +1332,7 @@ function GC.UI:BuildSettingsPage()
     -- der Karte "Allgemein".
     local notificationCard = CreateCard(content, "Rekrutierung: Meldungen & Töne")
     notificationCard:SetSize(752, 150)
-    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1136)
+    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1298)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
     end)
@@ -1371,7 +1371,7 @@ function GC.UI:BuildSettingsPage()
     -- ihrer eigenen Karte "Allgemein".
     local generalCard = CreateCard(content, "Allgemein")
     generalCard:SetSize(752, 150)
-    generalCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1298)
+    generalCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -168)
 
     page.minimapToggle = CreateToggle(generalCard, "Minimap-Symbol anzeigen", function(checked)
         GC.DB:GetSettings().minimap.hidden = not checked
@@ -1413,7 +1413,7 @@ function GC.UI:BuildSettingsPage()
     -- koennte - deshalb haengt er am Gildenrang und nicht an jedem selbst.
     local soundRankCard = CreateCard(content, "Bewerberton hören")
     soundRankCard:SetSize(752, 180)
-    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -944)
+    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1106)
     local soundRankHelp = CreateLabel(soundRankCard,
         "Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter,"
         .. " nur still. Die Freigabe wird gildenweit synchronisiert.",
@@ -1445,7 +1445,7 @@ function GC.UI:BuildSettingsPage()
     -- erzeugt Muell aus dem ganzen Realm.
     local triggerCard = CreateCard(content, "Postfach-Erkennung: eigene Wörter")
     triggerCard:SetSize(752, 400)
-    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -532)
+    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -694)
     CreateLabel(triggerCard,
         "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
         .. " Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ –"
@@ -1501,7 +1501,7 @@ function GC.UI:BuildSettingsPage()
 
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1458)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1460)
     CreateLabel(gearCard,
         "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
@@ -1529,7 +1529,7 @@ function GC.UI:BuildSettingsPage()
     -- seinen eigenen Ton aus der bekannten Klangliste; "Aus" schaltet es ab.
     local orderCard = CreateCard(content, "Gildenaufträge")
     orderCard:SetSize(752, 352)
-    orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -168)
+    orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -330)
     local orderSoundNames = { "Aus" }
     for _, sound in ipairs(GC.SuccessSoundOptions) do
         orderSoundNames[#orderSoundNames + 1] = sound.name
@@ -1638,7 +1638,7 @@ function GC.UI:BuildSettingsPage()
     end
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -2046)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -2048)
 end
 
 function GC.UI:RefreshSettings()
@@ -1965,9 +1965,12 @@ end
 -- raus). NAME bleibt fest vorn, die Reihenfolge der übrigen Spalten liegt in
 -- den Einstellungen und gilt damit für alle Auswertungen.
 
--- Die Standardreihenfolge ist die vom Owner eingerichtete: Proviant direkt
--- neben der Anwesenheit, die Kampfwerte dahinter.
-local STAT_COLUMN_DEFAULTS = { "presence", "elixirs", "food", "flasks",
+-- Die Standardreihenfolge ist die vom Owner eingerichtete: Proviant vorn,
+-- die Kampfwerte dahinter. TIME ist bewusst KEINE Spalte mehr - die
+-- Anwesenheit steht im Zeilen-Tooltip und im Detailfenster, dafür haben
+-- alle übrigen Spalten mehr Platz. Alte gespeicherte Ordnungen mit
+-- "presence" bereinigt GetStatColumnOrder von selbst.
+local STAT_COLUMN_DEFAULTS = { "elixirs", "food", "flasks",
     "drums", "deaths", "potions", "dispels", "interrupts" }
 
 function GC.UI:GetStatColumnOrder()
@@ -2034,7 +2037,7 @@ function GC.UI:ApplyStatColumnLayout()
                 cell:SetPoint("LEFT", row, "LEFT", cursor, 0)
             end
         end
-        -- 2 Pixel Fuge: Bei einheitlichen 40er-Spalten endet die letzte
+        -- 2 Pixel Fuge: Bei acht einheitlichen 46er-Spalten endet die letzte
         -- damit bei 486 und bleibt innerhalb der 490er-Zeile.
         cursor = cursor + width + 2
     end
@@ -6043,17 +6046,18 @@ function GC.UI:BuildStatisticsPage()
     -- INT 32) - nach dem Umsortieren wirkte das Raster dadurch ungleichmäßig.
     -- Jetzt sind alle Wertespalten gleich breit, nur TIME braucht mehr Platz
     -- ("1h 33m"), und ELIXIR heißt wie im Detailfenster kurz ELIX.
+    -- Ohne TIME-Spalte (Owner: unnötig, steht im Tooltip und Detailfenster)
+    -- bekommen die acht Wertespalten einheitlich 46 statt 40 Pixel.
     local detailHeaders = {
         { text = "NAME",  key = "name",       x = 18,  width = 96 },
-        { text = "TIME",  key = "presence",   x = 117, width = 46 },
-        { text = "DEATH", key = "deaths",     x = 165, width = 40 },
-        { text = "INT",   key = "interrupts", x = 207, width = 40 },
-        { text = "DISP",  key = "dispels",    x = 249, width = 40 },
-        { text = "POT",   key = "potions",    x = 291, width = 40 },
-        { text = "FLASK", key = "flasks",     x = 333, width = 40 },
-        { text = "ELIX",  key = "elixirs",    x = 375, width = 40 },
-        { text = "FOOD",  key = "food",       x = 417, width = 40 },
-        { text = "DRUM",  key = "drums",      x = 459, width = 40 },
+        { text = "ELIX",  key = "elixirs",    x = 117, width = 46 },
+        { text = "FOOD",  key = "food",       x = 165, width = 46 },
+        { text = "FLASK", key = "flasks",     x = 213, width = 46 },
+        { text = "DRUM",  key = "drums",      x = 261, width = 46 },
+        { text = "DEATH", key = "deaths",     x = 309, width = 46 },
+        { text = "POT",   key = "potions",    x = 357, width = 46 },
+        { text = "DISP",  key = "dispels",    x = 405, width = 46 },
+        { text = "INT",   key = "interrupts", x = 453, width = 46 },
     }
 
     -- Die Kopfzeile sortiert. Erster Klick absteigend, zweiter aufsteigend -
@@ -6166,15 +6170,14 @@ function GC.UI:BuildStatisticsPage()
         -- ApplyStatColumnLayout nach der gespeicherten Ordnung.
         local columns = {
             { key = "name", x = 5, width = 96 },
-            { key = "presence", x = 104, width = 46 },
-            { key = "elixirs", x = 152, width = 40 },
-            { key = "food", x = 194, width = 40 },
-            { key = "flasks", x = 236, width = 40 },
-            { key = "drums", x = 278, width = 40 },
-            { key = "deaths", x = 320, width = 40 },
-            { key = "potions", x = 362, width = 40 },
-            { key = "dispels", x = 404, width = 40 },
-            { key = "interrupts", x = 446, width = 40 },
+            { key = "elixirs", x = 104, width = 46 },
+            { key = "food", x = 152, width = 46 },
+            { key = "flasks", x = 200, width = 46 },
+            { key = "drums", x = 248, width = 46 },
+            { key = "deaths", x = 296, width = 46 },
+            { key = "potions", x = 344, width = 46 },
+            { key = "dispels", x = 392, width = 46 },
+            { key = "interrupts", x = 440, width = 46 },
         }
         for _, column in ipairs(columns) do
             row[column.key] = CreateLabel(row, "", { width = column.width, height = 25 })
@@ -6375,7 +6378,6 @@ function GC.UI:RefreshStatistics()
 
     local SORT_VALUES = {
         name = function(p) return tostring(p.name or ""):lower() end,
-        presence = function(p) return p.seconds or 0 end,
         deaths = function(p) return p.deaths or 0 end,
         interrupts = function(p) return p.interrupts or 0 end,
         dispels = function(p) return p.dispels or 0 end,
@@ -6432,22 +6434,8 @@ function GC.UI:RefreshStatistics()
             row.name:SetText(participant.name)
             row.name:SetTextColor(ClassColor(participant.classFile))
 
-            -- Eine nackte Dauer sagt wenig: "36m" ist nur im Verhaeltnis zur
-            -- Sitzung zu lesen. Wer deutlich kuerzer da war, faellt deshalb
-            -- farblich auf - genau das macht die Spalte brauchbar.
-            row.presence:SetText(FormatDuration(participant.seconds))
-            if sessionSeconds > 0 then
-                local share = (participant.seconds or 0) / sessionSeconds
-                if share < 0.5 then
-                    SetTextColor(row.presence, THEME.danger)
-                elseif share < 0.85 then
-                    SetTextColor(row.presence, THEME.warning)
-                else
-                    SetTextColor(row.presence, THEME.text)
-                end
-            else
-                SetTextColor(row.presence, THEME.text)
-            end
+            -- Die Anwesenheit hat keine eigene Spalte mehr (Owner-Wunsch);
+            -- sie steht im Tooltip der Zeile und im Detailfenster.
             row.deaths:SetText(participant.deaths or 0)
             row.interrupts:SetText(participant.interrupts or 0)
             row.dispels:SetText(participant.dispels or 0)
@@ -6942,9 +6930,11 @@ function GC.UI:RefreshGear()
         row:SetShown(audit ~= nil)
         if audit then
             local issues = GC.GearAudit:GetIssueCount(audit)
+            -- Grün heißt fertig, Rot heißt Arbeit (Owner-Wunsch) - so ist die
+            -- Liste auf einen Blick lesbar.
             row:SetText(audit.name .. (issues > 0
-            and ("  •  " .. issues .. (issues == 1 and " Fund" or " Funde"))
-            or "  •  ok"))
+            and ("  •  |cffff6166" .. issues .. (issues == 1 and " Fund" or " Funde") .. "|r")
+            or "  •  |cff59e695ok|r"))
             row:SetActive(audit.name == selectedName)
         end
     end

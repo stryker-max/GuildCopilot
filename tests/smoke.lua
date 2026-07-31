@@ -4780,25 +4780,26 @@ do
     orders_page = addon.UI.pages.STATISTICS
     addon.DB:GetSettings().statColumnOrder = nil
     orders_list = addon.UI:GetStatColumnOrder()
-    assert(orders_list[1] == "presence" and orders_list[2] == "elixirs"
+    assert(orders_list[1] == "elixirs" and orders_list[2] == "food"
         and orders_list[#orders_list] == "interrupts",
-        "Die Standard-Spaltenordnung (Proviant vorn) stimmt nicht")
+        "Die Standard-Spaltenordnung (Proviant vorn, ohne TIME) stimmt nicht")
 
-    assert(addon.UI:MoveStatColumn("food", 2) == true, "Das Spaltenverschieben scheiterte")
+    assert(addon.UI:MoveStatColumn("drums", 2) == true, "Das Spaltenverschieben scheiterte")
     orders_list = addon.UI:GetStatColumnOrder()
-    assert(orders_list[2] == "food" and orders_list[1] == "presence",
-        "FOOD steht nach dem Verschieben nicht an Position 2")
-    assert(addon.DB:GetSettings().statColumnOrder[2] == "food",
+    assert(orders_list[2] == "drums" and orders_list[1] == "elixirs",
+        "DRUM steht nach dem Verschieben nicht an Position 2")
+    assert(addon.DB:GetSettings().statColumnOrder[2] == "drums",
         "Die Spaltenordnung wurde nicht gespeichert")
 
     -- Unbekannte Schlüssel werden abgelehnt; kaputte gespeicherte Einträge
-    -- fliegen beim Lesen raus, fehlende hängen hinten an.
+    -- (auch das ausgemusterte "presence") fliegen beim Lesen raus, fehlende
+    -- hängen hinten an.
     assert(addon.UI:MoveStatColumn("quatsch", 1) == false,
         "Eine unbekannte Spalte wurde verschoben")
-    addon.DB:GetSettings().statColumnOrder = { "drums", "unfug", "drums" }
+    addon.DB:GetSettings().statColumnOrder = { "drums", "presence", "drums" }
     orders_list = addon.UI:GetStatColumnOrder()
-    assert(orders_list[1] == "drums" and orders_list[2] == "presence"
-        and #orders_list == 9,
+    assert(orders_list[1] == "drums" and orders_list[2] == "elixirs"
+        and #orders_list == 8,
         "Die Reparatur der gespeicherten Spaltenordnung versagt")
 
     -- Kopf- und Zellpositionen folgen der Ordnung ohne Fehler.
