@@ -585,6 +585,7 @@ function GC.Orders:Accept(orderID, crafterName)
         return false, "Den eigenen Auftrag nimmt man nicht selbst an."
     end
 
+    local previousStatus = order.status
     local ok, message = Transition(self, order, "ACC", GC:GetPlayerFullName(), nil, {
         crafter = crafterName,
         accountTag = GC.DB:GetAccountTag(),
@@ -593,6 +594,7 @@ function GC.Orders:Accept(orderID, crafterName)
         return false, message
     end
     self:BroadcastOrder(order)
+    self:PlayStatusSound(order, previousStatus)
     NotifyChanged()
     return true, "Angenommen. Es fertigt: " .. GC.Util.PlayerShortName(crafterName) .. "."
 end
@@ -612,12 +614,14 @@ for methodName, definition in pairs(SIMPLE_ACTIONS) do
         if not order then
             return false, "Der Auftrag ist nicht mehr bekannt."
         end
+        local previousStatus = order.status
         local ok, message = Transition(self, order, definition.event,
             GC:GetPlayerFullName(), nil, { note = note })
         if not ok then
             return false, message
         end
         self:BroadcastOrder(order)
+        self:PlayStatusSound(order, previousStatus)
         NotifyChanged()
         return true, definition.done
     end
@@ -628,6 +632,7 @@ function GC.Orders:MarkCrafted(orderID, actualCost, note)
     if not order then
         return false, "Der Auftrag ist nicht mehr bekannt."
     end
+    local previousStatus = order.status
     local ok, message = Transition(self, order, "CRA", GC:GetPlayerFullName(), nil, {
         actualCost = actualCost,
         note = note,
@@ -636,6 +641,7 @@ function GC.Orders:MarkCrafted(orderID, actualCost, note)
         return false, message
     end
     self:BroadcastOrder(order)
+    self:PlayStatusSound(order, previousStatus)
     NotifyChanged()
     return true, "Als gefertigt gemeldet."
 end
@@ -852,6 +858,7 @@ function GC.Orders:ReceiveState(fields, sender)
     end
 
     self:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
+    self:PlayStatusSound(order, previousStatus)
     NotifyChanged()
     return true
 end
@@ -870,6 +877,50 @@ function GC.Orders:ReceiveLog(fields)
         return true
     end
     return false
+end
+
+-- === Klangrückmeldung ======================================================
+-- Owner-Wunsch: Stufenaufstieg bei neuen machbaren Aufträgen, Karten-Ping
+-- beim Fortschritt eigener Aufträge, Questabschluss beim Abschluss - jedes
+-- Ereignis in den Einstellungen umstellbar oder abschaltbar (leerer Wert).
+local ORDER_SOUND_DEFAULTS = {
+    newOrder = "LEVEL_UP",
+    progress = "MAP_PING",
+    done = "IG_QUEST_LIST_COMPLETE",
+}
+
+function GC.Orders:PlayEventSound(event)
+    if not GC.Chat then
+        return false
+    end
+    local sounds = GC.DB:GetSettings().orderSounds or {}
+    local key = sounds[event]
+    if key == "" then
+        return false
+    end
+    return GC.Chat:PlaySuccessSound(key or ORDER_SOUND_DEFAULTS[event]) == true
+end
+
+-- Zurücklegen und Abbrechen sind bewusst stumm - sie sind kein Fortschritt.
+local PROGRESS_SOUND_STATUSES = {
+    ACCEPTED = true, WORKING = true, CRAFTED = true, SHIPPED = true, RECEIVED = true,
+}
+
+function GC.Orders:PlayStatusSound(order, previousStatus)
+    if not order or order.status == previousStatus then
+        return
+    end
+    local involved = self:IsCreatorCharacter(order, GC:GetPlayerFullName())
+        or (GC.Util.Trim(order.acceptedByTag) ~= ""
+            and order.acceptedByTag == GC.DB:GetAccountTag())
+    if not involved then
+        return
+    end
+    if order.status == "DONE" then
+        self:PlayEventSound("done")
+    elseif PROGRESS_SOUND_STATUSES[order.status] then
+        self:PlayEventSound("progress")
+    end
 end
 
 -- Dezente Chat-Hinweise: neue machbare Aufträge und Bewegungen an eigenen.
@@ -897,6 +948,11 @@ function GC.Orders:NotifyNewOrder(order)
     GC:Print("Neuer Gildenauftrag: „" .. (order.recipeName or "?") .. "“ von "
         .. GC.Util.PlayerShortName(order.createdBy or "?") .. " – dein "
         .. GC.Util.PlayerShortName(candidates[1]) .. " kann das Rezept.")
+    self:PlayEventSound("newOrder")
+    GC:FireCallback("ORDERS_BANNER",
+        "Neuer Gildenauftrag: " .. (order.recipeName or "?")
+        .. " ×" .. (order.quantity or 1)
+        .. " (von " .. GC.Util.PlayerShortName(order.createdBy or "?") .. ")")
 end
 
 -- === Abgleich ===============================================================

@@ -46,6 +46,21 @@ local DEFAULTS = {
             x = 0,
             y = -300,
         },
+        -- Klangrueckmeldung der Gildenauftraege, je Ereignis ein Schluessel
+        -- aus GC.SuccessSoundOptions; leer heisst ausdruecklich aus.
+        orderSounds = {
+            newOrder = "LEVEL_UP",
+            progress = "MAP_PING",
+            done = "IG_QUEST_LIST_COMPLETE",
+        },
+        -- Die Bildschirmmeldung bei neuen machbaren Auftraegen. Frei
+        -- verschiebbar, weil die Standard-Raidwarnungsposition erfahrungsgemaess
+        -- von WeakAuras belegt ist.
+        orderBanner = {
+            enabled = true,
+            x = 0,
+            y = 200,
+        },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
         -- Lokale Automatik des Gear Audits. Bewusst nicht gildenweit: Beides

@@ -4516,4 +4516,65 @@ do
     addon.DB.data.characters["twinky-realm"] = nil
 end
 
+do
+    -- Klang und Bildschirmmeldung: Stufenaufstieg (888) bei neuen machbaren
+    -- Aufträgen samt Banner, Karten-Ping (3175) beim Fortschritt,
+    -- Questabschluss (619) beim Abschluss - und alles abschaltbar.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.DB.data.characters["twinky-realm"] = {
+        fullName = "Twinky-Realm",
+        workshop = { professions = { verzauberkunst = {
+            key = "verzauberkunst", name = "Verzauberkunst",
+            recipes = { I90002 = { name = "Testbrenner" } },
+        } } },
+    }
+
+    playedSoundID = nil
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|soundtest-1|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|A|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    assert(playedSoundID == 888, "Der neue machbare Auftrag spielt nicht den Stufenaufstieg")
+    assert(addon.UI.orderBanner ~= nil and addon.UI.orderBanner.shown == true,
+        "Die Bildschirmmeldung zum neuen Auftrag fehlt")
+    addon.UI.orderBanner:Hide()
+
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|soundtest-1|1|OPEN|" .. currentTime .. "||0|||0|0|"
+            .. currentTime .. "|Heiler-Realm|CRT|", "GUILD", "Heiler-Realm")
+    playedSoundID = nil
+    assert(addon.Orders:Accept("soundtest-1") == true, "Die Klang-Testannahme scheiterte")
+    assert(playedSoundID == 3175, "Der Fortschritt pingt nicht wie die Karte")
+
+    -- Abgeschaltet bleibt still.
+    addon.DB:GetSettings().orderSounds.progress = ""
+    playedSoundID = nil
+    assert(addon.Orders:MarkMaterialsComplete("soundtest-1") == true,
+        "Der Materialschritt des Klangtests scheiterte")
+    assert(playedSoundID == nil, "Der abgeschaltete Fortschrittston spielte trotzdem")
+    addon.DB:GetSettings().orderSounds.progress = "MAP_PING"
+
+    addon.Orders:MarkCrafted("soundtest-1")
+    playedSoundID = nil
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|soundtest-1|" .. (addon.Orders:GetOrder("soundtest-1").rev + 1) .. "|DONE|"
+            .. currentTime .. "|" .. addon.DB:GetAccountTag() .. "|" .. currentTime
+            .. "|Twinky-Realm|Tester-Realm|0|0|" .. currentTime .. "|Heiler-Realm|RCV|",
+        "GUILD", "Heiler-Realm")
+    assert(addon.Orders:GetOrder("soundtest-1").status == "DONE",
+        "Der Klangtest-Auftrag wurde nicht abgeschlossen")
+    assert(playedSoundID == 619, "Der Abschluss spielt nicht den Questabschluss")
+
+    -- Abgeschaltete Bildschirmmeldung bleibt unsichtbar.
+    addon.DB:GetSettings().orderBanner.enabled = false
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|soundtest-2|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|A|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    assert(addon.UI.orderBanner.shown == false,
+        "Die abgeschaltete Bildschirmmeldung erschien trotzdem")
+    addon.DB:GetSettings().orderBanner.enabled = true
+
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.DB.data.characters["twinky-realm"] = nil
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

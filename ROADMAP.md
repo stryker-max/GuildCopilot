@@ -298,6 +298,14 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.54 – Gildenaufträge: Klang und Bildschirmmeldung
+
+Owner-Wunsch mit Präzisierung während der Umsetzung (Stufenaufstieg statt Raidwarnung für neue Aufträge):
+
+- **Drei Klänge, drei Ereignisse:** Stufenaufstieg bei einem neuen Auftrag, den ein eigener Charakter fertigen kann, Karten-Ping bei jedem Fortschritt an eigenen Aufträgen (Annahme bis Erstattung), Questabschluss beim Abschluss. Zurücklegen und Abbrechen bleiben stumm – sie sind kein Fortschritt;
+- **alles einstellbar:** neue Karte „Gildenaufträge" in den Einstellungen mit je einem Klangmenü pro Ereignis (die bekannte Klangliste plus „Aus") und einem Schalter für die Bildschirmmeldung;
+- **eigene Bildschirmmeldung statt der eingebauten Raidwarnung:** Die Standardposition oben-mittig ist erfahrungsgemäß von WeakAuras belegt und schlecht lesbar. Die Meldung zu neuen machbaren Aufträgen ist ein eigener, gut lesbarer Balken mit dunklem Hintergrund, frei verschiebbar (Position wird gespeichert), verschwindet nach fünf Sekunden von selbst und lässt sich über „Meldung testen" in den Einstellungen zum Platzieren aufrufen.
+
 ## 0.9.53 – Kompakt-Tracker: Höhe nach Inhalt
 
 Der Tracker hielt immer Platz für drei Zeilen vor – mit einem einzigen Auftrag sah das nach kaputtem Fenster aus, und lange Zeilen brachen in die 26-Pixel-Zeile um. Jetzt: Höhe = Titelzeile plus sichtbare Zeilen, Text einzeilig mit hartem Abschnitt statt Umbruch (`SetWordWrap(false)`, `SetMaxLines(1)`).

@@ -1159,7 +1159,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(1484)
+    content:SetHeight(1700)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -1443,8 +1443,59 @@ function GC.UI:BuildSettingsPage()
         vertical = "TOP",
     }):SetPoint("TOPLEFT", gearCard, "TOPLEFT", 18, -96)
 
+    -- Klang und Bildschirmmeldung der Gildenaufträge. Jedes Ereignis hat
+    -- seinen eigenen Ton aus der bekannten Klangliste; "Aus" schaltet es ab.
+    local orderCard = CreateCard(content, "Gildenaufträge")
+    orderCard:SetSize(752, 224)
+    orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1432)
+    local orderSoundNames = { "Aus" }
+    for _, sound in ipairs(GC.SuccessSoundOptions) do
+        orderSoundNames[#orderSoundNames + 1] = sound.name
+    end
+    local function OrderSoundDropdown(labelText, y, eventKey)
+        CreateLabel(orderCard, labelText, { muted = true, width = 236, height = 30 })
+            :SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, y)
+        local dropdown = CreateChoiceDropdown(orderCard, 190, orderSoundNames, function(value)
+            local settings = GC.DB:GetSettings()
+            settings.orderSounds = settings.orderSounds or {}
+            if value == "Aus" then
+                settings.orderSounds[eventKey] = ""
+                return
+            end
+            for _, sound in ipairs(GC.SuccessSoundOptions) do
+                if sound.name == value then
+                    settings.orderSounds[eventKey] = sound.key
+                    GC.Chat:PlaySuccessSound(sound.key)
+                    break
+                end
+            end
+        end, false)
+        dropdown:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 262, y)
+        return dropdown
+    end
+    page.orderSoundNew = OrderSoundDropdown("Neuer machbarer Auftrag", -48, "newOrder")
+    page.orderSoundProgress = OrderSoundDropdown("Fortschritt an eigenen Aufträgen", -86, "progress")
+    page.orderSoundDone = OrderSoundDropdown("Auftrag abgeschlossen", -124, "done")
+
+    page.orderBannerToggle = CreateToggle(orderCard,
+        "Bildschirmmeldung bei neuen machbaren Aufträgen", function(checked)
+        GC.DB:GetSettings().orderBanner.enabled = checked
+    end)
+    page.orderBannerToggle:SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -166)
+    page.orderBannerToggle.text:SetWidth(360)
+    local bannerTest = CreateButton(orderCard, "Meldung testen", 140, 30, function()
+        GC.UI:ShowOrderBanner("Neuer Gildenauftrag: Beispiel ×1")
+    end)
+    bannerTest:SetPoint("TOPRIGHT", orderCard, "TOPRIGHT", -14, -160)
+    CreateLabel(orderCard,
+        "Die Meldung lässt sich mit der Maus dorthin schieben, wo sie nichts verdeckt.", {
+        muted = true,
+        width = 716,
+        height = 16,
+    }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -196)
+
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1432)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1668)
 end
 
 function GC.UI:RefreshSettings()
@@ -1532,6 +1583,25 @@ function GC.UI:RefreshSettings()
         end
     end
     page.profileSoundDropdown:SetValue(profileSoundName or GC.SuccessSoundOptions[1].name)
+
+    local orderSounds = settings.orderSounds or {}
+    local function OrderSoundName(eventKey, fallbackKey)
+        local key = orderSounds[eventKey]
+        if key == "" then
+            return "Aus"
+        end
+        key = key or fallbackKey
+        for _, sound in ipairs(GC.SuccessSoundOptions) do
+            if sound.key == key then
+                return sound.name
+            end
+        end
+        return "Aus"
+    end
+    page.orderSoundNew:SetValue(OrderSoundName("newOrder", "LEVEL_UP"))
+    page.orderSoundProgress:SetValue(OrderSoundName("progress", "MAP_PING"))
+    page.orderSoundDone:SetValue(OrderSoundName("done", "IG_QUEST_LIST_COMPLETE"))
+    SetToggle(page.orderBannerToggle, settings.orderBanner.enabled ~= false)
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
@@ -3997,6 +4067,68 @@ function GC.UI:ToggleOrderTracker()
     settings.hidden = not settings.hidden
     self:RefreshOrderTracker()
     self:RefreshOrdersBoard()
+end
+
+-- === Bildschirmmeldung ======================================================
+-- Eine eigene, gut lesbare Raidwarnung für neue machbare Gildenaufträge. Die
+-- eingebaute Position oben-mittig ist erfahrungsgemäß von WeakAuras belegt;
+-- diese hier ist frei verschiebbar und merkt sich ihren Platz.
+
+function GC.UI:CreateOrderBanner()
+    if self.orderBanner then
+        return self.orderBanner
+    end
+    local settings = GC.DB:GetSettings().orderBanner
+    local banner = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotOrderBanner")
+    banner:SetSize(560, 46)
+    banner:SetPoint("CENTER", UIParent, "CENTER",
+        tonumber(settings.x) or 0, tonumber(settings.y) or 200)
+    banner:SetFrameStrata("HIGH")
+    banner:SetClampedToScreen(true)
+    banner:SetMovable(true)
+    banner:EnableMouse(true)
+    banner:RegisterForDrag("LeftButton")
+    banner:SetScript("OnDragStart", banner.StartMoving)
+    banner:SetScript("OnDragStop", function(frame)
+        frame:StopMovingOrSizing()
+        local point, _, _, x, y = frame:GetPoint()
+        if point then
+            GC.DB:GetSettings().orderBanner.x = math.floor(tonumber(x) or 0)
+            GC.DB:GetSettings().orderBanner.y = math.floor(tonumber(y) or 0)
+        end
+    end)
+    banner:SetBackdropColor(THEME.window[1], THEME.window[2], THEME.window[3], 0.92)
+    banner.text = CreateLabel(banner, "", {
+        font = "GameFontNormalHuge",
+        align = "CENTER",
+        width = 540,
+        height = 46,
+    })
+    banner.text:SetPoint("CENTER", banner, "CENTER", 0, 0)
+    SetTextColor(banner.text, THEME.accent)
+    banner:Hide()
+    self.orderBanner = banner
+    return banner
+end
+
+function GC.UI:ShowOrderBanner(text)
+    if GC.DB:GetSettings().orderBanner.enabled == false then
+        return
+    end
+    local banner = self:CreateOrderBanner()
+    banner.text:SetText(text or "")
+    -- Eine neuere Meldung verlängert die Anzeige; der Timer der älteren
+    -- versteckt dann nichts mehr.
+    banner.hideAt = GC.Util.Now() + 5
+    banner:Show()
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(5, function()
+            local current = GC.UI.orderBanner
+            if current and GC.Util.Now() >= (current.hideAt or 0) then
+                current:Hide()
+            end
+        end)
+    end
 end
 
 function GC.UI:BuildRecruitmentPage()
@@ -6533,6 +6665,10 @@ GC:RegisterCallback("ORDERS_UPDATED", GC.UI, function(self)
     if self.pages.WORKSHOP and self.pages.WORKSHOP.orderLogDialog then
         self:RefreshOrderLogDialog()
     end
+end)
+
+GC:RegisterCallback("ORDERS_BANNER", GC.UI, function(self, text)
+    self:ShowOrderBanner(text)
 end)
 
 GC:RegisterCallback("ROSTER_UPDATED", GC.UI, function(self)
