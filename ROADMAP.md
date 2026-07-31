@@ -298,6 +298,10 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.62 – Kompakt-Tracker: zwei Zeilen je Auftrag
+
+Owner-Screenshot: „Materialien an Silverssoul li…" – Rezept und Aufgabe in einer Zeile schnitten die Aufgabe ab. Jeder Auftrag hat jetzt zwei Zeilen (Rezept ×Menge oben, Aufgabe gedämpft darunter), der Tracker ist etwas breiter und wächst weiterhin nur so hoch wie sein Inhalt.
+
 ## 0.9.61 – Ranggeschütztes trägt ein Schloss statt zu verschwinden
 
 Owner-Entscheidung: Sichtbar-aber-gesperrt schlägt unsichtbar. Ein verstecktes Feature sieht aus, als gäbe es das Addon ohne es; ein Schloss sagt „gibt es, braucht Rang".

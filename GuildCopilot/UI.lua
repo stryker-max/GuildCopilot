@@ -4125,7 +4125,7 @@ function GC.UI:CreateOrderTracker()
         return self.orderTracker
     end
     local tracker = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotOrderTracker")
-    tracker:SetSize(312, 118)
+    tracker:SetSize(344, 118)
     local settings = GC.DB:GetSettings().orderTracker
     tracker:SetPoint("CENTER", UIParent, "CENTER", tonumber(settings.x) or 0, tonumber(settings.y) or -300)
     tracker:SetClampedToScreen(true)
@@ -4153,26 +4153,39 @@ function GC.UI:CreateOrderTracker()
     end)
     tracker.close:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -8, -7)
 
+    -- Zwei Zeilen je Auftrag: Rezept oben, Aufgabe gedämpft darunter. In
+    -- einer Zeile wurde die Aufgabe abgeschnitten ("Materialien an … li…").
     tracker.rows = {}
     for index = 1, 3 do
-        local row = CreateButton(tracker, "", 288, 26, function()
+        local row = CreateButton(tracker, "", 320, 40, function()
             GC.UI:CreateMainFrame()
             GC.UI.frame:Show()
             GC.UI:ShowPage("WORKSHOP")
             GC.UI:SetWorkshopView("ORDERS")
         end)
-        row:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -28 - ((index - 1) * 28))
+        row:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -28 - ((index - 1) * 44))
         row.label:ClearAllPoints()
-        row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -5)
         row.label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
         row.label:SetJustifyH("LEFT")
-        -- Eine Zeile je Auftrag: Was nicht passt, wird abgeschnitten. Ein
-        -- Umbruch ragte sonst aus der 26 Pixel hohen Zeile heraus.
         if row.label.SetWordWrap then
             row.label:SetWordWrap(false)
         end
         if row.label.SetMaxLines then
             row.label:SetMaxLines(1)
+        end
+        row.action = CreateLabel(row, "", {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 304,
+            height = 14,
+        })
+        row.action:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -22)
+        if row.action.SetWordWrap then
+            row.action:SetWordWrap(false)
+        end
+        if row.action.SetMaxLines then
+            row.action:SetMaxLines(1)
         end
         row:Hide()
         tracker.rows[index] = row
@@ -4205,7 +4218,8 @@ function GC.UI:RefreshOrderTracker()
         local boardRow = rows[index]
         if boardRow then
             local order = boardRow.order
-            row:SetText((order.recipeName or "?") .. "  ·  " .. boardRow.action)
+            row:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1))
+            row.action:SetText(boardRow.action or "")
             row:Show()
             visible = visible + 1
         else
@@ -4219,7 +4233,7 @@ function GC.UI:RefreshOrderTracker()
     end
     -- Der Rahmen ist so hoch wie sein Inhalt: Titelzeile plus die sichtbaren
     -- Zeilen. Drei leere Plätze vorzuhalten sah nach kaputtem Fenster aus.
-    tracker:SetHeight(34 + (visible * 28) + 6)
+    tracker:SetHeight(34 + (visible * 44) + 4)
     tracker:Show()
 end
 

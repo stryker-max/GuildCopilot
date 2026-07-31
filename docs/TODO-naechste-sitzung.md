@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 31.07.2026, nach Release 0.9.61 / Installer 1.0.5.
+Stand: 31.07.2026, nach Release 0.9.62 / Installer 1.0.5.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
