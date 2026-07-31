@@ -764,6 +764,8 @@ function GC.Orders:ReceiveState(fields, sender)
     local orderID = GC.Util.Trim(fields[4])
     local order = self:GetOrder(orderID)
     if not order then
+        -- Der Kern zu diesem Auftrag fehlt hier - nachfordern statt schweigen.
+        self:RequestRecovery()
         return false
     end
     local rev = tonumber(fields[5]) or 0
@@ -899,44 +901,74 @@ end
 
 -- === Abgleich ===============================================================
 
-function GC.Orders:GetNewestChangeAt()
-    local newest = 0
-    for _, order in pairs(self:GetStore()) do
-        if (order.changedAt or 0) > newest then
-            newest = order.changedAt
-        end
-    end
-    return newest
-end
-
 function GC.Orders:RequestSync()
     if not GC.Sync then
         return false
     end
     self.lastRequestAt = GC.Util.Now()
-    return GC.Sync:Send(Join({ "O", SCHEMA(), "Q", tostring(self:GetNewestChangeAt()) }))
+    -- Das vierte Feld war einmal ein Zeitstempel-Filter ("nur Neueres als …").
+    -- Der Filter war ein Konstruktionsfehler: Die eigene juengste Aenderung
+    -- maskierte alle aelteren Auftraege der anderen. Gesendet wird die 0 fuer
+    -- Altclients, die das Feld noch lesen; beantwortet wird immer alles.
+    return GC.Sync:Send(Join({ "O", SCHEMA(), "Q", "0" }))
 end
 
--- Antwort auf eine Q-Anfrage: alles, was der Anfragende noch nicht kennt,
--- über die Bulk-Warteschlange - Kern, Zustand und Verlaufszeilen. Mehrere
--- Antwortende stören nicht: Revisionen und der Verlaufs-Dedup räumen
--- Doppeltes weg. Der Zufallsversatz verhindert den gleichzeitigen Chor.
-function GC.Orders:AnswerRequest(sinceTimestamp, requester)
+-- Beim Login zusaetzlich der Gegenweg: die eigenen laufenden Auftraege als
+-- Push in den Gildenkanal. Damit lernt die Gilde meine Auftraege auch dann,
+-- wenn ihre Live-Broadcasts an mir vorbeigingen (alte Version, Ladebildschirm)
+-- und niemand rechtzeitig gefragt hat. Klein und gedeckelt: nur eigene, nur
+-- nicht abgeschlossene, ohne Verlaufszeilen.
+function GC.Orders:PushOwnOrders()
+    if not GC.Sync then
+        return 0
+    end
+    local ownTag = GC.DB:GetAccountTag()
+    local pushed = 0
+    for _, order in pairs(self:GetStore()) do
+        if not TERMINAL[order.status]
+            and (order.createdByTag == ownTag or order.acceptedByTag == ownTag) then
+            GC.Sync:SendBulk(self:BuildCoreMessage(order), "GUILD")
+            GC.Sync:SendBulk(self:BuildStateMessage(order, nil), "GUILD")
+            pushed = pushed + 1
+        end
+    end
+    return pushed
+end
+
+-- Trifft ein Zustandswechsel zu einem unbekannten Auftrag ein, ist unterwegs
+-- ein Kernpaket verloren gegangen. Einmal pro Minute darf deshalb eine
+-- Nachforderung in die Gilde - die naechste Antwort bringt den ganzen Stand.
+function GC.Orders:RequestRecovery()
     local now = GC.Util.Now()
-    if (now - (self.lastAnswerAt or 0)) < MIN_ANSWER_INTERVAL then
+    if (now - (self.lastRecoveryAt or 0)) < 60 then
         return false
     end
-    sinceTimestamp = tonumber(sinceTimestamp) or 0
+    self.lastRecoveryAt = now
+    return GC.Sync and GC.Sync:Send(Join({ "O", SCHEMA(), "Q", "0" })) == true or false
+end
+
+-- Antwort auf eine Q-Anfrage: der komplette eigene Stand ueber die
+-- Bulk-Warteschlange - Kern, Zustand und Verlaufszeilen. Bewusst alles statt
+-- einer Differenz: Zeitstempel verschiedener Absender sind nicht vergleichbar,
+-- und Revisionen plus Verlaufs-Dedup machen Doppeltes ohnehin wirkungslos.
+-- Die Drossel gilt je Anfragendem, damit zwei kurz nacheinander einloggende
+-- Mitglieder beide ihre Antwort bekommen; der Zufallsversatz verhindert den
+-- gleichzeitigen Chor mehrerer Antwortender.
+function GC.Orders:AnswerRequest(_, requester)
+    local now = GC.Util.Now()
+    self.answeredAt = self.answeredAt or {}
+    local requesterKey = GC.Util.NormalizeName(requester)
+    if (now - (self.answeredAt[requesterKey] or 0)) < MIN_ANSWER_INTERVAL then
+        return false
+    end
     local pending = {}
     for _, order in pairs(self:GetStore()) do
-        if (order.changedAt or 0) > sinceTimestamp then
-            pending[#pending + 1] = order
-        end
+        pending[#pending + 1] = order
     end
     if #pending == 0 then
         return false
     end
-    self.lastAnswerAt = now
+    self.answeredAt[requesterKey] = now
 
     local function SendAll()
         for _, order in ipairs(pending) do

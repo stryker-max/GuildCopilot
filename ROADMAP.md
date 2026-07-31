@@ -298,6 +298,16 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.52 – Gildenaufträge: der Abgleich war ein Konstruktionsfehler
+
+Aus dem Zwei-Spieler-Test: Beide hatten Aufträge erstellt, keiner sah die des anderen. Drei Ursachen, alle im Abgleich:
+
+- **Der Zeitstempel-Filter der Login-Anfrage maskierte fremde Aufträge.** „Schick mir alles, was neuer ist als meine letzte Änderung" klingt sparsam, ist aber falsch: Die letzte Änderung ist nach dem Erstellen eines eigenen Auftrags *der eigene Auftrag* – und Zeitstempel verschiedener Absender sind ohnehin nicht vergleichbar. Eine Anfrage wird jetzt immer mit dem **kompletten Stand** beantwortet; Revisionen und der Verlaufs-Dedup machen Doppeltes wirkungslos. Die Drossel gilt je Anfragendem statt global, damit zwei kurz nacheinander Einloggende beide ihre Antwort bekommen;
+- **es gab nur Pull, keinen Push.** Wer zur Erstellzeit offline oder auf einer älteren Version war (die den `O`-Typ verwirft), konnte einen Auftrag nur über die eigene Anfrage nachladen – die einmalig 13 s nach dem Login feuert. Jetzt drückt jeder Client 17 s nach dem Login zusätzlich die **eigenen laufenden Aufträge** als Kern+Zustand in den Gildenkanal;
+- **ein verlorenes Kernpaket blieb verloren.** Ein Zustandswechsel zu einem unbekannten Auftrag wurde stillschweigend verworfen. Jetzt löst er eine **Nachforderung** aus (höchstens eine pro Minute), und die nächste Antwort bringt den ganzen Stand.
+
+Die Tests bilden den gemeldeten Fall jetzt wörtlich ab: Eine Anfrage mit Zeitstempel in der Zukunft bekommt trotzdem den vollen Stand; ein unbekannter Zustandswechsel fordert nach und ist gedrosselt; der Login-Push sendet je eigenem Auftrag Kern und Zustand.
+
 ## 0.9.51 – Gildenaufträge: erste Runde Spielpraxis
 
 Vier Funde aus dem ersten echten Blick ins Spiel, gemeldet vom Owner mit Screenshots, dazu sein Wunsch nach Farbkennzeichnung:

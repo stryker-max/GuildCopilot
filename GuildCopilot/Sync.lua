@@ -1488,9 +1488,16 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
         end
     end)
     C_Timer.After(13, function()
-        -- Gildenaufträge abgleichen: Wer Neueres kennt, liefert es nach.
+        -- Gildenaufträge abgleichen: Wer etwas kennt, liefert es nach.
         if GC.Orders then
             GC.Orders:RequestSync()
+        end
+    end)
+    C_Timer.After(17, function()
+        -- ... und der Gegenweg: die eigenen laufenden Aufträge in die Gilde
+        -- drücken, für alle, an denen die Live-Broadcasts vorbeigingen.
+        if GC.Orders then
+            GC.Orders:PushOwnOrders()
         end
     end)
 end)

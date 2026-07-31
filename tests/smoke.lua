@@ -4365,15 +4365,37 @@ do
     assert(addon.Orders:GetOrder(orders_twinkOrderID .. "b").status == "OPEN",
         "Ein Fremder ohne Rangfreigabe konnte abbrechen")
 
-    -- Abgleich: Eine Anfrage liefert Kern, Zustand und Verlauf per Flüstern.
-    addon.Orders.lastAnswerAt = 0
+    -- Abgleich: Eine Anfrage liefert den GANZEN Stand per Flüstern - auch mit
+    -- einem Zeitstempel im Feld. Bis 0.9.51 filterte der Wert die Antwort,
+    -- und die eigene jüngste Änderung maskierte alles Ältere der anderen:
+    -- Zwei Spieler mit frisch erstellten Aufträgen sahen gegenseitig nichts.
+    addon.Orders.answeredAt = {}
     orders_sentBefore = #sentAddon
-    addon.Sync:OnMessage("GuildCopilot", "O|7|Q|0", "GUILD", "Heiler-Realm")
+    addon.Sync:OnMessage("GuildCopilot", "O|7|Q|" .. (currentTime + 99999), "GUILD", "Heiler-Realm")
     assert(#sentAddon > orders_sentBefore, "Die Abgleichanfrage blieb unbeantwortet")
     assert(sentAddon[#sentAddon][3] == "WHISPER", "Die Abgleichantwort lief nicht über Flüstern")
+    -- Dieselbe Person sofort nochmal: gedrosselt. Eine andere: eigene Antwort.
     orders_sentBefore = #sentAddon
+    addon.Sync:OnMessage("GuildCopilot", "O|7|Q|0", "GUILD", "Heiler-Realm")
+    assert(#sentAddon == orders_sentBefore, "Die Antwortdrossel je Anfragendem fehlt")
     addon.Sync:OnMessage("GuildCopilot", "O|7|Q|0", "GUILD", "Zwerg-Realm")
-    assert(#sentAddon == orders_sentBefore, "Die Antwortdrossel für den Abgleich fehlt")
+    assert(#sentAddon > orders_sentBefore, "Der zweite Anfragende bekam keine eigene Antwort")
+
+    -- Verlorener Kern: Ein Zustandswechsel zu einem unbekannten Auftrag
+    -- fordert den Stand nach - einmal pro Minute, nicht pro Nachricht.
+    addon.Orders.lastRecoveryAt = 0
+    orders_sentBefore = #sentAddon
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|niemals-gesehen|3|WORKING|" .. currentTime .. "|cccccccccc|" .. currentTime
+            .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime .. "|Zwerg-Realm|MAT|",
+        "GUILD", "Zwerg-Realm")
+    assert(#sentAddon == orders_sentBefore + 1, "Der unbekannte Auftrag wurde nicht nachgefordert")
+    assert(LastAddonMessage() == "O|7|Q|0", "Die Nachforderung hat das falsche Format")
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|U|niemals-gesehen|4|CRAFTED|" .. currentTime .. "|cccccccccc|" .. currentTime
+            .. "|Zwerg-Realm|Zwerg-Realm|0|0|" .. currentTime .. "|Zwerg-Realm|CRA|",
+        "GUILD", "Zwerg-Realm")
+    assert(#sentAddon == orders_sentBefore + 1, "Die Nachforderung ist nicht gedrosselt")
 
     -- Grenzen: Höchstens fünf offene Aufträge je Account.
     addon.DB:GetGuild().workshop.orders = {}
@@ -4383,6 +4405,14 @@ do
     end
     orders_result = addon.Orders:Create("I90001")
     assert(orders_result == false, "Der sechste offene Auftrag wurde nicht abgewiesen")
+
+    -- Login-Push: Die eigenen laufenden Aufträge gehen als Kern+Zustand in
+    -- die Gilde, damit auch Clients ohne rechtzeitige Anfrage sie lernen.
+    addon.Sync.bulkAllowance = 4000
+    orders_sentBefore = #sentAddon
+    assert(addon.Orders:PushOwnOrders() == 5, "Der Login-Push zählt die eigenen Aufträge falsch")
+    assert(#sentAddon == orders_sentBefore + 10,
+        "Der Login-Push sendet nicht Kern und Zustand je Auftrag")
 
     -- Verfall: Ein alter offener Auftrag verschwindet beim Aufräumen.
     for _, entry in pairs(addon.Orders:GetStore()) do
