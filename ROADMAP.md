@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.51 – Gildenaufträge: erste Runde Spielpraxis
+
+Vier Funde aus dem ersten echten Blick ins Spiel, gemeldet vom Owner mit Screenshots, dazu sein Wunsch nach Farbkennzeichnung:
+
+- **Texte liefen hinter die neuen Knöpfe:** Der Seiten-Hilfetext verschwand hinter den Unterreiter-Knöpfen, der Rezeptname hinter „In Auftrag geben". Beide Beschriftungen sind jetzt schmaler und brechen vor den Knöpfen um;
+- **der dritte Materialmodell-Knopf stand außerhalb des Dialogs:** Die x-Position wurde aus der Breite des jeweiligen Knopfs statt der Summe der vorherigen gerechnet. Jetzt läuft ein Cursor mit, und der Dialog ist minimal breiter (452);
+- **die Dialoge waren durchscheinend und lagen im Seiten-Scrollbereich:** Wie bei den Aufklappmenüs dokumentiert, mischen sich Kinder der Seite mit deren Karten und werden beschnitten. Die Dialoge hängen jetzt am Hauptfenster, mit eigener hoher Ebene und voll deckendem Hintergrund; Seitenwechsel und Fensterschluss schließen sie mit;
+- **Farbkennzeichnung** (Owner-Wunsch): Das Statuswort trägt jetzt Farbe (gelb wartet, türkis läuft, grün fertig, rot abgebrochen – dieselben Hexwerte, die das Addon in Texten ohnehin nutzt), der Kartenrahmen wird türkis, wenn du dran bist, und grün bei offenen Aufträgen, die ein eigener Charakter fertigen kann; die Aufgabenzeile steht in Warnfarbe statt grau.
+
 ## 0.9.50 – Gildenaufträge: die Werkstatt nimmt Bestellungen an
 
 Stufe 1 des abgenommenen Konzepts (`docs/KONZEPT-werkstatt-gildenauftraege.md`), umgesetzt in einem neuen Modul `GuildCopilot/Orders.lua` plus Board, Dialogen und Kompakt-Tracker in `UI.lua`:

@@ -2722,8 +2722,12 @@ end
 
 function GC.UI:BuildWorkshopPage()
     local page = self.pages.WORKSHOP
-    CreatePageTitle(page, "Gildenwerkstatt",
+    local _, workshopHelp = CreatePageTitle(page, "Gildenwerkstatt",
         "Rezepte werden automatisch erfasst, sobald ein Spieler sein WoW-Berufsfenster öffnet.")
+    -- Die Unterreiter-Knöpfe stehen oben rechts auf Höhe des Hilfetexts.
+    -- Mit voller Breite liefe der Text hinter die Knöpfe; schmaler bricht er
+    -- vor ihnen um.
+    workshopHelp:SetWidth(460)
 
     -- Zwei Unterreiter: der Katalog und das Auftragsboard
     -- (docs/KONZEPT-werkstatt-gildenauftraege.md). Beide teilen sich die
@@ -2862,9 +2866,12 @@ function GC.UI:BuildWorkshopPage()
     local detailCard = CreateCard(page, "Rezeptdetails")
     detailCard:SetSize(346, 342)
     detailCard:SetPoint("TOPRIGHT", searchCard, "BOTTOMRIGHT", 0, -12)
+    -- Breite 170 statt 200: Rechts stehen inzwischen zwei Knöpfe übereinander
+    -- ("Merken" und "In Auftrag geben", ab x 192); ein längerer Rezeptname
+    -- muss vor ihnen umbrechen statt darunter zu verschwinden.
     page.workshopRecipeTitle = CreateLabel(detailCard, "Kein Rezept ausgewählt", {
         title = true,
-        width = 200,
+        width = 170,
         height = 45,
         vertical = "TOP",
     })
@@ -3324,6 +3331,25 @@ local function OrderPrimaryAction(order)
     return nil
 end
 
+-- Farbkennzeichnung der Status: gelb wartet, türkis läuft, grün fertig,
+-- rot abgebrochen. Die Hexwerte entsprechen THEME.warning/accent/success/
+-- danger, wie sie das Addon auch sonst in Textform verwendet.
+local ORDER_STATUS_COLORS = {
+    OPEN = "|cffe8b84b",
+    ACCEPTED = "|cff2ed9e6",
+    WORKING = "|cff2ed9e6",
+    CRAFTED = "|cff2ed9e6",
+    SHIPPED = "|cff2ed9e6",
+    RECEIVED = "|cffe8b84b",
+    DONE = "|cff59e695",
+    CANCELLED = "|cffff6266",
+}
+
+local function ColoredOrderStatus(order)
+    return (ORDER_STATUS_COLORS[order.status] or "")
+        .. (GC.OrderStatusLabels[order.status] or order.status) .. "|r"
+end
+
 local function OrderRowTitle(order)
     local ownName = GC:GetPlayerFullName()
     local isCreator = GC.Orders:IsCreatorCharacter(order, ownName)
@@ -3338,7 +3364,7 @@ local function OrderRowTitle(order)
     return (order.recipeName or order.recipeKey or "?")
         .. " ×" .. (order.quantity or 1)
         .. "  ·  " .. counterpart
-        .. "  ·  " .. (GC.OrderStatusLabels[order.status] or order.status)
+        .. "  ·  " .. ColoredOrderStatus(order)
 end
 
 local function OrderOfferLine(order)
@@ -3479,6 +3505,20 @@ local function FillOrderRow(row, boardRow, isOpenSection)
     local ownName = GC:GetPlayerFullName()
     row.cancelButton:SetShown(order.status ~= "DONE" and order.status ~= "CANCELLED"
         and (GC.Orders:IsCreatorCharacter(order, ownName) or GC.Orders:CanAdministrate(ownName)))
+
+    -- Farbkennzeichnung am Rahmen: türkis heißt "du bist dran", grün heißt
+    -- "für dich machbar", sonst die neutrale Kartenlinie. Dazu springt die
+    -- Aufgabenzeile in Warnfarbe, statt grau unterzugehen.
+    if boardRow.yourTurn then
+        row:SetBackdropBorderColor(THEME.accent[1], THEME.accent[2], THEME.accent[3], 1)
+        SetTextColor(row.detail, THEME.warning)
+    elseif isOpenSection and boardRow.canAccept then
+        row:SetBackdropBorderColor(THEME.success[1], THEME.success[2], THEME.success[3], 1)
+        SetTextColor(row.detail, THEME.muted)
+    else
+        row:SetBackdropBorderColor(THEME.border[1], THEME.border[2], THEME.border[3], 1)
+        SetTextColor(row.detail, THEME.muted)
+    end
     row:Show()
 end
 
@@ -3523,7 +3563,7 @@ function GC.UI:RefreshOrdersBoard()
         if boardRow then
             local order = boardRow.order
             label:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1)
-                .. "  ·  " .. (GC.OrderStatusLabels[order.status] or order.status)
+                .. "  ·  " .. ColoredOrderStatus(order)
                 .. "  ·  " .. GC.Util.PlayerShortName(order.createdBy or "?"))
             label:Show()
         else
@@ -3554,11 +3594,18 @@ function GC.UI:AcceptOrder(orderID)
 end
 
 local function BuildOrderDialogFrame(page, width, height, titleText)
-    local dialog = CreatePanel(page, THEME.window, THEME.accent)
+    -- Wie die Dropdown-Menüs hängen die Dialoge NICHT unter der Seite: Die
+    -- Seiten liegen in einem ScrollFrame, dessen Kinder beschnitten werden und
+    -- deren Ebenen sich mit den Seitenkarten mischen - dahinterliegende Knöpfe
+    -- schimmerten durch. Als Kind des Hauptfensters mit eigener hoher Ebene
+    -- und voll deckendem Hintergrund liegt der Dialog sauber über allem.
+    local host = GC.UI.frame or UIParent
+    local dialog = CreatePanel(host, THEME.window, THEME.accent)
     dialog:SetSize(width, height)
-    dialog:SetPoint("CENTER", page, "CENTER", 0, 10)
-    local pageLevel = page.GetFrameLevel and page:GetFrameLevel() or 1
-    dialog:SetFrameLevel((pageLevel or 1) + 40)
+    dialog:SetPoint("CENTER", host, "CENTER", 0, 0)
+    local hostLevel = host.GetFrameLevel and host:GetFrameLevel() or 1
+    dialog:SetFrameLevel((hostLevel or 1) + 80)
+    dialog:SetBackdropColor(THEME.window[1], THEME.window[2], THEME.window[3], 1)
     dialog:EnableMouse(true)
     dialog.title = CreateLabel(dialog, titleText, { title = true, width = width - 60 })
     dialog.title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -12)
@@ -3567,17 +3614,24 @@ local function BuildOrderDialogFrame(page, width, height, titleText)
     end)
     dialog.close:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -8, -8)
     dialog:Hide()
+    -- Wechselt die Seite oder schließt das Fenster, geht der Dialog mit zu.
+    page:HookScript("OnHide", function()
+        dialog:Hide()
+    end)
     return dialog
 end
 
 function GC.UI:BuildOrderCreateDialog(page)
-    local dialog = BuildOrderDialogFrame(page, 430, 372, "Gildenauftrag erstellen")
+    local dialog = BuildOrderDialogFrame(page, 452, 372, "Gildenauftrag erstellen")
     page.orderCreateDialog = dialog
 
     local function RadioRow(labelText, y, options, field)
         local caption = CreateLabel(dialog, labelText, { muted = true, width = 120, height = 15 })
         caption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, y)
         local buttons = {}
+        -- Die x-Position läuft mit der Summe der bisherigen Breiten mit;
+        -- vorher stand der dritte, breitere Knopf außerhalb des Dialogs.
+        local cursor = 16
         for index, option in ipairs(options) do
             local button = CreateButton(dialog, option.label, option.width, 24, function()
                 dialog[field] = option.value
@@ -3588,7 +3642,8 @@ function GC.UI:BuildOrderCreateDialog(page)
                 dialog.costEdit.container:SetShown(dialog.materialModel == "C")
             end)
             button.optionValue = option.value
-            button:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16 + ((index - 1) * (option.width + 6)), y - 17)
+            button:SetPoint("TOPLEFT", dialog, "TOPLEFT", cursor, y - 17)
+            cursor = cursor + option.width + 6
             buttons[index] = button
         end
         dialog[field .. "Buttons"] = buttons
