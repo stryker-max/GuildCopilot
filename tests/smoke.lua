@@ -4460,6 +4460,32 @@ do
 end
 
 do
+    -- Die Berufe-Karte zählt normalisiert: Alt-Schreibweise "Alchemie" und
+    -- der "Unbekannt"-Platzhalter erzeugen keine Phantom-Berufe.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Heiler-Realm", sharedBy = "Heiler-Realm",
+        professionKey = "alchemie", professionName = "Alchemie",
+        recipeKeys = { "I91001" },
+    })
+    addon.Workshop:ClaimRecipes({
+        crafter = "Heiler-Realm", sharedBy = "Heiler-Realm",
+        professionKey = "alchimie", professionName = "Alchimie",
+        recipeKeys = { "I91002" },
+    })
+    orders_result = addon.Workshop:GetSummary()
+    orders_sentBefore = orders_result.professions
+    -- Ein weiterer Alchemie-Alt-Eintrag darf die Zahl nicht erhöhen.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Zwerg-Realm", sharedBy = "Zwerg-Realm",
+        professionKey = "alchemie", professionName = "Alchemie",
+        recipeKeys = { "I91003" },
+    })
+    orders_result = addon.Workshop:GetSummary()
+    assert(orders_result.professions == orders_sentBefore,
+        "Die Alt-Schreibweise Alchemie zählt als eigener Beruf")
+end
+
+do
     -- Kurier-Prinzip: Ein Kernpaket darf auch von einem Dritten kommen, der
     -- den Auftrag nur weiterträgt - sonst brächten Abgleich-Antworten und
     -- Login-Push nur die eigenen Aufträge durch.

@@ -1930,7 +1930,17 @@ function GC.Workshop:GetSummary()
     local crafters = {}
     local professions = {}
     for _, entry in ipairs(entries) do
-        professions[entry.profession] = true
+        -- Berufe nach normalisiertem Schluessel zaehlen, nicht nach dem
+        -- Namens-String: Sonst zaehlen die Alt-Schreibweise "Alchemie" neben
+        -- "Alchimie" und der "Unbekannt"-Platzhalter als eigene Berufe -
+        -- die Karte zeigte 13 Berufe, wo TBC hoechstens 12 kennt.
+        local professionKey = NormalizeKey(entry.profession)
+        if professionKey == NormalizeKey("Alchemie") then
+            professionKey = NormalizeKey("Alchimie")
+        end
+        if professionKey ~= "" and professionKey ~= NormalizeKey("Unbekannt") then
+            professions[professionKey] = true
+        end
         for _, crafter in ipairs(entry.crafters) do
             crafters[GC.Util.NormalizeName(crafter)] = true
         end

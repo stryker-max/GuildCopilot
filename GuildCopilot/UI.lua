@@ -3505,8 +3505,12 @@ function GC.UI:RefreshWorkshop()
             .. syncStats.failed .. " Pakete konnten auch nach Wiederholungen nicht gesendet werden.")
         SetTextColor(page.workshopStatus, THEME.danger)
     elseif (syncStats.receivedProfessions or 0) > 0 then
-        page.workshopStatus:SetText("Empfangen: " .. syncStats.receivedProfessions .. " Berufe mit "
-            .. syncStats.receivedRecipes .. " Rezepten"
+        -- Der Zaehler zaehlt PAKETE, nicht Berufe: Derselbe Beruf desselben
+        -- Herstellers kommt bei jedem Abgleich erneut. "110 Berufe" neben der
+        -- 13-Berufe-Karte sah nach Doppelzaehlung aus - war es auch, nur im
+        -- Text falsch beschriftet.
+        page.workshopStatus:SetText("Abgleich: " .. syncStats.receivedProfessions
+            .. " Berufspakete empfangen"
             .. (syncStats.lastSender ~= "" and ("  •  zuletzt " .. syncStats.lastSender) or "") .. ".")
         SetTextColor(page.workshopStatus, THEME.success)
     elseif #missingProfessions > 0 then

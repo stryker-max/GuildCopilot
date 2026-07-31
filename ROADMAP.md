@@ -298,6 +298,13 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.65 – Werkstatt: „110 Berufe" waren Pakete, „13 Berufe" ein Duplikat
+
+Owner-Screenshot: Die Statuszeile meldete „Empfangen: 110 Berufe mit 4003 Rezepten", direkt neben der Karte mit ehrlichen 885 Rezepten und 13 Berufen. Zwei getrennte Zählfehler:
+
+- **Die Statuszeile zählte Pakete, nannte sie aber Berufe:** Jeder Abgleich liefert dieselben Berufe derselben Hersteller erneut, der Zähler summiert je Paket. Die Zeile heißt jetzt ehrlich „Abgleich: X Berufspakete empfangen • zuletzt Y" – ohne die sinnlose Rezeptsumme;
+- **die Berufe-Karte zählte nach Namens-String:** Die Alt-Schreibweise „Alchemie" neben „Alchimie" und der „Unbekannt"-Platzhalter zählten als eigene Berufe – daher 13, wo TBC höchstens 12 kennt. Gezählt wird jetzt nach normalisiertem Schlüssel, Alchemie→Alchimie zusammengeführt, „Unbekannt" außen vor. Ein Test hält fest, dass ein weiterer Alt-Eintrag die Zahl nicht mehr erhöht.
+
 ## 0.9.64 – Gildenaufträge: Klang-Feinschliff, Übergabetext, Herstellerliste
 
 Fünf Owner-Wünsche in einer Runde:
