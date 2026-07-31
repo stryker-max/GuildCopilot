@@ -1233,14 +1233,14 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(2000)
+    content:SetHeight(2120)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
-    local function BuildRankCard(title, x, helpText, onChanged)
+    local function BuildRankCard(title, x, y, helpText, onChanged)
         local card = CreateCard(content, title)
         card:SetSize(370, 240)
-        card:SetPoint("TOPLEFT", content, "TOPLEFT", x, 0)
+        card:SetPoint("TOPLEFT", content, "TOPLEFT", x, -y)
         local help = CreateLabel(card, helpText, {
             muted = true,
             width = 334,
@@ -1268,7 +1268,7 @@ function GC.UI:BuildSettingsPage()
 
     page.activeRankCard, page.activeRankToggles = BuildRankCard(
         "Aktive Raider",
-        0,
+        0, 1602,
         "Diese Ränge erscheinen als Level-70-Raider in der Übersicht.",
         function(rankIndex, checked)
             GC.Roster:SetRankActive(rankIndex, checked)
@@ -1276,7 +1276,7 @@ function GC.UI:BuildSettingsPage()
     )
     page.editorRankCard, page.editorRankToggles = BuildRankCard(
         "Gildenweite Einstellungen bearbeiten",
-        382,
+        382, 1602,
         "Nur diese Ränge dürfen Profil, Regeln, Rangfreigaben und Vorlagen ändern.",
         function(rankIndex, checked)
             local success, reason = GC.Roster:SetGuildProfileRankActive(rankIndex, checked)
@@ -1301,7 +1301,7 @@ function GC.UI:BuildSettingsPage()
 
     local accessCard = CreateCard(content, "Mitgliederpflege öffnen")
     accessCard:SetSize(752, 180)
-    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -252)
+    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1854)
     local accessHelp = CreateLabel(accessCard,
         "Nur diese Ränge sehen die Mitgliederpflege - und nur sie dürfen Raidauswertungen löschen. "
         .. "Die Freigabe wird gildenweit synchronisiert.",
@@ -1326,9 +1326,13 @@ function GC.UI:BuildSettingsPage()
         page.memberCareAccessToggles[index] = toggle
     end
 
-    local notificationCard = CreateCard(content, "Benachrichtigungen & Zugriff")
-    notificationCard:SetSize(752, 226)
-    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -444)
+    -- Früher "Benachrichtigungen & Zugriff": ein Sammelsurium aus
+    -- Rekrutierungs-Schaltern, Minimap und Profilton. Jetzt klar getrennt:
+    -- Hier nur, was die Rekrutierung meldet; Minimap und Profilton stehen in
+    -- der Karte "Allgemein".
+    local notificationCard = CreateCard(content, "Rekrutierung: Meldungen & Töne")
+    notificationCard:SetSize(752, 150)
+    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1136)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
     end)
@@ -1363,34 +1367,25 @@ function GC.UI:BuildSettingsPage()
     page.watchChannelToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -105)
     page.watchChannelToggle.text:SetWidth(310)
 
-    page.minimapToggle = CreateToggle(notificationCard, "Minimap-Symbol anzeigen", function(checked)
+    -- Minimap und Profilton betreffen nicht die Rekrutierung - sie stehen in
+    -- ihrer eigenen Karte "Allgemein".
+    local generalCard = CreateCard(content, "Allgemein")
+    generalCard:SetSize(752, 150)
+    generalCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1298)
+
+    page.minimapToggle = CreateToggle(generalCard, "Minimap-Symbol anzeigen", function(checked)
         GC.DB:GetSettings().minimap.hidden = not checked
         GC.UI:RefreshMinimapButton()
     end)
-    page.minimapToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -150)
+    page.minimapToggle:SetPoint("TOPLEFT", generalCard, "TOPLEFT", 18, -55)
     page.minimapToggle.text:SetWidth(260)
-
-    -- Der Rueckweg, in einer eigenen Zeile. Neben dem Schalter waere kein Platz:
-    -- Rechts davon steht schon die Profilbestaetigung, und beides in eine Zeile
-    -- zu quetschen hiesse, dass der Knopf ueber der Beschriftung liegt.
-    page.minimapResetButton = CreateButton(notificationCard, "Symbol zurück an die Minimap", 230, 28, function()
-        GC.UI:ResetMinimapButton()
-        GC.UI:RefreshSettings()
-    end)
-    page.minimapResetButton:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 18, -186)
-    CreateLabel(notificationCard,
-        "Das Symbol lässt sich frei ziehen: nahe der Minimap am Ring entlang, weiter weg überall hin.", {
-        muted = true,
-        width = 460,
-        height = 28,
-    }):SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 258, -186)
 
     -- Eigener Ton fuer die Bestaetigung des eigenen Raidprofils. Bewusst vom
     -- Bewerberklang getrennt: Der eine meldet einen fremden Interessenten, der
     -- andere bestaetigt die eigene Eingabe.
-    CreateLabel(notificationCard, "Profilbestätigung:", { muted = true, width = 118, height = 32 })
-        :SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -145)
-    page.profileSoundDropdown = CreateChoiceDropdown(notificationCard, 190, soundNames, function(value)
+    CreateLabel(generalCard, "Profilbestätigung:", { muted = true, width = 118, height = 32 })
+        :SetPoint("TOPLEFT", generalCard, "TOPLEFT", 385, -53)
+    page.profileSoundDropdown = CreateChoiceDropdown(generalCard, 190, soundNames, function(value)
         for _, sound in ipairs(GC.SuccessSoundOptions) do
             if sound.name == value then
                 GC.DB:GetSettings().profileSoundKey = sound.key
@@ -1399,14 +1394,26 @@ function GC.UI:BuildSettingsPage()
             end
         end
     end, false)
-    page.profileSoundDropdown:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 508, -142)
+    page.profileSoundDropdown:SetPoint("TOPLEFT", generalCard, "TOPLEFT", 508, -50)
+
+    page.minimapResetButton = CreateButton(generalCard, "Symbol zurück an die Minimap", 230, 28, function()
+        GC.UI:ResetMinimapButton()
+        GC.UI:RefreshSettings()
+    end)
+    page.minimapResetButton:SetPoint("TOPLEFT", generalCard, "TOPLEFT", 18, -100)
+    CreateLabel(generalCard,
+        "Das Symbol lässt sich frei ziehen: nahe der Minimap am Ring entlang, weiter weg überall hin.", {
+        muted = true,
+        width = 460,
+        height = 28,
+    }):SetPoint("TOPLEFT", generalCard, "TOPLEFT", 258, -100)
 
     -- Der Bewerberton meldet einen fremden Interessenten. Wer nicht rekrutiert,
     -- will ihn nicht hoeren, weiss aber meist nicht, dass er ihn abschalten
     -- koennte - deshalb haengt er am Gildenrang und nicht an jedem selbst.
     local soundRankCard = CreateCard(content, "Bewerberton hören")
     soundRankCard:SetSize(752, 180)
-    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -684)
+    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -944)
     local soundRankHelp = CreateLabel(soundRankCard,
         "Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter,"
         .. " nur still. Die Freigabe wird gildenweit synchronisiert.",
@@ -1438,7 +1445,7 @@ function GC.UI:BuildSettingsPage()
     -- erzeugt Muell aus dem ganzen Realm.
     local triggerCard = CreateCard(content, "Postfach-Erkennung: eigene Wörter")
     triggerCard:SetSize(752, 400)
-    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -876)
+    triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -532)
     CreateLabel(triggerCard,
         "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
         .. " Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ –"
@@ -1494,7 +1501,7 @@ function GC.UI:BuildSettingsPage()
 
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1288)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1458)
     CreateLabel(gearCard,
         "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
@@ -1522,7 +1529,7 @@ function GC.UI:BuildSettingsPage()
     -- seinen eigenen Ton aus der bekannten Klangliste; "Aus" schaltet es ab.
     local orderCard = CreateCard(content, "Gildenaufträge")
     orderCard:SetSize(752, 352)
-    orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1432)
+    orderCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -168)
     local orderSoundNames = { "Aus" }
     for _, sound in ipairs(GC.SuccessSoundOptions) do
         orderSoundNames[#orderSoundNames + 1] = sound.name
@@ -1620,7 +1627,7 @@ function GC.UI:BuildSettingsPage()
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
     local commandCard = CreateCard(content, "Chat-Befehle")
     commandCard:SetSize(752, 156)
-    commandCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1800)
+    commandCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     for index, entry in ipairs(SLASH_COMMANDS) do
         CreateLabel(commandCard, "|cffffffff" .. entry.command .. "|r – " .. entry.description, {
             muted = true,
@@ -1631,7 +1638,7 @@ function GC.UI:BuildSettingsPage()
     end
 
     page.settingsStatus = CreateLabel(content, "", { width = 716, height = 18 })
-    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -1968)
+    page.settingsStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 18, -2046)
 end
 
 function GC.UI:RefreshSettings()

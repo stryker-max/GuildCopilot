@@ -298,6 +298,17 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.75 – Einstellungen neu sortiert: Alltag oben, Verwaltung unten
+
+Die Einstellungsseite folgt jetzt der Owner-Ordnung, in logischen Blöcken:
+
+1. **Chat-Befehle** (ganz oben – das Nachschlagewerk);
+2. **Gildenaufträge** (Klänge, Banner, Übergabetext);
+3.–5. **der Rekrutierungsblock:** „Postfach-Erkennung: eigene Wörter", „Bewerberton hören" und die Karte **„Rekrutierung: Meldungen & Töne"** – so heißt „Benachrichtigungen & Zugriff" jetzt, denn genau das steckte drin: Erfolgssound und die beiden Erkennungs-Schalter. Der Name sagt endlich, worum es geht;
+6. **„Allgemein"** (neue Karte): Minimap-Symbol und Profilbestätigungston – die steckten vorher fälschlich in der Rekrutierungskarte;
+7. **Ausrüstung – Hintergrundabgleich**;
+8.–9. **der Verwaltungsblock ganz unten:** „Aktive Raider" und „Gildenweite Einstellungen bearbeiten" nebeneinander, darunter „Mitgliederpflege öffnen" – alle drei sind Rang-Häkchenkarten und stehen jetzt beieinander.
+
 ## 0.9.74 – Spalten-Feinschliff: gleichmäßig, fühlbar, Proviant-Standard
 
 Drei Rückmeldungen aus der ersten Runde Spalten-Schieben:
