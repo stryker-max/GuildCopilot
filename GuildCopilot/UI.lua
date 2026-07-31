@@ -3935,6 +3935,14 @@ function GC.UI:CreateOrderTracker()
         row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
         row.label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
         row.label:SetJustifyH("LEFT")
+        -- Eine Zeile je Auftrag: Was nicht passt, wird abgeschnitten. Ein
+        -- Umbruch ragte sonst aus der 26 Pixel hohen Zeile heraus.
+        if row.label.SetWordWrap then
+            row.label:SetWordWrap(false)
+        end
+        if row.label.SetMaxLines then
+            row.label:SetMaxLines(1)
+        end
         row:Hide()
         tracker.rows[index] = row
     end
@@ -3961,12 +3969,14 @@ function GC.UI:RefreshOrderTracker()
     end
 
     local tracker = self:CreateOrderTracker()
+    local visible = 0
     for index, row in ipairs(tracker.rows) do
         local boardRow = rows[index]
         if boardRow then
             local order = boardRow.order
             row:SetText((order.recipeName or "?") .. "  ·  " .. boardRow.action)
             row:Show()
+            visible = visible + 1
         else
             row:Hide()
         end
@@ -3976,6 +3986,9 @@ function GC.UI:RefreshOrderTracker()
     else
         tracker.title:SetText("Gildenaufträge – du bist dran")
     end
+    -- Der Rahmen ist so hoch wie sein Inhalt: Titelzeile plus die sichtbaren
+    -- Zeilen. Drei leere Plätze vorzuhalten sah nach kaputtem Fenster aus.
+    tracker:SetHeight(34 + (visible * 28) + 6)
     tracker:Show()
 end
 

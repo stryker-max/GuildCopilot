@@ -298,6 +298,10 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.53 – Kompakt-Tracker: Höhe nach Inhalt
+
+Der Tracker hielt immer Platz für drei Zeilen vor – mit einem einzigen Auftrag sah das nach kaputtem Fenster aus, und lange Zeilen brachen in die 26-Pixel-Zeile um. Jetzt: Höhe = Titelzeile plus sichtbare Zeilen, Text einzeilig mit hartem Abschnitt statt Umbruch (`SetWordWrap(false)`, `SetMaxLines(1)`).
+
 ## 0.9.52 – Gildenaufträge: der Abgleich war ein Konstruktionsfehler
 
 Aus dem Zwei-Spieler-Test: Beide hatten Aufträge erstellt, keiner sah die des anderen. Drei Ursachen, alle im Abgleich:
