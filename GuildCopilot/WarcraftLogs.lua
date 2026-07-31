@@ -372,6 +372,17 @@ end
 
 function GC.WarcraftLogs:Import(text)
     text = tostring(text or ""):gsub("\r", "")
+    -- Der WoW-Client verdoppelt beim Einfügen jede Pipe (Schutz vor
+    -- Escape-Sequenzen): aus "S|code|…" wird "S||code||…". Der Parser las
+    -- dann ein leeres Feld und verwarf Sitzungs- wie Teilnehmerzeilen
+    -- kommentarlos - die Profilzeilen (Semikolons) überlebten als Einzige.
+    -- Erkennbar ist das Escaping sicher am doppelten Trenner direkt nach dem
+    -- Zeilentyp; echte Daten haben dort nie ein leeres Feld. Halbieren macht
+    -- aus "||||" (leeres Feld, escaped) wieder "||" und aus "||" wieder "|".
+    if text:find("S||", 1, true) or text:find("P||", 1, true)
+        or text:match("GCP%u+%d+||") then
+        text = text:gsub("||", "|")
+    end
     text = RepairLineBreaks(text)
     local headerSeen = false
     local importSource = "MANUAL"

@@ -5188,7 +5188,33 @@ do
         "Die Sitzung hinter dem Bruchstück fehlt")
 end
 
--- === Ausrüstungsseite: Rangfilter und Leeren ================================
+-- === Import: WoW-Escaping verdoppelt jede Pipe ==============================
+do
+    -- So kommt ein Paste wirklich an: "S|code|…" wurde zu "S||code||…". Der
+    -- Parser las ein leeres Feld und verwarf Sitzung wie Teilnehmer stumm -
+    -- nur die Profilzeilen (Semikolons) überlebten.
+    local okImport, importMessage = addon.WarcraftLogs:Import(table.concat({
+        "GCPWCL3||1",
+        "S||escRept55||1753300000||1753310000||Karazhan||5||4||1",
+        "P||Escapia||MAGE||3600||1||0||0||28486:2||0",
+        "P||Leerfeld||PRIEST||3500||0||0||8||||1",
+    }, "\n"))
+    assert(okImport == true,
+        "Der Import mit verdoppelten Pipes schlug fehl: " .. tostring(importMessage))
+    local stored = addon.RaidMonitor:GetSummary("WCL:escRept55")
+    assert(stored ~= nil, "Die Sitzung aus dem escapten Paste fehlt")
+    assert(#stored.participants == 2, "Die Teilnehmer aus dem escapten Paste fehlen")
+    local leerfeld
+    for _, participant in ipairs(stored.participants) do
+        if participant.name == "Leerfeld" then
+            leerfeld = participant
+        end
+    end
+    assert(leerfeld ~= nil and leerfeld.dispels == 8 and leerfeld.resurrects == 1,
+        "Das leere Verbrauchsfeld (escaped „||||“) verschob die Spalten")
+end
+
+-- === Ausrüstungsseite: Rang-Auswahl und Leeren ==============================
 do
     addon.UI:ShowPage("GEAR")
     local gearPage = addon.UI.pages.GEAR
@@ -5200,8 +5226,24 @@ do
     addon.Roster.membersByName = addon.Roster.membersByName or {}
     local savedMember = addon.Roster.membersByName[addon.Util.NormalizeName("detailix")]
     addon.Roster.membersByName[addon.Util.NormalizeName("detailix")] = { rankIndex = 5, rank = "Twink" }
+    local savedMembers = addon.Roster.members
+    addon.Roster.members = {
+        { rankIndex = 0, rank = "Gildenmeister" },
+        { rankIndex = 5, rank = "Twink" },
+    }
+    addon.GearAudit:ResetRankView()
 
-    addon.DB:GetSettings().gearRankLimit = 2
+    -- Flyout öffnen: je bekanntem Rang ein Häkchen.
+    gearPage:ToggleGearRankFlyout()
+    local flyout = gearPage.gearRankFlyout
+    assert(flyout ~= nil and flyout.shown == true, "Das Rang-Flyout öffnet nicht")
+    assert(flyout.rows[1].shown == true and flyout.rows[2].shown == true,
+        "Das Rang-Flyout zeigt nicht alle Ränge")
+    assert(flyout.rows[2].text:GetText() == "Twink",
+        "Das Rang-Flyout beschriftet die Ränge falsch")
+
+    -- Twink-Rang abwählen: Detailix verschwindet, der eigene Char bleibt.
+    addon.GearAudit:SetRankShown(5, false)
     addon.UI:RefreshGear()
     local seen = false
     for _, audit in ipairs(gearPage.gearAuditList or {}) do
@@ -5209,11 +5251,14 @@ do
             seen = true
         end
     end
-    assert(seen == false, "Der Rangfilter lässt einen zu niedrigen Rang durch")
-    assert(tostring(gearPage.gearRankButton.label:GetText()):find("bis ", 1, true) ~= nil,
-        "Der Rangfilter-Knopf nennt die Grenze nicht")
+    assert(seen == false, "Der abgewählte Rang steht weiter in der Liste")
+    assert(addon.GearAudit:IsRankShown(0) == true,
+        "Der erste Eingriff hakte nicht alle übrigen Ränge an")
+    assert(tostring(gearPage.gearRankButton.label:GetText()):find("1 von 2", 1, true) ~= nil,
+        "Der Rangknopf zählt die Auswahl nicht")
 
-    addon.DB:GetSettings().gearRankLimit = nil
+    -- Zurücksetzen: alles wieder sichtbar.
+    addon.GearAudit:ResetRankView()
     addon.UI:RefreshGear()
     seen = false
     for _, audit in ipairs(gearPage.gearAuditList or {}) do
@@ -5221,9 +5266,11 @@ do
             seen = true
         end
     end
-    assert(seen == true, "Ohne Rangfilter fehlt der Spieler in der Liste")
+    assert(seen == true, "Nach dem Zurücksetzen fehlt der Spieler in der Liste")
     assert(gearPage.gearRankButton.label:GetText() == "Ränge: alle",
-        "Der Rangfilter-Knopf zeigt den Alle-Zustand nicht")
+        "Der Rangknopf zeigt den Alle-Zustand nicht")
+    gearPage.gearRankFlyout:Hide()
+    addon.Roster.members = savedMembers
 
     -- Leeren wirft alles raus; die Karte meldet den leeren Zustand.
     local savedAudits = addon.DB:GetGuild().gearAudits

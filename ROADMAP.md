@@ -298,6 +298,15 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.71 – Die wahre Import-Ursache: WoW verdoppelt Pipes; Ränge echt wählbar
+
+**Die eigentliche Ursache des Import-Dramas, endlich bewiesen** (durch die neue Diagnosezeile): Der WoW-Client verdoppelt beim Einfügen jede Pipe – aus `S|code|…` wird `S||code||…`. Der Parser las dann ein leeres Feld und verwarf Sitzungs- wie Teilnehmerzeilen stumm; nur die Profilzeilen (Semikolons statt Pipes) überlebten. Daher immer „11 Profile, keine Raidauswertung", und daher auch die ominöse „|1"-Zeile (der abgerissene Rest der verdoppelten Kopfzeile).
+
+- **Der Import entschärft das Escaping jetzt selbst:** Erkennt er den doppelten Trenner direkt nach dem Zeilentyp (`S||`, `P||`, Kopfzeile), halbiert er alle Pipe-Paare – aus `||||` (leeres Feld, escaped) wird korrekt `||`. Echte Daten haben an diesen Stellen nie leere Felder, der Erkenner kann also nicht fehlgreifen;
+- die Speicher-Fixes aus 0.9.70 (Aufbewahrung nach Wert, ehrliche Zählung) bleiben die zweite Verteidigungslinie.
+
+**Rangfilter neu: echte Auswahl statt „bis Rang X".** Die Schwelle setzte eine Wertigkeit der Rangreihenfolge voraus, die es in echten Gilden nicht gibt (Owner: der Twink-Rang steht mitten zwischen Raidrängen). Der Knopf öffnet jetzt eine **Häkchenliste aller Gildenränge** – jeder Rang einzeln an- und abwählbar, „Alle anzeigen" setzt zurück, der Knopf zählt („Ränge: 3 von 6"). Der erste Eingriff hakt automatisch alle übrigen Ränge an, damit nicht beim ersten Klick alles verschwindet.
+
 ## 0.9.70 – Import-Rätsel gelöst, Prüfliste mit Rangfilter, Berufe-Nachlese
 
 **Das „keine Raidauswertung"-Rätsel ist gelöst.** Der Import funktionierte die ganze Zeit – aber die Aufbewahrung hielt nur 12 Sitzungen und warf beim Aufräumen strikt nach Alter hinaus. Zwölf in der Stadt gestartete Probe-Sitzungen (Orgrimmar, Shattrath …) waren „neuer" als der Raidabend: Der frisch importierte Report wurde gespeichert, einsortiert – und als Nummer 13 sofort wieder gelöscht, während der Import Erfolg meldete.

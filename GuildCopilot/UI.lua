@@ -6435,29 +6435,88 @@ function GC.UI:BuildGearPage()
     end)
     page.gearClearButton:SetPoint("TOPRIGHT", listCard, "TOPRIGHT", -12, -10)
 
-    -- Rangfilter als Durchschalt-Knopf: "Ränge: alle" oder "bis <Rang>".
-    -- Ein Dropdown ginge nicht - die Rangnamen stehen erst nach dem
-    -- Rosterabruf fest, und CreateChoiceDropdown kennt nur feste Listen.
+    -- Rangfilter mit echter Auswahl: Der Knopf klappt eine Häkchenliste aller
+    -- Gildenränge auf (Owner-Wunsch). Eine "bis Rang X"-Schwelle taugte
+    -- nicht - die Rangreihenfolge einer Gilde ist keine Wertigkeit.
     page.gearRankButton = CreateButton(listCard, "Ränge: alle", 214, 26, function()
-        local ranks = GC.Roster:GetRankDefinitions()
-        local current = GC.DB:GetSettings().gearRankLimit
-        local nextLimit
-        if current == nil then
-            nextLimit = ranks[1] and ranks[1].index
-        else
-            local position
-            for index, rank in ipairs(ranks) do
-                if rank.index == current then
-                    position = index
-                end
-            end
-            local nextRank = position and ranks[position + 1]
-            nextLimit = nextRank and nextRank.index or nil
-        end
-        GC.DB:GetSettings().gearRankLimit = nextLimit
-        GC.UI:RefreshGear()
+        page:ToggleGearRankFlyout()
     end)
     page.gearRankButton:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -42)
+
+    function page:RefreshGearRankFlyout()
+        local panel = page.gearRankFlyout
+        if not panel then
+            return
+        end
+        local ranks = GC.Roster:GetRankDefinitions()
+        for index, toggle in ipairs(panel.rows) do
+            local rank = ranks[index]
+            toggle:SetShown(rank ~= nil)
+            toggle.rankIndex = rank and rank.index or nil
+            if rank then
+                toggle.text:SetText(rank.name)
+                toggle:SetChecked(GC.GearAudit:IsRankShown(rank.index))
+                toggle:RefreshVisual()
+            end
+        end
+        panel.title:SetText(#ranks > 0 and "Nur diese Ränge zeigen:"
+            or "Noch keine Rangdaten - das Gildenroster lädt.")
+        panel:SetSize(214, 46 + #ranks * 24 + 36)
+    end
+
+    function page:ToggleGearRankFlyout()
+        local host = GC.UI.frame
+        if not page.gearRankFlyout then
+            -- Wie die Dropdown-Popups: ans Hauptfenster gehängt, sonst
+            -- schneidet der Seiten-Scroller das Panel ab.
+            local panel = CreatePanel(host, THEME.window, THEME.accent, "GuildCopilotGearRankFlyout")
+            panel:SetFrameStrata("DIALOG")
+            panel:SetToplevel(true)
+            panel.title = CreateLabel(panel, "", { muted = true, width = 186, height = 26,
+                font = "GameFontNormalSmall", vertical = "TOP" })
+            panel.title:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -10)
+            panel.rows = {}
+            for index = 1, 10 do
+                local rowIndex = index
+                local toggle = CreateToggle(panel, "", function(checked)
+                    local rankIndex = panel.rows[rowIndex].rankIndex
+                    if rankIndex ~= nil then
+                        GC.GearAudit:SetRankShown(rankIndex, checked)
+                        GC.UI:RefreshGear()
+                        page:RefreshGearRankFlyout()
+                    end
+                end)
+                toggle:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -40 - ((rowIndex - 1) * 24))
+                toggle:Hide()
+                panel.rows[rowIndex] = toggle
+            end
+            panel.reset = CreateButton(panel, "Alle anzeigen", 120, 24, function()
+                GC.GearAudit:ResetRankView()
+                GC.UI:RefreshGear()
+                page:RefreshGearRankFlyout()
+            end)
+            panel.reset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 8)
+            panel:Hide()
+            page.gearRankFlyout = panel
+            page:HookScript("OnHide", function()
+                panel:Hide()
+            end)
+        end
+        local panel = page.gearRankFlyout
+        if panel:IsShown() then
+            panel:Hide()
+            return
+        end
+        panel:ClearAllPoints()
+        panel:SetPoint("TOPLEFT", page.gearRankButton, "BOTTOMLEFT", 0, -2)
+        local hostLevel = host.GetFrameLevel and host:GetFrameLevel() or 1
+        panel:SetFrameLevel((hostLevel or 1) + 40)
+        page:RefreshGearRankFlyout()
+        panel:Show()
+        if panel.Raise then
+            panel:Raise()
+        end
+    end
 
     local playerScroll = CreateModernScrollFrame(listCard)
     playerScroll:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -76)
@@ -6695,17 +6754,17 @@ function GC.UI:RefreshGear()
     end
     page.gearStatus:SetText(statusText .. "\n" .. ruleLine)
 
-    -- Rangfilter: Nur Gildenmitglieder bis zum eingestellten Rang bleiben in
-    -- der Liste; der eigene Charakter steht immer drin. Wer nicht (mehr) im
-    -- Roster auftaucht, fällt bei aktivem Filter heraus.
-    local rankLimit = GC.DB:GetSettings().gearRankLimit
-    if rankLimit ~= nil then
+    -- Rangfilter: Nur Mitglieder der angehakten Ränge bleiben in der Liste;
+    -- der eigene Charakter steht immer drin. Wer nicht (mehr) im Roster
+    -- auftaucht, fällt bei aktivem Filter heraus.
+    local rankView = GC.GearAudit:GetRankView()
+    if rankView.configured then
         local ownKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
         local filtered = {}
         for _, audit in ipairs(audits) do
             local member = GC.Roster:GetMember(audit.name)
             local rankIndex = member and tonumber(member.rankIndex)
-            if (rankIndex ~= nil and rankIndex <= rankLimit)
+            if (rankIndex ~= nil and GC.GearAudit:IsRankShown(rankIndex))
                 or GC.Util.NormalizeName(GC.Util.PlayerShortName(audit.name or "")) == ownKey then
                 filtered[#filtered + 1] = audit
             end
@@ -6715,14 +6774,15 @@ function GC.UI:RefreshGear()
     page.gearAuditList = audits
 
     local rankLabel = "Ränge: alle"
-    if rankLimit ~= nil then
-        local rankName = "Rang " .. (rankLimit + 1)
-        for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
-            if rank.index == rankLimit then
-                rankName = rank.name
+    if rankView.configured then
+        local ranks = GC.Roster:GetRankDefinitions()
+        local shownCount = 0
+        for _, rank in ipairs(ranks) do
+            if GC.GearAudit:IsRankShown(rank.index) then
+                shownCount = shownCount + 1
             end
         end
-        rankLabel = "bis " .. rankName
+        rankLabel = "Ränge: " .. shownCount .. " von " .. #ranks
     end
     page.gearRankButton:SetText(rankLabel)
 

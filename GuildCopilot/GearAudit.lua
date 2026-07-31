@@ -1185,6 +1185,44 @@ function GC.GearAudit:GetAudit(name)
     return GC.DB:GetGuild().gearAudits[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
 end
 
+-- === Rang-Auswahl für die Prüfliste ========================================
+-- Der Owner wählt die Ränge einzeln an und ab - eine "bis Rang X"-Schwelle
+-- taugt nicht, weil die Rangreihenfolge einer Gilde keine Wertigkeit sein
+-- muss (der Twink-Rang kann mitten zwischen zwei Raidrängen stehen).
+-- Unkonfiguriert gilt: alle Ränge sichtbar.
+
+function GC.GearAudit:GetRankView()
+    local guild = GC.DB:GetGuild()
+    guild.gearRankView = guild.gearRankView or { configured = false, shown = {} }
+    guild.gearRankView.shown = guild.gearRankView.shown or {}
+    return guild.gearRankView
+end
+
+function GC.GearAudit:IsRankShown(rankIndex)
+    local view = self:GetRankView()
+    if not view.configured then
+        return true
+    end
+    return view.shown[tostring(rankIndex)] == true
+end
+
+function GC.GearAudit:SetRankShown(rankIndex, shown)
+    local view = self:GetRankView()
+    if not view.configured then
+        -- Erster Eingriff: erst alle bekannten Ränge anhaken, dann den einen
+        -- umlegen - sonst verschwände beim ersten Klick alles außer einem.
+        view.configured = true
+        for _, rank in ipairs(GC.Roster:GetRankDefinitions()) do
+            view.shown[tostring(rank.index)] = true
+        end
+    end
+    view.shown[tostring(rankIndex)] = shown == true
+end
+
+function GC.GearAudit:ResetRankView()
+    GC.DB:GetGuild().gearRankView = { configured = false, shown = {} }
+end
+
 -- Leert die Dauerliste der geprüften Spieler auf Knopfdruck. Nur der lokale
 -- Zwischenspeicher - fremde Clients behalten ihre eigenen Daten, und die
 -- eigene Ausrüstung sowie eintreffende Abgleiche füllen die Liste neu.
