@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.78",
+    VERSION = "0.9.79",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -165,8 +165,10 @@ end
 -- gezählt, es entstehen also keine falschen Zahlen, sondern nur unvollständige.
 -- Vor dem Scharfschalten gegen echte Logs abgleichen.
 GC.Consumables = {
-    [28495] = { category = "POTION", name = "Übermächtiger Heiltrank" },
-    [28499] = { category = "POTION", name = "Übermächtiger Manatrank" },
+    -- Namen wie im deutschen Client (Owner-Korrektur): "Super" heißt dort
+    -- "Erstklassig", die Major-Elixiere heißen "übermächtig".
+    [28495] = { category = "POTION", name = "Erstklassiger Heiltrank" },
+    [28499] = { category = "POTION", name = "Erstklassiger Manatrank" },
     [28507] = { category = "POTION", name = "Hasttrank" },
     [28508] = { category = "POTION", name = "Zerstörungstrank" },
     [28494] = { category = "POTION", name = "Trank der irren Stärke" },
@@ -185,18 +187,18 @@ GC.Consumables = {
     [28520] = { category = "FLASK", name = "Fläschchen des unerbittlichen Angriffs" },
     [28521] = { category = "FLASK", name = "Fläschchen des blendenden Lichts" },
     [28540] = { category = "FLASK", name = "Fläschchen des reinen Todes" },
-    [28490] = { category = "ELIXIR", name = "Elixier der Stärke" },
-    [28497] = { category = "ELIXIR", name = "Elixier der Beweglichkeit" },
+    [28490] = { category = "ELIXIR", name = "Elixier der übermächtigen Stärke" },
+    [28497] = { category = "ELIXIR", name = "Elixier der übermächtigen Beweglichkeit" },
     [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft" },
-    [28493] = { category = "ELIXIR", name = "Elixier der Frostmacht" },
-    [28501] = { category = "ELIXIR", name = "Elixier der Feuermacht" },
-    [28502] = { category = "ELIXIR", name = "Elixier der Verteidigung" },
-    [28503] = { category = "ELIXIR", name = "Elixier der Schattenmacht" },
-    [28509] = { category = "ELIXIR", name = "Elixier des Magierbluts" },
-    [39625] = { category = "ELIXIR", name = "Elixier der Standhaftigkeit" },
-    [39627] = { category = "ELIXIR", name = "Elixier der Draeneiweisheit" },
-    [28017] = { category = "OIL", name = "Überlegenes Zaubereröl" },
-    [28019] = { category = "OIL", name = "Überlegenes Manaöl" },
+    [28493] = { category = "ELIXIR", name = "Elixier der übermächtigen Frostmacht" },
+    [28501] = { category = "ELIXIR", name = "Elixier der übermächtigen Feuermacht" },
+    [28502] = { category = "ELIXIR", name = "Elixier der übermächtigen Verteidigung" },
+    [28503] = { category = "ELIXIR", name = "Elixier der übermächtigen Schattenmacht" },
+    [28509] = { category = "ELIXIR", name = "Elixier des übermächtigen Magierbluts" },
+    [39625] = { category = "ELIXIR", name = "Elixier der übermächtigen Seelenstärke" },
+    [39627] = { category = "ELIXIR", name = "Elixier der draenischen Weisheit" },
+    [28017] = { category = "OIL", name = "Überragendes Zauberöl" },
+    [28019] = { category = "OIL", name = "Überragendes Manaöl" },
 
     -- === Essen ==============================================================
     --

@@ -298,6 +298,10 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.79 – Verbrauchsnamen wie im deutschen Client
+
+Owner-Korrektur an der Gegenstandstabelle: Die „Super"-Tränke heißen im deutschen Client **„Erstklassig"** (Erstklassiger Heil-/Manatrank), die Major-Elixiere **„übermächtig"** (Elixier der übermächtigen Stärke/Beweglichkeit/Frostmacht/Feuermacht/Verteidigung/Schattenmacht, Elixier des übermächtigen Magierbluts, Elixier der übermächtigen Seelenstärke) – und es heißt **„Elixier der draenischen Weisheit"**, nicht „Draeneiweisheit". Die Öle heißen „Überragendes Zauberöl/Manaöl". Nur Anzeige-Kosmetik: Gezählt wird über Spell-IDs, an den Zahlen ändert sich nichts.
+
 ## 0.9.78 – Gegenstandsliste: unbekannte IDs verschwinden nicht mehr
 
 Owner-Verwirrung am echten Export geklärt: Die „exakten Gegenstände" stehen im Export als Zauber-IDs (`28499:4` = 4× Übermächtiger Manatrank) – das Addon übersetzt sie beim Import in Namen. Alle IDs des konkreten Karazhan-Exports waren bereits in der Tabelle. Zusätzlich abgesichert:
