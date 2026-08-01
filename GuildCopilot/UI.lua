@@ -4,7 +4,12 @@ GC.UI = {
     pages = {},
     tabs = {},
     activePage = "ROSTER",
-    selectedLead = 1,
+    -- Gewaehlt wird ein INTERESSENT, nicht eine Listenzeile. Der Listenplatz
+    -- taugt dafuer nicht: Eine eingehende Fluesternachricht schiebt einen neuen
+    -- Eintrag ganz nach vorne, und alles darunter rutscht eine Position weiter.
+    -- Wer gerade an Nummer drei schrieb, hatte danach jemand anderen ausgewaehlt
+    -- - der Entwurf blieb stehen und waere an den Falschen gegangen.
+    selectedLeadKey = nil,
 }
 
 local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
@@ -2692,7 +2697,10 @@ function GC.UI:RefreshSuggestions()
     if not page then
         return
     end
-    local summary = GC.Roster:GetSummary()
+    -- GetSuggestions liefert die Zusammenfassung mit, aus der es seine
+    -- Vorschlaege zieht. Sie hier erneut anzufordern liesse den kompletten
+    -- Roster ein zweites Mal durchlaufen, fuer exakt dieselben Zahlen.
+    local suggestions, summary = GC.Recruitment:GetSuggestions()
     local missing = MissingGuildProfileFields()
     if GC.Roster.lastUpdate and GC.Roster.lastUpdate > 0 and date then
         page.rosterRefreshStatus:SetText("Stand: " .. date("%H:%M", GC.Roster.lastUpdate))
@@ -2705,7 +2713,6 @@ function GC.UI:RefreshSuggestions()
     page.metricCards.COVERAGE.value:SetText(summary.knownProfiles .. "/" .. summary.total)
     page.metricCards.IMPORTS.value:SetText(summary.importedProfiles)
 
-    local suggestions = GC.Recruitment:GetSuggestions()
     for index, row in ipairs(page.suggestionRows) do
         local suggestion = suggestions[index]
         row:SetShown(suggestion ~= nil)
@@ -5320,6 +5327,20 @@ end
 -- einmal, damit Aufbau, Blaettern und Auffrischen nie auseinanderlaufen.
 local LEADS_PER_PAGE = 9
 
+-- Passt das Gildenprofil noch durch den Gildenkanal? Jede Stelle, die etwas
+-- gildenweit Synchronisiertes speichert, muss das fragen, BEVOR sie Erfolg
+-- meldet - sonst steht "synchronisiert" da, waehrend der verzoegerte Sender
+-- die Nutzlast danach ablehnt. Die Antwort ist nil, wenn alles passt.
+function GC.UI:GuildProfileTooLargeMessage()
+    local bytes, maximum, tooLarge = GC.Sync:GetGuildProfileSize()
+    if not tooLarge then
+        return nil
+    end
+    return "Lokal gespeichert, aber NICHT gildenweit verteilt: "
+        .. bytes .. " von höchstens " .. maximum .. " Zeichen. "
+        .. "Bitte Texte, Antwortvorlagen oder Verzauberungsregeln kürzen."
+end
+
 function GC.UI:BuildInboxPage()
     local page = self.pages.INBOX
     CreatePageTitle(page, "Postfach", "Whispers und erkannte „Suche Gilde“-Nachrichten werden hier gesammelt.")
@@ -5351,19 +5372,21 @@ function GC.UI:BuildInboxPage()
         page.leadButtons[index] = button
         local remove = CreateButton(leadCard, "×", 34, 38, function()
             local leadIndex = GC.UI:GetLeadIndexForSlot(slot)
-            local wasSelected = GC.UI.selectedLead == leadIndex
             local removed = GC.DB:GetGuild().inbox[leadIndex]
             local removedKey = removed and GC.Util.NormalizeName(removed.name)
             if GC.Chat:RemoveLead(leadIndex) then
                 if removedKey then
                     page.replyDrafts[removedKey] = nil
-                end
-                local inbox = GC.DB:GetGuild().inbox
-                if GC.UI.selectedLead > leadIndex then
-                    GC.UI.selectedLead = GC.UI.selectedLead - 1
-                elseif wasSelected then
-                    GC.UI.selectedLead = math.max(1, math.min(leadIndex, #inbox))
-                    GC.UI:LoadLeadDraft()
+                    -- Die Auswahl haengt am Namen: Wer jemand anderen gewaehlt
+                    -- hatte, behaelt ihn ohne Zutun. Nur wenn der Geloeschte
+                    -- selbst gewaehlt war, muss ein neuer her.
+                    if GC.UI.selectedLeadKey == removedKey then
+                        local inbox = GC.DB:GetGuild().inbox
+                        local following = inbox[math.min(leadIndex, #inbox)]
+                        GC.UI.selectedLeadKey = following
+                            and GC.Util.NormalizeName(following.name) or nil
+                        GC.UI:LoadLeadDraft()
+                    end
                 end
                 GC.UI:RefreshInbox()
             end
@@ -5395,7 +5418,7 @@ function GC.UI:BuildInboxPage()
             return
         end
         if GC.Chat:ClearInbox() then
-            GC.UI.selectedLead = 1
+            GC.UI.selectedLeadKey = nil
             page.leadPage = 1
             page.replyDrafts = {}
             page.replyEdit:SetText("")
@@ -5495,21 +5518,21 @@ function GC.UI:BuildInboxPage()
     end)
 
     local thanks = CreateButton(detailCard, "Danke", 105, 30, function()
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("THANKS", lead.name))
         end
     end)
     thanks:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -386)
     local info = CreateButton(detailCard, "Gildeninfos", 115, 30, function()
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("INFO", lead.name))
         end
     end)
     info:SetPoint("LEFT", thanks, "RIGHT", 8, 0)
     local discord = CreateButton(detailCard, "Discord", 105, 30, function()
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("DISCORD", lead.name))
         end
@@ -5517,7 +5540,7 @@ function GC.UI:BuildInboxPage()
     discord:SetPoint("LEFT", info, "RIGHT", 8, 0)
 
     page.replyButton = CreateButton(detailCard, "Antworten", 248, 38, function()
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if lead and GC.Chat:SendReply(lead.name, page.replyEdit:GetText()) then
             -- Verschickt ist verschickt: Der Entwurf hat seinen Zweck erfuellt
             -- und darf nicht beim naechsten Aufruf wieder dastehen.
@@ -5534,7 +5557,7 @@ function GC.UI:BuildInboxPage()
     page.replyButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -430)
 
     page.inviteButton = CreateButton(detailCard, "In Gilde einladen", 248, 38, function()
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if lead then
             GC.Chat:Invite(lead.name)
             page.replyResult:SetText("Einladung an " .. lead.name .. " ausgelöst.")
@@ -5548,7 +5571,7 @@ function GC.UI:BuildInboxPage()
     -- ausblenden. Befristet oder dauerhaft; zuruecknehmen geht in der Liste
     -- unter den Vorlagen.
     local function FilterSelectedLead(days)
-        local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
+        local lead = GC.UI:GetSelectedLead()
         if not lead then
             page.replyResult:SetText("Kein Interessent ausgewählt.")
             SetTextColor(page.replyResult, THEME.danger)
@@ -5558,9 +5581,12 @@ function GC.UI:BuildInboxPage()
         page.replyResult:SetText(message or "")
         SetTextColor(page.replyResult, ok and THEME.success or THEME.danger)
         page.replyDrafts[GC.Util.NormalizeName(lead.name)] = nil
-        GC.UI.selectedLead = 1
+        -- Kein SetText("") vor LoadLeadDraft: Das Leeren feuert OnTextChanged,
+        -- und das schreibt den leeren Text dem dann schon gewaehlten NAECHSTEN
+        -- Interessenten zu. Dessen gemerkter Entwurf waere weg, bevor
+        -- LoadLeadDraft ihn ueberhaupt holt.
+        GC.UI.selectedLeadKey = nil
         page.leadPage = 1
-        page.replyEdit:SetText("")
         GC.UI:LoadLeadDraft()
         GC.UI:RefreshInbox()
     end
@@ -5610,6 +5636,15 @@ function GC.UI:BuildInboxPage()
             guildData.replyTemplates[key] = GC.Util.Trim(edit:GetText())
         end
         guildData.profile.updatedAt = GC.Util.Now()
+
+        local tooLarge = GC.UI:GuildProfileTooLargeMessage()
+        if tooLarge then
+            GC:FireCallback("GUILD_PROFILE_UPDATED")
+            page.templateStatus:SetText(tooLarge)
+            SetTextColor(page.templateStatus, THEME.danger)
+            return
+        end
+
         GC.Sync:QueueGuildProfile()
         GC:FireCallback("GUILD_PROFILE_UPDATED")
         page.templateStatus:SetText("Vorlagen gespeichert und für die Gilde synchronisiert.")
@@ -5658,14 +5693,36 @@ function GC.UI:GetLeadIndexForSlot(slot)
     return ((leadPage - 1) * LEADS_PER_PAGE) + slot
 end
 
--- Der Schluessel, unter dem der Entwurf des gerade gewaehlten Interessenten
--- liegt. Nil heisst: gar niemand gewaehlt, dann gehoert der Text niemandem.
-function GC.UI:GetSelectedLeadKey()
-    local lead = GC.DB:GetGuild().inbox[self.selectedLead]
-    if not lead then
-        return nil
+-- Der gewaehlte Interessent, gesucht ueber seinen Namen statt ueber einen
+-- Listenplatz. Ist er verschwunden (geloescht, ausgeblendet, zusammengefuehrt),
+-- ruecken wir auf den ersten Eintrag - aber ausdruecklich erst DANN, nicht bei
+-- jeder Verschiebung der Liste.
+--
+-- Zurueckgegeben werden Eintrag, Listenplatz und Schluessel; der Listenplatz
+-- wird nur zum Zeichnen gebraucht und nie gespeichert.
+function GC.UI:GetSelectedLead()
+    local inbox = GC.DB:GetGuild().inbox
+    if self.selectedLeadKey then
+        for index, lead in ipairs(inbox) do
+            if GC.Util.NormalizeName(lead.name) == self.selectedLeadKey then
+                return lead, index, self.selectedLeadKey
+            end
+        end
     end
-    return GC.Util.NormalizeName(lead.name)
+    local first = inbox[1]
+    if not first then
+        self.selectedLeadKey = nil
+        return nil, nil, nil
+    end
+    self.selectedLeadKey = GC.Util.NormalizeName(first.name)
+    return first, 1, self.selectedLeadKey
+end
+
+-- Der Schluessel, unter dem der Entwurf des gewaehlten Interessenten liegt.
+-- Nil heisst: gar niemand gewaehlt, dann gehoert der Text niemandem.
+function GC.UI:GetSelectedLeadKey()
+    local _, _, key = self:GetSelectedLead()
+    return key
 end
 
 -- Holt den gemerkten Entwurf des gewaehlten Interessenten ins Feld.
@@ -5676,12 +5733,15 @@ function GC.UI:LoadLeadDraft()
     end
     page.replyEdit:ClearFocus()
     local key = self:GetSelectedLeadKey()
+    -- SetText loest OnTextChanged aus und schriebe den Text sofort wieder in
+    -- den Speicher. Das ist hier derselbe Schluessel und damit folgenlos - bei
+    -- einem Wechsel waere es das nicht, deshalb laeuft jeder Wechsel ueber
+    -- SelectLead und niemals ueber ein nacktes SetText.
     page.replyEdit:SetText((key and page.replyDrafts[key]) or "")
 end
 
--- Wechselt den gewaehlten Interessenten und tauscht dabei den Entwurf mit aus.
--- Nur fuer echte Wechsel: Nach einem Loeschen ist der bisherige Schluessel
--- schon vergeben, dann wird ausschliesslich LoadLeadDraft benutzt.
+-- Waehlt den Interessenten auf einem Listenplatz und tauscht den Entwurf mit
+-- aus. Gemerkt wird sein Name, nicht der Platz.
 function GC.UI:SelectLead(leadIndex)
     local page = self.pages.INBOX
     if page and page.replyDrafts then
@@ -5690,7 +5750,8 @@ function GC.UI:SelectLead(leadIndex)
             page.replyDrafts[previous] = page.replyEdit:GetText() or ""
         end
     end
-    self.selectedLead = leadIndex
+    local lead = GC.DB:GetGuild().inbox[leadIndex]
+    self.selectedLeadKey = lead and GC.Util.NormalizeName(lead.name) or nil
     self:LoadLeadDraft()
     self:RefreshInbox()
 end
@@ -5734,9 +5795,9 @@ function GC.UI:RefreshInbox()
     for markerIndex, markerButton in ipairs(page.replyMarkerButtons) do
         markerButton:SetActive(markerIndex == replyMarker)
     end
-    if self.selectedLead > #inbox then
-        self.selectedLead = math.max(1, #inbox)
-    end
+    -- Loest die Auswahl auf und rueckt bei Bedarf nach. Der Listenplatz kommt
+    -- hier heraus, wird aber nur zum Markieren benutzt und nie gespeichert.
+    local selectedLead, selectedIndex = self:GetSelectedLead()
 
     local leadPageCount = math.max(1, math.ceil(#inbox / LEADS_PER_PAGE))
     page.leadPage = math.max(1, math.min(page.leadPage or 1, leadPageCount))
@@ -5768,7 +5829,7 @@ function GC.UI:RefreshInbox()
                 .. ClassColoredName(GC.Util.PlayerShortName(lead.name), lead.classFile)
                 .. (level and ("  |cff8b98a5" .. level .. "|r") or "")
                 .. (count > 1 and ("  |cff8b98a5(" .. count .. ")|r") or ""))
-            button:SetActive(self.selectedLead == leadIndex)
+            button:SetActive(selectedIndex == leadIndex)
         end
     end
 
@@ -5797,10 +5858,10 @@ function GC.UI:RefreshInbox()
         page.filterNotice:SetText("")
     end
 
-    SetButtonEnabled(page.hideTempButton, inbox[self.selectedLead] ~= nil)
-    SetButtonEnabled(page.hideForeverButton, inbox[self.selectedLead] ~= nil)
+    SetButtonEnabled(page.hideTempButton, selectedLead ~= nil)
+    SetButtonEnabled(page.hideForeverButton, selectedLead ~= nil)
 
-    local lead = inbox[self.selectedLead]
+    local lead = selectedLead
     if not lead then
         page.leadTitle:SetText("Noch keine Interessenten")
         page.lastMessage:SetText("Starte eine Suche. Eingehende Flüsternachrichten erscheinen automatisch hier.")
@@ -5906,12 +5967,10 @@ function GC.UI:BuildGuildPage()
         -- Erst pruefen, dann melden: Ein zu grosses Profil wird lokal zwar
         -- gespeichert, kommt bei niemandem an. Das darf nicht als Erfolg
         -- durchgehen.
-        local bytes, maximum, tooLarge = GC.Sync:GetGuildProfileSize()
+        local tooLarge = GC.UI:GuildProfileTooLargeMessage()
         if tooLarge then
             GC:FireCallback("GUILD_PROFILE_UPDATED")
-            page.saveResult:SetText("Lokal gespeichert, aber NICHT gildenweit verteilt: "
-                .. bytes .. " von höchstens " .. maximum .. " Zeichen. "
-                .. "Bitte Texte, Antwortvorlagen oder Verzauberungsregeln kürzen.")
+            page.saveResult:SetText(tooLarge)
             SetTextColor(page.saveResult, THEME.danger)
             return
         end

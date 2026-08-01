@@ -1860,9 +1860,18 @@ function GC.Workshop:GetCatalogIndex()
     return entries
 end
 
--- Verwirft den zwischengespeicherten Index. Aufgerufen wird das ausschliesslich
--- dort, wo sich der Rezeptbestand wirklich aendert - nicht bei jedem
--- WORKSHOP_UPDATED, denn das feuert auch fuer reine Synchronisierungszaehler.
+-- Verwirft den zwischengespeicherten Index.
+--
+-- REGEL FUER NEUE SCHREIBSTELLEN: Wer an den eigenen Berufen, am Herstellerindex
+-- oder am Rezeptkatalog etwas aendert, ruft das hier auf. Ein pauschales Netz an
+-- WORKSHOP_UPDATED gab es kurzzeitig, es ist wieder weg: Dieses Ereignis feuert
+-- auch fuer reine Synchronisierungszaehler, und bei geoeffneter Werkstatt wurde
+-- der Katalog waehrend eines Transfers dutzendfach neu gebaut - genau der
+-- Aufwand, den der Cache vermeiden soll.
+--
+-- Die Wanderungen in GetOwnData und GetGuildWorkshop brauchen keinen Aufruf:
+-- Sie laufen einmalig INNERHALB des Aufbaus, ihr Ergebnis steht also schon im
+-- frisch gebauten Index.
 function GC.Workshop:InvalidateCatalog()
     self.catalogIndex = nil
     self.catalogByKey = nil
@@ -2075,17 +2084,6 @@ workshopEvents:SetScript("OnEvent", function(_, event)
         end
         GC.Workshop:ScheduleScan()
     end
-end)
-
--- Sicherheitsnetz fuer den Katalog-Cache: Die vier schreibenden Funktionen
--- verwerfen ihn selbst, aber WORKSHOP_UPDATED ist das Signal, DASS sich etwas
--- geaendert hat. Lieber einmal zu viel neu aufbauen als eine veraltete Liste
--- zeigen - das Ereignis feuert bei Datenaenderungen und beim Synchronisieren,
--- nicht beim Tippen in der Suche. Genau dort lag der teure Fall.
--- Registriert VOR der Oberflaeche (Workshop.lua steht in der TOC vor UI.lua),
--- damit der Cache weg ist, bevor irgendetwas neu gezeichnet wird.
-GC:RegisterCallback("WORKSHOP_UPDATED", GC.Workshop, function(self)
-    self:InvalidateCatalog()
 end)
 
 -- Der Roster wird nach jeder Gildenaktualisierung neu gelesen; das Aufraeumen

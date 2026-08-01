@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 02.08.2026, nach Release 0.9.81 / Installer 1.0.6.
+Stand: 02.08.2026, nach Release 0.9.82 / Installer 1.0.6.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -234,11 +234,11 @@ Vor dem Bau entscheiden, welcher Weg gewollt ist.
 
 ---
 
-## 7. Fremdanalyse – ABGEARBEITET in 0.9.81
+## 7. Fremdanalyse – ABGEARBEITET in 0.9.81 und 0.9.82
 
-Eine externe Codeanalyse meldete fünfzehn Punkte. Alle wurden geprüft, der
-Großteil ist in 0.9.81 umgesetzt (Einzelheiten im ROADMAP-Abschnitt). Nicht
-umgesetzt und **bewusst so**:
+Eine externe Codeanalyse meldete fünfzehn Punkte, eine Nachprüfung gegen 0.9.81
+noch einmal fünf. Alle wurden geprüft; der Großteil ist umgesetzt (Einzelheiten
+in der ROADMAP). Nicht umgesetzt und **bewusst so**:
 
 - **Selbstupdate ohne kryptografische Verifikation.** Faktisch richtig: Die EXE
   wird vom veränderlichen `main`-Branch geladen und nur auf eine Mindestgröße

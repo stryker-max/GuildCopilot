@@ -122,16 +122,30 @@ end
 -- JEDES Gildenmitglied mit - auch den Stufe-12-Twink und einen Rang, der
 -- ausdruecklich ausgeschlossen war. Eine gesuchte Spec galt dadurch als
 -- abgedeckt, obwohl sie niemand raiden konnte. Beide Seiten fragen jetzt hier.
-function GC.Roster:CountsAsActiveRaider(member)
+-- Die Maßstaebe einmal einsammeln. GC.DB:GetGuild() faehrt bei JEDEM Aufruf
+-- rekursiv den kompletten Vorgabenbaum ab (MergeDefaults) - in einer Schleife
+-- ueber alle Gildenmitglieder ist genau das der teure Teil. Die Pruefungen
+-- unten nehmen die fertigen Regeln deshalb entgegen, statt sie sich je Mitglied
+-- selbst zu holen.
+function GC.Roster:GetRaiderRules()
+    local guildData = GC.DB:GetGuild()
+    return {
+        rankFilterConfigured = guildData.roster.rankFilterConfigured,
+        activeRaiderRanks = guildData.roster.activeRaiderRanks,
+        inactivityHours = (tonumber(guildData.memberCare.inactivityDays) or 60) * 24,
+    }
+end
+
+function GC.Roster:CountsAsActiveRaider(member, rules)
     if not member then
         return false
     end
     if (tonumber(member.level) or 0) < 70 then
         return false
     end
-    local rosterSettings = GC.DB:GetGuild().roster
-    if rosterSettings.rankFilterConfigured
-        and rosterSettings.activeRaiderRanks[tostring(member.rankIndex)] ~= true then
+    rules = rules or self:GetRaiderRules()
+    if rules.rankFilterConfigured
+        and rules.activeRaiderRanks[tostring(member.rankIndex)] ~= true then
         return false
     end
     return true
@@ -141,13 +155,13 @@ end
 -- eingeloggt war, deckt keine Spec ab. Ausgeschlossen wird aber nur, wessen
 -- Abwesenheit wirklich bekannt ist - liefert der Client keine Zeit seit dem
 -- letzten Login, darf das niemanden aus der Rechnung werfen.
-function GC.Roster:CountsForCoverage(member)
-    if not self:CountsAsActiveRaider(member) then
+function GC.Roster:CountsForCoverage(member, rules)
+    rules = rules or self:GetRaiderRules()
+    if not self:CountsAsActiveRaider(member, rules) then
         return false
     end
-    local inactivityDays = tonumber(GC.DB:GetGuild().memberCare.inactivityDays) or 60
     local lastOnlineHours = tonumber(member.lastOnlineHours)
-    if lastOnlineHours and lastOnlineHours > (inactivityDays * 24) then
+    if lastOnlineHours and lastOnlineHours > rules.inactivityHours then
         return false
     end
     return true
@@ -155,8 +169,9 @@ end
 
 function GC.Roster:GetActiveRaiders(limit)
     local raiders = {}
+    local rules = self:GetRaiderRules()
     for _, member in ipairs(self.members) do
-        if self:CountsAsActiveRaider(member) then
+        if self:CountsAsActiveRaider(member, rules) then
             raiders[#raiders + 1] = member
         end
     end
@@ -779,7 +794,10 @@ function GC.Roster:IsGuildMember(name)
     return self.membersByName[GC.Util.NormalizeName(name)] ~= nil
 end
 
-function GC.Roster:GetProfile(name)
+-- "guildData" ist optional und rein fuer Schleifen gedacht: Wer ueber alle
+-- Mitglieder laeuft, holt den Gildendatensatz einmal und reicht ihn durch,
+-- statt ihn je Mitglied erneut ueber den Vorgabenbaum aufbauen zu lassen.
+function GC.Roster:GetProfile(name, guildData)
     local normalized = GC.Util.NormalizeName(name)
     local ownName = GC.Util.NormalizeName(GC:GetPlayerFullName())
     local ownShortName = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
@@ -787,7 +805,7 @@ function GC.Roster:GetProfile(name)
         return GC.Profile:Get()
     end
 
-    local guildData = GC.DB:GetGuild()
+    guildData = guildData or GC.DB:GetGuild()
     local shortName = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
     local remote = guildData.remoteProfiles[normalized] or guildData.remoteProfiles[shortName]
     if remote then
@@ -811,6 +829,11 @@ function GC.Roster:GetSummary()
         importedProfiles = 0,
     }
 
+    -- Einmal fuer den ganzen Durchlauf, nicht einmal je Mitglied: Sonst laeuft
+    -- bei 200 Mitgliedern zweihundertfach der Vorgabenbaum durch.
+    local rules = self:GetRaiderRules()
+    local guildData = GC.DB:GetGuild()
+
     for _, member in ipairs(self.members) do
         if member.online then
             summary.online = summary.online + 1
@@ -819,12 +842,12 @@ function GC.Roster:GetSummary()
             summary.classCounts[member.classFile] = (summary.classCounts[member.classFile] or 0) + 1
         end
 
-        local profile = self:GetProfile(member.name)
+        local profile = self:GetProfile(member.name, guildData)
         if profile then
             -- Gezaehlt wird weiter alles, was in der Gilde steht - nur die
             -- Abdeckung, aus der die Rekrutierungsvorschlaege entstehen, zaehlt
             -- ausschliesslich Spieler, die tatsaechlich raiden koennen.
-            local counts = self:CountsForCoverage(member)
+            local counts = self:CountsForCoverage(member, rules)
             local specKey = profile.raidSpecKey or profile.detectedSpecKey
             if specKey and GC.SpecByKey[specKey] then
                 summary.knownProfiles = summary.knownProfiles + 1

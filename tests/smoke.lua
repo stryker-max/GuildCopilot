@@ -1445,7 +1445,7 @@ namelessLead.guid = "Player-4"
 assert(addon.Chat:ResolveLeadClass(namelessLead) == "PALADIN",
     "Die Klasse eines Altbestands wurde nicht nachgetragen")
 addon.UI:ShowPage("INBOX")
-addon.UI.selectedLead = 1
+addon.UI:SelectLead(1)
 addon.UI:RefreshInbox()
 assert(addon.UI.pages.INBOX.leadButtons[1].label.value:find("|cfff58cba", 1, true) ~= nil,
     "Der Interessent wird nicht in seiner Klassenfarbe angezeigt: "
@@ -5659,13 +5659,47 @@ do
     assert(inb_page.leadButtons[3].shown == true and inb_page.leadButtons[4].shown == false,
         "Auf der zweiten Seite stehen die falschen Interessenten")
     addon.UI:SelectLead(addon.UI:GetLeadIndexForSlot(3))
-    assert(addon.DB:GetGuild().inbox[addon.UI.selectedLead].name == "Bewerber12-Realm",
+    assert(addon.UI:GetSelectedLead().name == "Bewerber12-Realm",
         "Ein Interessent jenseits der neunten Zeile lässt sich nicht wählen")
+
+    -- Der eigentliche Falschempfaenger-Fall: Waehrend man schreibt, trifft eine
+    -- neue Fluesternachricht ein. Der neue Eintrag wird VORNE eingefuegt, alle
+    -- anderen ruecken einen Platz weiter. Haengt die Auswahl am Listenplatz,
+    -- zeigt sie danach auf jemand anderen - der stehengebliebene Entwurf ginge
+    -- an den Falschen.
+    inb_page.leadPage = 1
+    addon.UI:SelectLead(3)
+    local inb_intended = addon.UI:GetSelectedLead().name
+    inb_page.replyEdit:SetText("Nur für " .. inb_intended)
+    table.insert(inb_inbox, 1, {
+        name = "Dazwischenfunker-Realm",
+        messages = { { text = "Huhu", receivedAt = currentTime } },
+    })
+    addon.UI:RefreshInbox()
+    assert(addon.UI:GetSelectedLead().name == inb_intended,
+        "Ein neu eingegangener Interessent verschiebt die Auswahl auf jemand anderen")
+    assert(inb_page.replyEdit:GetText() == "Nur für " .. inb_intended,
+        "Der Entwurf gehört nach dem Eingang nicht mehr zum gewählten Interessenten")
+    table.remove(inb_inbox, 1)
+
+    -- Ausblenden darf nicht den Entwurf des naechsten Interessenten loeschen.
+    -- Das Leeren des Feldes feuert OnTextChanged; ist die Auswahl da schon
+    -- umgesetzt, schriebe die Leerung dessen gemerkten Text weg.
+    inb_page.replyDrafts = {}
+    addon.UI:SelectLead(1)
+    inb_page.replyEdit:SetText("Entwurf für den Ersten")
+    addon.UI:SelectLead(2)
+    inb_page.replyEdit:SetText("Entwurf für den Zweiten")
+    inb_page.hideForeverButton.scripts.OnClick()
+    addon.UI:SelectLead(1)
+    assert(inb_page.replyEdit:GetText() == "Entwurf für den Ersten",
+        "Das Ausblenden hat den Entwurf eines anderen Interessenten gelöscht")
+    addon.Chat:ClearInboxFilter(addon.Util.NormalizeName("Bewerber2-Realm"))
 
     inb_page.leadPage = 1
     inb_page.replyDrafts = {}
+    addon.UI.selectedLeadKey = nil
     inb_page.replyEdit:SetText("")
-    addon.UI.selectedLead = 1
     for index = #inb_inbox, 1, -1 do
         inb_inbox[index] = nil
     end

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.81",
+  "## Version: 0.9.82",
 ];
 
 for (const entry of requiredMetadata) {
@@ -379,9 +379,15 @@ const requiredImplementations = [
   ["Antwortentwurf je Interessent", /page\.replyDrafts/],
   ["Entwurf wechselt mit dem Interessenten", /function GC\.UI:SelectLead/],
   ["Postfach lässt sich blättern", /function GC\.UI:GetLeadIndexForSlot/],
+  // Der gewaehlte Interessent haengt an seinem Namen, nicht am Listenplatz:
+  // Ein eingehender Fluesterer schiebt einen neuen Eintrag nach vorne, und alle
+  // Plaetze darunter verschieben sich.
+  ["Auswahl hängt am Interessenten, nicht am Listenplatz", /function GC\.UI:GetSelectedLead/],
+  ["zu großes Profil auch beim Vorlagenspeichern gemeldet", /function GC\.UI:GuildProfileTooLargeMessage/],
   // Rekrutierung: Abdeckung nur aus Spielern, die wirklich raiden koennen.
   ["Abdeckung nur aus aktiven Raidern", /function GC\.Roster:CountsForCoverage/],
   ["ein Maßstab für aktive Raider", /function GC\.Roster:CountsAsActiveRaider/],
+  ["Raidermaßstäbe einmal je Durchlauf", /function GC\.Roster:GetRaiderRules/],
   // Suche, Gruppenkanal und Werkstatt.
   ["Suchsitzung läuft ab", /function GC\.Chat:IsSessionActive/],
   ["Gruppenkanal folgt der Gruppe", /function GC\.Sync:GroupChannel/],
@@ -401,6 +407,27 @@ for (const [name, pattern] of requiredImplementations) {
 
 if (/\bSYNC_INTERVAL\b/.test(allSource)) {
   throw new Error("Die Werkstatt enthält noch eine künstliche Paketpause.");
+}
+
+// Der Werkstattkatalog wird zwischengespeichert. Ein pauschales Verwerfen an
+// WORKSHOP_UPDATED baut ihn bei jedem Synchronisierungszähler neu auf - bei
+// geöffneter Werkstatt also dutzendfach während eines Transfers. Verworfen wird
+// an den Schreibstellen, nicht am Ereignis.
+const workshopSource = fs.readFileSync(path.join(root, "Workshop.lua"), "utf8");
+if (/RegisterCallback\("WORKSHOP_UPDATED"[\s\S]{0,200}InvalidateCatalog/.test(workshopSource)) {
+  throw new Error("Der Katalog-Cache wird wieder pauschal an WORKSHOP_UPDATED verworfen.");
+}
+// Umgekehrt muss jede Schreibstelle ihn verwerfen. Das Aufräumen in Database.lua
+// ist die leicht zu übersehende: Es entfernt Hersteller ohne Werkstatt-Ereignis.
+const databaseSource = fs.readFileSync(path.join(root, "Database.lua"), "utf8");
+if (!databaseSource.includes("GC.Workshop:InvalidateCatalog()")) {
+  throw new Error("Das Aufräumen entfernt Hersteller, ohne den Katalog-Cache zu verwerfen.");
+}
+
+// Die Auswahl im Postfach darf nicht mehr am Listenplatz hängen: Ein eingehender
+// Flüsterer schiebt einen neuen Eintrag nach vorne und verschiebt alles darunter.
+if (/GC\.UI\.selectedLead\b(?!Key)/.test(allSource)) {
+  throw new Error("Der gewählte Interessent wird wieder über den Listenplatz gehalten.");
 }
 
 if (allSource.includes("RefreshOverview")) {

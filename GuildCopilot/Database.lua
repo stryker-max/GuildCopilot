@@ -292,10 +292,17 @@ function GC.DB:Prune()
             guildData.addonUsers[name] = nil
         end
     end
+    local removedCrafters = false
     for name, crafter in pairs(guildData.workshop.crafters or {}) do
         if (crafter.updatedAt or 0) < cutoff then
             guildData.workshop.crafters[name] = nil
+            removedCrafters = true
         end
+    end
+    -- Das Aufraeumen ist eine Schreibstelle wie jede andere: Der Werkstatt-
+    -- katalog wird zwischengespeichert und muss danach neu entstehen.
+    if removedCrafters and GC.Workshop and GC.Workshop.InvalidateCatalog then
+        GC.Workshop:InvalidateCatalog()
     end
 
     local sessionCutoff = GC.Util.Now() - (30 * 24 * 60 * 60)

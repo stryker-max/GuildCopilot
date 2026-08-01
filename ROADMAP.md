@@ -298,6 +298,31 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.82 – Nachprüfung der Fremdanalyse: fünf Restbefunde, drei davon aus 0.9.81
+
+Eine zweite Analyserunde gegen 0.9.81 hat fünf Punkte gemeldet. Alle bestätigt, alle umgesetzt. Drei davon waren **in 0.9.81 neu entstanden** – die Korrektur des Falschempfänger-Falls war unvollständig, und die richtige Abdeckungsrechnung war teuer erkauft.
+
+**Der Falschempfänger war nicht behoben, nur die halbe Ursache.** 0.9.81 hat den Entwurf an den Interessenten gebunden, die *Auswahl* aber weiter als Listenplatz gehalten. Ein eingehender Flüsterer legt einen neuen Eintrag **vorne** an, alles darunter rückt eine Position weiter: Wer gerade an Nummer drei schrieb, hatte danach jemand anderen ausgewählt, der Entwurf blieb stehen, und der Antwortknopf meinte den verschobenen Platz. Genau der Fall, den 0.9.81 verhindern sollte – nur asynchron statt per Klick:
+
+- gemerkt wird jetzt der **Name** des gewählten Interessenten, nicht seine Zeile. `GC.UI:GetSelectedLead()` löst ihn bei jedem Zugriff auf und rückt erst nach, wenn er wirklich verschwunden ist;
+- der Listenplatz entsteht nur noch zum Markieren der aktiven Zeile und wird nirgends gespeichert;
+- `tests/smoke.lua` bildet den Fall ausdrücklich ab: Entwurf schreiben, neuen Interessenten eintreffen lassen, prüfen, dass Auswahl **und** Entwurf beim Gemeinten bleiben. Gegen den Stand von 0.9.81 schlägt der Test fehl;
+- `tests/validate.mjs` lehnt ein `GC.UI.selectedLead` ohne `Key` wieder ab.
+
+**Das Ausblenden löschte den Entwurf eines anderen.** Nach dem Entfernen wurde die Auswahl umgesetzt und **danach** das Textfeld geleert – die Leerung feuerte `OnTextChanged` und wurde dem inzwischen gewählten nächsten Interessenten zugeschrieben. Dessen gemerkter Text war weg, bevor `LoadLeadDraft()` ihn holen konnte. Das überflüssige `SetText("")` ist raus; auch dieser Fall steht als Test.
+
+**Die korrigierte Abdeckung war ein neuer Hotpath.** `CountsAsActiveRaider` und `CountsForCoverage` holten sich je Mitglied den Gildendatensatz, und `GC.DB:GetGuild()` fährt bei **jedem** Aufruf rekursiv den kompletten Vorgabenbaum ab. Bei 200 Mitgliedern waren das mehrere hundert zusätzliche Durchläufe pro Ansicht:
+
+- `Roster:GetRaiderRules()` sammelt Rangfilter und Inaktivitätsgrenze einmal je Durchlauf ein und wird durchgereicht;
+- `Roster:GetProfile()` nimmt den Gildendatensatz optional entgegen – das spart in `GetSummary` einen weiteren Aufruf je Mitglied;
+- die Vorschlagsseite berechnete die Zusammenfassung **zweimal** (einmal selbst, einmal über `GetSuggestions`). Sie nimmt jetzt die mitgelieferte. Unterm Strich läuft der Roster einmal statt zweimal, und der Vorgabenbaum ein- statt mehrhundertfach.
+
+**Antwortvorlagen meldeten „synchronisiert“ ohne Größenprüfung.** Der Gildenprofil-Speicher prüfte seit 0.9.81, der separate Vorlagen-Speicher nicht – bei ohnehin großer Nutzlast stand dort Erfolg, während der verzögerte Sender danach ablehnte. Beide fragen jetzt dasselbe `GC.UI:GuildProfileTooLargeMessage()`.
+
+**Der Werkstatt-Cache wurde bei reinen Statusmeldungen verworfen.** Das Sicherheitsnetz an `WORKSHOP_UPDATED` griff auch bei Synchronisierungszählern: Bei geöffneter Werkstatt entstand der Katalog während eines Transfers dutzendfach neu – genau der Aufwand, den der Cache vermeiden soll. Das Netz ist raus, verworfen wird an den Schreibstellen. Die eine, die dabei fehlte, ist ergänzt: `DB:Prune()` entfernt Hersteller ohne Werkstatt-Ereignis. `tests/validate.mjs` bewacht jetzt beide Richtungen – kein pauschales Verwerfen am Ereignis, aber ein Verwerfen im Aufräumen.
+
+Nicht geändert: Der Katalog-Cache hält einen zusätzlichen Index im Speicher (bei mehreren tausend Rezepten einige MB). Das ist der bewusste Preis dafür, ihn nicht mehr je Tastendruck neu zu bauen.
+
 ## 0.9.81 – Fremdanalyse abgearbeitet: Sync-Grenze, Postfach, Abdeckung, Werkstattsuche
 
 Eine externe Codeanalyse hat fünfzehn Punkte gemeldet. Geprüft wurden alle; zwei waren in 0.9.67 und 0.9.49 längst behoben, einer (leerer Verzauberungs-Regelsatz) hatte sich mit dem ausgelieferten T4/T5-Satz erledigt, einer (fehlende Signatur des Selbstupdates) ist für ein Ein-Personen-Repository kein sinnvoll behebbares Risiko. Der Rest ist hier umgesetzt.
