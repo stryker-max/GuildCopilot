@@ -6,6 +6,27 @@ GC.Chat = {
     heardSenders = {},
 }
 
+-- Wie lange nach dem Posten der Werbung ein eingehender Fluesterer noch als
+-- Antwort darauf gilt. Ohne diese Grenze hatte "Fluestern nur waehrend einer
+-- Suche" gar kein Ende: sessionActive wurde beim ersten erfolgreichen Post
+-- gesetzt und bis zum naechsten Neuladen der Oberflaeche nie zurueckgenommen.
+-- Die Einstellung war damit ab dem ersten Post faktisch wirkungslos, und
+-- sessionStartedAt wurde zwar gefuellt, aber nie gelesen.
+local SESSION_DURATION = 60 * 60
+
+-- Laeuft gerade eine Suche? Der Ablauf wird beim Nachfragen festgestellt; ein
+-- eigener Timer waere fuer eine reine Ja/Nein-Frage Verschwendung.
+function GC.Chat:IsSessionActive()
+    if not self.sessionActive then
+        return false
+    end
+    if (GC.Util.Now() - (self.sessionStartedAt or 0)) > SESSION_DURATION then
+        self.sessionActive = false
+        return false
+    end
+    return true
+end
+
 -- Der Ton fuer die eigene Profilbestaetigung. Er ist bewusst vom Bewerberton
 -- getrennt: Der eine meldet einen fremden Interessenten, der andere bestaetigt
 -- die eigene Eingabe.
@@ -537,7 +558,7 @@ end
 
 function GC.Chat:CaptureWhisper(message, sender, guid)
     local settings = GC.DB:GetSettings()
-    if settings.captureOnlyDuringSearch and not self.sessionActive then
+    if settings.captureOnlyDuringSearch and not self:IsSessionActive() then
         return
     end
     local knownLead = false

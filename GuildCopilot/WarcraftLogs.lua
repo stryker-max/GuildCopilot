@@ -267,8 +267,13 @@ local function DecodeConsumables(payload)
             if category.repeatable then
                 counters[category.key] = counters[category.key] + count
             elseif count > 0 then
-                -- Dauerhafte Buffs zählen wie in der Livesitzung einmal je Spieler.
-                counters[category.key] = 1
+                -- Dauerhafte Buffs zählen wie in der Livesitzung EINMAL JE
+                -- ZAUBER, nicht einmal je Kategorie. Der Kommentar behauptete
+                -- vorher Gleichstand, die Rechnung war aber eine andere: Live
+                -- ergaben Kampf- und Wächterelixier zwei Einträge, derselbe
+                -- Abend aus Warcraft Logs nur einen. Dieselbe Spielweise stand
+                -- damit je nach Quelle mit anderen Zahlen da.
+                counters[category.key] = counters[category.key] + 1
             end
             if count > 0 then
                 items[#items + 1] = {
@@ -582,7 +587,9 @@ function GC.WarcraftLogs:Import(text)
             -- "erfolgreich" speichern und die Aufbewahrung wirft den Eintrag
             -- gleich wieder hinaus - genau das darf nie mehr als Erfolg
             -- durchgehen.
-            if GC.RaidMonitor:GetSummary(session.id) ~= nil then
+            -- Ausdruecklich mit Quelle: Eine gleichnamige Livesitzung ist kein
+            -- Beleg dafuer, dass dieser Import angekommen ist.
+            if GC.RaidMonitor:GetSummary(session.id, session.source) ~= nil then
                 storedSessionIDs[session.id] = true
             end
         end

@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.80
+# Guild Copilot 0.9.81
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -146,7 +146,7 @@ Alle Mitglieder sollten dieselbe Version fahren. Die Versionsnummer steht im Fen
 - hat ein eigenes Dateisymbol im Explorer (mehrere Größen von 16 bis 256 Pixeln);
 - enthält den Warcraft-Logs-Import.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.5 und das Addon bei 0.9.80; beide Nummern stehen im Verlauf.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.6 und das Addon bei 0.9.81; beide Nummern stehen im Verlauf.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -160,7 +160,7 @@ Bei SmartScreen führt der Weg über **Weitere Informationen → Trotzdem ausfü
 Get-FileHash .\GuildCopilot-Installer.exe -Algorithm SHA256
 ```
 
-SHA-256 der Fassung 1.0.5: `30A4DD7FD03A5C50E1E9DC424588468D19B978E318AEE74003F4A321A0666DC8`
+SHA-256 der Fassung 1.0.6: `54274AE55A453B02C6A6DD0723B4DC3B72A2B1578425C3B052805B3405AC452E`
 
 Wem das zu umständlich ist, nimmt `Install.cmd` aus dem Repository – dort wird nichts ausgeführt, was Windows nicht ohnehin kennt.
 

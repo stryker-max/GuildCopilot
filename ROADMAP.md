@@ -298,6 +298,44 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.81 – Fremdanalyse abgearbeitet: Sync-Grenze, Postfach, Abdeckung, Werkstattsuche
+
+Eine externe Codeanalyse hat fünfzehn Punkte gemeldet. Geprüft wurden alle; zwei waren in 0.9.67 und 0.9.49 längst behoben, einer (leerer Verzauberungs-Regelsatz) hatte sich mit dem ausgelieferten T4/T5-Satz erledigt, einer (fehlende Signatur des Selbstupdates) ist für ein Ein-Personen-Repository kein sinnvoll behebbares Risiko. Der Rest ist hier umgesetzt.
+
+**Das Gildenprofil kam ab einer gewissen Größe bei niemandem an.** Der Sender zerlegte die Nutzlast in beliebig viele 175-Byte-Blöcke, der Empfänger verwarf jede Übertragung mit mehr als 30 – über 5250 Bytes verschwand alles kommentarlos, während lokal „Gespeichert" stand. Allein die Spec-Verzauberungsregeln dürfen rund 4300 Bytes groß werden, die Grenze war also im Alltag erreichbar:
+
+- Blockgröße und Höchstzahl stehen als `GUILD_PROFILE_CHUNK_BYTES` und `GUILD_PROFILE_MAX_CHUNKS` in `Constants.lua`; Sender und Empfänger lesen dieselbe Zahl. Die Grenze liegt jetzt bei 26 250 Bytes und damit über dem, was sich über die Oberfläche überhaupt eintragen lässt;
+- passt es trotzdem nicht, wird **nichts** gesendet und es steht rot am Speichern-Knopf, wie viele Zeichen zu viel sind – statt lokal Erfolg zu melden;
+- auch ein nach fünf Versuchen abgebrochener Versand meldet sich jetzt im Chat, statt still zu enden.
+
+**Ein Antwortentwurf konnte an den falschen Interessenten gehen.** Beim Wechsel in der Liste blieb der Text stehen, der Senden-Knopf meinte aber schon den neu gewählten Spieler. Entwürfe gehören jetzt zum Interessenten: Sie werden nach Namen gemerkt, wechseln mit der Auswahl mit und verschwinden nach dem Senden. Zusätzlich war **ab dem zehnten Interessenten Schluss** – die Liste zeigte neun Knöpfe, ohne Hinweis und ohne Blättern; ältere Einträge waren weder sicht- noch einzeln löschbar. Jetzt gibt es eine Seitennavigation mit Gesamtzahl.
+
+**Rekrutierungsvorschläge zählten jedes Gildenmitglied.** Ein Stufe-12-Twink oder ein seit einem Jahr abgemeldeter Spieler ließ eine gesuchte Spec als abgedeckt gelten. Die Raiderliste filterte längst richtig (Stufe 70, freigegebener Rang) – die Abdeckung fragte nur nie danach. Beide benutzen jetzt `Roster:CountsAsActiveRaider`; für die Abdeckung kommt über `CountsForCoverage` die eingestellte Inaktivitätsgrenze dazu. Wessen letzte Onlinezeit unbekannt ist, fällt ausdrücklich **nicht** heraus.
+
+**„Flüstern nur während einer Suche" endete nie.** Der Zustand wurde beim ersten erfolgreichen Post gesetzt und bis zum nächsten Neuladen nie zurückgenommen; der mitgeschriebene Startzeitpunkt wurde nie gelesen. Eine Suche läuft jetzt nach einer Stunde ab.
+
+**Raidsitzungen in einer normalen Party erreichten niemanden.** Start, Ende und Auswertung gingen fest über den Raidkanal, obwohl Sitzungen ausdrücklich auch in einer Gruppe laufen können und der Empfänger beide Kanäle längst annimmt. `Sync:GroupChannel()` wählt jetzt RAID oder PARTY nach der tatsächlichen Gruppe.
+
+**Die vollständigere Auswertung des Raidleiters wurde bei Teilnehmern verworfen.** Jeder Teilnehmer speichert beim Sitzungsende seine eigene LIVE-Fassung; die danach eintreffende SYNC-Fassung trug dieselbe Kennung und wurde als „andere Quelle" abgelehnt. Quellen bleiben getrennt – aber eine Auswertung wird jetzt durch **Kennung und Quelle** identifiziert, beide stehen nebeneinander und der Quellenvergleich hat endlich zwei Seiten.
+
+**Verbrauchsmaterial zählte je nach Quelle anders.** Live ergaben Kampf- und Wächterelixier zwei Einträge, derselbe Abend aus Warcraft Logs nur einen – der Kommentar dort behauptete Gleichstand. Beide zählen jetzt einmal je Zauber.
+
+**Unvollständige Inspect-Daten galten als erledigt.** Sobald `INSPECT_READY` eintraf, wurde gespeichert und mitgezählt, auch wenn Item-Daten noch fehlten; den Wiederholungslauf gab es nur für die eigene Prüfung. Fremdspieler werden jetzt bis zu zweimal erneut gelesen, und was danach noch Lücken hat, steht getrennt als „nur unvollständig lesbar" in der Meldung. Nebenbei behoben: Die Zeitüberschreitung verglich die Einheit und hätte damit den eigenen Wiederholungslauf abgeräumt – jeder Anlauf hat jetzt eine eigene Nummer.
+
+**Zeitstempel des Gildenprofils.** Sie haben Sekundengenauigkeit, und bei Gleichstand gewann schlicht die zuletzt eingetroffene Fassung – auf jedem Rechner also möglicherweise eine andere. Entschieden wird jetzt über die Nutzlast selbst; dieselbe Regel führt überall zum selben Ergebnis, ohne ein zusätzliches Feld im Protokoll. Außerdem liest `Util.Now()` die **Serverzeit**, wo der Client sie anbietet, und ein Stand mit mehr als einem Tag Vorsprung wird weder übernommen noch verteidigt – eine falsch gestellte Uhr konnte sonst jede spätere Änderung der ganzen Gilde dauerhaft blockieren.
+
+**Werkstattsuche (Performance).** Der Katalog wurde bei **jedem Tastendruck zweimal** komplett neu aufgebaut – einmal über die Kennzahlen, einmal für die Suche – inklusive Kopie jeder Reagenzienliste. Bei mehreren tausend Rezepten ist das der teuerste Vorgang des Addons:
+
+- der Katalog wird einmal aufgebaut und gehalten; verworfen wird er nur bei echten Datenänderungen (die vier schreibenden Funktionen und `WORKSHOP_UPDATED` als Sicherheitsnetz);
+- Suchtext und Berufsschlüssel entstehen beim Aufbau, nicht je Zeichen und Eintrag;
+- die Kennzahlen hängen am selben Zwischenstand;
+- die Eingabe wird um 250 ms entprellt – „Verzauberung" löste vorher zwölf vollständige Suchläufe aus;
+- Auftragsdialog und Auftragsanlage suchen ein Rezept über einen Schlüsselindex statt linear durch den ganzen Katalog.
+
+**Kleinigkeiten.** Für synchronisierte Ausrüstung wurde `EvaluateEnchant` mit `nil` als Namen aufgerufen, obwohl der Kommentar eine lokale Auflösung behauptete – dadurch standen oft nur IDs da; der Name wird jetzt über Gegenstands- und Verzauberungs-ID aufgelöst. Der Installer prüft vor dem Kopieren, ob der Warcraft-Logs-Importcode in das Addon-Feld passt (60 000 Zeichen): Zwölf Reports eines 40er-Raids überschreiten das, WoW schnitt beim Einfügen ab und der Parser nahm den Rest als gültigen Teilimport an.
+
+**Tests.** `tests/smoke.lua` läuft über fengari und deckt die neuen Zusicherungen ab; `tests/validate.mjs` prüft die neuen Bausteine statisch. Installer 1.0.6.
+
 ## 0.9.80 – Preisrahmen bleibt sichtbar, wenn man am Zug ist
 
 Gildenwunsch aus dem Versandschritt: „Man möchte auch nochmal den Preisrahmen sehen, den der Auftraggeber angegeben hat." Bisher ersetzte die Handlungsaufforderung („An Nexarius versenden.") genau die Zeile, in der Kostenrahmen und Trinkgeld standen – wer versandbereit war, sah die Absprache nur noch über den Verlauf.

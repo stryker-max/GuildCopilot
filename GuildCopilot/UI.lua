@@ -3138,13 +3138,17 @@ function GC.UI:BuildWorkshopPage()
     page.workshopSearchClear = CreateButton(page.workshopSearch.container, "×", 20, 20, function()
         page.workshopSearch:SetText("")
         page.workshopSearch:ClearFocus()
+        GC.UI:RefreshWorkshop()
     end)
     page.workshopSearchClear:SetPoint("RIGHT", page.workshopSearch.container, "RIGHT", -5, 0)
     page.workshopSearchClear:Hide()
+    -- Wer "Verzauberung" tippt, loest zwoelf Suchlaeufe aus, von denen elf
+    -- niemand sieht. Gezeichnet wird deshalb erst, wenn die Eingabe kurz steht.
+    -- Das × reagiert weiter sofort, das ist ein Klick und kein Tippen.
     page.workshopSearch:SetScript("OnTextChanged", function(edit)
         page.workshopPage = 1
         page.workshopSearchClear:SetShown(GC.Util.Trim(edit:GetText()) ~= "")
-        GC.UI:RefreshWorkshop()
+        GC.UI:QueueWorkshopSearch()
     end)
     local searchHint = CreateLabel(page.workshopSearch.container, "Rezept oder Spieler suchen", {
         muted = true,
@@ -3316,6 +3320,26 @@ function GC.UI:BuildWorkshopPage()
     }
 
     self:BuildOrdersView(page)
+end
+
+-- Sammelt Tastendruecke in der Rezeptsuche. Ohne Timer laeuft der Sucher
+-- synchron - dann ist auch ein gecachter Katalog noch je Zeichen ein
+-- vollstaendiger Durchlauf, aber immerhin kein Neuaufbau.
+local WORKSHOP_SEARCH_DELAY = 0.25
+
+function GC.UI:QueueWorkshopSearch()
+    if self.workshopSearchPending then
+        return
+    end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        self:RefreshWorkshop()
+        return
+    end
+    self.workshopSearchPending = true
+    C_Timer.After(WORKSHOP_SEARCH_DELAY, function()
+        GC.UI.workshopSearchPending = false
+        GC.UI:RefreshWorkshop()
+    end)
 end
 
 function GC.UI:RefreshWorkshop()
@@ -4246,13 +4270,7 @@ function GC.UI:OpenOrderCreateDialog(recipeKey)
     if not dialog then
         return
     end
-    local entry
-    for _, candidate in ipairs(GC.Workshop:GetCatalog()) do
-        if candidate.key == recipeKey then
-            entry = candidate
-            break
-        end
-    end
+    local entry = GC.Workshop:GetCatalogEntry(recipeKey)
     dialog.recipeKey = recipeKey
     dialog.title:SetText("Gildenauftrag: " .. ((entry and entry.name) or recipeKey))
     -- Vorlage des Rezepts, falls gemerkt - sonst die Grundeinstellung.
@@ -5298,6 +5316,10 @@ function GC.UI:RefreshPost()
     self:RefreshPostStatus()
 end
 
+-- So viele Interessenten passen auf eine Seite der Liste. Die Zahl steht hier
+-- einmal, damit Aufbau, Blaettern und Auffrischen nie auseinanderlaufen.
+local LEADS_PER_PAGE = 9
+
 function GC.UI:BuildInboxPage()
     local page = self.pages.INBOX
     CreatePageTitle(page, "Postfach", "Whispers und erkannte „Suche Gilde“-Nachrichten werden hier gesammelt.")
@@ -5316,11 +5338,11 @@ function GC.UI:BuildInboxPage()
     leadCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     page.leadButtons = {}
     page.leadDeleteButtons = {}
-    for index = 1, 9 do
-        local leadIndex = index
+    page.leadPage = 1
+    for index = 1, LEADS_PER_PAGE do
+        local slot = index
         local button = CreateButton(leadCard, "", 148, 38, function()
-            GC.UI.selectedLead = leadIndex
-            GC.UI:RefreshInbox()
+            GC.UI:SelectLead(GC.UI:GetLeadIndexForSlot(slot))
         end)
         button:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, -48 - ((index - 1) * 43))
         button.label:SetJustifyH("LEFT")
@@ -5328,14 +5350,20 @@ function GC.UI:BuildInboxPage()
         button.label:SetPoint("LEFT", button, "LEFT", 12, 0)
         page.leadButtons[index] = button
         local remove = CreateButton(leadCard, "×", 34, 38, function()
+            local leadIndex = GC.UI:GetLeadIndexForSlot(slot)
             local wasSelected = GC.UI.selectedLead == leadIndex
+            local removed = GC.DB:GetGuild().inbox[leadIndex]
+            local removedKey = removed and GC.Util.NormalizeName(removed.name)
             if GC.Chat:RemoveLead(leadIndex) then
+                if removedKey then
+                    page.replyDrafts[removedKey] = nil
+                end
                 local inbox = GC.DB:GetGuild().inbox
                 if GC.UI.selectedLead > leadIndex then
                     GC.UI.selectedLead = GC.UI.selectedLead - 1
                 elseif wasSelected then
                     GC.UI.selectedLead = math.max(1, math.min(leadIndex, #inbox))
-                    page.replyEdit:SetText("")
+                    GC.UI:LoadLeadDraft()
                 end
                 GC.UI:RefreshInbox()
             end
@@ -5344,6 +5372,22 @@ function GC.UI:BuildInboxPage()
         remove.label:SetTextColor(THEME.danger[1], THEME.danger[2], THEME.danger[3], 1)
         page.leadDeleteButtons[index] = remove
     end
+
+    -- Ab dem zehnten Interessenten war der Rest bisher unerreichbar: Es gab
+    -- weder eine Seitennavigation noch einen Hinweis, und einzeln loeschen liess
+    -- sich nur, was auf der ersten Seite stand.
+    page.leadPrev = CreateButton(leadCard, "◀", 34, 26, function()
+        page.leadPage = math.max(1, (page.leadPage or 1) - 1)
+        GC.UI:RefreshInbox()
+    end)
+    page.leadPrev:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, -444)
+    page.leadPageLabel = CreateLabel(leadCard, "", { muted = true, width = 108, align = "CENTER" })
+    page.leadPageLabel:SetPoint("LEFT", page.leadPrev, "RIGHT", 6, 0)
+    page.leadNext = CreateButton(leadCard, "▶", 34, 26, function()
+        page.leadPage = (page.leadPage or 1) + 1
+        GC.UI:RefreshInbox()
+    end)
+    page.leadNext:SetPoint("LEFT", page.leadPageLabel, "RIGHT", 6, 0)
     page.clearInboxButton = CreateButton(leadCard, "Alle löschen", 188, 30, function()
         if not page.confirmClearInbox then
             page.confirmClearInbox = true
@@ -5352,6 +5396,8 @@ function GC.UI:BuildInboxPage()
         end
         if GC.Chat:ClearInbox() then
             GC.UI.selectedLead = 1
+            page.leadPage = 1
+            page.replyDrafts = {}
             page.replyEdit:SetText("")
             page.replyResult:SetText("Postfach vollständig geleert.")
             SetTextColor(page.replyResult, THEME.muted)
@@ -5431,10 +5477,21 @@ function GC.UI:BuildInboxPage()
     page.replyEdit.container:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -263)
     page.replyByteCounter = CreateLabel(detailCard, "0/255 Bytes", { muted = true, align = "RIGHT", width = 110 })
     page.replyByteCounter:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -18, -374)
+    -- Jeder Entwurf gehoert zu genau einem Interessenten. Frueher blieb der Text
+    -- beim Wechsel stehen, waehrend der Senden-Knopf schon den neu gewaehlten
+    -- Spieler meinte - ein persoenlich formulierter Entwurf fuer A konnte so an
+    -- B gehen. Gemerkt wird nach Namen, nicht nach Listenplatz: Der verschiebt
+    -- sich, sobald ein Eintrag geloescht oder ausgeblendet wird.
+    page.replyDrafts = {}
     page.replyEdit:SetScript("OnTextChanged", function(edit)
-        local bytes = #(edit:GetText() or "")
+        local text = edit:GetText() or ""
+        local bytes = #text
         page.replyByteCounter:SetText(bytes .. "/" .. GC.Constants.MAX_CHAT_BYTES .. " Bytes")
         SetTextColor(page.replyByteCounter, bytes > GC.Constants.MAX_CHAT_BYTES and THEME.danger or THEME.muted)
+        local key = GC.UI:GetSelectedLeadKey()
+        if key then
+            page.replyDrafts[key] = text
+        end
     end)
 
     local thanks = CreateButton(detailCard, "Danke", 105, 30, function()
@@ -5462,6 +5519,10 @@ function GC.UI:BuildInboxPage()
     page.replyButton = CreateButton(detailCard, "Antworten", 248, 38, function()
         local lead = GC.DB:GetGuild().inbox[GC.UI.selectedLead]
         if lead and GC.Chat:SendReply(lead.name, page.replyEdit:GetText()) then
+            -- Verschickt ist verschickt: Der Entwurf hat seinen Zweck erfuellt
+            -- und darf nicht beim naechsten Aufruf wieder dastehen.
+            page.replyDrafts[GC.Util.NormalizeName(lead.name)] = nil
+            page.replyEdit:SetText("")
             page.replyResult:SetText("Antwort an " .. lead.name .. " gesendet.")
             SetTextColor(page.replyResult, THEME.success)
         else
@@ -5496,8 +5557,11 @@ function GC.UI:BuildInboxPage()
         local ok, message = GC.Chat:SetInboxFilter(lead.name, days)
         page.replyResult:SetText(message or "")
         SetTextColor(page.replyResult, ok and THEME.success or THEME.danger)
+        page.replyDrafts[GC.Util.NormalizeName(lead.name)] = nil
         GC.UI.selectedLead = 1
+        page.leadPage = 1
         page.replyEdit:SetText("")
+        GC.UI:LoadLeadDraft()
         GC.UI:RefreshInbox()
     end
 
@@ -5587,6 +5651,50 @@ function GC.UI:BuildInboxPage()
     page.filterNotice:SetPoint("BOTTOMLEFT", filterCard, "BOTTOMLEFT", 18, 12)
 end
 
+-- Welcher Interessent steht auf Listenplatz "slot" der aktuellen Seite?
+function GC.UI:GetLeadIndexForSlot(slot)
+    local page = self.pages.INBOX
+    local leadPage = (page and page.leadPage) or 1
+    return ((leadPage - 1) * LEADS_PER_PAGE) + slot
+end
+
+-- Der Schluessel, unter dem der Entwurf des gerade gewaehlten Interessenten
+-- liegt. Nil heisst: gar niemand gewaehlt, dann gehoert der Text niemandem.
+function GC.UI:GetSelectedLeadKey()
+    local lead = GC.DB:GetGuild().inbox[self.selectedLead]
+    if not lead then
+        return nil
+    end
+    return GC.Util.NormalizeName(lead.name)
+end
+
+-- Holt den gemerkten Entwurf des gewaehlten Interessenten ins Feld.
+function GC.UI:LoadLeadDraft()
+    local page = self.pages.INBOX
+    if not page or not page.replyEdit then
+        return
+    end
+    page.replyEdit:ClearFocus()
+    local key = self:GetSelectedLeadKey()
+    page.replyEdit:SetText((key and page.replyDrafts[key]) or "")
+end
+
+-- Wechselt den gewaehlten Interessenten und tauscht dabei den Entwurf mit aus.
+-- Nur fuer echte Wechsel: Nach einem Loeschen ist der bisherige Schluessel
+-- schon vergeben, dann wird ausschliesslich LoadLeadDraft benutzt.
+function GC.UI:SelectLead(leadIndex)
+    local page = self.pages.INBOX
+    if page and page.replyDrafts then
+        local previous = self:GetSelectedLeadKey()
+        if previous then
+            page.replyDrafts[previous] = page.replyEdit:GetText() or ""
+        end
+    end
+    self.selectedLead = leadIndex
+    self:LoadLeadDraft()
+    self:RefreshInbox()
+end
+
 function GC.UI:RefreshInbox()
     local page = self.pages.INBOX
     if not page then
@@ -5629,8 +5737,22 @@ function GC.UI:RefreshInbox()
     if self.selectedLead > #inbox then
         self.selectedLead = math.max(1, #inbox)
     end
+
+    local leadPageCount = math.max(1, math.ceil(#inbox / LEADS_PER_PAGE))
+    page.leadPage = math.max(1, math.min(page.leadPage or 1, leadPageCount))
+    local firstOnPage = (page.leadPage - 1) * LEADS_PER_PAGE
+    local showLeadPaging = #inbox > LEADS_PER_PAGE
+    page.leadPrev:SetShown(showLeadPaging)
+    page.leadNext:SetShown(showLeadPaging)
+    page.leadPageLabel:SetText(showLeadPaging
+        and ("Seite " .. page.leadPage .. "/" .. leadPageCount .. "  •  " .. #inbox)
+        or "")
+    SetButtonEnabled(page.leadPrev, page.leadPage > 1)
+    SetButtonEnabled(page.leadNext, page.leadPage < leadPageCount)
+
     for index, button in ipairs(page.leadButtons) do
-        local lead = inbox[index]
+        local leadIndex = firstOnPage + index
+        local lead = inbox[leadIndex]
         button:SetShown(lead ~= nil)
         page.leadDeleteButtons[index]:SetShown(lead ~= nil)
         if lead then
@@ -5646,7 +5768,7 @@ function GC.UI:RefreshInbox()
                 .. ClassColoredName(GC.Util.PlayerShortName(lead.name), lead.classFile)
                 .. (level and ("  |cff8b98a5" .. level .. "|r") or "")
                 .. (count > 1 and ("  |cff8b98a5(" .. count .. ")|r") or ""))
-            button:SetActive(self.selectedLead == index)
+            button:SetActive(self.selectedLead == leadIndex)
         end
     end
 
@@ -5780,6 +5902,20 @@ function GC.UI:BuildGuildPage()
         end
         profile.updatedAt = GC.Util.Now()
         GC.DB:GetGuild().recruitment.adText = GC.Recruitment:GenerateAdvertisement()
+
+        -- Erst pruefen, dann melden: Ein zu grosses Profil wird lokal zwar
+        -- gespeichert, kommt bei niemandem an. Das darf nicht als Erfolg
+        -- durchgehen.
+        local bytes, maximum, tooLarge = GC.Sync:GetGuildProfileSize()
+        if tooLarge then
+            GC:FireCallback("GUILD_PROFILE_UPDATED")
+            page.saveResult:SetText("Lokal gespeichert, aber NICHT gildenweit verteilt: "
+                .. bytes .. " von höchstens " .. maximum .. " Zeichen. "
+                .. "Bitte Texte, Antwortvorlagen oder Verzauberungsregeln kürzen.")
+            SetTextColor(page.saveResult, THEME.danger)
+            return
+        end
+
         if GC.Sync and GC.Sync.QueueGuildProfile then
             GC.Sync:QueueGuildProfile()
         end
@@ -6063,7 +6199,7 @@ function GC.UI:BuildStatisticsPage()
             -- Knoepfe neben der Kopfzeile.
             local evening = GC.RaidMonitor:GetEvenings()[index]
             if evening then
-                GC.RaidMonitor.selectedSessionID = evening.summary.id
+                GC.RaidMonitor.selectedSessionID = GC.RaidMonitor:SummaryKey(evening.summary)
                 GC.UI:RefreshStatistics()
             end
         end)
@@ -6377,9 +6513,11 @@ function GC.UI:RefreshStatistics()
     -- hat, soll ihn einmal in der Liste finden.
     local evenings = monitor:GetEvenings()
     page.sessionEmpty:SetShown(#evenings == 0)
+    -- Gewaehlt wird ueber Kennung UND Quelle: Live- und Sync-Fassung desselben
+    -- Abends teilen sich die Kennung, sind aber zwei Auswertungen.
     local selectedID = monitor.selectedSessionID
-    if not monitor:GetSummary(selectedID) then
-        selectedID = evenings[1] and evenings[1].summary.id
+    if not monitor:GetSummaryByKey(selectedID) then
+        selectedID = evenings[1] and monitor:SummaryKey(evenings[1].summary)
         monitor.selectedSessionID = selectedID
     end
 
@@ -6411,13 +6549,13 @@ function GC.UI:RefreshStatistics()
                     and ("  |cff4ec9ff+" .. table.concat(extras, "+") .. "|r") or ""))
             local active = false
             for _, candidate in ipairs(evening.sources) do
-                active = active or candidate.id == selectedID
+                active = active or monitor:SummaryKey(candidate) == selectedID
             end
             row:SetActive(active)
         end
     end
 
-    local selected = monitor:GetSummary(selectedID)
+    local selected = monitor:GetSummaryByKey(selectedID)
     page.participantEmpty:SetShown(selected == nil)
     if selected then
         page.sessionHeadline:SetText(FormatSessionDate(selected)
@@ -6446,7 +6584,7 @@ function GC.UI:RefreshStatistics()
     for index = #page.sessionSourceButtons, 1, -1 do
         local button = page.sessionSourceButtons[index]
         local candidate = multiSource and evening.sources[index] or nil
-        button.summaryID = candidate and candidate.id or nil
+        button.summaryID = candidate and monitor:SummaryKey(candidate) or nil
         button:SetShown(candidate ~= nil)
         if candidate then
             button:ClearAllPoints()
@@ -6455,7 +6593,7 @@ function GC.UI:RefreshStatistics()
             button:SetText((SESSION_SOURCE_MARK[candidate.source or "LIVE"] or "?")
                 .. " (" .. #(candidate.participants or {}) .. ")")
             SetButtonEnabled(button, true)
-            button:SetActive(candidate.id == selectedID)
+            button:SetActive(button.summaryID == selectedID)
         end
     end
 
@@ -8113,12 +8251,12 @@ function GC.UI:RefreshSessionReview()
     local sources = evening.sources
     local selectedValid = false
     for _, candidate in ipairs(sources) do
-        if candidate.id == frame.selectedID then
+        if monitor:SummaryKey(candidate) == frame.selectedID then
             selectedValid = true
         end
     end
     if not selectedValid then
-        frame.selectedID = evening.summary.id
+        frame.selectedID = monitor:SummaryKey(evening.summary)
     end
     if frame.compare and #sources < 2 then
         frame.compare = false
@@ -8126,12 +8264,12 @@ function GC.UI:RefreshSessionReview()
 
     for index, button in ipairs(frame.sourceButtons) do
         local candidate = sources[index]
-        button.summaryID = candidate and candidate.id or nil
+        button.summaryID = candidate and monitor:SummaryKey(candidate) or nil
         button:SetShown(candidate ~= nil)
         if candidate then
             button:SetText((SESSION_SOURCE_LABEL[candidate.source or "LIVE"] or "?")
                 .. " (" .. #(candidate.participants or {}) .. ")")
-            button:SetActive(not frame.compare and candidate.id == frame.selectedID)
+            button:SetActive(not frame.compare and button.summaryID == frame.selectedID)
         end
     end
     frame.compareButton:SetShown(#sources > 1)
@@ -8141,7 +8279,7 @@ function GC.UI:RefreshSessionReview()
 
     local shownRows = 0
     if not frame.compare then
-        local summary = monitor:GetSummary(frame.selectedID) or evening.summary
+        local summary = monitor:GetSummaryByKey(frame.selectedID) or evening.summary
         local zone = summary.zone ~= "" and summary.zone or "Raid"
         frame.headline:SetText(FormatSessionDate(summary) .. "  •  " .. zone
             .. "  •  " .. FormatDuration((summary.endedAt or 0) - (summary.startedAt or 0))

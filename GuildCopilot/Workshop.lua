@@ -386,6 +386,7 @@ function GC.Workshop:StoreCatalogRecipe(recipe, professionKey, professionName)
         profession = professionName or (existing and existing.profession),
         reagents = recipe.reagents or (existing and existing.reagents) or {},
     }
+    self:InvalidateCatalog()
     return true
 end
 
@@ -419,6 +420,7 @@ function GC.Workshop:ClaimRecipes(info)
         recipeKeys = recipeKeys,
     }
     workshop.crafters[crafterKey] = crafter
+    self:InvalidateCatalog()
     return crafter
 end
 
@@ -569,6 +571,7 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
     profession.fingerprint = RecipeFingerprint(profession)
     profession.fingerprintHash = FingerprintHash(profession.fingerprint)
     workshop.professions[professionKey] = profession
+    self:InvalidateCatalog()
     self.lastScan = {
         name = professionName,
         recipes = #SortedKeys(recipes),
@@ -1766,7 +1769,19 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
     end
 end
 
-function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
+-- Der Katalogaufbau ist der teuerste Vorgang der ganzen Werkstatt: Er laeuft
+-- ueber die eigenen Rezepte, die aller Twinks desselben Accounts und den
+-- kompletten Gildenindex und kopiert dabei jede Reagenzienliste. Bei mehreren
+-- tausend Rezepten ist das nichts, was pro Tastendruck passieren darf - und
+-- genau das tat es: die Suche baute ihn ueber GetSummary und GetCatalog gleich
+-- zweimal je Zeichen neu auf. Gebaut wird jetzt einmal; gesucht wird im
+-- Ergebnis. Neu entsteht der Index nur, wenn sich die Daten wirklich geaendert
+-- haben - dafuer sorgt InvalidateCatalog an den vier schreibenden Stellen.
+function GC.Workshop:GetCatalogIndex()
+    if self.catalogIndex then
+        return self.catalogIndex
+    end
+
     local catalog = {}
     local ownName = GC:GetPlayerFullName()
     AddCrafterToCatalog(catalog, ownName, self:GetOwnData().professions)
@@ -1819,18 +1834,17 @@ function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
         end
     end
 
-    query = NormalizeKey(query)
-    professionFilter = NormalizeKey(professionFilter)
-    local favorites = GC.DB:GetSettings().workshopFavorites or {}
+    -- Suchtext und Berufsschluessel entstehen einmal hier und nicht bei jedem
+    -- Tastendruck erneut fuer jeden der tausenden Eintraege.
     local entries = {}
+    local byKey = {}
     for _, entry in pairs(catalog) do
         table.sort(entry.crafters)
-        local searchable = NormalizeKey(entry.name .. " " .. entry.profession .. " " .. table.concat(entry.crafters, " "))
-        local professionMatches = professionFilter == "" or NormalizeKey(entry.profession) == professionFilter
-        local favoriteMatches = not favoritesOnly or favorites[entry.key] == true
-        if professionMatches and favoriteMatches and (query == "" or searchable:find(query, 1, true)) then
-            entries[#entries + 1] = entry
-        end
+        entry.searchable = NormalizeKey(
+            entry.name .. " " .. entry.profession .. " " .. table.concat(entry.crafters, " "))
+        entry.professionKey = NormalizeKey(entry.profession)
+        entries[#entries + 1] = entry
+        byKey[entry.key] = entry
     end
     table.sort(entries, function(left, right)
         if left.profession ~= right.profession then
@@ -1838,7 +1852,49 @@ function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
         end
         return left.name < right.name
     end)
+
+    -- Der Schluesselindex haengt bewusst NICHT am Ergebnisarray: Aufrufer
+    -- duerfen weiter mit pairs darueber laufen, ohne ein Zusatzfeld zu treffen.
+    self.catalogByKey = byKey
+    self.catalogIndex = entries
     return entries
+end
+
+-- Verwirft den zwischengespeicherten Index. Aufgerufen wird das ausschliesslich
+-- dort, wo sich der Rezeptbestand wirklich aendert - nicht bei jedem
+-- WORKSHOP_UPDATED, denn das feuert auch fuer reine Synchronisierungszaehler.
+function GC.Workshop:InvalidateCatalog()
+    self.catalogIndex = nil
+    self.catalogByKey = nil
+    self.catalogSummary = nil
+end
+
+-- Ein einzelnes Rezept nach Schluessel. Vorher suchten die Aufrufer linear
+-- durch den kompletten Katalog - bei jedem Auftragsdialog einmal komplett.
+function GC.Workshop:GetCatalogEntry(recipeKey)
+    self:GetCatalogIndex()
+    return self.catalogByKey[tostring(recipeKey or "")]
+end
+
+function GC.Workshop:GetCatalog(query, professionFilter, favoritesOnly)
+    local entries = self:GetCatalogIndex()
+    query = NormalizeKey(query)
+    professionFilter = NormalizeKey(professionFilter)
+    if query == "" and professionFilter == "" and not favoritesOnly then
+        return entries
+    end
+
+    local favorites = GC.DB:GetSettings().workshopFavorites or {}
+    local matches = {}
+    for _, entry in ipairs(entries) do
+        local professionMatches = professionFilter == "" or entry.professionKey == professionFilter
+        local favoriteMatches = not favoritesOnly or favorites[entry.key] == true
+        if professionMatches and favoriteMatches
+            and (query == "" or entry.searchable:find(query, 1, true)) then
+            matches[#matches + 1] = entry
+        end
+    end
+    return matches
 end
 
 -- Wer die Gilde verlaesst, verschwindet mit seinen Rezepten aus der Werkstatt.
@@ -1892,6 +1948,7 @@ function GC.Workshop:PruneDepartedCrafters()
                 workshop.catalog[recipeKey] = nil
             end
         end
+        self:InvalidateCatalog()
         GC:FireCallback("WORKSHOP_UPDATED")
     end
     return removed
@@ -1935,8 +1992,14 @@ function GC.Workshop:GetMissingOwnProfessions()
     return missing
 end
 
+-- Die Kennzahlen haengen ausschliesslich am Index. Sie werden deshalb mit ihm
+-- zusammen gehalten, statt bei jedem Tastendruck in der Suche neu ueber alle
+-- Rezepte und deren Hersteller zu laufen.
 function GC.Workshop:GetSummary()
-    local entries = self:GetCatalog("")
+    if self.catalogSummary and self.catalogIndex then
+        return self.catalogSummary
+    end
+    local entries = self:GetCatalogIndex()
     local crafters = {}
     local professions = {}
     for _, entry in ipairs(entries) do
@@ -1963,11 +2026,12 @@ function GC.Workshop:GetSummary()
     for _ in pairs(professions) do
         professionCount = professionCount + 1
     end
-    return {
+    self.catalogSummary = {
         recipes = #entries,
         crafters = crafterCount,
         professions = professionCount,
     }
+    return self.catalogSummary
 end
 
 -- GET_ITEM_INFO_RECEIVED meldet jeden einzelnen Gegenstand, den der Client in
@@ -1982,13 +2046,16 @@ function GC.Workshop:ScheduleNameRefresh()
     if self.nameRefreshPending then
         return
     end
+    -- Nachgeladene Namen aendern Anzeige UND Suchtext, der Index muss also weg.
     if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:InvalidateCatalog()
         GC:FireCallback("WORKSHOP_UPDATED")
         return
     end
     self.nameRefreshPending = true
     C_Timer.After(NAME_REFRESH_DELAY, function()
         GC.Workshop.nameRefreshPending = false
+        GC.Workshop:InvalidateCatalog()
         GC:FireCallback("WORKSHOP_UPDATED")
     end)
 end
@@ -2008,6 +2075,17 @@ workshopEvents:SetScript("OnEvent", function(_, event)
         end
         GC.Workshop:ScheduleScan()
     end
+end)
+
+-- Sicherheitsnetz fuer den Katalog-Cache: Die vier schreibenden Funktionen
+-- verwerfen ihn selbst, aber WORKSHOP_UPDATED ist das Signal, DASS sich etwas
+-- geaendert hat. Lieber einmal zu viel neu aufbauen als eine veraltete Liste
+-- zeigen - das Ereignis feuert bei Datenaenderungen und beim Synchronisieren,
+-- nicht beim Tippen in der Suche. Genau dort lag der teure Fall.
+-- Registriert VOR der Oberflaeche (Workshop.lua steht in der TOC vor UI.lua),
+-- damit der Cache weg ist, bevor irgendetwas neu gezeichnet wird.
+GC:RegisterCallback("WORKSHOP_UPDATED", GC.Workshop, function(self)
+    self:InvalidateCatalog()
 end)
 
 -- Der Roster wird nach jeder Gildenaktualisierung neu gelesen; das Aufraeumen

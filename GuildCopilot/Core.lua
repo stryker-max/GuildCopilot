@@ -239,7 +239,19 @@ function GC.Util.SplitFields(payload)
     return fields
 end
 
+-- Zeitstempel entscheiden gildenweit, welcher Stand des Gildenprofils gewinnt.
+-- Die lokale Systemuhr taugt dafuer schlecht: Sie geht auf jedem Rechner ein
+-- bisschen anders, und eine falsch gestellte Uhr in der Zukunft konnte jede
+-- spaetere Aenderung der ganzen Gilde blockieren. GetServerTime() liefert
+-- dagegen fuer alle auf demselben Realm dieselbe Zeit. Wo es die Funktion
+-- nicht gibt, bleibt es bei der Systemuhr.
 function GC.Util.Now()
+    if GetServerTime then
+        local ok, serverTime = pcall(GetServerTime)
+        if ok and tonumber(serverTime) then
+            return serverTime
+        end
+    end
     return time and time() or 0
 end
 

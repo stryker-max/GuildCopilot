@@ -21,6 +21,11 @@ local MIN_REPLY_INTERVAL = 15
 local MIN_PROFILE_REPLY_INTERVAL = 30
 local MIN_MANUAL_SYNC_INTERVAL = 15
 local INCOMING_TTL = 5 * 60
+-- Wie weit ein fremder Zeitstempel hoechstens in der Zukunft liegen darf, bevor
+-- er als falsch gestellte Uhr gilt. Ein Tag ist grosszuegig genug fuer
+-- Realm-Wechsel und Sommerzeit und eng genug, um eine um Jahre verstellte Uhr
+-- nicht zur ewigen Autoritaet ueber das Gildenprofil zu machen.
+local MAX_CLOCK_SKEW = 24 * 60 * 60
 -- ChatThrottleLib nutzt dieselben konservativen Grenzwerte. Ist die Bibliothek
 -- bereits durch ein anderes Addon geladen, reihen wir uns dort ein. Andernfalls
 -- stellt diese kleine lokale Warteschlange denselben Schutz bereit: bis zu 4 KB
@@ -763,7 +768,10 @@ function GC.Sync:ReplyWithProfile()
     return true
 end
 
-function GC.Sync:BuildGuildProfileMessages()
+-- Die fertige Nutzlast des Gildenprofils, noch nicht zerlegt. Getrennt vom
+-- Zerlegen, damit sich ihre Groesse schon beim Speichern pruefen laesst - und
+-- nicht erst der Empfaenger stumm entscheidet, dass es zu viel war.
+function GC.Sync:BuildGuildProfilePayload()
     local guildData = GC.DB:GetGuild()
     local profile = guildData.profile
     local permissions = guildData.profilePermissions
@@ -808,9 +816,34 @@ function GC.Sync:BuildGuildProfileMessages()
     for index, value in ipairs(fields) do
         fields[index] = GC.Util.EscapeField(value)
     end
-    local payload = table.concat(fields, "|")
+    return table.concat(fields, "|")
+end
+
+function GC.Sync:GetGuildProfileMaxBytes()
+    return GC.Constants.GUILD_PROFILE_MAX_CHUNKS * GC.Constants.GUILD_PROFILE_CHUNK_BYTES
+end
+
+-- Aktuelle Groesse und Obergrenze der Gildenprofil-Nutzlast. Die Oberflaeche
+-- fragt das vor dem Speichern ab und sagt es dem Offizier, statt lokal Erfolg
+-- zu melden und gildenweit nichts auszuliefern.
+function GC.Sync:GetGuildProfileSize()
+    local bytes = #self:BuildGuildProfilePayload()
+    local maximum = self:GetGuildProfileMaxBytes()
+    return bytes, maximum, bytes > maximum
+end
+
+-- Zerlegt die Nutzlast in sendbare Bloecke. Passt sie nicht mehr durch, wird
+-- gar nicht erst gesendet: Ein halbes Profil kann der Empfaenger ohnehin nicht
+-- zusammensetzen, und die zweite Rueckgabe sagt, wie viel zu viel es war.
+function GC.Sync:BuildGuildProfileMessages()
+    local payload = self:BuildGuildProfilePayload()
+    local maximum = self:GetGuildProfileMaxBytes()
+    if #payload > maximum then
+        return {}, #payload, maximum
+    end
+
     local chunks = {}
-    local chunkSize = 175
+    local chunkSize = GC.Constants.GUILD_PROFILE_CHUNK_BYTES
     for offset = 1, #payload, chunkSize do
         chunks[#chunks + 1] = payload:sub(offset, offset + chunkSize - 1)
     end
@@ -836,7 +869,16 @@ function GC.Sync:SendGuildProfile(force)
     if not force and not GC.Roster:CanEditGuildProfile() then
         return false
     end
-    local messages = self:BuildGuildProfileMessages()
+    local messages, bytes, maximum = self:BuildGuildProfileMessages()
+    if #messages == 0 then
+        -- Lieber laut scheitern als leise: Vorher sah der Offizier "Gespeichert",
+        -- waehrend bei allen anderen nichts ankam.
+        GC:Print("|cffff5555Das Gildenprofil ist zu gross zum Synchronisieren|r ("
+            .. bytes .. " von höchstens " .. maximum .. " Zeichen). "
+            .. "Bitte Texte, Antwortvorlagen oder Verzauberungsregeln kürzen.")
+        GC:FireCallback("GUILD_PROFILE_TOO_LARGE", bytes, maximum)
+        return false
+    end
     local index = 1
     local retries = 0
     local function SendNext()
@@ -851,6 +893,10 @@ function GC.Sync:SendGuildProfile(force)
         else
             retries = retries + 1
             if retries >= 5 then
+                -- Auch der abgebrochene Versand war bisher unsichtbar.
+                GC:Print("|cffff5555Das Gildenprofil konnte nicht vollständig gesendet werden|r ("
+                    .. (index - 1) .. " von " .. #messages .. " Teilen). "
+                    .. "Bitte im Gildenprofil erneut speichern.")
                 return
             end
         end
@@ -891,8 +937,9 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     local index = tonumber(indexText)
     local total = tonumber(totalText)
     if schemaVersion ~= GC.Constants.SCHEMA_VERSION
-        or not index or not total or index < 1 or index > total or total > 30
-        or #token > 40 or #chunk > 175 then
+        or not index or not total or index < 1 or index > total
+        or total > GC.Constants.GUILD_PROFILE_MAX_CHUNKS
+        or #token > 40 or #chunk > GC.Constants.GUILD_PROFILE_CHUNK_BYTES then
         return
     end
 
@@ -918,13 +965,35 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     end
     self.guildProfileIncoming[incomingKey] = nil
 
-    local fields = GC.Util.SplitFields(table.concat(payloadParts))
+    local payload = table.concat(payloadParts)
+    local fields = GC.Util.SplitFields(payload)
     if fields[1] ~= "GP" then
         return
     end
     local updatedAt = tonumber(fields[2]) or 0
     local guildData = GC.DB:GetGuild()
-    if updatedAt < (tonumber(guildData.profile.updatedAt) or 0) then
+    local now = GC.Util.Now()
+
+    -- Eine Uhr, die weit in der Zukunft steht, hat sonst das letzte Wort auf
+    -- Dauer: Ihr Zeitstempel ist groesser als jeder echte, und keine spaetere
+    -- Aenderung kaeme je durch. Solche Staende werden weder uebernommen noch
+    -- verteidigt.
+    if updatedAt > (now + MAX_CLOCK_SKEW) then
+        return
+    end
+    local storedAt = tonumber(guildData.profile.updatedAt) or 0
+    if storedAt > (now + MAX_CLOCK_SKEW) then
+        storedAt = 0
+    end
+
+    if updatedAt < storedAt then
+        return
+    end
+    -- Gleicher Zeitstempel, zwei Fassungen: Bisher gewann schlicht die zuletzt
+    -- eingetroffene, und damit auf jedem Rechner eine andere. Entschieden wird
+    -- deshalb ueber die Nutzlast selbst - dieselbe Regel fuehrt ueberall zum
+    -- selben Ergebnis, ohne dass ein Feld dafuer durch die Leitung muss.
+    if updatedAt == storedAt and payload <= self:BuildGuildProfilePayload() then
         return
     end
 
@@ -1161,10 +1230,10 @@ end
 -- auch Mitglieder fremder Gilden.
 function GC.Sync:RequestVersionCheck(mode)
     if mode == "GROUP" then
-        if not (IsInGroup and IsInGroup()) then
+        local channel = self:GroupChannel()
+        if not channel then
             return false
         end
-        local channel = (IsInRaid and IsInRaid()) and "RAID" or "PARTY"
         return self:Send(self:BuildVersionMessage(true), channel)
     end
     return self:AnnounceVersion(true, 5)
@@ -1343,28 +1412,56 @@ function GC.Sync:GetAddonUserStats()
     return stats
 end
 
+-- Der richtige Kanal fuer die aktuelle Gruppe. Sitzungen lassen sich auch in
+-- einer normalen Party starten, Start, Ende und Auswertung gingen aber fest
+-- ueber RAID - in einer Party erreichte das niemanden. Der Empfaenger nimmt
+-- beide Kanaele schon immer an, nur gesendet wurde falsch.
+function GC.Sync:GroupChannel()
+    if IsInRaid and IsInRaid() then
+        return "RAID"
+    end
+    if IsInGroup and IsInGroup() then
+        return "PARTY"
+    end
+    return nil
+end
+
 function GC.Sync:AnnounceSessionStart(session)
+    local channel = self:GroupChannel()
+    if not channel then
+        return false
+    end
     return self:Send(table.concat({
         "RS",
         tostring(GC.Constants.SCHEMA_VERSION),
         session.id,
         tostring(session.startedAt),
         GC.Util.EscapeField(session.zone or ""),
-    }, "|"), "RAID")
+    }, "|"), channel)
 end
 
 function GC.Sync:AnnounceSessionEnd(summary)
+    local channel = self:GroupChannel()
+    if not channel then
+        return false
+    end
     return self:Send(table.concat({
         "RE",
         tostring(GC.Constants.SCHEMA_VERSION),
         summary.id,
         tostring(summary.endedAt),
-    }, "|"), "RAID")
+    }, "|"), channel)
 end
 
 -- Die Zusammenfassung geht gedrosselt und in Teilen raus; fehlgeschlagene
 -- Pakete werden begrenzt wiederholt, damit keine Lücke entsteht.
 function GC.Sync:DistributeSummary(summary, distribution, target)
+    -- Ohne ausdrueckliches Ziel geht die Auswertung an die eigene Gruppe - in
+    -- der Party ueber PARTY, im Raid ueber RAID.
+    distribution = distribution or self:GroupChannel()
+    if not distribution then
+        return 0
+    end
     local messages = GC.RaidMonitor:BuildSummaryMessages(summary)
     local index = 1
     local retries = 0
@@ -1373,7 +1470,7 @@ function GC.Sync:DistributeSummary(summary, distribution, target)
         if not message then
             return
         end
-        local sent = self:Send(message, distribution or "RAID", target)
+        local sent = self:Send(message, distribution, target)
         if sent then
             index = index + 1
             retries = 0

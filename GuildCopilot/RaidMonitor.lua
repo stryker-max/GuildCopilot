@@ -241,7 +241,9 @@ function GC.RaidMonitor:EndSession()
     local summary = self:FinishSession(GC.Util.Now())
     if summary then
         GC.Sync:AnnounceSessionEnd(summary)
-        GC.Sync:DistributeSummary(summary, "RAID")
+        -- Ohne festen Kanal: DistributeSummary waehlt RAID oder PARTY danach,
+        -- in welcher Gruppe die Sitzung tatsaechlich lief.
+        GC.Sync:DistributeSummary(summary)
     end
     local participantCount = summary and #summary.participants or 0
     return true, "Raidsitzung beendet. " .. participantCount
@@ -345,12 +347,14 @@ function GC.RaidMonitor:StoreSummary(summary)
 
     local sessions = GC.DB:GetGuild().raidSessions
     for index, stored in ipairs(sessions) do
-        if stored.id == summary.id then
-            -- Live-, Sync- und WCL-Daten bleiben getrennt und werden nie
-            -- ineinander verrechnet.
-            if stored.source ~= summary.source then
-                return false
-            end
+        -- Live-, Sync- und WCL-Daten bleiben getrennt und werden nie ineinander
+        -- verrechnet - deshalb identifiziert erst Kennung UND Quelle zusammen
+        -- eine Auswertung. Vorher zaehlte allein die Kennung: Jeder Teilnehmer
+        -- speicherte beim Sitzungsende seine eigene LIVE-Fassung, und die
+        -- vollstaendigere SYNC-Fassung des Raidleiters wurde danach mit
+        -- derselben Kennung als "andere Quelle" verworfen, statt neben der
+        -- eigenen zu stehen. Der Quellenvergleich hatte damit nie zwei Seiten.
+        if stored.id == summary.id and stored.source == summary.source then
             -- Die vollständigere Auswertung gewinnt, bei Gleichstand die neuere.
             local storedSize = #(stored.participants or {})
             local incomingSize = #(summary.participants or {})
@@ -395,23 +399,23 @@ end
 -- Löschen dürfen nur die Ränge, die auch die Mitgliederpflege öffnen
 -- (Standard: Offiziere oder höher). Der Kreis ist in den Einstellungen
 -- einstellbar und wird gildenweit synchronisiert.
-function GC.RaidMonitor:DeleteEvening(sessionID)
+function GC.RaidMonitor:DeleteEvening(summaryKey)
     if not GC.Roster:CanAccessMemberCare() then
         return false, "Nur die in den Einstellungen freigegebenen Ränge dürfen Auswertungen löschen."
     end
-    local evening = self:GetEveningOf(sessionID)
+    local evening = self:GetEveningOf(summaryKey)
     if not evening then
         return false, "Keine Auswertung gewählt."
     end
     local drop = {}
     local dropped = 0
     for _, summary in ipairs(evening.sources) do
-        drop[summary.id] = true
+        drop[self:SummaryKey(summary)] = true
         dropped = dropped + 1
     end
     local sessions = GC.DB:GetGuild().raidSessions
     for index = #sessions, 1, -1 do
-        if drop[sessions[index].id] then
+        if drop[self:SummaryKey(sessions[index])] then
             table.remove(sessions, index)
         end
     end
@@ -428,9 +432,36 @@ function GC.RaidMonitor:GetSummaries()
     return GC.DB:GetGuild().raidSessions or {}
 end
 
-function GC.RaidMonitor:GetSummary(sessionID)
+-- Eine gespeicherte Auswertung wird durch Kennung UND Quelle identifiziert:
+-- Derselbe Abend liegt als LIVE-Mitschrift und als SYNC-Fassung des
+-- Raidleiters mit derselben Kennung nebeneinander. Wo frueher die Kennung
+-- allein als Auswahl diente, traf sie damit immer nur die erste von beiden -
+-- die zweite Quelle liess sich gar nicht anzeigen.
+function GC.RaidMonitor:SummaryKey(summary)
+    if not summary then
+        return nil
+    end
+    return tostring(summary.id or "") .. "#" .. tostring(summary.source or "LIVE")
+end
+
+function GC.RaidMonitor:GetSummaryByKey(summaryKey)
+    if not summaryKey then
+        return nil
+    end
     for _, summary in ipairs(self:GetSummaries()) do
-        if summary.id == sessionID then
+        if self:SummaryKey(summary) == summaryKey then
+            return summary
+        end
+    end
+    return nil
+end
+
+-- Bestand einer Quelle: Gibt es zu dieser Kennung schon eine Auswertung
+-- GENAU dieser Herkunft? Der Import fragt so, ob ein Report schon da ist.
+function GC.RaidMonitor:GetSummary(sessionID, source)
+    for _, summary in ipairs(self:GetSummaries()) do
+        if summary.id == sessionID
+            and (source == nil or (summary.source or "LIVE") == source) then
             return summary
         end
     end
@@ -517,10 +548,10 @@ function GC.RaidMonitor:GetEvenings()
     return evenings
 end
 
-function GC.RaidMonitor:GetEveningOf(sessionID)
+function GC.RaidMonitor:GetEveningOf(summaryKey)
     for _, evening in ipairs(self:GetEvenings()) do
         for _, summary in ipairs(evening.sources) do
-            if summary.id == sessionID then
+            if self:SummaryKey(summary) == summaryKey then
                 return evening
             end
         end

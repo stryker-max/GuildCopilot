@@ -117,13 +117,46 @@ function GC.Roster:ScanNow()
     GC:FireCallback("ROSTER_UPDATED")
 end
 
+-- Wer zaehlt als aktiver Raider? Diese Frage beantwortete bisher nur die
+-- Raiderliste fuer sich selbst; die Rekrutierungsabdeckung zaehlte dagegen
+-- JEDES Gildenmitglied mit - auch den Stufe-12-Twink und einen Rang, der
+-- ausdruecklich ausgeschlossen war. Eine gesuchte Spec galt dadurch als
+-- abgedeckt, obwohl sie niemand raiden konnte. Beide Seiten fragen jetzt hier.
+function GC.Roster:CountsAsActiveRaider(member)
+    if not member then
+        return false
+    end
+    if (tonumber(member.level) or 0) < 70 then
+        return false
+    end
+    local rosterSettings = GC.DB:GetGuild().roster
+    if rosterSettings.rankFilterConfigured
+        and rosterSettings.activeRaiderRanks[tostring(member.rankIndex)] ~= true then
+        return false
+    end
+    return true
+end
+
+-- Fuer die Abdeckung reicht "darf raiden" nicht: Wer seit Monaten nicht mehr
+-- eingeloggt war, deckt keine Spec ab. Ausgeschlossen wird aber nur, wessen
+-- Abwesenheit wirklich bekannt ist - liefert der Client keine Zeit seit dem
+-- letzten Login, darf das niemanden aus der Rechnung werfen.
+function GC.Roster:CountsForCoverage(member)
+    if not self:CountsAsActiveRaider(member) then
+        return false
+    end
+    local inactivityDays = tonumber(GC.DB:GetGuild().memberCare.inactivityDays) or 60
+    local lastOnlineHours = tonumber(member.lastOnlineHours)
+    if lastOnlineHours and lastOnlineHours > (inactivityDays * 24) then
+        return false
+    end
+    return true
+end
+
 function GC.Roster:GetActiveRaiders(limit)
     local raiders = {}
-    local rosterSettings = GC.DB:GetGuild().roster
     for _, member in ipairs(self.members) do
-        local rankAllowed = not rosterSettings.rankFilterConfigured
-            or rosterSettings.activeRaiderRanks[tostring(member.rankIndex)] == true
-        if (tonumber(member.level) or 0) >= 70 and rankAllowed then
+        if self:CountsAsActiveRaider(member) then
             raiders[#raiders + 1] = member
         end
     end
@@ -788,16 +821,24 @@ function GC.Roster:GetSummary()
 
         local profile = self:GetProfile(member.name)
         if profile then
+            -- Gezaehlt wird weiter alles, was in der Gilde steht - nur die
+            -- Abdeckung, aus der die Rekrutierungsvorschlaege entstehen, zaehlt
+            -- ausschliesslich Spieler, die tatsaechlich raiden koennen.
+            local counts = self:CountsForCoverage(member)
             local specKey = profile.raidSpecKey or profile.detectedSpecKey
             if specKey and GC.SpecByKey[specKey] then
                 summary.knownProfiles = summary.knownProfiles + 1
                 summary.specCounts[specKey] = (summary.specCounts[specKey] or 0) + 1
-                summary.coverageSpecCounts[specKey] = (summary.coverageSpecCounts[specKey] or 0) + 1
+                if counts then
+                    summary.coverageSpecCounts[specKey] = (summary.coverageSpecCounts[specKey] or 0) + 1
+                end
             end
             local secondarySpecKey = profile.secondarySpecKey
             if secondarySpecKey and GC.SpecByKey[secondarySpecKey] then
                 summary.secondarySpecCounts[secondarySpecKey] = (summary.secondarySpecCounts[secondarySpecKey] or 0) + 1
-                summary.coverageSpecCounts[secondarySpecKey] = (summary.coverageSpecCounts[secondarySpecKey] or 0) + 1
+                if counts then
+                    summary.coverageSpecCounts[secondarySpecKey] = (summary.coverageSpecCounts[secondarySpecKey] or 0) + 1
+                end
             end
             if profile.confirmed then
                 summary.confirmedProfiles = summary.confirmedProfiles + 1

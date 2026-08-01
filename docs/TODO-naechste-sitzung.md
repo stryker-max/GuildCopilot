@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 01.08.2026, nach Release 0.9.80 / Installer 1.0.5.
+Stand: 02.08.2026, nach Release 0.9.81 / Installer 1.0.6.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -14,10 +14,17 @@ node tests/validate.mjs
 
 `tests/smoke.lua` braucht einen Lua-Interpreter. Auf diesem Rechner ist keiner
 installiert; er läuft über **fengari** als npm-Paket (`npm install fengari` im
-Scratchpad, Runner schreiben, der `loadfile` mit Dateiinhalt versorgt und die
-Datei als **Bytes** übergibt). Lua bricht bei mehr als 200 lokalen Variablen je
-Funktion ab, und smoke.lua ist eine einzige – neue Testblöcke deshalb in
-`do ... end` kapseln.
+Scratchpad, Runner schreiben, der `luaL_loadbuffer` mit dem Dateiinhalt als
+**Bytes** versorgt). Zwei Fallstricke, beide in 0.9.81 durchgemacht:
+
+- der Runner muss **aus dem Repository-Wurzelverzeichnis** laufen, sonst findet
+  smoke.lua `GuildCopilot/Constants.lua` nicht;
+- fengari ist eine **Lua-5.3**-Implementierung, smoke.lua ist für 5.1
+  geschrieben (so läuft es im WoW-Client). Vor dem Testlauf deshalb
+  `if unpack == nil then unpack = table.unpack end` ausführen.
+
+Lua bricht bei mehr als 200 lokalen Variablen je Funktion ab, und smoke.lua ist
+eine einzige – neue Testblöcke deshalb in `do ... end` kapseln.
 
 Nach jedem fertigen Punkt: Version in `GuildCopilot.toc`, `Constants.lua`,
 `README.md` und `tests/validate.mjs` gleichziehen, ROADMAP nachführen, nach
@@ -224,6 +231,41 @@ Ehrliche Optionen für später:
   als Momentaufnahme des Scannenden, nicht als Mindeststufe.
 
 Vor dem Bau entscheiden, welcher Weg gewollt ist.
+
+---
+
+## 7. Fremdanalyse – ABGEARBEITET in 0.9.81
+
+Eine externe Codeanalyse meldete fünfzehn Punkte. Alle wurden geprüft, der
+Großteil ist in 0.9.81 umgesetzt (Einzelheiten im ROADMAP-Abschnitt). Nicht
+umgesetzt und **bewusst so**:
+
+- **Selbstupdate ohne kryptografische Verifikation.** Faktisch richtig: Die EXE
+  wird vom veränderlichen `main`-Branch geladen und nur auf eine Mindestgröße
+  geprüft. Nur ist der Angreifer, gegen den das schützen müsste, jemand mit
+  Schreibrechten auf genau dieses Repository – ein SHA-256-Manifest **im selben
+  Repository** hilft dagegen nicht. Echter Schutz wäre eine Authenticode-
+  Signatur mit einem Schlüssel außerhalb des Repositories; das Zertifikat kostet
+  jährlich dreistellig (siehe README-Abschnitt zu SmartScreen);
+- **Installer aktualisiert nicht atomar.** Er kopiert Datei für Datei in den
+  Addon-Ordner. Das ist eine dokumentierte Absicht (`AddonSource.cs`): Löschen
+  scheitert an einem offenen Explorer-Fenster, Überschreiben nicht. Der Download
+  landet vorher in einem Staging-Verzeichnis, und nach dem Kopieren wird die
+  `.toc` geprüft. Ein Fehlschlag ist durch erneutes Ausführen behebbar;
+- **Ausschluss meldet Erfolg zu früh.** `GuildUninvite` und `C_GuildInfo.Uninvite`
+  liefern in WoW kein Ergebnis und haben keinen Callback – mehr als „der Aufruf
+  hat keinen Lua-Fehler geworfen" ist nicht zu haben. `Roster:Request()` holt den
+  Roster ohnehin neu. Denkbar wäre, `DONE` erst zu setzen, wenn der Spieler im
+  nächsten Roster fehlt;
+- **Whisper-Pakete kurz nach dem Login.** Solange der Gildenroster leer ist, wird
+  die Mitgliedsprüfung übersprungen (`Sync.lua`, dokumentiert). Auswirkung ist
+  Datenmüll in der lokalen Addon-Datenbank, kein Accountrisiko. Sauberer wäre,
+  solche Pakete zu **parken**, bis der Roster da ist, statt die Prüfung
+  auszulassen.
+
+Zwei gemeldete Punkte waren bereits behoben (Trashkämpfe als Boss-Kills in
+0.9.67, `UI:Refresh()` über alle Seiten in 0.9.49), einer hatte sich mit dem
+ausgelieferten T4/T5-Verzauberungssatz erledigt.
 
 ---
 

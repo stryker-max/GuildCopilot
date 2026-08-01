@@ -2,11 +2,19 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.80",
+    VERSION = "0.9.81",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
     MAX_CHAT_BYTES = 255,
+    -- Das Gildenprofil wandert zerlegt durch den Gildenkanal. Sender und
+    -- Empfaenger MUESSEN dieselbe Obergrenze kennen: Bisher schnitt der Sender
+    -- unbegrenzt viele Bloecke, waehrend der Empfaenger jede Uebertragung mit
+    -- mehr als 30 Bloecken verwarf. Alles ueber 5250 Bytes verschwand damit
+    -- ohne eine einzige Meldung - und allein die Spec-Verzauberungsregeln
+    -- duerfen schon rund 4300 Bytes gross werden.
+    GUILD_PROFILE_CHUNK_BYTES = 175,
+    GUILD_PROFILE_MAX_CHUNKS = 150,
     -- Warcraft-Logs-Host, wenn die gespeicherte Gildenquelle keinen eigenen
     -- nennt. Die deutsche Variante ist Vorgabe, weil das Addon deutschsprachig
     -- ist; ein selbst eingetragener Host bleibt immer erhalten.

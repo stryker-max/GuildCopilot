@@ -885,6 +885,11 @@ ownWorkshop.professions.alchimie = {
         },
     },
 }
+-- Der Katalog wird zwischengespeichert, sonst baute ihn jeder Tastendruck in
+-- der Suche komplett neu auf. Dieser Test schreibt am Speichern vorbei direkt
+-- in die Tabelle und muss den Cache deshalb selbst verwerfen; im Addon
+-- erledigen das StoreProfession und WORKSHOP_UPDATED.
+addon.Workshop:InvalidateCatalog()
 assert(#addon.Workshop:GetCatalog("", "Alchemie") == 1,
     "Die alte Schreibweise Alchemie findet die TBC-Berufsbezeichnung Alchimie nicht")
 assert(#addon.Workshop:GetCatalog("", "Alchimie") == 1,
@@ -934,6 +939,10 @@ twinkCharacter.workshop = {
         },
     },
 }
+-- Auch hier am Speichern vorbei geschrieben: Cache verwerfen. Im Spiel stehen
+-- die Berufe der Twinks beim Login schon in der SavedVariables und aendern
+-- sich waehrend einer Sitzung nicht mehr.
+addon.Workshop:InvalidateCatalog()
 twinkCatalog = addon.Workshop:GetCatalog("", "Schmiedekunst")
 assert(#twinkCatalog == 1,
     "Der Beruf eines eigenen Twinks erscheint nicht im Werkstattkatalog")
@@ -2485,18 +2494,39 @@ assert(addon.RaidMonitor:GetSummary("live-1").source == "LIVE",
     "Die Livesitzung wurde von den Logs-Daten überschrieben")
 assert(#addon.RaidMonitor:GetSummaries() == 2, "Live und Logs wurden zusammengeworfen")
 
-local collidingSummary = {
-    id = "live-1",
-    startedAt = 100,
-    endedAt = 300,
-    zone = "Logs",
-    source = "WCL",
-    participants = { { name = "Tester", seconds = 1, consumables = {} } },
-}
-assert(addon.RaidMonitor:StoreSummary(collidingSummary) == false,
-    "Eine Logs-Auswertung konnte eine Livesitzung überschreiben")
-assert(addon.RaidMonitor:GetSummary("live-1").zone == "Karazhan",
-    "Die Livesitzung wurde doch verändert")
+-- Gleiche Kennung, andere Quelle: Die zweite Fassung ersetzt die erste nicht,
+-- sie tritt NEBEN sie. Vorher wurde sie stillschweigend verworfen - genau
+-- deshalb kam die vollstaendigere SYNC-Auswertung des Raidleiters bei den
+-- Teilnehmern nie an, die ihre eigene LIVE-Fassung schon gespeichert hatten.
+do
+    local storedBefore = #addon.RaidMonitor:GetSummaries()
+    local collidingSummary = {
+        id = "live-1",
+        startedAt = 100,
+        endedAt = 300,
+        zone = "Logs",
+        source = "WCL",
+        participants = { { name = "Tester", seconds = 1, consumables = {} } },
+    }
+    assert(addon.RaidMonitor:StoreSummary(collidingSummary) == true,
+        "Eine zweite Quelle mit derselben Kennung wurde verworfen")
+    assert(#addon.RaidMonitor:GetSummaries() == storedBefore + 1,
+        "Die zweite Quelle wurde nicht zusaetzlich gespeichert")
+    assert(addon.RaidMonitor:GetSummary("live-1", "LIVE").zone == "Karazhan",
+        "Die Livesitzung wurde doch verändert")
+    assert(addon.RaidMonitor:GetSummary("live-1", "WCL").zone == "Logs",
+        "Die Logs-Fassung derselben Kennung fehlt")
+
+    -- Ausgewaehlt wird ueber Kennung UND Quelle, sonst liesse sich immer nur
+    -- die erste der beiden Fassungen anzeigen.
+    local liveKey = addon.RaidMonitor:SummaryKey(addon.RaidMonitor:GetSummary("live-1", "LIVE"))
+    local wclKey = addon.RaidMonitor:SummaryKey(addon.RaidMonitor:GetSummary("live-1", "WCL"))
+    assert(liveKey ~= wclKey, "Live- und Logs-Fassung teilen sich denselben Auswahlschluessel")
+    assert(addon.RaidMonitor:GetSummaryByKey(liveKey).zone == "Karazhan",
+        "Der Auswahlschluessel findet die Livesitzung nicht")
+    assert(addon.RaidMonitor:GetSummaryByKey(wclKey).zone == "Logs",
+        "Der Auswahlschluessel findet die Logs-Fassung nicht")
+end
 
 -- GCPWCL3 hängt die Wiederbelebungen als neuntes Feld an. Ältere Zeilen ohne
 -- dieses Feld müssen weiterhin durchgehen, sonst bricht jeder Import, sobald
@@ -2932,7 +2962,11 @@ do
     assert(#evenings[1].sources == 2, "Die zweite Quelle des Abends fehlt")
     assert(evenings[1].summary.source == "LIVE",
         "Nicht die vollständigste Auswertung führt den Abend an")
-    local evening = addon.RaidMonitor:GetEveningOf("LOG:20260728-2002")
+    -- Gesucht wird ueber Kennung UND Quelle: Zwei Auswertungen koennen sich
+    -- dieselbe Kennung teilen, die Auswahl muss trotzdem eindeutig sein.
+    local logKey = addon.RaidMonitor:SummaryKey(
+        addon.RaidMonitor:GetSummary("LOG:20260728-2002", "LOG"))
+    local evening = addon.RaidMonitor:GetEveningOf(logKey)
     assert(evening ~= nil and evening.summary.id == "live-abend",
         "Über die zweite Quelle ist der Abend nicht auffindbar")
 
@@ -5132,7 +5166,11 @@ do
                 resurrects = 0, interrupts = 0, dispels = 0, consumables = {} },
         },
     })
-    addon.RaidMonitor.selectedSessionID = "LIVE:reviewA"
+    -- Gewaehlt wird ueber Kennung UND Quelle, nicht mehr ueber die Kennung
+    -- allein - sonst liesse sich von zwei Fassungen desselben Abends immer nur
+    -- die erste anzeigen.
+    addon.RaidMonitor.selectedSessionID = addon.RaidMonitor:SummaryKey(
+        addon.RaidMonitor:GetSummary("LIVE:reviewA", "LIVE"))
     addon.UI:ShowSessionReview()
     local review = addon.UI.sessionReview
     assert(review ~= nil and review.shown == true, "Das Auswertungsfenster öffnet nicht")
@@ -5390,10 +5428,13 @@ do
         participants = { { name = "Alphax" } },
     })
 
+    -- Geloescht wird ueber Kennung UND Quelle.
+    del_keyA = addon.RaidMonitor:SummaryKey(addon.RaidMonitor:GetSummary("LIVE:delA", "LIVE"))
+
     -- Ohne freigegebenen Rang wird abgelehnt.
     addon.Roster.membersByName[del_ownKey] = nil
     addon.Roster.membersByName[del_ownFullKey] = nil
-    del_okDenied = addon.RaidMonitor:DeleteEvening("LIVE:delA")
+    del_okDenied = addon.RaidMonitor:DeleteEvening(del_keyA)
     assert(del_okDenied == false, "Das Löschen lief ohne Berechtigung durch")
     assert(addon.RaidMonitor:GetSummary("LIVE:delA") ~= nil, "Die Ablehnung löschte trotzdem")
 
@@ -5401,7 +5442,7 @@ do
     addon.Roster.membersByName[del_ownKey] = { rankIndex = 1, rank = "Offizier" }
     del_memberCare.accessRanksConfigured = true
     del_memberCare.accessRanks = { ["1"] = true }
-    del_okDelete, del_message = addon.RaidMonitor:DeleteEvening("LIVE:delA")
+    del_okDelete, del_message = addon.RaidMonitor:DeleteEvening(del_keyA)
     assert(del_okDelete == true, "Das Löschen schlug fehl: " .. tostring(del_message))
     assert(addon.RaidMonitor:GetSummary("LIVE:delA") == nil
         and addon.RaidMonitor:GetSummary("WCL:delB") == nil,
@@ -5511,6 +5552,178 @@ do
     for index, stored in ipairs(del2_savedList) do
         del2_sessionsRef[index] = stored
     end
+end
+
+-- === Gildenprofil: Groesse, Zeitstempel und Uhrenschutz =====================
+--
+-- Der Sender schnitt beliebig viele Bloecke, der Empfaenger nahm hoechstens 30
+-- (5250 Bytes) an. Alles darueber verschwand ohne eine einzige Meldung, waehrend
+-- lokal "Gespeichert" stand. Sender und Empfaenger rechnen jetzt mit derselben
+-- Konstante, und was nicht durchpasst, wird gar nicht erst verschickt.
+do
+    local gp_guild = addon.DB:GetGuild()
+    local gp_savedDescription = gp_guild.profile.description
+    local gp_savedUpdatedAt = gp_guild.profile.updatedAt
+
+    local gp_bytes, gp_maximum, gp_tooLarge = addon.Sync:GetGuildProfileSize()
+    assert(gp_maximum == addon.Constants.GUILD_PROFILE_MAX_CHUNKS
+        * addon.Constants.GUILD_PROFILE_CHUNK_BYTES,
+        "Sender und Empfänger rechnen mit unterschiedlichen Obergrenzen")
+    assert(gp_maximum > 5250, "Die Obergrenze deckt nicht einmal die Spec-Regeln ab")
+    assert(gp_tooLarge == false and gp_bytes < gp_maximum,
+        "Ein normales Gildenprofil gilt bereits als zu groß")
+
+    local gp_messages = addon.Sync:BuildGuildProfileMessages()
+    assert(#gp_messages > 0, "Ein normales Gildenprofil erzeugt keine Pakete")
+    assert(#gp_messages <= addon.Constants.GUILD_PROFILE_MAX_CHUNKS,
+        "Der Sender erzeugt mehr Blöcke, als der Empfänger annimmt")
+
+    -- Zu gross: nichts wird gesendet, und der Aufrufer erfaehrt es.
+    gp_guild.profile.description = string.rep("x", gp_maximum + 500)
+    local gp_over, gp_overBytes, gp_overMax = addon.Sync:BuildGuildProfileMessages()
+    assert(#gp_over == 0, "Ein zu großes Gildenprofil wird trotzdem gesendet")
+    assert(gp_overBytes > gp_overMax, "Die gemeldete Größe passt nicht zur Ablehnung")
+    assert(addon.Sync:SendGuildProfile(true) == false,
+        "Das Senden meldet Erfolg, obwohl nichts hinausging")
+    gp_guild.profile.description = gp_savedDescription
+
+    -- Eine Uhr weit in der Zukunft darf nicht das letzte Wort behalten. Der
+    -- leere Roster schaltet nur die Absenderpruefung ab; geprueft wird hier der
+    -- Zeitstempel.
+    local gp_savedMembers = addon.Roster.members
+    addon.Roster.members = {}
+    gp_guild.profile.updatedAt = addon.Util.Now() + (400 * 24 * 60 * 60)
+    gp_guild.profile.description = "Aus der Zukunft"
+    addon.Sync:ReceiveGuildProfileChunk(
+        "G|" .. addon.Constants.SCHEMA_VERSION .. "|tok1|1|1|"
+        .. "GP|" .. (addon.Util.Now() - 10) .. "|Aus der Gegenwart",
+        "Offizier-Realm")
+    assert(gp_guild.profile.description == "Aus der Gegenwart",
+        "Ein Zeitstempel aus der Zukunft blockiert jede spätere Änderung")
+
+    -- Umgekehrt: Ein Absender mit verstellter Uhr uebernimmt nicht die Fuehrung.
+    gp_guild.profile.description = "Gegenwart bleibt"
+    gp_guild.profile.updatedAt = addon.Util.Now()
+    addon.Sync:ReceiveGuildProfileChunk(
+        "G|" .. addon.Constants.SCHEMA_VERSION .. "|tok2|1|1|"
+        .. "GP|" .. (addon.Util.Now() + (400 * 24 * 60 * 60)) .. "|Aus der Zukunft",
+        "Offizier-Realm")
+    assert(gp_guild.profile.description == "Gegenwart bleibt",
+        "Ein Stand mit verstellter Uhr wird übernommen")
+
+    addon.Roster.members = gp_savedMembers
+    gp_guild.profile.description = gp_savedDescription
+    gp_guild.profile.updatedAt = gp_savedUpdatedAt
+end
+
+-- === Postfach: Entwurf gehoert zum Interessenten ============================
+--
+-- Beim Wechsel blieb der Antworttext stehen, der Senden-Knopf meinte aber schon
+-- den neu gewaehlten Spieler: Ein persoenlicher Entwurf fuer A konnte an B
+-- gehen. Ausserdem waren ab dem zehnten Interessenten alle weiteren unerreichbar.
+do
+    local inb_page = addon.UI.pages.INBOX
+    local inb_inbox = addon.DB:GetGuild().inbox
+    local inb_saved = {}
+    for index, lead in ipairs(inb_inbox) do
+        inb_saved[index] = lead
+    end
+    for index = #inb_inbox, 1, -1 do
+        inb_inbox[index] = nil
+    end
+    for index = 1, 12 do
+        inb_inbox[index] = {
+            name = "Bewerber" .. index .. "-Realm",
+            messages = { { text = "Hallo", receivedAt = currentTime } },
+        }
+    end
+    inb_page.replyDrafts = {}
+
+    addon.UI:SelectLead(1)
+    inb_page.replyEdit:SetText("Hallo Bewerber1, schön dass du schreibst!")
+    addon.UI:SelectLead(2)
+    assert(inb_page.replyEdit:GetText() == "",
+        "Der Entwurf für den vorherigen Interessenten steht beim nächsten noch da")
+
+    inb_page.replyEdit:SetText("Text für Bewerber2")
+    addon.UI:SelectLead(1)
+    assert(inb_page.replyEdit:GetText() == "Hallo Bewerber1, schön dass du schreibst!",
+        "Der gemerkte Entwurf kommt beim Zurückwechseln nicht wieder")
+
+    -- Blaettern: Auf Seite 2 zeigen die Knoepfe die Interessenten 10 bis 12.
+    assert(inb_page.leadNext.shown == true, "Bei mehr als neun Interessenten fehlt die Blätterung")
+    assert(addon.UI:GetLeadIndexForSlot(1) == 1, "Seite 1 beginnt nicht beim ersten Interessenten")
+    inb_page.leadNext.scripts.OnClick()
+    assert(inb_page.leadPage == 2, "Der Weiter-Knopf blättert nicht")
+    assert(addon.UI:GetLeadIndexForSlot(1) == 10, "Seite 2 beginnt nicht beim zehnten Interessenten")
+    assert(inb_page.leadButtons[3].shown == true and inb_page.leadButtons[4].shown == false,
+        "Auf der zweiten Seite stehen die falschen Interessenten")
+    addon.UI:SelectLead(addon.UI:GetLeadIndexForSlot(3))
+    assert(addon.DB:GetGuild().inbox[addon.UI.selectedLead].name == "Bewerber12-Realm",
+        "Ein Interessent jenseits der neunten Zeile lässt sich nicht wählen")
+
+    inb_page.leadPage = 1
+    inb_page.replyDrafts = {}
+    inb_page.replyEdit:SetText("")
+    addon.UI.selectedLead = 1
+    for index = #inb_inbox, 1, -1 do
+        inb_inbox[index] = nil
+    end
+    for index, lead in ipairs(inb_saved) do
+        inb_inbox[index] = lead
+    end
+end
+
+-- === Rekrutierung, Suchsitzung, Gruppenkanal, Verbrauch =====================
+do
+    -- Abdeckung: Nur wer wirklich raiden kann, deckt eine Spec ab.
+    local rec_lowLevel = { name = "Twink-Realm", level = 12, rankIndex = 4, online = true }
+    local rec_raider = { name = "Raider-Realm", level = 70, rankIndex = 4, online = true }
+    local rec_inactive = { name = "Weg-Realm", level = 70, rankIndex = 4,
+        lastOnlineHours = 400 * 24 }
+    assert(addon.Roster:CountsAsActiveRaider(rec_lowLevel) == false,
+        "Ein Stufe-12-Twink gilt als aktiver Raider")
+    assert(addon.Roster:CountsAsActiveRaider(rec_raider) == true,
+        "Ein Stufe-70-Spieler gilt nicht als aktiver Raider")
+    assert(addon.Roster:CountsForCoverage(rec_raider) == true,
+        "Ein aktiver Raider zählt nicht für die Abdeckung")
+    assert(addon.Roster:CountsForCoverage(rec_inactive) == false,
+        "Ein seit über einem Jahr abgemeldeter Spieler deckt weiter eine Spec ab")
+    assert(addon.Roster:CountsForCoverage(rec_lowLevel) == false,
+        "Ein Twink deckt weiter eine Spec ab")
+
+    -- Suchsitzung: laeuft ab, statt bis zum Neuladen zu gelten.
+    addon.Chat.sessionActive = true
+    addon.Chat.sessionStartedAt = addon.Util.Now()
+    assert(addon.Chat:IsSessionActive() == true, "Eine frisch gestartete Suche gilt nicht")
+    addon.Chat.sessionStartedAt = addon.Util.Now() - (60 * 60 * 3)
+    assert(addon.Chat:IsSessionActive() == false,
+        "Die Suche läuft nie ab - „nur während einer Suche“ bliebe für immer an")
+    assert(addon.Chat.sessionActive == false, "Der abgelaufene Zustand wird nicht zurückgesetzt")
+
+    -- Gruppenkanal: In einer Party geht nichts über RAID hinaus.
+    local grp_savedInRaid, grp_savedInGroup = IsInRaid, IsInGroup
+    IsInRaid = function() return false end
+    IsInGroup = function() return true end
+    assert(addon.Sync:GroupChannel() == "PARTY",
+        "In einer Party wird weiterhin über den Raidkanal gesendet")
+    IsInRaid = function() return true end
+    assert(addon.Sync:GroupChannel() == "RAID", "Im Schlachtzug wird nicht über RAID gesendet")
+    IsInRaid = function() return false end
+    IsInGroup = function() return false end
+    assert(addon.Sync:GroupChannel() == nil, "Ohne Gruppe wird trotzdem ein Kanal gemeldet")
+    IsInRaid, IsInGroup = grp_savedInRaid, grp_savedInGroup
+
+    -- Verbrauch: Zwei verschiedene Elixiere zaehlen live wie aus den Logs zwei.
+    addon.WarcraftLogs:Import(
+        "GCPWCL3|1\n"
+        .. "S|zwei-elixiere|3000|9000|Karazhan|1|1|0\n"
+        .. "P|Mixer|MAGE|5000|0|0|0|28490:1,28497:1|0\n"
+    )
+    local con_summary = addon.RaidMonitor:GetSummary("WCL:zwei-elixiere", "WCL")
+    assert(con_summary ~= nil, "Die Verbrauchsauswertung wurde nicht gespeichert")
+    assert(con_summary.participants[1].consumables.ELIXIR == 2,
+        "Zwei verschiedene Elixiere zählen aus den Logs nur einmal, live aber zweimal")
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

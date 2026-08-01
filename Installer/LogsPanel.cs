@@ -22,6 +22,16 @@ public sealed class LogsPanel : UserControl
 
     private string _importText = string.Empty;
 
+    /// <summary>
+    /// So viele Zeichen nimmt das Importfeld im Addon entgegen
+    /// (SetMaxLetters in UI.lua). WoW schneidet laengeren Text beim Einfuegen
+    /// stillschweigend ab, und der Parser akzeptiert den Rest als gueltigen
+    /// Teilimport - der Abend fehlt dann halb, ohne dass irgendwo ein Fehler
+    /// steht. Deshalb wird die Groesse hier geprueft, bevor etwas in die
+    /// Zwischenablage geht.
+    /// </summary>
+    private const int AddonImportLimit = 60000;
+
     public LogsPanel(Settings settings, Action<string> log)
     {
         _settings = settings;
@@ -164,6 +174,22 @@ public sealed class LogsPanel : UserControl
 
             _importText = result.Text;
             _copy.Enabled = true;
+
+            if (result.Text.Length > AddonImportLimit)
+            {
+                // Nicht kopieren: Ein zu grosser Text saehe in der
+                // Zwischenablage vollstaendig aus, kaeme im Addon aber
+                // abgeschnitten an - und wuerde dort als Erfolg gemeldet.
+                _log($"Der Importcode ist {result.Text.Length} Zeichen gross, das Addon nimmt {AddonImportLimit}.");
+                _status.ForeColor = Theme.Danger;
+                _status.Text = $"Der Importcode ist zu gross: {result.Text.Length} von höchstens {AddonImportLimit} Zeichen. "
+                             + $"WoW würde ihn beim Einfügen abschneiden und nur einen Teil importieren. "
+                             + $"Bitte die Anzahl der Reports verringern (aktuell {(int)_reports.Value}) und erneut erzeugen.";
+                foreach (var warning in result.Warnings) _log($"Hinweis: {warning}");
+                Persist();
+                return;
+            }
+
             var copied = Copy(result.Text, null);
 
             _status.ForeColor = copied ? Theme.Success : Theme.Danger;
@@ -196,6 +222,13 @@ public sealed class LogsPanel : UserControl
     private bool Copy(string text, string? confirmation)
     {
         if (text.Length == 0) return false;
+        if (text.Length > AddonImportLimit)
+        {
+            _status.ForeColor = Theme.Danger;
+            _status.Text = $"Der Importcode ist mit {text.Length} Zeichen zu gross für das Addon "
+                         + $"(höchstens {AddonImportLimit}). Bitte mit weniger Reports erneut erzeugen.";
+            return false;
+        }
         try
         {
             Clipboard.SetText(text);

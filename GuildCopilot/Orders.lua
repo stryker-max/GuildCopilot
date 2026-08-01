@@ -667,14 +667,7 @@ end
 function GC.Orders:Create(recipeKey, options)
     options = options or {}
     recipeKey = tostring(recipeKey or "")
-    local catalog = GC.Workshop:GetCatalog()
-    local entry
-    for _, candidate in ipairs(catalog) do
-        if candidate.key == recipeKey then
-            entry = candidate
-            break
-        end
-    end
+    local entry = GC.Workshop:GetCatalogEntry(recipeKey)
     if not entry then
         return false, "Dieses Rezept steht nicht im Katalog der Gilde."
     end

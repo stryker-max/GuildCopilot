@@ -16,6 +16,12 @@ local AUDIT_TTL = 7 * 24 * 60 * 60
 local AUTO_SELF_DELAY = 3
 local AUTO_SELF_LOGIN_DELAY = 8
 local MAX_SELF_READ_RETRIES = 5
+-- Dasselbe fuer Fremdspieler: Wie oft ein Inspect wiederholt wird, solange
+-- noch Slots unlesbar sind, und wie lange dazwischen gewartet wird. Bewusst
+-- knapper als bei der Selbstpruefung - der Durchlauf soll nicht an einem
+-- einzelnen Spieler haengenbleiben, dessen Items partout nicht laden.
+local MAX_INSPECT_RETRIES = 2
+local INSPECT_RETRY_DELAY = 1
 local EQUIPMENT_CHUNK_BYTES = 165
 local EQUIPMENT_MAX_PARTS = 10
 local EQUIPMENT_MAX_INCOMING = 40
@@ -227,6 +233,28 @@ function GC.GearAudit:ResolveEnchantName(link, enchantID)
     end
     enchantNameCache[enchantID] = false
     return nil
+end
+
+-- Fuer synchronisierte Ausruestung gibt es keinen Item-Link, nur Gegenstands-
+-- und Verzauberungs-ID. Der Name laesst sich trotzdem lokal aufloesen: einmal
+-- aufgeloest liegt er im Cache, sonst baut diese Funktion den Link selbst
+-- zusammen und laesst ihn vom Client auswerten. Vorher wurde EvaluateEnchant
+-- fuer diesen Weg schlicht mit nil aufgerufen - in der Auswertung stand dann
+-- "Verzauberung 2564" statt des Namens, den der Client sehr wohl kennt.
+function GC.GearAudit:ResolveEnchantNameByID(itemID, enchantID)
+    enchantID = tonumber(enchantID) or 0
+    if enchantID <= 0 then
+        return nil
+    end
+    local cached = enchantNameCache[enchantID]
+    if cached ~= nil then
+        return cached ~= false and cached or nil
+    end
+    itemID = tonumber(itemID) or 0
+    if itemID <= 0 then
+        return nil
+    end
+    return self:ResolveEnchantName("|Hitem:" .. itemID .. ":" .. enchantID .. "|h[?]|h", enchantID)
 end
 
 -- === Gildeneigener Regelsatz ===============================================
@@ -975,8 +1003,9 @@ function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, 
             entry.itemID = measured.itemID
             entry.enchantID = measured.enchantID
             entry.emptySockets = measured.emptySockets
+            entry.enchantName = self:ResolveEnchantNameByID(measured.itemID, measured.enchantID)
             entry.verdict, entry.reason = self:EvaluateEnchant(
-                slot, measured.enchantID, audit.role, nil, specKey)
+                slot, measured.enchantID, audit.role, entry.enchantName, specKey)
             if entry.verdict == "MISSING" then
                 audit.missingEnchants = audit.missingEnchants + 1
             elseif entry.verdict == "UNKNOWN" then
@@ -1503,6 +1532,7 @@ function GC.GearAudit:StartRaidScan()
     self.scanning = true
     self.skipped = 0
     self.completed = 0
+    self.incomplete = 0
     self.shared = shared
     if firstSharedName then
         self.selectedName = GC.Util.PlayerShortName(firstSharedName)
@@ -1534,6 +1564,11 @@ function GC.GearAudit:FinishScan()
     if (self.skipped or 0) > 0 then
         message = message .. ", " .. self.skipped .. " nicht in Reichweite"
     end
+    -- Unvollstaendig Gelesenes stand bisher kommentarlos unter "geprueft". Wer
+    -- die Zahl liest, soll wissen, wie viele Ergebnisse Luecken haben.
+    if (self.incomplete or 0) > 0 then
+        message = message .. ", " .. self.incomplete .. " nur unvollständig lesbar"
+    end
     self:SetStatus(message .. ".")
     return message
 end
@@ -1556,18 +1591,26 @@ function GC.GearAudit:ProcessQueue()
         return
     end
 
+    -- Jeder Anlauf bekommt eine eigene Nummer. Die Zeitueberschreitung darf
+    -- sonst den WIEDERHOLUNGSLAUF desselben Spielers abraeumen: Sie verglich
+    -- die Einheit, und die ist bei einer Wiederholung genau dieselbe.
+    self.attemptID = (self.attemptID or 0) + 1
+    local attemptID = self.attemptID
     self.active = {
         unit = target.unit,
         name = target.name,
         guid = UnitGUID and UnitGUID(target.unit),
         startedAt = GC.Util.Now(),
+        retries = tonumber(target.retries) or 0,
+        target = target,
+        attemptID = attemptID,
     }
     if NotifyInspect then
         NotifyInspect(target.unit)
     end
 
     C_Timer.After(INSPECT_TIMEOUT, function()
-        if self.active and self.active.unit == target.unit then
+        if self.active and self.active.attemptID == attemptID then
             self.skipped = (self.skipped or 0) + 1
             self.active = nil
             if ClearInspectPlayer then
@@ -1596,8 +1639,32 @@ function GC.GearAudit:OnInspectReady(guid)
             return GetInventoryItemID(unit, slotID)
         end
     end)
+    -- INSPECT_READY heisst nur "die Anfrage ist beantwortet", nicht "alle
+    -- Gegenstandsdaten sind da": Beim ersten Blick auf einen Spieler liegen
+    -- einzelne Items noch nicht im Cache. Bisher wurde das Ergebnis trotzdem
+    -- gespeichert und als geprueft gezaehlt - fuer Fremdspieler fehlte genau
+    -- der Wiederholungslauf, den die Selbstpruefung laengst hat.
+    if (audit.unreadableSlots or 0) > 0
+        and active.retries < MAX_INSPECT_RETRIES
+        and self.scanning and active.target then
+        active.target.retries = active.retries + 1
+        table.insert(self.queue, 1, active.target)
+        self.active = nil
+        if ClearInspectPlayer then
+            ClearInspectPlayer()
+        end
+        C_Timer.After(INSPECT_RETRY_DELAY, function()
+            self:ProcessQueue()
+        end)
+        return true
+    end
+
     self:StoreAudit(audit)
-    self.completed = (self.completed or 0) + 1
+    if (audit.unreadableSlots or 0) > 0 then
+        self.incomplete = (self.incomplete or 0) + 1
+    else
+        self.completed = (self.completed or 0) + 1
+    end
     self.active = nil
     if ClearInspectPlayer then
         ClearInspectPlayer()

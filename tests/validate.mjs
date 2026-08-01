@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.80",
+  "## Version: 0.9.81",
 ];
 
 for (const entry of requiredMetadata) {
@@ -325,7 +325,12 @@ const requiredImplementations = [
   ["Importquelle folgt der Kopfzeile", /local sessionSource = "WCL"/],
   ["Offline-Import als eigene Quelle", /sessionSource = "LOG"/],
   ["Consumables aus Logs über die Addon-Tabelle", /DecodeConsumables/],
-  ["Quellen werden nicht vermischt", /stored\.source ~= summary\.source/],
+  // Kennung UND Quelle identifizieren eine Auswertung. Vorher genuegte die
+  // Kennung, und die SYNC-Fassung des Raidleiters wurde bei Teilnehmern
+  // verworfen, weil dort schon die eigene LIVE-Fassung mit derselben Kennung
+  // lag - der Quellenvergleich hatte damit nie zwei Seiten.
+  ["Quellen werden nicht vermischt", /stored\.id == summary\.id and stored\.source == summary\.source/],
+  ["Auswertung wird über Kennung und Quelle gewählt", /function GC\.RaidMonitor:SummaryKey/],
   ["aufbereitete Ausrüstungsfunde", /function GC\.GearAudit:GetFindings/],
   ["Gesamtübersicht der Ausrüstungsprüfung", /function GC\.GearAudit:GetOverview/],
   ["eigene Ausrüstung im Profil", /profileGearFindings/],
@@ -362,6 +367,30 @@ const requiredImplementations = [
   ["Hilfe aus derselben Tabelle", /function GC\.UI:PrintSlashHelp[\s\S]{0,300}ipairs\(SLASH_COMMANDS\)/],
   ["Befehle auf der Addon-Optionsseite", /panel\.commandRows/],
   ["Profiländerung frischt die Karte auf", /page\.selectedFlex = enabled\s+GC\.UI:RefreshRoster\(\)/],
+  // Gildenprofil: Sender und Empfaenger teilen sich eine Obergrenze, und was
+  // nicht durchpasst, wird gemeldet statt stillschweigend zerschnitten.
+  ["gemeinsame Obergrenze für das Gildenprofil", /GUILD_PROFILE_MAX_CHUNKS/],
+  ["Nutzlast getrennt vom Zerlegen", /function GC\.Sync:BuildGuildProfilePayload/],
+  ["zu großes Gildenprofil wird gemeldet", /GUILD_PROFILE_TOO_LARGE/],
+  ["Schutz gegen verstellte Uhren", /MAX_CLOCK_SKEW/],
+  ["Zeitstempel aus der Serverzeit", /if GetServerTime then/],
+  // Postfach: Der Entwurf gehoert zu einem Interessenten, und die Liste laesst
+  // sich ueber die neunte Zeile hinaus bedienen.
+  ["Antwortentwurf je Interessent", /page\.replyDrafts/],
+  ["Entwurf wechselt mit dem Interessenten", /function GC\.UI:SelectLead/],
+  ["Postfach lässt sich blättern", /function GC\.UI:GetLeadIndexForSlot/],
+  // Rekrutierung: Abdeckung nur aus Spielern, die wirklich raiden koennen.
+  ["Abdeckung nur aus aktiven Raidern", /function GC\.Roster:CountsForCoverage/],
+  ["ein Maßstab für aktive Raider", /function GC\.Roster:CountsAsActiveRaider/],
+  // Suche, Gruppenkanal und Werkstatt.
+  ["Suchsitzung läuft ab", /function GC\.Chat:IsSessionActive/],
+  ["Gruppenkanal folgt der Gruppe", /function GC\.Sync:GroupChannel/],
+  ["Werkstattkatalog wird zwischengespeichert", /function GC\.Workshop:GetCatalogIndex/],
+  ["Katalog-Cache wird gezielt verworfen", /function GC\.Workshop:InvalidateCatalog/],
+  ["Rezeptsuche wird entprellt", /function GC\.UI:QueueWorkshopSearch/],
+  // Gearcheck: unvollstaendig Gelesenes zaehlt nicht als geprueft.
+  ["Inspect wird bei Lücken wiederholt", /MAX_INSPECT_RETRIES/],
+  ["Verzauberungsname auch ohne Item-Link", /function GC\.GearAudit:ResolveEnchantNameByID/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
