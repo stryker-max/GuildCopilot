@@ -3740,28 +3740,101 @@ local function OrderRowTitle(order)
         .. "  ·  " .. ColoredOrderStatus(order)
 end
 
-local function OrderOfferLine(order)
-    local parts = { GC.OrderModelLabels[order.materialModel] or "?" }
-    parts[#parts + 1] = GC.OrderDeliveryLabels[order.delivery] or "?"
+-- Die Bedingungen ohne Geld: Materialmodell und Übergabeweg.
+local function OrderTermsParts(order)
+    return {
+        GC.OrderModelLabels[order.materialModel] or "?",
+        GC.OrderDeliveryLabels[order.delivery] or "?",
+    }
+end
+
+-- Der Preisrahmen, den der Auftraggeber beim Erstellen gesetzt hat. Einen
+-- Kostenrahmen gibt es nur beim Materialmodell C - Orders.lua setzt ihn sonst
+-- auf 0 -, ein Trinkgeld bei allen.
+local function OrderPriceParts(order)
+    local parts = {}
     if (order.costLimit or 0) > 0 then
         parts[#parts + 1] = "bis " .. GC.Orders.FormatMoney(order.costLimit)
     end
     if (order.tip or 0) > 0 then
         parts[#parts + 1] = "Trinkgeld " .. GC.Orders.FormatMoney(order.tip)
     end
+    return parts
+end
+
+local function AppendOrderNote(parts, order)
     if GC.Util.Trim(order.note) ~= "" then
         parts[#parts + 1] = "„" .. order.note .. "“"
     end
-    return table.concat(parts, "  ·  ")
+    return parts
 end
 
-local function BuildOrderRow(parent, height, withPrimary)
+local function OrderOfferLine(order)
+    local parts = OrderTermsParts(order)
+    for _, part in ipairs(OrderPriceParts(order)) do
+        parts[#parts + 1] = part
+    end
+    return table.concat(AppendOrderNote(parts, order), "  ·  ")
+end
+
+-- In den eigenen Aufträgen trägt der Preisrahmen eine eigene Zeile, deshalb
+-- bleibt diese hier ohne Geld.
+local function OrderTermsLine(order)
+    return table.concat(AppendOrderNote(OrderTermsParts(order), order), "  ·  ")
+end
+
+-- Die Preiszeile der eigenen Aufträge. Wer am Zug ist, liest in der Zeile
+-- darüber die Handlungsaufforderung statt der Bedingungen - damit verschwand
+-- der Preisrahmen genau dort, wo die Gilde ihn braucht: beim Versenden soll
+-- ohne Umweg über den Verlauf sichtbar sein, was der Auftraggeber zugesagt
+-- hat. Gemeldete Kosten stehen daneben und werden rot, sobald sie den Rahmen
+-- überschreiten - dieselbe Aussage wie im Verlaufsdialog.
+local function OrderPriceFrameLine(order)
+    local parts = OrderPriceParts(order)
+    if (order.actualCost or 0) > 0 then
+        local overLimit = (order.costLimit or 0) > 0 and order.actualCost > order.costLimit
+        parts[#parts + 1] = (overLimit and "|cffff6266" or "")
+            .. "gemeldet " .. GC.Orders.FormatMoney(order.actualCost)
+            .. (overLimit and "|r" or "")
+    end
+    if #parts == 0 then
+        parts[#parts + 1] = "keine Angabe des Auftraggebers"
+    end
+    return "Preisrahmen: " .. table.concat(parts, "  ·  ")
+end
+
+-- Maße des Auftragsboards. Sie stehen beisammen, weil die eigenen Aufträge
+-- eine Zeile mehr tragen als die offenen und sich damit alles darunter
+-- verschiebt; tests/validate.mjs rechnet mit denselben Zahlen nach, dass die
+-- Abschnitte einander nicht überlappen und über der Statuszeile bleiben.
+local ORDERS_VIEW_TOP = 66
+local ORDERS_ROWS_PER_SECTION = 3
+local ORDERS_MINE_ROW_HEIGHT = 58
+local ORDERS_OPEN_ROW_HEIGHT = 44
+local ORDERS_ROW_GAP = 4
+local ORDERS_HEADER_HEIGHT = 19
+-- Die Überschrift der offenen Aufträge trägt rechts den Filterknopf und
+-- braucht deshalb etwas mehr Luft als die anderen beiden.
+local ORDERS_FILTER_HEADER_HEIGHT = 23
+local ORDERS_SECTION_GAP = 9
+local ORDERS_CLOSED_LINE_HEIGHT = 17
+
+local function BuildOrderRow(parent, height, withPrimary, withPrice)
     local row = CreatePanel(parent, THEME.card)
     row:SetSize(776, height)
     row.title = CreateLabel(row, "", { width = 470, height = 16 })
     row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -7)
     row.detail = CreateLabel(row, "", { muted = true, width = 470, height = 15 })
     row.detail:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -25)
+    if withPrice then
+        row.price = CreateLabel(row, "", {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 470,
+            height = 14,
+        })
+        row.price:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -42)
+    end
     row.logButton = CreateButton(row, "Verlauf", 74, 28, function()
         if row.orderID then
             GC.UI:OpenOrderLogDialog(row.orderID)
@@ -3790,41 +3863,56 @@ end
 
 function GC.UI:BuildOrdersView(page)
     local view = CreateFrame("Frame", nil, page)
-    view:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    view:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -ORDERS_VIEW_TOP)
     view:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 0)
     view:Hide()
     page.ordersView = view
 
+    -- Der Aufbau läuft von oben nach unten mit einem mitlaufenden Abstand:
+    -- Eine höhere Zeile schiebt so alles Folgende mit, statt feste Zahlen an
+    -- sechs Stellen nachziehen zu müssen.
+    local cursor = 0
+
     view.mineHeader = CreateLabel(view, "DU BIST DRAN", { muted = true, width = 500, height = 15 })
-    view.mineHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
+    view.mineHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
+    cursor = cursor + ORDERS_HEADER_HEIGHT
     view.mineRows = {}
-    for index = 1, 3 do
-        local row = BuildOrderRow(view, 44, true)
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -19 - ((index - 1) * 48))
+    for index = 1, ORDERS_ROWS_PER_SECTION do
+        local row = BuildOrderRow(view, ORDERS_MINE_ROW_HEIGHT, true, true)
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
+        cursor = cursor + ORDERS_MINE_ROW_HEIGHT + ORDERS_ROW_GAP
         view.mineRows[index] = row
     end
+    cursor = cursor - ORDERS_ROW_GAP + ORDERS_SECTION_GAP
 
     view.openHeader = CreateLabel(view, "OFFENE AUFTRÄGE DER GILDE",
         { muted = true, width = 500, height = 15 })
-    view.openHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -168)
+    view.openHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
     view.openFilter = CreateButton(view, "nur machbare", 128, 24, function()
         page.ordersShowAll = not page.ordersShowAll
         GC.UI:RefreshOrdersBoard()
     end)
-    view.openFilter:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, -164)
+    -- Der Knopf ist höher als die Überschrift und sitzt deshalb vier Pixel
+    -- weiter oben, damit beide auf derselben Mittellinie liegen.
+    view.openFilter:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, -(cursor - 4))
+    cursor = cursor + ORDERS_FILTER_HEADER_HEIGHT
     view.openRows = {}
-    for index = 1, 3 do
-        local row = BuildOrderRow(view, 44, true)
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -191 - ((index - 1) * 48))
+    for index = 1, ORDERS_ROWS_PER_SECTION do
+        local row = BuildOrderRow(view, ORDERS_OPEN_ROW_HEIGHT, true)
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
+        cursor = cursor + ORDERS_OPEN_ROW_HEIGHT + ORDERS_ROW_GAP
         view.openRows[index] = row
     end
+    cursor = cursor - ORDERS_ROW_GAP + ORDERS_SECTION_GAP
 
     view.closedHeader = CreateLabel(view, "ABGESCHLOSSEN", { muted = true, width = 500, height = 15 })
-    view.closedHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -340)
+    view.closedHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
+    cursor = cursor + ORDERS_HEADER_HEIGHT
     view.closedRows = {}
-    for index = 1, 3 do
+    for index = 1, ORDERS_ROWS_PER_SECTION do
         local row = CreateLabel(view, "", { muted = true, width = 700, height = 15 })
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 14, -359 - ((index - 1) * 17))
+        row:SetPoint("TOPLEFT", view, "TOPLEFT", 14, -cursor)
+        cursor = cursor + ORDERS_CLOSED_LINE_HEIGHT
         view.closedRows[index] = row
     end
 
@@ -3878,13 +3966,16 @@ local function FillOrderRow(row, boardRow, isOpenSection)
                 .. OrderOfferLine(order))
         end
     else
-        row.detail:SetText(boardRow.yourTurn and boardRow.action or OrderOfferLine(order))
+        row.detail:SetText(boardRow.yourTurn and boardRow.action or OrderTermsLine(order))
         local label, handler = OrderPrimaryAction(order)
         row.primaryHandler = handler
         if row.primary then
             row.primary:SetText(label or "")
             row.primary:SetShown(label ~= nil)
         end
+    end
+    if row.price then
+        row.price:SetText(OrderPriceFrameLine(order))
     end
     local ownName = GC:GetPlayerFullName()
     row.cancelButton:SetShown(order.status ~= "DONE" and order.status ~= "CANCELLED"
@@ -4536,14 +4627,18 @@ function GC.UI:CreateOrderTracker()
     tracker:SetFrameStrata("MEDIUM")
     tracker:Hide()
 
+    -- Kopfzeile: Der Schließen-Knopf steht in derselben Spalte wie die Zeilen
+    -- darunter (12 px Rand, vorher 8) und liegt mittig zum Titel statt drei
+    -- Pixel tiefer. Der Titel bekommt dafür feste Maße - ohne sie wächst er
+    -- mit seinem Text („… (4)") bis unter den Knopf.
     tracker.title = CreateLabel(tracker, "Gildenaufträge – du bist dran",
-        { font = "GameFontNormalSmall" })
-    tracker.title:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -9)
+        { font = "GameFontNormalSmall", width = 282, height = 20 })
+    tracker.title:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -7)
     tracker.close = CreateButton(tracker, "×", 20, 20, function()
         GC.DB:GetSettings().orderTracker.hidden = true
         GC.UI:RefreshOrderTracker()
     end)
-    tracker.close:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -8, -7)
+    tracker.close:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -12, -7)
 
     -- Zwei Zeilen je Auftrag: Rezept oben, Aufgabe gedämpft darunter. In
     -- einer Zeile wurde die Aufgabe abgeschnitten ("Materialien an … li…").

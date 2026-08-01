@@ -4893,6 +4893,59 @@ do
 end
 
 do
+    -- Preisrahmen in den eigenen Aufträgen: Wer am Zug ist, liest in der
+    -- oberen Zeile die Aufgabe statt der Bedingungen. Der Rahmen des
+    -- Auftraggebers steht deshalb in einer eigenen Zeile darunter - genau
+    -- beim Versenden wollte die Gilde ihn wiedersehen.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.Orders:GetStore()["preis-1"] = {
+        id = "preis-1", revision = 3,
+        recipeKey = "I90001", recipeName = "Testring", quantity = 2,
+        createdBy = "Heiler-Realm", createdByTag = "bbbbbbbbbb",
+        createdAt = currentTime, changedAt = currentTime,
+        materialModel = "C", delivery = "MAIL",
+        costLimit = 500000, tip = 10000, note = "",
+        status = "CRAFTED",
+        acceptedByTag = addon.DB:GetAccountTag(), acceptedAt = currentTime,
+        crafter = "Tester-Realm", craftedCount = 2, actualCost = 600000,
+        reimbursedAt = 0, reimbursedPaid = 0, log = {},
+    }
+    addon.UI:SetWorkshopView("ORDERS")
+    addon.UI:RefreshOrdersBoard()
+    orders_row = addon.UI.pages.WORKSHOP.ordersView.mineRows[1]
+    assert(orders_row.shown == true, "Der eigene Auftrag fehlt auf dem Board")
+    assert(orders_row.primary.label.value == "Versandt",
+        "Der Versand-Knopf fehlt beim gefertigten Postauftrag")
+    assert(orders_row.detail.value:find("versenden") ~= nil,
+        "Die Aufgabenzeile nennt den Versand nicht")
+    assert(orders_row.price ~= nil, "Die eigenen Auftragszeilen haben keine Preiszeile")
+    assert(orders_row.price.value:find("Preisrahmen", 1, true) == 1,
+        "Die Preiszeile ist nicht als Preisrahmen beschriftet: " .. tostring(orders_row.price.value))
+    assert(orders_row.price.value:find("bis 50g", 1, true) ~= nil,
+        "Der Kostenrahmen des Auftraggebers fehlt: " .. tostring(orders_row.price.value))
+    assert(orders_row.price.value:find("Trinkgeld 1g", 1, true) ~= nil,
+        "Das zugesagte Trinkgeld fehlt: " .. tostring(orders_row.price.value))
+    -- Gemeldete Kosten über dem Rahmen stehen daneben und werden rot.
+    assert(orders_row.price.value:find("gemeldet 60g", 1, true) ~= nil,
+        "Die gemeldeten Kosten fehlen in der Preiszeile")
+    assert(orders_row.price.value:find("|cffff6266", 1, true) ~= nil,
+        "Kosten über dem Kostenrahmen werden nicht hervorgehoben")
+
+    -- Ohne Angaben des Auftraggebers bleibt die Zeile trotzdem eindeutig.
+    orders_order = addon.Orders:GetOrder("preis-1")
+    orders_order.materialModel = "A"
+    orders_order.costLimit = 0
+    orders_order.tip = 0
+    orders_order.actualCost = 0
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_row.price.value == "Preisrahmen: keine Angabe des Auftraggebers",
+        "Ein Auftrag ohne Preisangaben schreibt: " .. tostring(orders_row.price.value))
+
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.UI:RefreshOrdersBoard()
+end
+
+do
     -- Klang und Bildschirmmeldung: Stufenaufstieg (888) bei neuen machbaren
     -- Aufträgen samt Banner, Karten-Ping (3175) beim Fortschritt,
     -- Questabschluss (619) beim Abschluss - und alles abschaltbar.

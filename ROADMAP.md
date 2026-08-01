@@ -298,6 +298,17 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.80 – Preisrahmen bleibt sichtbar, wenn man am Zug ist
+
+Gildenwunsch aus dem Versandschritt: „Man möchte auch nochmal den Preisrahmen sehen, den der Auftraggeber angegeben hat." Bisher ersetzte die Handlungsaufforderung („An Nexarius versenden.") genau die Zeile, in der Kostenrahmen und Trinkgeld standen – wer versandbereit war, sah die Absprache nur noch über den Verlauf.
+
+- **Die eigenen Aufträge tragen jetzt drei Zeilen:** Rezept, Aufgabe beziehungsweise Bedingungen und darunter neu **„Preisrahmen: bis 50g · Trinkgeld 5g"**. Sie steht in jedem Schritt, nicht nur beim Versenden;
+- **gemeldete Materialkosten** erscheinen daneben („gemeldet 60g") und werden **rot**, sobald sie den Kostenrahmen überschreiten – dieselbe Aussage wie im Verlaufsdialog;
+- hat der Auftraggeber nichts angegeben, steht das ausdrücklich da („keine Angabe des Auftraggebers") statt einer leeren Zeile;
+- Bedingungen (Materialmodell, Übergabeweg, Notiz) und Preis stehen damit in den eigenen Aufträgen in getrennten Zeilen; doppelt genannt wird nichts. Das offene Board der Gilde bleibt unverändert einzeilig;
+- **die Maße des Boards stehen als benannte Konstanten beisammen**, der Aufbau läuft mit einem mitlaufenden Abstand von oben nach unten. `tests/validate.mjs` rechnet nach, dass die drei Abschnitte einander nicht überlappen und über der Statuszeile bleiben – das Board hat keine Bildlaufleiste;
+- **Kompakt-Tracker:** Der Schließen-Knopf steht in derselben Spalte wie die Zeilen darunter und sitzt auf der Höhe des Titels, statt vier Pixel weiter rechts und drei tiefer.
+
 ## 0.9.79 – Verbrauchsnamen wie im deutschen Client
 
 Owner-Korrektur an der Gegenstandstabelle: Die „Super"-Tränke heißen im deutschen Client **„Erstklassig"** (Erstklassiger Heil-/Manatrank), die Major-Elixiere **„übermächtig"** (Elixier der übermächtigen Stärke/Beweglichkeit/Frostmacht/Feuermacht/Verteidigung/Schattenmacht, Elixier des übermächtigen Magierbluts, Elixier der übermächtigen Seelenstärke) – und es heißt **„Elixier der draenischen Weisheit"**, nicht „Draeneiweisheit". Die Öle heißen „Überragendes Zauberöl/Manaöl". Nur Anzeige-Kosmetik: Gezählt wird über Spell-IDs, an den Zahlen ändert sich nichts.

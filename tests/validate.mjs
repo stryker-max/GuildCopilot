@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.79",
+  "## Version: 0.9.80",
 ];
 
 for (const entry of requiredMetadata) {
@@ -673,6 +673,73 @@ if (navHeight > sidebarHeight) {
     `Die Seitenleiste ist zu klein: ${tabCount} Navigationspunkte brauchen ${navHeight} px, ` +
       `verfuegbar sind ${sidebarHeight} px.`
   );
+}
+
+// Das Auftragsboard hat drei Abschnitte untereinander in einer Ansicht ohne
+// Bildlaufleiste. Seit die eigenen Auftraege eine dritte Zeile fuer den
+// Preisrahmen tragen, sind ihre Zeilen hoeher als die der offenen Auftraege -
+// alles darunter rutscht mit. Hier wird nachgerechnet, dass der Inhalt ueber
+// der Statuszeile bleibt.
+const ordersNumber = (name) => {
+  const match = uiSource.match(new RegExp(`local ${name} = (\\d+)`));
+  if (!match) throw new Error(`Mass ${name} des Auftragsboards fehlt in UI.lua.`);
+  return Number(match[1]);
+};
+const pageTop = Number(
+  uiSource.match(/page:SetPoint\("TOPLEFT", frame, "TOPLEFT", \d+, -(\d+)\)/)[1]
+);
+const pageBottom = Number(
+  uiSource.match(/page:SetPoint\("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -\d+, (\d+)\)/)[1]
+);
+const ordersRows = ordersNumber("ORDERS_ROWS_PER_SECTION");
+const ordersRowGap = ordersNumber("ORDERS_ROW_GAP");
+const ordersSection = (headerHeight, rowHeight) =>
+  headerHeight + ordersRows * rowHeight + (ordersRows - 1) * ordersRowGap;
+const ordersContentHeight =
+  ordersSection(ordersNumber("ORDERS_HEADER_HEIGHT"), ordersNumber("ORDERS_MINE_ROW_HEIGHT")) +
+  ordersNumber("ORDERS_SECTION_GAP") +
+  ordersSection(
+    ordersNumber("ORDERS_FILTER_HEADER_HEIGHT"),
+    ordersNumber("ORDERS_OPEN_ROW_HEIGHT")
+  ) +
+  ordersNumber("ORDERS_SECTION_GAP") +
+  ordersNumber("ORDERS_HEADER_HEIGHT") +
+  ordersRows * ordersNumber("ORDERS_CLOSED_LINE_HEIGHT");
+// Unten stehen Statuszeile und die Knoepfe "Statistik"/"Tracker" (30 px hoch,
+// am unteren Rand verankert); so viel Platz muss frei bleiben.
+const ordersViewHeight =
+  frameHeight - pageTop - pageBottom - ordersNumber("ORDERS_VIEW_TOP") - 30;
+if (ordersContentHeight > ordersViewHeight) {
+  throw new Error(
+    `Das Auftragsboard ist zu hoch: Die Abschnitte brauchen ${ordersContentHeight} px, ` +
+      `ueber der Statuszeile stehen ${ordersViewHeight} px zur Verfuegung.`
+  );
+}
+// Die Preiszeile muss in ihre Karte passen - sonst haengt sie in die naechste.
+const orderRowBlock = uiSource.slice(
+  uiSource.indexOf("local function BuildOrderRow("),
+  uiSource.indexOf("function GC.UI:BuildOrdersView")
+);
+const priceLine = orderRowBlock.match(
+  /row\.price[\s\S]{0,200}?height = (\d+),[\s\S]{0,200}?row\.price:SetPoint\("TOPLEFT", row, "TOPLEFT", \d+, -(\d+)\)/
+);
+if (!priceLine) {
+  throw new Error("Die Preisrahmen-Zeile der eigenen Auftraege fehlt in BuildOrderRow.");
+}
+const priceBottom = Number(priceLine[2]) + Number(priceLine[1]);
+if (priceBottom > ordersNumber("ORDERS_MINE_ROW_HEIGHT")) {
+  throw new Error(
+    `Die Preisrahmen-Zeile ragt aus ihrer Karte: Sie endet bei ${priceBottom} px, ` +
+      `die Karte ist ${ordersNumber("ORDERS_MINE_ROW_HEIGHT")} px hoch.`
+  );
+}
+// Sie darf auch nicht stumm verschwinden: Nur die eigenen Auftraege bekommen
+// sie, und gefuellt wird sie beim Zeichnen jeder Zeile.
+if (!/BuildOrderRow\(view, ORDERS_MINE_ROW_HEIGHT, true, true\)/.test(uiSource)) {
+  throw new Error("Die Zeilen der eigenen Auftraege werden ohne Preisrahmen-Zeile gebaut.");
+}
+if (!/row\.price:SetText\(OrderPriceFrameLine\(order\)\)/.test(uiSource)) {
+  throw new Error("Der Preisrahmen wird beim Zeichnen der Auftragszeilen nicht mehr gesetzt.");
 }
 
 // Beide Detailkarten heissen intern "detailCard". Ein Suchen-und-Ersetzen ohne
