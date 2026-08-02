@@ -188,7 +188,7 @@ function GC.Roster:GetActiveRaiders(limit)
     end)
 
     local result = {}
-    for index = 1, math.min(tonumber(limit) or 25, #raiders) do
+    for index = 1, math.min(tonumber(limit) or GC.Constants.ACTIVE_RAIDER_LIMIT, #raiders) do
         result[index] = raiders[index]
     end
     return result

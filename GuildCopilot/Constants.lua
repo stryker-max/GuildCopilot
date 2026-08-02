@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.85",
+    VERSION = "0.9.86",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -27,6 +27,11 @@ GC.Constants = {
     -- Addon ist ausschliesslich fuer TBC Anniversary gedacht.
     ARMORY_CHARACTER_URL = "https://classic-armory.org/character/<region>/tbc-anniversary/<realm>/<name>",
     WCL_CHARACTER_URL = "https://<host>/character/<region>/<realm>/<name>",
+    -- Wie viele aktive Raider die Gildenuebersicht fuehrt. 25 war exakt die
+    -- Groesse eines Schlachtzugs und damit zu knapp: Ersatzleute, Twinks und
+    -- gerade offline gegangene Stammspieler fielen hinten heraus, und die Liste
+    -- sah kleiner aus als die Gilde ist. 35 laesst zehn Plaetze Puffer.
+    ACTIVE_RAIDER_LIMIT = 35,
     ADDON_USER_TTL = 30 * 24 * 60 * 60,
     DEFAULT_POST_COOLDOWN = 120,
     DEFAULT_LFG_COOLDOWN = 120,

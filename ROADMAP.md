@@ -298,6 +298,76 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.86 – „Bin ich vollständig?" – ein Balken statt einer Paketzahl, und die Schleife, die niemand gesucht hat
+
+**Der Auftrag war die Statuszeile.** Unten in der Gildenwerkstatt stand „Abgleich: 110 Berufspakete empfangen". Die Zahl ist richtig und trotzdem nutzlos: Sie sagt, wie viel angekommen ist, nicht wie viel fehlt. Wer unten in der Werkstatt hinsieht, will genau eine Auskunft – **bin ich vollständig, und wenn nein, wie weit noch**. Gewünscht war ein Ladebalken; herausgekommen ist zuerst die Frage, was er eigentlich messen soll.
+
+**Ein ehrlicher Balken braucht einen Nenner.** „Empfangene Pakete" hat keinen. Gezählt wird deshalb die **offene Arbeit**, und zwar aus drei Quellen, die vorher nirgends zusammenkamen:
+
+- **ausgehend** – jedes Paket, das über `SendBulk` eingereiht wurde und dessen Zustellung noch nicht bestätigt ist. Der Zähler sitzt jetzt in `Sync.lua` und deckt beide Sendewege ab, die eigene Warteschlange **und** ChatThrottleLib; vorher zählte nur die Werkstatt ihre eigenen Pakete, Gildenbank, Aufträge und Ausrüstung liefen unsichtbar nebenher. Dazu kommen die selbst getakteten Übertragungen (Gildenprofil, Raidauswertung), die gar nicht über die Warteschlange gehen;
+- **eingehend** – die noch fehlenden Teile jeder angefangenen Übertragung, über alle sechs Module hinweg. Eine Übertragung, zu der seit 30 Sekunden nichts mehr kam, gilt als verloren statt als „läuft noch": Sonst behauptet der Balken minutenlang Betrieb, obwohl der Absender längst offline ist;
+- **bekannte Lücken** – und das ist der Teil, der aus „gerade ist nichts unterwegs" erst „vollständig" macht. Ein fremdes Manifest sagt, welche Berufe es in der Gilde gibt. Was davon hier fehlt, wird beim Empfang des Manifests vorgemerkt und beim Eintreffen wieder gestrichen. Ohne diese Liste hätte ein Client, dem drei Berufe nie geliefert wurden, sich für vollständig gehalten, sobald die Leitung ruhig ist.
+
+**Ein Zyklus, eine Hochwassermarke.** Er beginnt, sobald das Erste unterwegs ist, und endet, wenn nichts mehr aussteht. Der Nenner wächst mit, wenn währenddessen Neues dazukommt, fällt aber nie zurück – ein Balken, der rückwärts läuft, ist schlimmer als keiner. **100 Prozent gibt es ausschließlich bei null offener Arbeit**; solange etwas läuft, ist bei 99 Schluss. Endet ein Zyklus mit verlorenen Paketen, heißt er *unvollständig* und bekommt **keinen** Zeitstempel „zuletzt vollständig" – sonst stünde „Stand: gerade eben" über lückenhaften Daten. Und wenn ein Zyklus zwei Minuten lang nicht vorankommt, wird er abgeräumt und als unvollständig gemeldet: Ein einziger ausgebliebener Rückruf hätte den Balken sonst für den Rest der Sitzung bei achtzig Prozent festgehalten.
+
+**Der Takt kostet nichts, wenn nichts läuft.** Dieselbe Bauweise wie die Bulk-Warteschlange und der Raid-Herzschlag: ein Rahmen, der nur sichtbar ist, solange es etwas zu tun gibt – ein verstecktes Frame bekommt kein `OnUpdate`. Der Balken selbst hängt an der Werkstattseite und lebt nur, solange man ihn sieht; er zeichnet sich außerdem nur neu, wenn sich am Zustand wirklich etwas geändert hat, nicht viermal je Sekunde. Der Zyklus läuft trotzdem im Hintergrund weiter – sonst wäre „zuletzt vollständig abgeglichen" eine Zahl, die davon abhängt, ob das Fenster gerade offen war.
+
+**Nebenbei ein Wort zurechtgerückt.** Im Fensterkopf stand „alle synchron". Gemeint war „alle haben dieselbe Addon-Version"; gelesen wurde „die Daten sind vollständig". Beides steht jetzt getrennt da, und das Wort *synchron* gehört dem Balken.
+
+---
+
+**Und dann die Suche, die eigentlich eine Durchsicht war.** Der Auftrag lautete, das Addon von A bis Z auf Performance und Stabilität durchzugehen. In `Profile.lua` stand seit 0.9.45 dieser Ablauf: Um die Berufe aus den Classic-Fähigkeitszeilen lesen zu können, klappt das Addon eingeklappte Kategorien kurz auf und danach wieder zu – das Fähigkeitenfenster soll aussehen wie vorher.
+
+**Auf- und Zuklappen löst `SKILL_LINES_CHANGED` aus.** Also genau das Ereignis, an dem die Erfassung hängt. Jeder Durchlauf erzeugte damit den nächsten, und der wieder den übernächsten: eine sich selbst tragende Schleife, bei jedem Spieler, der mindestens eine Kategorie zugeklappt hat – und das sind die meisten. Sichtbar wurde sie nicht, weil sie nichts anzeigt; sie kostet nur Bildrate. **Das ist der bislang plausibelste Kandidat für die seit 0.9.48 offenen Meldungen aus der Gilde.** Belegt ist er damit nicht – dafür braucht es eine Messung bei einem Betroffenen –, aber die Schleife ist unabhängig davon falsch.
+
+Drei Sperren, jede für sich ausreichend, zusammen dicht:
+
+- **erst nachsehen, ohne etwas anzufassen.** Bei den allermeisten Charakteren stehen die Berufe offen sichtbar in der Liste; dann wird nichts geklappt, kein Ereignis erzeugt, und der teure Teil entfällt ganz;
+- **das eigene Klappen wird vermerkt** und ein `SKILL_LINES_CHANGED` innerhalb der nächsten fünf Sekunden übergangen. Die Sperre läuft in Echtzeit und nicht über einen Zähler, weil die Ereignisse erst im nächsten Bild eintreffen;
+- **entprellt.** `SKILL_LINES_CHANGED` feuert in TBC für jeden Fertigkeitspunkt, auch für Waffenfertigkeit – also mitten im Kampf im Sekundentakt, und jeder Durchlauf las Talente, Berufe und die komplette Fähigkeitsliste neu. Zehn Punkte in drei Sekunden ergeben jetzt einen Durchlauf. Der Handler ist dafür eine Methode geworden statt eines anonymen Zweigs: Was sich nicht aufrufen lässt, lässt sich auch nicht prüfen.
+
+**Aus der Gilde gemeldet, während diese Version entstand: „Den Kalender bei den Abmeldungen kann man NICHT öffnen – es geht nur rechts unten in der Ecke."** Das Symbol war da, der Klick lief ins Leere, und ein schmaler Rand funktionierte doch. Diese Beschreibung ist bereits die halbe Diagnose.
+
+Der Knopf war ein Kind der Karte und wurde nur *über* das Eingabefeld gelegt. Knopf und Feld waren damit Geschwister auf derselben Rahmenebene – wer bei Gleichstand den Klick bekommt, legt WoW nicht fest, und in der Praxis nahm ihn die EditBox. Anklickbar blieb genau das, was die EditBox nicht bedeckt: ihr Innenabstand von zehn Pixeln rechts und sechs oben und unten. Rechnet man das nach, ergibt sich ein sechs Pixel breiter Streifen am rechten Rand und je zwei Pixel oben und unten – **eine L-Form, deren Ecke unten rechts liegt.** Genau die, die gemeldet wurde.
+
+Der Knopf zieht deshalb ins Feld um: als Kind der Umrandung, mit eigener Rahmenebene darüber, und die EditBox endet vor ihm, damit getippter Text nicht darunter hindurchläuft. Weil das kein Einzelfall ist, steckt es in `AttachEditButton` – **das `×` der Rezeptsuche hatte denselben Fehler** und ist mit derselben Zeile behoben. `validate.mjs` lässt ab jetzt nur noch eine einzige Stelle zu, die einen Knopf an den rechten Rand eines Eingabefelds setzt; jede weitere von Hand gesetzte fällt durch. Der Testrahmen merkt sich dafür neu Elternrahmen und Rahmenebene – gegengeprüft, indem die Reparatur einmal zurückgenommen wurde: Der Test schlägt dann fehl.
+
+Das ist übrigens die dritte Variante derselben Familie innerhalb von zwei Versionen. 0.9.85 hatte das Häkchen der Ankreuzkästchen, das hinter dem Kasten lag; hier fängt eine Fläche den Klick statt ihn zu verdecken. Die Lehre ist dieselbe: **Wer etwas übereinanderlegt, muss die Ebene ausdrücklich sagen** – der Standardwert ist in beiden Fällen der falsche.
+
+---
+
+**Ebenfalls aus der Gilde, ebenfalls während dieser Version: „Was passiert, wenn mehrere Offis gleichzeitig auf Sitzung starten drücken?"** Die Antwort war unangenehmer als die Frage.
+
+Beide Clients sahen `self.session == nil`, beide legten eine Sitzung an, beide riefen ihren Start in den Raid. Und der Empfänger übernahm eine fremde Sitzung nur, wenn er selbst noch keine hatte – hatte er eine, verwarf er die Meldung stillschweigend. Ergebnis: **zwei Sitzungen mit zwei Kennungen, und der Raid verteilte sich auf beide**, je nachdem, wessen Startruf zuerst ankam. Am Ende des Abends schloss „Sitzung beenden" immer nur eine davon – die andere lief weiter, bis ihr Starter sie von Hand beendete oder sich ausloggte. In der Raidauswertung standen zwei Abende mit je einem Teil der Teilnehmer.
+
+**Gelöst wird das ohne Rückfrage.** Ein Dialog „Sitzung läuft schon, trotzdem starten?" verlagert die Entscheidung an den Falschen: Er weiß in dem Moment nicht mehr als der Client. Stattdessen eine **totale Ordnung, die jeder Client für sich ausrechnet und die überall dasselbe ergibt**: Die früher gestartete Sitzung gewinnt; bei gleicher Sekunde die lexikografisch kleinere Kennung. Die Startzeit kommt aus `GetServerTime()` und ist damit für alle auf dem Realm dieselbe – die lokale Systemuhr hätte genau hier versagt. Der Gleichstand ist häufig (zwei Klicks in derselben Sekunde), deshalb ist die Kennung als zweites Kriterium kein Beiwerk: Sie trägt einen Zufallsanteil und entscheidet eindeutig.
+
+Wer verliert, wird nicht ausgewertet, sondern **verworfen** – ausdrücklich nicht über `FinishSession`. Es gibt dort nichts abzulegen: Die Sitzung ist Sekunden alt und war von Anfang an derselbe Abend. Abgelegt würde sonst ein leerer Raidabend, der in der Liste steht und niemandem gehört.
+
+**Eine Grenze hat die Regel.** Wird die Spaltung erst nach einer Stunde entdeckt – zwei Gruppen, die getrennt gestartet und sich später zusammengeschlossen haben –, hängt an der unterlegenen Sitzung ein halber Abend. Der wiegt schwerer als eine aufgeräumte Kennung. Nach zwei Minuten wird deshalb nicht mehr verworfen: Dann bleiben beide bestehen, und es gibt einmalig eine Warnung im Chat. **Stillschweigend Mitgeschriebenes zu löschen wäre der schlimmere Fehler.**
+
+Dieselbe Prüfung hängt am Herzschlag, nicht nur am Startruf – so heilt sich auch eine Spaltung, die dem Start entgangen ist, weil jemand gerade im Ladebildschirm war. Und ein Nebenfund: Der alte Code stempelte bei **jedem** fremden Startruf den eigenen Herzschlag, auch bei einer wildfremden Sitzung. Das brachte die eigene Sitzung für einen Takt zum Schweigen, obwohl niemand für sie geredet hatte.
+
+**Sichtbar wird das an drei Stellen**, denn eine Regel, die man nicht bemerkt, ist von einem Fehler nicht zu unterscheiden: Die Absage nennt jetzt den Starter („Die Raidsitzung läuft bereits – gestartet von Nexarius."), das Fenster „Raidinstanz betreten" verschwindet nicht mehr wortlos, sondern sagt beim Schließen, wer schneller war, und der unterlegene Offizier liest, dass seine Sitzung zusammengeführt wurde – nicht, dass sein Klick wirkungslos war.
+
+---
+
+**Zwei weitere Funde derselben Art.**
+
+- `ROSTER_UPDATED` kommt aus zwei sehr verschiedenen Quellen: aus dem entprellten Gildenscan (selten) und aus **jedem eingehenden Profilpaket** (zur Prime Time mehrfach pro Sekunde). Der Handler rief `Refresh()`, und das zeichnet die offene Seite **sofort und synchron** neu. Der Sammel-Timer aus 0.9.49 war genau dagegen gebaut – dieser eine Pfad lief an ihm vorbei. Er tut es nicht mehr; der Fensterkopf wird im selben Takt mitgeführt statt eigens;
+- die Merkliste unterdrückter Rezeptanfragen wuchs unbegrenzt – ein Eintrag je je angefragtem Rezept, über einen Raidabend hinweg mehrere tausend. Sie wird jetzt aufgeräumt, sobald sie zu groß wird.
+
+**Zwei Befunde zur Datensynchronität.**
+
+- **Ein älteres Profil konnte ein neueres überschreiben.** Pakete desselben Absenders können sich überholen – eine Antwort auf eine Versionsanfrage und eine gerade gespeicherte Änderung laufen parallel –, und beim Empfang gewann schlicht das zuletzt eingetroffene. Jetzt gewinnt der neuere Zeitstempel, dieselbe Regel, die das Gildenprofil und der Warcraft-Logs-Import schon anwenden;
+- **der Zeitstempel des eigenen Profils sprang bei jedem Spielereignis nach vorn**, auch ohne jede Änderung. Gildenweit stand damit „gerade aktualisiert" an Profilen, an denen seit Wochen nichts passiert war – und ein Vergleich zweier Stände war wertlos. Er wandert jetzt nur bei einer echten Änderung mit. Erst dadurch ist der Punkt darüber überhaupt wirksam.
+
+---
+
+**Aufbau.** Die Seitenleiste soll einen Ablauf erzählen. Zwei Punkte taten das nicht: Der Abschnitt hieß „ROSTER" und trug damit denselben Namen wie der Seitenschlüssel der **Profil**-Seite – zwei verschiedene Dinge, ein Wort. Und „Warcraft Logs" stand darin, obwohl es weder Roster noch Gilde betrifft, sondern die **Datenquelle des Raidteils** ist: Der Import erzeugt Raidsitzungen und Profile, die Raidauswertung liest sie. Der Abschnitt heißt jetzt **Gilde** (Mitgliederpflege, Gildenwerkstatt), und **Raid** liest sich von oben nach unten als Kette: Warcraft Logs liefert, die Raidauswertung wertet aus, die Ausrüstungsprüfung zieht die Konsequenz. Der Rekrutierungstrichter bleibt, wie er war – Eckdaten, Bedarf, Auswahl, Werbung, Antworten –, denn er ist einer, und „Gildenprofil speichern" springt selbst auf „Vorschläge".
+
+**Gildenübersicht: 35 statt 25 Plätze.** 25 war exakt die Größe eines Schlachtzugs und damit zu knapp – Ersatzleute, Twinks und gerade offline gegangene Stammspieler fielen hinten heraus, und die Liste sah kleiner aus als die Gilde ist. Die Zahl steht jetzt an **einer** Stelle in `Constants.lua`; verstreute 25er in Zeilenzahl, Scrollbereich und Seitentitel waren der Grund, warum die drei überhaupt auseinanderlaufen konnten. `validate.mjs` lehnt eine wieder fest verdrahtete Zeilenzahl ab.
+
 ## 0.9.85 – Die Oberfläche zeichnet ihre Symbole selbst
 
 **„Die Symbole passen nicht."** In den Abmeldefeldern Von und Bis stand ein leerer Kasten, wo 0.9.84 ein Kalendersymbol versprochen hatte. Kein Installationsfehler – der Kasten steckte im ausgelieferten Code.

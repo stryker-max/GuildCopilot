@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.85",
+  "## Version: 0.9.86",
 ];
 
 for (const entry of requiredMetadata) {
@@ -414,6 +414,27 @@ const requiredImplementations = [
   // Gearcheck: unvollstaendig Gelesenes zaehlt nicht als geprueft.
   ["Inspect wird bei Lücken wiederholt", /MAX_INSPECT_RETRIES/],
   ["Verzauberungsname auch ohne Item-Link", /function GC\.GearAudit:ResolveEnchantNameByID/],
+  // Abgleichsbalken statt Paketzahl: Ein Zaehler beantwortet "bin ich
+  // vollstaendig?" nicht, und genau das ist unten in der Werkstatt die Frage.
+  ["Fortschritt des Gildenabgleichs", /function GC\.Sync:GetSyncStatus/],
+  ["ausgehende Pakete werden gezählt", /function GC\.Sync:NoteBulkQueued/],
+  ["eingehende Teile werden gezählt", /function GC\.Sync:GetIncomingPendingCount/],
+  ["angekündigte, nicht gelieferte Berufe sind eine Lücke", /function GC\.Workshop:GetPendingWantCount/],
+  ["Ladebalken unten in der Werkstatt", /function GC\.UI:RefreshSyncBar/],
+  ["Balken als eigenes Bauteil", /local function CreateProgressBar/],
+  // Der Ereignissturm aus Profile.lua: Auf- und Zuklappen der
+  // Faehigkeitskategorien loest genau das Ereignis aus, das die Erfassung
+  // anstoesst. Beide Sperren muessen bleiben.
+  // Zwei gleichzeitig gestartete Sitzungen muessen auf JEDEM Client zur selben
+  // gewinnen, sonst schreibt die Gilde denselben Abend zweimal mit.
+  ["eindeutige Regel bei zwei gleichzeitigen Sitzungen", /function GC\.RaidMonitor:IsPreferredSession/],
+  ["unterlegene Sitzung wird verworfen statt abgelegt", /function GC\.RaidMonitor:DiscardSession/],
+  ["fremder Sitzungsstart wird geprüft statt ignoriert", /function GC\.RaidMonitor:AdoptForeignSession/],
+  ["Knöpfe im Eingabefeld liegen über der EditBox", /local function AttachEditButton/],
+  ["Kalendersymbol der Abmeldung hängt im Feld", /AttachEditButton\(edit, pick, 26\)/],
+  ["Sperre gegen den selbst erzeugten Fähigkeitssturm", /skillHeadersTouchedAt/],
+  ["Berufserfassung wird entprellt", /function GC\.Profile:ScheduleRefresh/],
+  ["Fähigkeitsereignis als prüfbare Methode", /function GC\.Profile:OnGameEvent/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {
@@ -711,6 +732,44 @@ if (!refreshBody.includes("if not self:IsVisible() then")) {
 }
 if (!uiSource.includes("function GC.UI:Invalidate(")) {
   throw new Error("Die Vormerkung veralteter Seiten fehlt.");
+}
+// ROSTER_UPDATED kommt aus jedem eingehenden Profilpaket - zur Prime Time
+// mehrfach pro Sekunde. Refresh() zeichnet SOFORT; das lief am Sammel-Timer
+// vorbei, gegen den es gebaut wurde.
+if (/RegisterCallback\("ROSTER_UPDATED", GC\.UI,[\s\S]{0,120}self:Refresh\(\)/.test(uiSource)) {
+  throw new Error("Jedes eingehende Profil zeichnet die offene Seite wieder sofort neu.");
+}
+if (!uiSource.includes("function GC.UI:InvalidateAll(")) {
+  throw new Error("Das gesammelte Veralten aller Seiten fehlt.");
+}
+// Ein Knopf, der von Hand in ein Eingabefeld gesetzt wird, landet auf derselben
+// Rahmenebene wie die EditBox - und die fängt dann den Klick ab. Anklickbar
+// bleibt nur ihr Innenabstand, also der Rand. Genau so war das Kalendersymbol
+// der Abmeldung praktisch tot. Es gibt dafür genau eine Stelle: AttachEditButton.
+const editButtonAnchors = uiSource.match(/SetPoint\("RIGHT", [\w.]*container, "RIGHT"/g) || [];
+if (editButtonAnchors.length !== 1) {
+  throw new Error(
+    `Ein Knopf wird wieder von Hand in ein Eingabefeld gesetzt (${editButtonAnchors.length} Stellen ` +
+      "statt nur AttachEditButton). Ohne eigene Rahmenebene fängt die EditBox den Klick ab."
+  );
+}
+// Die Anzahl der Plaetze in der Gildenübersicht steht an einer Stelle. Drei
+// verstreute 25er waren der Grund, warum die Liste, ihre Zeilen und ihr
+// Scrollbereich auseinanderlaufen konnten.
+const constantsSource = fs.readFileSync(path.join(root, "Constants.lua"), "utf8");
+if (!/ACTIVE_RAIDER_LIMIT\s*=\s*(\d+)/.test(constantsSource)) {
+  throw new Error("Die Zahl der geführten aktiven Raider steht nicht mehr in Constants.lua.");
+}
+const raiderLimit = Number(constantsSource.match(/ACTIVE_RAIDER_LIMIT\s*=\s*(\d+)/)[1]);
+if (raiderLimit < 30) {
+  throw new Error(`Die Gildenübersicht führt nur ${raiderLimit} Raider; ein Schlachtzug hat schon 25.`);
+}
+const dashboardPage = uiSource.slice(
+  uiSource.indexOf("function GC.UI:BuildDashboardPage"),
+  uiSource.indexOf("function GC.UI:RefreshDashboard")
+);
+if (/for index = 1, \d+ do/.test(dashboardPage) || /content:SetHeight\(\d+ \* \d+\)/.test(dashboardPage)) {
+  throw new Error("Die Gildenübersicht hat wieder eine fest verdrahtete Zeilenzahl.");
 }
 // Grosse Uebertragungen pausieren im Kampf.
 const syncSource = fs.readFileSync(path.join(root, "Sync.lua"), "utf8");

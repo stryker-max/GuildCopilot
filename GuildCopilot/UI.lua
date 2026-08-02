@@ -69,6 +69,26 @@ local ROSTER_CARDS = {
     { key = "gearCard", top = 612, height = 162 },
 }
 
+-- Die Seitenleiste erzaehlt einen Ablauf, keine Merkmalsliste. Von oben nach
+-- unten: erst der eigene Charakter, dann die Gilde als Ganzes, dann die drei
+-- Arbeitsfelder in der Reihenfolge, in der man sie tatsaechlich benutzt.
+--
+--   COPILOT       was ICH melde und was daraus wird
+--   REKRUTIERUNG  der Trichter: Eckdaten -> Bedarf -> Auswahl -> Werbung ->
+--                 Antworten. Genau diese Reihenfolge laeuft man einmal durch,
+--                 und "Gildenprofil speichern" springt selbst auf "Vorschlaege"
+--   GILDE         die laufenden Dienste an der Gilde
+--   RAID          erst die Datenquelle, dann die Auswertung, dann was daraus
+--                 folgt: Warcraft Logs liefert Sitzungen und Profile, die
+--                 Raidauswertung liest sie, die Ausruestungspruefung zieht die
+--                 Konsequenz daraus
+--   SYSTEM        Einstellungen, immer zuletzt
+--
+-- Zwei Aenderungen gegenueber 0.9.85, beide aus derselben Ueberlegung: Der
+-- Abschnitt hiess "ROSTER" und trug damit denselben Namen wie der Seiten-
+-- schluessel der PROFIL-Seite - zwei verschiedene Dinge, ein Wort. Und
+-- "Warcraft Logs" stand darin, obwohl es weder Roster noch Gilde betrifft,
+-- sondern die Datenquelle des Raidteils ist.
 local TAB_DEFINITIONS = {
     { key = "ROSTER", section = "COPILOT", label = "Profil", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "OVERVIEW", section = "COPILOT", label = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Note_01" },
@@ -77,9 +97,9 @@ local TAB_DEFINITIONS = {
     { key = "RECRUITMENT", section = "REKRUTIERUNG", label = "Klassen & Specs", icon = "Interface\\Icons\\INV_Misc_GroupLooking" },
     { key = "POST", section = "REKRUTIERUNG", label = "Werbung posten", icon = "Interface\\Icons\\INV_Letter_15" },
     { key = "INBOX", section = "REKRUTIERUNG", label = "Postfach", icon = "Interface\\Icons\\INV_Letter_05" },
-    { key = "MEMBERCARE", section = "ROSTER", label = "Mitgliederpflege", icon = "Interface\\Icons\\INV_Misc_Note_06" },
-    { key = "WORKSHOP", section = "ROSTER", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
-    { key = "WCL", section = "ROSTER", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
+    { key = "MEMBERCARE", section = "GILDE", label = "Mitgliederpflege", icon = "Interface\\Icons\\INV_Misc_Note_06" },
+    { key = "WORKSHOP", section = "GILDE", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
+    { key = "WCL", section = "RAID", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
     { key = "STATISTICS", section = "RAID", label = "Raidauswertung", icon = "Interface\\Icons\\INV_Misc_Book_11" },
     { key = "GEAR", section = "RAID", label = "Ausrüstung", icon = "Interface\\Icons\\INV_Chest_Plate06" },
     { key = "SETTINGS", section = "SYSTEM", label = "Einstellungen", icon = "Interface\\Icons\\INV_Gizmo_02" },
@@ -198,6 +218,34 @@ local function CreateLabel(parent, text, style)
         label:SetWordWrap(false)
     end
     return label
+end
+
+-- Ein Fortschrittsbalken aus zwei Flächen: Rahmen und Füllung. Die Füllung
+-- hängt links an und wächst nach rechts; sie liegt über dem Hintergrund des
+-- Rahmens, weil eine Textur ihres Elternrahmens sonst darunter verschwindet -
+-- dieselbe Lektion wie beim Häkchen im Kanalkästchen.
+local function CreateProgressBar(parent, width, height)
+    local bar = CreatePanel(parent, THEME.input, THEME.border)
+    bar:SetSize(width, height)
+    bar.innerWidth = math.max(1, width - 2)
+    bar.fill = bar:CreateTexture(nil, "ARTWORK")
+    bar.fill:SetPoint("TOPLEFT", bar, "TOPLEFT", 1, -1)
+    bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 1, 1)
+    bar.fill:SetWidth(bar.innerWidth)
+    SetTextureColor(bar.fill, THEME.accent)
+
+    -- Der Anteil steht als Zahl daneben: Ein Balken allein beantwortet "wie
+    -- weit noch" nur ungefähr, und genau das ist hier die Frage.
+    function bar:SetProgress(fraction, color)
+        fraction = math.max(0, math.min(1, tonumber(fraction) or 0))
+        self.fraction = fraction
+        self.fill:SetWidth(math.max(1, self.innerWidth * fraction))
+        self.fill:SetShown(fraction > 0)
+        SetTextureColor(self.fill, color or THEME.accent)
+    end
+
+    bar:SetProgress(0)
+    return bar
 end
 
 -- Tooltips an Tabellenzeilen hingen fest rechts. Steht das Fenster am rechten
@@ -395,6 +443,34 @@ local function SetButtonMark(button, mark)
     mark:ClearAllPoints()
     mark:SetPoint("CENTER", button, "CENTER", 0, 0)
     button.mark = mark
+    return button
+end
+
+-- Ein Knopf IM Eingabefeld - das Kalendersymbol der Abmeldung, das × der
+-- Rezeptsuche.
+--
+-- Zwei Dinge muessen dafuer stimmen, und beide standen bisher nicht da:
+--
+-- 1. Der Knopf braucht eine hoehere Rahmenebene als die EditBox. Beide sind
+--    Kinder desselben Rahmens und lagen damit auf derselben Ebene; wer bei
+--    Gleichstand den Klick bekommt, ist nicht festgelegt, und in der Praxis
+--    fing ihn die EditBox ab. Anklickbar blieb genau der Rand, den die EditBox
+--    NICHT bedeckt: ihre Innenabstaende von zehn Pixeln rechts und sechs oben
+--    und unten - also ein schmaler Streifen und die untere rechte Ecke. Genau
+--    so wurde es gemeldet: "in der Mitte geht es nicht".
+-- 2. Der Text muss vor dem Knopf enden, sonst laeuft er darunter hindurch.
+--
+-- Der Knopf zieht deshalb ins Feld um: als Kind der Umrandung, mit eigener
+-- Ebene darueber, und die EditBox macht ihm Platz.
+local function AttachEditButton(edit, button, buttonWidth, gap)
+    gap = gap or 4
+    button:SetParent(edit.container)
+    button:ClearAllPoints()
+    button:SetPoint("RIGHT", edit.container, "RIGHT", -gap, 0)
+    local containerLevel = (edit.container.GetFrameLevel and edit.container:GetFrameLevel()) or 1
+    button:SetFrameLevel(containerLevel + 10)
+    edit:SetPoint("BOTTOMRIGHT", edit.container, "BOTTOMRIGHT",
+        -(gap + (tonumber(buttonWidth) or 20) + 4), 6)
     return button
 end
 
@@ -1061,8 +1137,16 @@ function GC.UI:CreateMainFrame()
             return
         end
         local stats = GC.Sync:GetAddonUserStats()
+        local status = GC.Sync:GetSyncStatus()
         GameTooltip:SetOwner(badge, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Abgleich mit der Gilde")
+        if status.state == "RUNNING" then
+            GameTooltip:AddLine("Läuft gerade: " .. status.percent .. " %, noch "
+                .. status.outstanding .. " offen.", 0.18, 0.78, 0.86, true)
+        elseif (status.lastSyncedAt or 0) > 0 and date then
+            GameTooltip:AddLine("Zuletzt vollständig: "
+                .. date("%d.%m. %H:%M", status.lastSyncedAt), 0.35, 0.90, 0.58, true)
+        end
         GameTooltip:AddLine(stats.players .. " Spieler mit "
             .. stats.known .. " erkannten Charakteren, davon " .. stats.compatible
             .. " mit gleicher Datenversion.", 1, 1, 1, true)
@@ -1299,7 +1383,9 @@ end
 
 function GC.UI:BuildDashboardPage()
     local page = self.pages.OVERVIEW
-    CreatePageTitle(page, "Gildenübersicht", "Bis zu 25 zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen.")
+    CreatePageTitle(page, "Gildenübersicht", "Bis zu "
+        .. GC.Constants.ACTIVE_RAIDER_LIMIT
+        .. " zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen.")
 
     page.metricCards = {}
     local metrics = {
@@ -1396,10 +1482,10 @@ function GC.UI:BuildDashboardPage()
     scroll:SetPoint("BOTTOMRIGHT", rosterCard, "BOTTOMRIGHT", -16, 14)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(742)
-    content:SetHeight(25 * 27)
+    content:SetHeight(GC.Constants.ACTIVE_RAIDER_LIMIT * 27)
     scroll:SetScrollChild(content)
     page.raiderRows = {}
-    for index = 1, 25 do
+    for index = 1, GC.Constants.ACTIVE_RAIDER_LIMIT do
         local row = CreatePanel(content, index % 2 == 0 and THEME.input or THEME.card)
         row:SetSize(740, 25)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
@@ -1488,7 +1574,7 @@ function GC.UI:RefreshDashboard()
         page.rankFilterButton:SetText("Ränge: " .. selectedRanks .. "/" .. #ranks)
     end
 
-    local raiders = GC.Roster:GetActiveRaiders(25)
+    local raiders = GC.Roster:GetActiveRaiders(GC.Constants.ACTIVE_RAIDER_LIMIT)
     for index, row in ipairs(page.raiderRows) do
         local member = raiders[index]
         row:SetShown(member ~= nil)
@@ -2655,7 +2741,7 @@ function GC.UI:BuildRosterPage()
                 end)
             end)
             SetButtonMark(pick, CreateCalendarMark(pick, 17))
-            pick:SetPoint("RIGHT", edit.container, "RIGHT", -4, 0)
+            AttachEditButton(edit, pick, 26)
             page.absenceEdits[field.key .. "_PICK"] = pick
         end
     end
@@ -3508,7 +3594,9 @@ function GC.UI:BuildWorkshopPage()
         page.workshopSearch:ClearFocus()
         GC.UI:RefreshWorkshop()
     end)
-    page.workshopSearchClear:SetPoint("RIGHT", page.workshopSearch.container, "RIGHT", -5, 0)
+    -- Dasselbe Problem wie beim Kalendersymbol: Ohne eigene Rahmenebene fing
+    -- die EditBox den Klick ab, und anklickbar blieb nur ihr Innenabstand.
+    AttachEditButton(page.workshopSearch, page.workshopSearchClear, 20, 5)
     page.workshopSearchClear:Hide()
     -- Wer "Verzauberung" tippt, loest zwoelf Suchlaeufe aus, von denen elf
     -- niemand sieht. Gezeichnet wird deshalb erst, wenn die Eingabe kurz steht.
@@ -3546,15 +3634,24 @@ function GC.UI:BuildWorkshopPage()
     page.workshopFavorites.label:SetPoint("RIGHT", page.workshopFavorites, "RIGHT", -8, 0)
     page.workshopFavorites.label:SetJustifyH("LEFT")
 
+    -- Der Erfolg steht ab 0.9.86 im Balken darunter; hier bleibt nur die
+    -- Meldung für den Fall, dass gar nicht gefragt werden konnte. Eine
+    -- Erfolgsmeldung in die Statuszeile zu schreiben hieße, sie eine
+    -- Viertelsekunde später vom Balken überschreiben zu lassen.
     page.workshopRequest = CreateButton(searchCard, "Daten anfragen", 176, 34, function()
         local success, message = GC.Workshop:RequestGuildData()
-        page.workshopStatus:SetText(message or "")
-        SetTextColor(page.workshopStatus, success and THEME.success or THEME.danger)
+        if not success then
+            GC:Print("|cffff5555" .. tostring(message) .. "|r")
+        end
+        GC.UI:RefreshSyncBar()
     end, "PRIMARY")
     page.workshopRequest:SetPoint("TOPRIGHT", searchCard, "TOPRIGHT", -14, -14)
 
     local listCard = CreateCard(page, "Gefundene Rezepte")
-    listCard:SetSize(418, 342)
+    -- Zwölf Pixel niedriger als bis 0.9.85: Darunter steht jetzt der
+    -- Abgleichsbalken, und der braucht eine eigene Zeile statt sich in die
+    -- Statuszeile zu quetschen.
+    listCard:SetSize(418, 330)
     listCard:SetPoint("TOPLEFT", searchCard, "BOTTOMLEFT", 0, -12)
     page.workshopListTitle = listCard.title
     page.workshopRows = {}
@@ -3598,7 +3695,7 @@ function GC.UI:BuildWorkshopPage()
     page.workshopNext:SetPoint("LEFT", page.workshopPageLabel, "RIGHT", 8, 0)
 
     local detailCard = CreateCard(page, "Rezeptdetails")
-    detailCard:SetSize(346, 342)
+    detailCard:SetSize(346, 330)
     detailCard:SetPoint("TOPRIGHT", searchCard, "BOTTOMRIGHT", 0, -12)
     -- Breite 170 statt 200: Rechts stehen inzwischen zwei Knöpfe übereinander
     -- ("Merken" und "In Auftrag geben", ab x 192); ein längerer Rezeptname
@@ -3677,14 +3774,80 @@ function GC.UI:BuildWorkshopPage()
 
     page.workshopStatus = CreateLabel(page,
         "Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.",
-        { muted = true, width = 776 })
+        { muted = true, width = 776, height = 16 })
     page.workshopStatus:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 0)
+
+    -- === Abgleichsbalken ===================================================
+    --
+    -- Hier stand bis 0.9.86 eine Zahl empfangener Pakete. Sie beantwortete
+    -- genau die Frage nicht, die man unten in der Werkstatt stellt: Bin ich
+    -- vollständig? "110 Berufspakete empfangen" heißt weder ja noch nein.
+    --
+    -- Der Balken zählt stattdessen die offene Arbeit - ausgehende Pakete,
+    -- fehlende Teile eingehender Übertragungen und Berufe, die ein fremdes
+    -- Manifest gemeldet hat und die hier noch fehlen. 100 % gibt es nur, wenn
+    -- davon nichts mehr übrig ist.
+    page.syncBar = CreateProgressBar(page, 700, 12)
+    page.syncBar:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 19)
+    page.syncPercent = CreateLabel(page, "", {
+        font = "GameFontNormalSmall",
+        width = 68,
+        height = 14,
+        align = "RIGHT",
+    })
+    page.syncPercent:SetPoint("LEFT", page.syncBar, "RIGHT", 8, 0)
+
+    page.syncBar:EnableMouse(true)
+    page.syncBar:SetScript("OnEnter", function(bar)
+        if not GameTooltip then
+            return
+        end
+        local status = GC.Sync:GetSyncStatus()
+        GameTooltip:SetOwner(bar, "ANCHOR_TOP")
+        GameTooltip:SetText("Stand des Gildenabgleichs")
+        GameTooltip:AddLine(status.outbound .. " Pakete zu senden, "
+            .. status.inbound .. " Teile im Empfang, "
+            .. status.missing .. " Berufe angekündigt und noch nicht da.", 1, 1, 1, true)
+        GameTooltip:AddLine("Gezählt wird der ganze Abgleich, nicht nur die Werkstatt – "
+            .. "davon aus der Werkstatt: " .. GC.Workshop:GetPendingPacketCount() .. ".",
+            0.57, 0.64, 0.72, true)
+        local waiting = GC.Workshop:GetPendingWantNames(6)
+        if #waiting > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Es fehlt noch von: " .. table.concat(waiting, ", "), 1, 0.72, 0.25, true)
+        end
+        if (status.lastSyncedAt or 0) > 0 and date then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Zuletzt vollständig: "
+                .. date("%d.%m. %H:%M", status.lastSyncedAt), 0.57, 0.64, 0.72, true)
+        end
+        GameTooltip:AddLine("„Daten anfragen“ startet einen neuen Abgleich.", 0.31, 0.79, 1, true)
+        GameTooltip:Show()
+    end)
+    page.syncBar:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+
+    -- Der Balken lebt, solange man ihn sieht: Ein verstecktes Frame bekommt
+    -- kein OnUpdate, bei geschlossener Werkstatt kostet er also nichts. Der
+    -- Zyklus selbst läuft unabhängig davon in Sync.lua weiter.
+    page.syncBar:SetScript("OnUpdate", function(bar, elapsed)
+        bar.elapsed = (bar.elapsed or 0) + elapsed
+        if bar.elapsed < 0.25 then
+            return
+        end
+        bar.elapsed = 0
+        GC.UI:RefreshSyncBar()
+    end)
 
     -- Alles, was zum Katalog gehört, damit der Reiterwechsel es gemeinsam
     -- ein- und ausblenden kann.
     page.workshopCatalogFrames = {
         page.metricCards.RECIPES, page.metricCards.CRAFTERS, page.metricCards.PROFESSIONS,
         searchCard, listCard, detailCard, page.workshopStatus,
+        page.syncBar, page.syncPercent,
     }
 
     self:BuildOrdersView(page)
@@ -3981,38 +4144,114 @@ function GC.UI:RefreshWorkshop()
         page.workshopDetailScroll:UpdateModernThumb()
     end
 
-    local missingProfessions = GC.Workshop:GetMissingOwnProfessions()
-    local syncStats = GC.Workshop.syncStats or {}
-    local pendingPackets = GC.Workshop:GetPendingPacketCount()
-    if pendingPackets > 0 then
-        page.workshopStatus:SetText("|cff2ed9e6Synchronisierung läuft:|r "
-            .. pendingPackets .. " Pakete verbleiben. Das Fenster kann geschlossen werden.")
-        SetTextColor(page.workshopStatus, THEME.accent)
-    elseif (syncStats.failed or 0) > 0 then
-        page.workshopStatus:SetText("|cffff6266Übertragung unvollständig:|r "
-            .. syncStats.failed .. " Pakete konnten auch nach Wiederholungen nicht gesendet werden.")
-        SetTextColor(page.workshopStatus, THEME.danger)
-    elseif (syncStats.receivedProfessions or 0) > 0 then
-        -- Der Zaehler zaehlt PAKETE, nicht Berufe: Derselbe Beruf desselben
-        -- Herstellers kommt bei jedem Abgleich erneut. "110 Berufe" neben der
-        -- 13-Berufe-Karte sah nach Doppelzaehlung aus - war es auch, nur im
-        -- Text falsch beschriftet.
-        page.workshopStatus:SetText("Abgleich: " .. syncStats.receivedProfessions
-            .. " Berufspakete empfangen"
-            .. (syncStats.lastSender ~= "" and ("  •  zuletzt " .. syncStats.lastSender) or "") .. ".")
-        SetTextColor(page.workshopStatus, THEME.success)
-    elseif #missingProfessions > 0 then
-        page.workshopStatus:SetText("|cffffb84dNoch nicht eingelesen:|r "
-            .. table.concat(missingProfessions, ", ") .. ". Das jeweilige Berufsfenster einmal geöffnet lassen.")
-        SetTextColor(page.workshopStatus, THEME.warning)
-    elseif GC.Workshop.lastScan then
-        page.workshopStatus:SetText("Zuletzt erkannt: " .. GC.Workshop.lastScan.name
-            .. "  •  " .. GC.Workshop.lastScan.recipes .. " Rezepte.")
-        SetTextColor(page.workshopStatus, THEME.success)
-    else
-        page.workshopStatus:SetText("Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest.")
-        SetTextColor(page.workshopStatus, THEME.muted)
+    self:RefreshSyncBar()
+end
+
+-- Wie lange ist das her? Für den Balken reicht die grobe Angabe; auf die
+-- Sekunde genau will das niemand wissen, und "vor 0 Sekunden" liest sich falsch.
+local function AgeLabel(timestamp)
+    local age = GC.Util.Now() - (tonumber(timestamp) or 0)
+    if age < 60 then
+        return "gerade eben"
+    elseif age < 3600 then
+        return "vor " .. math.floor(age / 60) .. " Min."
+    elseif age < 24 * 3600 then
+        return "vor " .. math.floor(age / 3600) .. " Std."
     end
+    return "vor " .. math.floor(age / (24 * 3600)) .. " Tagen"
+end
+
+-- Der Balken unten in der Werkstatt und die Zeile darunter.
+--
+-- Die Zeile trägt zwei Aussagen, in dieser Reihenfolge: erst der Zustand des
+-- Abgleichs, dann der eigene Beitrag dazu (nicht eingelesene Berufe). Beides
+-- steht nebeneinander statt sich gegenseitig zu verdrängen - vorher gewann der
+-- Paketzähler, und der Hinweis "Verzauberkunst noch nicht eingelesen" war genau
+-- dann unsichtbar, wenn er gebraucht wurde.
+function GC.UI:RefreshSyncBar(force)
+    local page = self.pages.WORKSHOP
+    if not page or not page.syncBar then
+        return
+    end
+
+    local status = GC.Sync:GetSyncStatus()
+    -- Viermal je Sekunde nachsehen ist billig, viermal je Sekunde alle
+    -- Beschriftungen neu zusammensetzen nicht. Gezeichnet wird deshalb nur,
+    -- wenn sich am Zustand wirklich etwas geaendert hat.
+    -- Das Alter geht in Minuten ein, nicht in Sekunden: "Stand: vor 3 Min."
+    -- muss mitwandern, ohne dafuer viermal je Sekunde neu gesetzt zu werden.
+    local ageMinutes = math.floor(
+        (GC.Util.Now() - (tonumber(status.lastSyncedAt) or 0)) / 60)
+    local signature = table.concat({
+        status.state,
+        status.percent,
+        status.outstanding,
+        status.failed,
+        ageMinutes,
+        (status.peerSeenAt or 0) > 0 and "P" or "-",
+        #GC.Workshop:GetMissingOwnProfessions(),
+    }, "|")
+    if force ~= true and page.syncSignature == signature then
+        return
+    end
+    page.syncSignature = signature
+
+    local text, color, percentText, percentColor
+
+    if status.state == "RUNNING" then
+        page.syncBar:SetProgress(status.percent / 100, THEME.accent)
+        percentText = status.percent .. " %"
+        percentColor = THEME.accent
+        text = "|cff2ed9e6Abgleich läuft|r  •  noch " .. status.outstanding
+            .. (status.outstanding == 1 and " Paket" or " Pakete")
+            .. ". Das Fenster kann geschlossen werden."
+        color = THEME.accent
+    elseif status.state == "INCOMPLETE" then
+        page.syncBar:SetProgress(1, THEME.danger)
+        percentText = "lückenhaft"
+        percentColor = THEME.danger
+        text = "|cffff6266Abgleich unvollständig|r  •  " .. status.failed
+            .. (status.failed == 1 and " Paket kam nicht durch" or " Pakete kamen nicht durch")
+            .. ". „Daten anfragen“ holt den Stand erneut."
+        color = THEME.danger
+    elseif status.state == "SYNCED" then
+        page.syncBar:SetProgress(1, THEME.success)
+        percentText = "100 %"
+        percentColor = THEME.success
+        if (status.peerSeenAt or 0) > 0 then
+            text = "|cff59e695Vollständig synchronisiert|r  •  Stand: "
+                .. AgeLabel(status.lastSyncedAt) .. "."
+        else
+            -- Belegt ist nur die halbe Aussage, also steht auch nur die halbe da.
+            text = "|cff8b98a5Nichts offen|r  •  bisher hat sich kein anderer"
+                .. " Guild-Copilot-Nutzer gemeldet – verglichen wurde also mit niemandem."
+            percentColor = THEME.muted
+            page.syncBar:SetProgress(1, THEME.muted)
+        end
+        color = THEME.success
+    else
+        page.syncBar:SetProgress(0, THEME.muted)
+        percentText = "–"
+        percentColor = THEME.muted
+        text = "Noch kein Abgleich gelaufen  •  „Daten anfragen“ holt den Stand der Gilde."
+        color = THEME.muted
+    end
+
+    -- Der eigene Beitrag hängt hinten an: Wer seine Berufe nie geöffnet hat,
+    -- ist selbst dann unvollständig, wenn die Leitung gerade ruhig ist.
+    local missingProfessions = GC.Workshop:GetMissingOwnProfessions()
+    if #missingProfessions > 0 then
+        text = text .. "  |cffffb84dDeine Berufe fehlen noch: "
+            .. table.concat(missingProfessions, ", ") .. " – Berufsfenster einmal öffnen.|r"
+    elseif status.state == "IDLE" and GC.Workshop.lastScan then
+        text = text .. "  Zuletzt erkannt: " .. GC.Workshop.lastScan.name
+            .. " mit " .. GC.Workshop.lastScan.recipes .. " Rezepten."
+    end
+
+    page.workshopStatus:SetText(text)
+    SetTextColor(page.workshopStatus, color)
+    page.syncPercent:SetText(percentText)
+    SetTextColor(page.syncPercent, percentColor)
 end
 
 -- === Gildenaufträge: Board, Dialoge, Ansicht ================================
@@ -7647,6 +7886,12 @@ function GC.UI:RefreshGear()
 end
 
 -- Zustand des Gildenabgleichs in einem Satz neben der Version.
+--
+-- "synchron" heisst hier ausdruecklich NICHT mehr "alle haben dieselbe
+-- Addon-Version". Genau das stand bis 0.9.85 dort und war die haeufigste
+-- Verwechslung: Der Kopf meldete "alle synchron", waehrend unten noch achtzig
+-- Pakete unterwegs waren. Die Version steht jetzt als Version da, und ob die
+-- Daten vollstaendig sind, sagt derselbe Zyklus wie der Balken in der Werkstatt.
 function GC.UI:RefreshSyncBadge()
     local badge = self.syncBadge
     if not badge then
@@ -7663,15 +7908,23 @@ function GC.UI:RefreshSyncBadge()
     local players = stats.players or known
     local differing = (stats.outdated or 0) + (stats.ahead or 0)
     local characterNote = known > players and (" (" .. known .. " Chars)") or ""
+    local status = GC.Sync:GetSyncStatus()
 
-    if players <= 1 then
+    if status.state == "RUNNING" then
+        badge:SetText("|cff2ed9e6• Abgleich läuft … " .. status.percent .. " %|r")
+    elseif status.state == "INCOMPLETE" then
+        badge:SetText("|cffff6266• Abgleich unvollständig|r")
+    elseif players <= 1 then
         badge:SetText("|cff8b98a5• kein anderer Nutzer erkannt|r")
     elseif differing > 0 then
         badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote .. ", "
             .. differing .. " mit anderer Version|r")
-    else
+    elseif status.state == "SYNCED" then
         badge:SetText("|cff59e695• " .. players .. " Nutzer" .. characterNote
-            .. ", alle synchron|r")
+            .. ", Daten vollständig|r")
+    else
+        badge:SetText("|cff8b98a5• " .. players .. " Nutzer" .. characterNote
+            .. ", gleiche Version|r")
     end
 end
 
@@ -7741,10 +7994,18 @@ function GC.UI:Invalidate(...)
             end
         end
     end
+    if self.headerStale and self:IsVisible() then
+        repaint = true
+    end
     if not repaint or self.repaintPending then
         return
     end
     if not C_Timer or type(C_Timer.After) ~= "function" then
+        if self.headerStale then
+            self.headerStale = nil
+            self:RefreshSyncBadge()
+            self:RefreshNavigationAccess()
+        end
         self:RefreshPage(self.activePage)
         return
     end
@@ -7755,11 +8016,39 @@ function GC.UI:Invalidate(...)
         -- RefreshPage raeumt den Veraltet-Merker der gezeichneten Seite ab;
         -- eine nicht mehr aktive Seite behaelt ihren und wird beim naechsten
         -- Aufschlagen nachgeholt.
+        if not GC.UI:IsVisible() then
+            return
+        end
+        if GC.UI.headerStale then
+            GC.UI.headerStale = nil
+            GC.UI:RefreshSyncBadge()
+            GC.UI:RefreshNavigationAccess()
+        end
         local active = GC.UI.activePage
-        if GC.UI:IsVisible() and GC.UI.stalePages and GC.UI.stalePages[active] then
+        if GC.UI.stalePages and GC.UI.stalePages[active] then
             GC.UI:RefreshPage(active)
         end
     end)
+end
+
+-- Alle Seiten veralten lassen, ohne sofort zu zeichnen. Fuer Ereignisse, die
+-- alles betreffen und trotzdem in Schueben kommen - der Sammel-Timer aus
+-- Invalidate faengt sie ab. Refresh() bleibt der Weg fuer Klicks: Wer das
+-- Fenster oeffnet, will den Stand sofort sehen und nicht in einer Viertelsekunde.
+function GC.UI:InvalidateAll()
+    if not self.frame then
+        return
+    end
+    self.stalePages = self.stalePages or {}
+    for pageKey in pairs(PAGE_REFRESH) do
+        self.stalePages[pageKey] = true
+    end
+    -- Der Fensterkopf haengt an keiner Seite und wird deshalb eigens
+    -- vorgemerkt; gezeichnet wird er zusammen mit der Seite im selben Takt.
+    self.headerStale = true
+    -- Der Sammel-Timer haengt an der sichtbaren Seite; sie ist ohnehin schon
+    -- als veraltet vorgemerkt, der Aufruf loest nur das Zeichnen aus.
+    self:Invalidate(self.activePage)
 end
 
 function GC.UI:Refresh()
@@ -8208,10 +8497,18 @@ GC:RegisterCallback("RAID_SESSION_PROMPT", GC.UI, function(self, zoneName)
     self:ShowSessionPrompt(zoneName)
 end)
 
--- Startet jemand anderes die Sitzung, ist die Frage beantwortet.
+-- Startet jemand anderes die Sitzung, ist die Frage beantwortet. Das Fenster
+-- schloss sich dabei wortlos - wer gerade danach greifen wollte, sah nur noch,
+-- dass es weg war. Jetzt steht im Chat, wer schneller war.
 GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
     if self.sessionPrompt and self.sessionPrompt:IsShown() and GC.RaidMonitor.session then
         self.sessionPrompt:Hide()
+        local startedBy = GC.Util.PlayerShortName(GC.RaidMonitor.session.startedBy or "")
+        if startedBy ~= "" and GC.Util.NormalizeName(startedBy)
+            ~= GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName())) then
+            GC:Print("Die Raidsitzung läuft bereits – gestartet von " .. startedBy
+                .. ". Du schreibst automatisch mit.")
+        end
     end
 end)
 
@@ -9453,8 +9750,21 @@ GC:RegisterCallback("VERSION_REPLIES_UPDATED", GC.UI, function(self)
     self:RefreshVersionCheck()
 end)
 
+-- ROSTER_UPDATED kommt aus zwei sehr verschiedenen Quellen: aus dem
+-- entprellten Gildenscan (selten) und aus jedem eingehenden Profilpaket
+-- (zur Prime Time mehrfach pro Sekunde). Refresh() zeichnete die offene Seite
+-- dabei SOFORT und synchron neu - genau der Fall, gegen den Invalidate() mit
+-- seinem Sammel-Timer gebaut wurde. Hier lief er daran vorbei.
 GC:RegisterCallback("ROSTER_UPDATED", GC.UI, function(self)
-    self:Refresh()
+    self:InvalidateAll()
+end)
+
+-- Der Kopf zeigt den Abgleich mit; die Werkstatt hat ihren eigenen Balken und
+-- frischt ihn selbst auf, solange sie zu sehen ist.
+GC:RegisterCallback("SYNC_PROGRESS", GC.UI, function(self)
+    if self:IsVisible() then
+        self:RefreshSyncBadge()
+    end
 end)
 
 -- Alle folgenden Rueckmeldungen kommen aus der Gildensynchronisierung und

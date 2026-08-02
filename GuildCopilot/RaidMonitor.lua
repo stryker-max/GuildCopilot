@@ -258,8 +258,101 @@ function GC.RaidMonitor:StartSession(sessionID, startedBy, startedAt, zone)
     return self.session
 end
 
+-- === Zwei Sitzungen zur selben Zeit ========================================
+--
+-- Druecken zwei Offiziere gleichzeitig auf "Sitzung starten", entstehen zwei
+-- Sitzungen mit zwei Kennungen. Bis 0.9.86 behielt jeder seine eigene und
+-- verwarf die fremde stillschweigend: Der Abend wurde zweimal mitgeschrieben,
+-- landete in zwei Auswertungen mit je einem Teil der Teilnehmer, und die
+-- unterlegene Sitzung lief weiter, bis ihr Starter sie von Hand beendete - ein
+-- "Sitzung beenden" schloss immer nur eine der beiden.
+--
+-- Aufgeloest wird das ohne Rueckfrage und ohne Wortmeldung, ueber eine Regel,
+-- die auf JEDEM Client dasselbe Ergebnis liefert: Die frueher gestartete
+-- Sitzung gewinnt, bei gleicher Sekunde die kleinere Kennung. Die Startzeit
+-- kommt aus der Serverzeit und ist damit fuer alle auf dem Realm dieselbe; die
+-- Kennung traegt einen Zufallsanteil und entscheidet den Gleichstand eindeutig.
+function GC.RaidMonitor:IsPreferredSession(candidateAt, candidateID, currentAt, currentID)
+    candidateAt = tonumber(candidateAt)
+    if not candidateAt or type(candidateID) ~= "string" or candidateID == "" then
+        return false
+    end
+    currentAt = tonumber(currentAt) or 0
+    if candidateAt ~= currentAt then
+        return candidateAt < currentAt
+    end
+    return candidateID < tostring(currentID or "")
+end
+
+-- Wie lange nach dem eigenen Start eine fremde Sitzung die eigene noch
+-- verdraengen darf. Danach steckt in der eigenen ein mitgeschriebener Abend,
+-- und der wiegt schwerer als eine aufgeraeumte Kennung: Dann laufen lieber zwei
+-- Auswertungen nebeneinander, als dass eine stillschweigend geloescht wird.
+local SESSION_MERGE_GRACE = 120
+
+-- Die laufende Sitzung wegwerfen, ohne sie auszuwerten. Ausdruecklich NICHT
+-- FinishSession: Es gibt hier nichts abzulegen - die Sitzung ist Sekunden alt
+-- und war von Anfang an dieselbe wie die, die jetzt uebernommen wird.
+function GC.RaidMonitor:DiscardSession()
+    if not self.session then
+        return false
+    end
+    self.session = nil
+    self:EndSessionUpkeep()
+    self:SetCombatLogTracking(false)
+    return true
+end
+
+-- Eine fremde Sitzungsmeldung gegen die eigene halten. Rueckgabe: ob die
+-- eigene Sitzung danach die fremde ist.
+function GC.RaidMonitor:AdoptForeignSession(sessionID, startedBy, startedAt, zone, sender)
+    if type(sessionID) ~= "string" or sessionID == "" then
+        return false
+    end
+    local session = self.session
+    if not session then
+        self:StartSession(sessionID, startedBy, startedAt, zone)
+        GC:FireCallback("ORDERS_BANNER",
+            "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(sender or startedBy or ""))
+        return true
+    end
+    if session.id == sessionID then
+        return true
+    end
+    if not self:IsPreferredSession(startedAt, sessionID, session.startedAt, session.id) then
+        return false
+    end
+    -- Die eigene Sitzung verliert. Nur wenn sie noch frisch ist, wird sie
+    -- verworfen - sonst haengt daran schon ein halber Abend.
+    if (GC.Util.Now() - (tonumber(session.startedAt) or 0)) > SESSION_MERGE_GRACE then
+        if not self.parallelSessionWarned then
+            self.parallelSessionWarned = true
+            GC:Print("|cffffb840Es laufen zwei Raidsitzungen parallel|r – deine von "
+                .. GC.Util.PlayerShortName(session.startedBy or "") .. " und eine von "
+                .. GC.Util.PlayerShortName(startedBy or sender or "") .. ". "
+                .. "Deine bleibt bestehen; beide werden getrennt ausgewertet.")
+        end
+        return false
+    end
+    self:DiscardSession()
+    self:StartSession(sessionID, startedBy, startedAt, zone)
+    GC:Print("Die Raidsitzung wurde bereits von "
+        .. GC.Util.PlayerShortName(startedBy or sender or "") .. " gestartet – "
+        .. "deine wurde damit zusammengeführt.")
+    GC:FireCallback("ORDERS_BANNER",
+        "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(startedBy or sender or ""))
+    return true
+end
+
 function GC.RaidMonitor:BeginSession()
     if self.session then
+        -- Wer die Sitzung gestartet hat, gehoert in die Absage: Sonst steht da
+        -- "laeuft bereits" und niemand weiss, ob das die eigene von vorhin ist
+        -- oder gerade jemand anderes schneller war.
+        local startedBy = GC.Util.PlayerShortName(self.session.startedBy or "")
+        if startedBy ~= "" then
+            return false, "Die Raidsitzung läuft bereits – gestartet von " .. startedBy .. "."
+        end
         return false, "Es läuft bereits eine Sitzung."
     end
     if not self:CanControlSession() then
@@ -1236,15 +1329,20 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
 
     if fields[1] == "RS" then
         -- Alle Addon-Nutzer im Raid zeichnen dieselbe Sitzung mit, damit die
-        -- Auswertung nicht an einem einzelnen Client hängt.
-        if not self.session and distribution ~= "WHISPER" then
-            self:StartSession(fields[3], sender, tonumber(fields[4]), fields[5])
-            -- Sichtbar wie ein Gildenauftrag (Owner-Wunsch): Die Meldung
-            -- nutzt denselben Banner samt Ein/Aus-Schalter und Position.
-            GC:FireCallback("ORDERS_BANNER",
-                "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(sender))
+        -- Auswertung nicht an einem einzelnen Client hängt. Läuft hier schon
+        -- eine andere, entscheidet die Regel oben, welche gilt - der Banner
+        -- steckt in AdoptForeignSession.
+        if distribution == "WHISPER" then
+            return false
         end
-        self:NoteHeartbeat()
+        local adopted = self:AdoptForeignSession(
+            fields[3], sender, tonumber(fields[4]), fields[5], sender)
+        -- Nur der Ruf zur EIGENEN Sitzung zählt als „es redet schon jemand".
+        -- Vorher stempelte jede fremde Meldung den eigenen Herzschlag und
+        -- brachte die unterlegene Sitzung zusätzlich zum Schweigen.
+        if adopted then
+            self:NoteHeartbeat()
+        end
         return true
     elseif fields[1] == "RH" then
         -- Der Herzschlag einer laufenden Sitzung. Für alle, die den Startruf
@@ -1265,9 +1363,16 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
             self:NoteHeartbeat()
             return true
         end
-        -- Eine fremde Sitzung verdrängt die eigene nicht. Nur der Herzschlag
-        -- zur eigenen Sitzung zählt als „es redet schon jemand".
         if self.session.id == sessionID then
+            self:NoteHeartbeat()
+            return true
+        end
+        -- Eine fremde Sitzung verdrängt die eigene nur, wenn sie nach derselben
+        -- Regel gewinnt und die eigene noch frisch ist. Der Herzschlag heilt
+        -- damit auch eine Spaltung, die dem Startruf entgangen ist - etwa weil
+        -- jemand beim Drücken gerade im Ladebildschirm war.
+        if self:AdoptForeignSession(sessionID, fields[6] ~= "" and fields[6] or sender,
+            tonumber(fields[4]), fields[5], sender) then
             self:NoteHeartbeat()
             return true
         end

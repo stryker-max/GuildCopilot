@@ -7,6 +7,11 @@ GC.Workshop = {
     bulkPending = 0,
     syncSending = false,
     scanPending = false,
+    -- Berufe, die ein fremdes Manifest gemeldet hat und die hier noch fehlen.
+    -- Sie sind der Unterschied zwischen "gerade ist nichts unterwegs" und
+    -- "der Stand ist vollstaendig" - genau die Frage, die der
+    -- Fortschrittsbalken beantworten soll.
+    pendingWants = {},
     syncStats = {
         queued = 0,
         sent = 0,
@@ -31,6 +36,14 @@ local MISSING_REQUEST_DELAY = 8
 local MISSING_REQUEST_SUPPRESS = 60
 local MAX_KEYS_PER_REQUEST = 40
 local DEPARTED_PRUNE_INTERVAL = 60
+-- So lange gilt ein aus dem Manifest gemeldeter Beruf als "kommt noch". Danach
+-- ist er nicht mehr unterwegs, sondern ausgeblieben - und der Balken sagt das
+-- statt ewig weiterzulaufen.
+local WANT_TTL = 120
+-- Die Merkliste unterdrueckter Rezeptanfragen wuchs bisher unbegrenzt: ein
+-- Eintrag je Rezept, in einer grossen Gilde ueber Stunden mehrere tausend.
+-- Sie wird deshalb aufgeraeumt, sobald sie zu gross wird.
+local MAX_SUPPRESSED_REQUESTS = 600
 
 -- Rezeptschluessel sind Item- oder Zauber-IDs. Nach Typ gruppiert und als
 -- Differenzen aufsteigender Zahlen kosten 294 Schluessel rund 590 Bytes statt
@@ -420,6 +433,7 @@ function GC.Workshop:ClaimRecipes(info)
         recipeKeys = recipeKeys,
     }
     workshop.crafters[crafterKey] = crafter
+    self:ClearWanted(info.crafter, info.professionKey)
     self:InvalidateCatalog()
     return crafter
 end
@@ -453,12 +467,33 @@ end
 -- Client in der Zwischenzeit die Anfrage eines anderen oder trifft das Rezept
 -- ein, entfaellt die eigene Anfrage. So bleibt es bei hundert Mitgliedern bei
 -- wenigen Anfragen statt hundert gleichlautenden.
+-- Abgelaufene Merker fliegen raus, sobald die Liste zu gross wird. Sie ist rein
+-- lokal und lebt nur in dieser Sitzung, wuchs aber mit jedem je angefragten
+-- Rezept weiter - in einer grossen Gilde ueber einen Raidabend hinweg um
+-- mehrere tausend Eintraege.
+local function PruneSuppressed(suppressed, ttl)
+    local count = 0
+    for _ in pairs(suppressed) do
+        count = count + 1
+    end
+    if count <= MAX_SUPPRESSED_REQUESTS then
+        return
+    end
+    local cutoff = GC.Util.Now() - ttl
+    for key, at in pairs(suppressed) do
+        if (tonumber(at) or 0) < cutoff then
+            suppressed[key] = nil
+        end
+    end
+end
+
 function GC.Workshop:ScheduleMissingRecipeRequest(crafterName, recipeKeys)
     local missing = self:GetUnknownRecipeKeys(recipeKeys)
     if #missing == 0 or GC.Util.Trim(crafterName) == "" then
         return false
     end
     self.suppressedRequests = self.suppressedRequests or {}
+    PruneSuppressed(self.suppressedRequests, MISSING_REQUEST_SUPPRESS)
     local now = GC.Util.Now()
     local pending = {}
     for _, recipeKey in ipairs(missing) do
@@ -1169,6 +1204,71 @@ function GC.Workshop:GetPendingPacketCount()
     return #self.syncQueue + (self.bulkPending or 0) + reliable
 end
 
+-- === Bekannte Luecken ======================================================
+--
+-- Ein fremdes Manifest sagt, welche Berufe es in der Gilde gibt. Was davon hier
+-- fehlt, ist eine Luecke mit Namen - und damit die einzige belastbare Antwort
+-- auf "bin ich auf dem aktuellsten Stand?". Ohne diese Liste wuerde ein Client,
+-- bei dem gerade kein Paket unterwegs ist, sich fuer vollstaendig halten,
+-- obwohl er drei Berufe nie bekommen hat.
+
+local function WantKey(crafter, professionKey)
+    return GC.Util.NormalizeName(crafter) .. "|" .. tostring(professionKey or "")
+end
+
+function GC.Workshop:NoteWanted(entries)
+    local now = GC.Util.Now()
+    self.pendingWants = self.pendingWants or {}
+    for _, entry in ipairs(entries or {}) do
+        if GC.Util.Trim(entry.crafter) ~= "" and GC.Util.Trim(entry.professionKey) ~= "" then
+            self.pendingWants[WantKey(entry.crafter, entry.professionKey)] = {
+                crafter = entry.crafter,
+                professionKey = entry.professionKey,
+                at = now,
+            }
+        end
+    end
+    if GC.Sync and GC.Sync.WakeProgress then
+        GC.Sync:WakeProgress()
+    end
+end
+
+function GC.Workshop:ClearWanted(crafter, professionKey)
+    if not self.pendingWants then
+        return
+    end
+    self.pendingWants[WantKey(crafter, professionKey)] = nil
+end
+
+function GC.Workshop:GetPendingWantCount()
+    local now = GC.Util.Now()
+    local count = 0
+    for key, want in pairs(self.pendingWants or {}) do
+        if (now - (tonumber(want.at) or 0)) > WANT_TTL then
+            self.pendingWants[key] = nil
+        else
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Welche Berufe genau noch fehlen - fuer den Tooltip des Balkens.
+function GC.Workshop:GetPendingWantNames(maximum)
+    local names = {}
+    local now = GC.Util.Now()
+    for _, want in pairs(self.pendingWants or {}) do
+        if (now - (tonumber(want.at) or 0)) <= WANT_TTL then
+            names[#names + 1] = GC.Util.PlayerShortName(want.crafter)
+        end
+    end
+    table.sort(names)
+    while #names > (tonumber(maximum) or 6) do
+        table.remove(names)
+    end
+    return names
+end
+
 -- Manifest fuer den Gildenkanal: je Beruf des Accounts nur Hersteller,
 -- Zeitstempel, Anzahl und Fingerabdruck. Wer nichts Neues hat, kostet damit ein
 -- Paket pro Login statt einer vollen Schluesselliste.
@@ -1516,6 +1616,10 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             end
         end
         if #wanted > 0 then
+            -- Erst vormerken, dann anfragen: Vorgemerkt ist die Luecke auch
+            -- dann, wenn die Anfrage gerade unterdrueckt wird, weil ein anderer
+            -- sie schon gestellt hat.
+            self:NoteWanted(wanted)
             self:ScheduleKeyListRequest(wanted)
         end
         return
@@ -1548,6 +1652,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         local wantedCrafter = GC.Util.Trim(fields[4] or "")
         local requestedKeys = DecodeRecipeKeys(fields[5])
         self.suppressedRequests = self.suppressedRequests or {}
+        PruneSuppressed(self.suppressedRequests, MISSING_REQUEST_SUPPRESS)
         local now = GC.Util.Now()
         for _, recipeKey in ipairs(requestedKeys) do
             -- Wer dieselbe Anfrage schon unterwegs sieht, stellt sie nicht

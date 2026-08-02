@@ -10,6 +10,13 @@ GC.Sync = {
     bulkAllowance = 4000,
     reliableQueue = {},
     lastAnnounceAt = 0,
+    -- Wie viele Pakete gerade unterwegs sind. Der Zaehler ist die einzige
+    -- Quelle fuer den Fortschrittsbalken und deckt beide Sendewege ab: die
+    -- eigene Warteschlange und ChatThrottleLib.
+    bulkOutstanding = 0,
+    -- Uebertragungen, die nicht ueber SendBulk laufen, sondern selbst
+    -- getaktet senden (Gildenprofil, Raidauswertung).
+    serialPending = 0,
 }
 
 -- Der Handshake läuft bewusst ohne Dauerbroadcast: gesendet wird nur beim
@@ -54,6 +61,36 @@ local RELIABLE_RETRY_DELAY = 1.5
 -- ein kurzzeitig ueberlasteter Kanal faelschlich einen Fehlschlag.
 local RELIABLE_MAX_ATTEMPTS = 8
 local RELIABLE_MAX_RETRY_DELAY = 6
+
+-- === Fortschritt des Gildenabgleichs =======================================
+--
+-- Der Balken unten in der Werkstatt beantwortet zwei Fragen: Ist gerade noch
+-- etwas unterwegs, und ist der Stand vollstaendig? Beides wird nicht geschaetzt,
+-- sondern gezaehlt - ausgehende Pakete ueber bulkOutstanding und serialPending,
+-- eingehende ueber die noch fehlenden Teile aller laufenden Uebertragungen, und
+-- fehlende Daten ueber die Berufe, die ein fremdes Manifest gemeldet hat und die
+-- hier noch nicht angekommen sind.
+--
+-- Ein Zyklus beginnt, sobald das Erste unterwegs ist, und endet, wenn nichts
+-- mehr aussteht. Die Hoechstzahl des Zyklus ist der Nenner des Balkens; sie
+-- waechst mit, wenn waehrenddessen Neues dazukommt, faellt aber nie zurueck.
+local PROGRESS_TICK = 0.5
+-- Eine eingehende Uebertragung, zu der so lange kein Teil mehr kam, gilt als
+-- verloren statt als "laeuft noch". Sonst behauptet der Balken minutenlang
+-- Betrieb, obwohl der Absender laengst offline ist.
+local PROGRESS_INCOMING_STALE = 30
+-- Und ab wann sie gar nicht mehr vorkommt. Dieselbe Frist, die jedes Modul fuer
+-- seine eigenen Tabellen benutzt.
+local PROGRESS_INCOMING_DROP = 5 * 60
+-- Kommt der SENDEZAEHLER so lange nicht voran, ist ein Rueckruf ausgeblieben.
+-- Nur er wird zurueckgesetzt: Empfang und bekannte Luecken haben eigene
+-- Verfallszeiten und heilen von selbst. Wer hier alles auf null setzt, erfindet
+-- Verluste, die zwei Sekunden spaeter wieder als offen dastehen - und der
+-- Zyklus faengt im Zweiminutentakt von vorn an.
+local PROGRESS_STALL_SECONDS = 120
+local progressFrame = CreateFrame("Frame")
+progressFrame:Hide()
+local progressElapsed = 0
 
 local function PruneIncoming(transfers)
     local cutoff = GC.Util.Now() - INCOMING_TTL
@@ -314,7 +351,11 @@ end
 -- Grosse Datenmengen landen in einer gemeinsamen, durchsatzorientierten
 -- Warteschlange. Ein vorhandenes ChatThrottleLib kennt auch den Verkehr
 -- anderer Addons; der eingebaute Fallback macht Guild Copilot eigenstaendig.
-function GC.Sync:SendBulk(payload, distribution, target, callback)
+-- "untracked" schaltet die Fortschrittszaehlung fuer dieses Paket ab. Genau ein
+-- Aufrufer braucht das: der bestaetigte Fluestertransfer. Seine Teile werden
+-- ueber die ACK-Liste gezaehlt und wuerden hier ein zweites Mal auftauchen -
+-- ein Zehn-Teile-Transfer meldete dadurch bis zu vierzehn offene Pakete.
+function GC.Sync:SendBulk(payload, distribution, target, callback, untracked)
     distribution = distribution or "GUILD"
     if not payload or #payload > GC.Constants.MAX_CHAT_BYTES then
         return false
@@ -324,6 +365,25 @@ function GC.Sync:SendBulk(payload, distribution, target, callback)
     end
     if distribution == "WHISPER" and GC.Util.Trim(target) == "" then
         return false
+    end
+
+    -- Ab hier gilt das Paket als eingereiht. Der Abschluss darf genau einmal
+    -- gezaehlt werden, egal welcher der beiden Sendewege ihn meldet.
+    if untracked ~= true then
+        self:NoteBulkQueued()
+    end
+    local finished = false
+    local function Finish(success)
+        if finished then
+            return
+        end
+        finished = true
+        if untracked ~= true then
+            GC.Sync:NoteBulkFinished(success)
+        end
+        if type(callback) == "function" then
+            pcall(callback, success == true)
+        end
     end
 
     local throttle = _G and _G.ChatThrottleLib
@@ -339,7 +399,7 @@ function GC.Sync:SendBulk(payload, distribution, target, callback)
             target,
             queueName,
             function(_, sent)
-                FinishBulkEntry({ callback = callback }, sent ~= false)
+                Finish(sent ~= false)
             end,
             nil
         )
@@ -352,7 +412,7 @@ function GC.Sync:SendBulk(payload, distribution, target, callback)
         payload = payload,
         distribution = distribution,
         target = target,
-        callback = callback,
+        callback = Finish,
         retries = 0,
     }
     -- Waehrend der Leerlaufpause hat sich das Sendebudget weiter gefuellt;
@@ -442,6 +502,209 @@ function GC.Sync:PumpBulk(elapsed)
     bulkFrame:Hide()
 end
 
+function GC.Sync:WakeProgress()
+    if not progressFrame:IsShown() then
+        progressElapsed = 0
+        progressFrame:Show()
+    end
+end
+
+function GC.Sync:NoteBulkQueued()
+    self.bulkOutstanding = (tonumber(self.bulkOutstanding) or 0) + 1
+    self:WakeProgress()
+end
+
+function GC.Sync:NoteBulkFinished(success)
+    self.bulkOutstanding = math.max(0, (tonumber(self.bulkOutstanding) or 1) - 1)
+    if success == false then
+        self.progressFailed = (tonumber(self.progressFailed) or 0) + 1
+    end
+    self:WakeProgress()
+end
+
+-- Fuer Uebertragungen, die sich selbst takten statt SendBulk zu benutzen.
+function GC.Sync:NoteSerialPending(delta)
+    self.serialPending = math.max(0, (tonumber(self.serialPending) or 0) + (tonumber(delta) or 0))
+    self:WakeProgress()
+end
+
+-- Wie viele Teile aller laufenden Uebertragungen noch fehlen - und wie viele
+-- Uebertragungen so lange stillstehen, dass sie als verloren gelten.
+--
+-- Aufgeraeumt wird hier gleich mit, nach derselben Frist, die jedes Modul
+-- ohnehin anwendet. Sonst haengt der Rest einer abgebrochenen Uebertragung bis
+-- zum naechsten Verkehr derselben Art in der Zahl: Die Module raeumen ihre
+-- Tabellen nur beim Empfang auf, und wenn nichts mehr kommt, kommt auch das
+-- Aufraeumen nicht. Der Balken meldete dann bis zum Ausloggen "unvollstaendig",
+-- obwohl das seit einer Stunde niemanden mehr betrifft.
+local function CountMissingParts(transfers, now, pending, lost)
+    for key, transfer in pairs(transfers or {}) do
+        if type(transfer) == "table" then
+            local age = now - (tonumber(transfer.receivedAt) or now)
+            local total = tonumber(transfer.total) or 0
+            local received = tonumber(transfer.received)
+            if not received then
+                received = 0
+                for _ in pairs(transfer.chunks or transfer.parts or {}) do
+                    received = received + 1
+                end
+            end
+            local missing = math.max(0, total - received)
+            if age > PROGRESS_INCOMING_DROP then
+                transfers[key] = nil
+            elseif missing > 0 then
+                if age > PROGRESS_INCOMING_STALE then
+                    lost[1] = lost[1] + missing
+                else
+                    pending[1] = pending[1] + missing
+                end
+            end
+        end
+    end
+end
+
+function GC.Sync:GetIncomingPendingCount()
+    local now = GC.Util.Now()
+    local pending, lost = { 0 }, { 0 }
+    CountMissingParts(self.guildProfileIncoming, now, pending, lost)
+    if GC.Workshop then
+        CountMissingParts(GC.Workshop.incoming, now, pending, lost)
+    end
+    if GC.Inventory then
+        CountMissingParts(GC.Inventory.guildBankIncoming, now, pending, lost)
+    end
+    if GC.GearAudit then
+        CountMissingParts(GC.GearAudit.equipmentIncoming, now, pending, lost)
+    end
+    if GC.WarcraftLogs then
+        CountMissingParts(GC.WarcraftLogs.syncIncoming, now, pending, lost)
+    end
+    if GC.RaidMonitor then
+        CountMissingParts(GC.RaidMonitor.incoming, now, pending, lost)
+    end
+    return pending[1], lost[1]
+end
+
+-- Der aktuelle Stand des Abgleichs. Die Funktion schreibt den Zyklus fort und
+-- gibt ihn zurueck; sie ist damit zugleich der Taktgeber und die Auskunft.
+--
+--   percent      0-100, immer ehrlich: 100 gibt es nur ohne offene Arbeit
+--   state        RUNNING | SYNCED | INCOMPLETE | IDLE
+--   outstanding  Pakete und Datensaetze, die noch fehlen
+--   lastSyncedAt wann zuletzt nichts mehr offen war
+function GC.Sync:GetSyncStatus()
+    local now = GC.Util.Now()
+    local status = self.syncStatus
+    if not status then
+        status = {
+            total = 0,
+            done = 0,
+            failed = 0,
+            percent = 100,
+            state = "IDLE",
+            outstanding = 0,
+            outbound = 0,
+            inbound = 0,
+            missing = 0,
+            lastSyncedAt = 0,
+            changedAt = now,
+        }
+        self.syncStatus = status
+    end
+
+    -- Jedes Paket zaehlt genau einmal: gewoehnliche Bulk-Pakete ueber den
+    -- Zaehler, selbst getaktete Uebertragungen ueber serialPending, bestaetigte
+    -- Fluesterteile ueber ihre ACK-Liste. Die Teile des dritten Wegs sind
+    -- ausdruecklich von der Bulk-Zaehlung ausgenommen (siehe SendBulk).
+    local outbound = math.max(0, tonumber(self.bulkOutstanding) or 0)
+        + math.max(0, tonumber(self.serialPending) or 0)
+        + self:GetReliablePendingCount()
+
+    -- Der Sendezaehler ist der einzige Wert, der lecken kann: Bleibt der
+    -- Rueckruf von ChatThrottleLib aus, faellt er nie zurueck. Kommt er zwei
+    -- Minuten lang nicht voran, gilt das Ausstehende als verloren. Empfang und
+    -- bekannte Luecken bleiben unangetastet - sie verfallen von selbst.
+    if outbound > 0 and outbound == status.outbound
+        and (now - (status.outboundChangedAt or now)) > PROGRESS_STALL_SECONDS then
+        self.progressFailed = (tonumber(self.progressFailed) or 0) + outbound
+        self.bulkOutstanding = 0
+        self.serialPending = 0
+        outbound = self:GetReliablePendingCount()
+    end
+    if outbound ~= status.outbound then
+        status.outboundChangedAt = now
+    end
+
+    local inbound, lostInbound = self:GetIncomingPendingCount()
+    local missing = 0
+    if GC.Workshop and GC.Workshop.GetPendingWantCount then
+        missing = GC.Workshop:GetPendingWantCount()
+    end
+    local outstanding = outbound + inbound + missing
+
+    if outstanding ~= status.outstanding then
+        status.changedAt = now
+    end
+    status.outbound = outbound
+    status.inbound = inbound
+    status.missing = missing
+    status.outstanding = outstanding
+    status.failed = (tonumber(self.progressFailed) or 0) + lostInbound
+    -- Belegbar ist nur "nichts offen". Ob der eigene Stand dem der Gilde
+    -- entspricht, weiss dieser Client erst, wenn sich ueberhaupt jemand
+    -- gemeldet hat - vorher gibt es nichts, womit er sich vergleichen koennte.
+    status.peerSeenAt = tonumber(self.lastPeerAt) or 0
+
+    if outstanding > 0 then
+        if status.state ~= "RUNNING" then
+            status.startedAt = now
+            -- Ein neuer Zyklus faengt mit einer leeren Fehlerbilanz an.
+            self.progressFailed = 0
+            status.failed = lostInbound
+        end
+        status.total = math.max(status.total, status.done + outstanding)
+        status.done = math.max(0, status.total - outstanding)
+        status.percent = status.total > 0
+            and math.min(99, math.floor((status.done / status.total) * 100))
+            or 0
+        status.state = "RUNNING"
+    else
+        -- "Zuletzt vollstaendig" bekommt nur ein Zyklus, der auch vollstaendig
+        -- war. Ein Durchlauf mit verlorenen Paketen darf sich nicht als Stand
+        -- ausgeben - sonst steht "Stand: gerade eben" ueber luckenhaften Daten.
+        if status.state == "RUNNING" and status.failed == 0 then
+            status.lastSyncedAt = now
+        end
+        status.total = 0
+        status.done = 0
+        status.percent = 100
+        if status.failed > 0 then
+            status.state = "INCOMPLETE"
+        elseif (status.lastSyncedAt or 0) > 0 then
+            status.state = "SYNCED"
+        else
+            status.state = "IDLE"
+        end
+    end
+    return status
+end
+
+-- Der Rahmen laeuft nur, solange etwas offen ist. Er haelt den Zyklus auch dann
+-- fort, wenn niemand hinsieht - sonst waere "zuletzt vollstaendig abgeglichen"
+-- eine Zahl, die vom Zufall abhaengt, ob das Fenster gerade offen war.
+progressFrame:SetScript("OnUpdate", function(_, elapsed)
+    progressElapsed = progressElapsed + elapsed
+    if progressElapsed < PROGRESS_TICK then
+        return
+    end
+    progressElapsed = 0
+    local status = GC.Sync:GetSyncStatus()
+    if status.state ~= "RUNNING" then
+        progressFrame:Hide()
+    end
+    GC:FireCallback("SYNC_PROGRESS", status)
+end)
+
 local function ReliableEntryID(kind, token, target)
     return table.concat({
         tostring(kind or ""),
@@ -450,11 +713,16 @@ local function ReliableEntryID(kind, token, target)
     }, "|")
 end
 
+-- Wie viele Teile noch echt unterwegs sind. Aufgegebene zaehlen NICHT mit:
+-- Sie kommen nie mehr an, und "unterwegs" waere dafuer das falsche Wort - sie
+-- stehen in der Fehlerbilanz. Vorher hing ein verlorener Teil bis zum Ende des
+-- ganzen Transfers als offen in der Zahl.
 function GC.Sync:GetReliablePendingCount(kind)
     local count = 0
     local function AddEntry(entry)
         if not kind or entry.kind == kind then
-            count = count + math.max(0, #entry.messages - (entry.acknowledgedCount or 0))
+            count = count + math.max(0, #entry.messages
+                - (entry.acknowledgedCount or 0) - (entry.failedCount or 0))
         end
     end
     if self.reliableActive then
@@ -497,6 +765,7 @@ function GC.Sync:QueueReliable(messages, target, kind, token, onComplete, onFail
         onFailure = onFailure,
     }
     self.reliableQueue[#self.reliableQueue + 1] = entry
+    self:WakeProgress()
     self:PumpReliable()
     return true
 end
@@ -540,6 +809,10 @@ local function GiveUpReliablePart(self, entry, part)
     end
     entry.failed[part] = true
     entry.failedCount = (entry.failedCount or 0) + 1
+    -- Hier und nur hier entsteht der Verlust eines Fluesterteils. Seit die
+    -- Teile nicht mehr als Bulk-Pakete mitgezaehlt werden, kommt die
+    -- Fehlerbilanz sonst nie an diese Information.
+    self.progressFailed = (tonumber(self.progressFailed) or 0) + 1
     if not self:MaybeFinishReliable() and self.reliableActive == entry then
         self:PumpReliable()
     end
@@ -615,9 +888,11 @@ function GC.Sync:PumpReliable()
             local queuedPart = part
             entry.pending[part] = true
             entry.inFlight = entry.inFlight + 1
+            -- Ungezaehlt: Dieser Teil steht bereits in der ACK-Liste und wuerde
+            -- als Bulk-Paket ein zweites Mal in den Fortschritt eingehen.
             local queued = self:SendBulk(entry.messages[queuedPart], "WHISPER", entry.target, function(success)
                 GC.Sync:ReliablePartDispatched(entry.id, queuedPart, success)
-            end)
+            end, true)
             if not queued then
                 -- Ein abgelehnter Sendeversuch (kein gueltiges Ziel, nicht in der
                 -- Gilde) ist dauerhaft. Das Paket gilt als verloren, statt die
@@ -666,10 +941,13 @@ function GC.Sync:ReceiveReliableAck(fields, sender)
     end
 
     -- Trifft doch noch ein spaetes ACK fuer ein bereits aufgegebenes Paket ein,
-    -- zaehlt es wieder als zugestellt.
+    -- zaehlt es wieder als zugestellt - und verschwindet damit auch wieder aus
+    -- der Fehlerbilanz. Ein Paket, das doch ankam, darf dort nicht stehen
+    -- bleiben.
     if entry.failed[part] then
         entry.failed[part] = nil
         entry.failedCount = math.max(0, (entry.failedCount or 0) - 1)
+        self.progressFailed = math.max(0, (tonumber(self.progressFailed) or 0) - 1)
     end
     entry.acknowledged[part] = true
     entry.acknowledgedCount = entry.acknowledgedCount + 1
@@ -741,6 +1019,8 @@ function GC.Sync:RequestSync()
         return false, "Der Abgleich lief gerade eben schon."
     end
     self.lastManualSyncAt = now
+    self.lastRequestAt = now
+    self:WakeProgress()
 
     self:AnnounceVersion(true)
     self:QueueProfile()
@@ -881,15 +1161,27 @@ function GC.Sync:SendGuildProfile(force)
     end
     local index = 1
     local retries = 0
+    -- Der Versand taktet sich selbst und laeuft nicht ueber SendBulk; damit der
+    -- Fortschrittsbalken ihn trotzdem kennt, wird er als offene Arbeit gebucht
+    -- und auf jedem Ausgang wieder abgemeldet.
+    local outstanding = #messages
+    self:NoteSerialPending(outstanding)
+    local function ReleaseSerial(count)
+        count = math.min(outstanding, math.max(0, count or outstanding))
+        outstanding = outstanding - count
+        GC.Sync:NoteSerialPending(-count)
+    end
     local function SendNext()
         local message = messages[index]
         if not message then
+            ReleaseSerial()
             return
         end
         local sent = self:Send(message)
         if sent then
             index = index + 1
             retries = 0
+            ReleaseSerial(1)
         else
             retries = retries + 1
             if retries >= 5 then
@@ -897,11 +1189,15 @@ function GC.Sync:SendGuildProfile(force)
                 GC:Print("|cffff5555Das Gildenprofil konnte nicht vollständig gesendet werden|r ("
                     .. (index - 1) .. " von " .. #messages .. " Teilen). "
                     .. "Bitte im Gildenprofil erneut speichern.")
+                self.progressFailed = (tonumber(self.progressFailed) or 0) + outstanding
+                ReleaseSerial()
                 return
             end
         end
         if messages[index] then
             C_Timer.After(sent and 0.45 or 1.25, SendNext)
+        else
+            ReleaseSerial()
         end
     end
     SendNext()
@@ -1189,6 +1485,15 @@ function GC.Sync:ReceiveProfile(fields, sender)
     local key = GC.Util.NormalizeName(sender)
     local shortKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))
     local profiles = GC.DB:GetGuild().remoteProfiles
+
+    -- Ein aelterer Stand darf einen neueren nicht ueberschreiben. Pakete
+    -- desselben Absenders koennen sich ueberholen - eine Antwort auf eine
+    -- Versionsanfrage und eine gerade gespeicherte Aenderung laufen parallel -,
+    -- und dann gewann bisher schlicht das zuletzt eingetroffene.
+    local stored = profiles[key] or profiles[shortKey]
+    if stored and (tonumber(stored.updatedAt) or 0) > (tonumber(profile.updatedAt) or 0) then
+        return
+    end
     profiles[key] = profile
     profiles[shortKey] = profile
     GC:FireCallback("ROSTER_UPDATED")
@@ -1304,6 +1609,11 @@ function GC.Sync:NoteAddonUser(sender, info)
 
     entry.name = sender
     entry.seenAt = GC.Util.Now()
+    -- Wann zuletzt ueberhaupt ein anderer Client etwas geschickt hat. Der
+    -- Fortschrittsbalken haengt daran, ob er "vollstaendig" sagen darf: Wer
+    -- allein online ist, hat nichts angekuendigt bekommen und kann deshalb auch
+    -- nichts vermissen - "nichts offen" ist dann die ganze Wahrheit.
+    self.lastPeerAt = entry.seenAt
     guildData.addonUsers[key] = entry
     guildData.addonUsers[shortKey] = entry
     if changed then
@@ -1483,23 +1793,36 @@ function GC.Sync:DistributeSummary(summary, distribution, target)
     local messages = GC.RaidMonitor:BuildSummaryMessages(summary)
     local index = 1
     local retries = 0
+    local outstanding = #messages
+    self:NoteSerialPending(outstanding)
+    local function ReleaseSerial(count)
+        count = math.min(outstanding, math.max(0, count or outstanding))
+        outstanding = outstanding - count
+        GC.Sync:NoteSerialPending(-count)
+    end
     local function SendNext()
         local message = messages[index]
         if not message then
+            ReleaseSerial()
             return
         end
         local sent = self:Send(message, distribution, target)
         if sent then
             index = index + 1
             retries = 0
+            ReleaseSerial(1)
         else
             retries = retries + 1
             if retries >= 5 then
+                self.progressFailed = (tonumber(self.progressFailed) or 0) + outstanding
+                ReleaseSerial()
                 return
             end
         end
         if messages[index] then
             C_Timer.After(sent and 0.5 or 1.5, SendNext)
+        else
+            ReleaseSerial()
         end
     end
     SendNext()
@@ -1527,6 +1850,13 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         or messageType == "GQ" or messageType == "E" or messageType == "L"
         or messageType == "B" or messageType == "O" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
+    end
+
+    -- Alles, was in Teilen ankommt, treibt den Fortschrittsbalken an: Erst
+    -- danach weiss dieser Client ueberhaupt, dass eine Uebertragung laeuft.
+    if messageType == "W" or messageType == "G" or messageType == "E"
+        or messageType == "L" or messageType == "B" or messageType == "RD" then
+        self:WakeProgress()
     end
 
     -- Direkte Datentransfers duerfen nur von Gildenmitgliedern kommen. Direkt

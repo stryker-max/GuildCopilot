@@ -2,6 +2,19 @@ local _, GC = ...
 
 GC.Profile = {}
 
+-- Eine laufende Uhr in Sekunden. GetTime() zaehlt seit dem Start des Clients
+-- und laeuft nie rueckwaerts; ohne sie tut es die Serverzeit, die zwar
+-- sekundengenau ist, aber fuer eine Sperre von wenigen Sekunden genuegt.
+function GC.Profile:Clock()
+    if type(GetTime) == "function" then
+        local ok, value = pcall(GetTime)
+        if ok and tonumber(value) then
+            return value
+        end
+    end
+    return GC.Util.Now()
+end
+
 local function ReadProfession(professionIndex)
     if not professionIndex or not GetProfessionInfo then
         return nil
@@ -41,26 +54,8 @@ PROFESSION_BY_NAME[GC.Util.NormalizeName("Alchemie")] = "Alchimie"
 -- Auskunft gibt. Der Unterschied ist wichtig - "nichts gefunden" und "kann
 -- nicht nachsehen" sind zwei verschiedene Antworten, und nur die erste heisst,
 -- dass dieser Charakter keinen Beruf hat.
-local function ReadSkillLineProfessions()
-    if type(GetNumSkillLines) ~= "function" or type(GetSkillLineInfo) ~= "function" then
-        return nil
-    end
-
-    -- Eine eingeklappte Kategorie zaehlt GetNumSkillLines nicht mit. Welche
-    -- zugeklappt war, wird notiert und hinterher wiederhergestellt: Das
-    -- Faehigkeitenfenster des Spielers soll danach aussehen wie vorher.
-    local collapsed = {}
-    for index = 1, (GetNumSkillLines() or 0) do
-        local name, isHeader, isExpanded = GetSkillLineInfo(index)
-        if isHeader and not isExpanded and name then
-            collapsed[name] = true
-        end
-    end
-    local anyCollapsed = next(collapsed) ~= nil
-    if anyCollapsed and type(ExpandSkillHeader) == "function" then
-        pcall(ExpandSkillHeader, 0)
-    end
-
+-- Einmal die sichtbaren Fähigkeitszeilen durchgehen.
+local function CollectSkillLineProfessions()
     local found = {}
     local seen = {}
     for index = 1, (GetNumSkillLines() or 0) do
@@ -75,9 +70,49 @@ local function ReadSkillLineProfessions()
             }
         end
     end
+    return found
+end
+
+local function ReadSkillLineProfessions()
+    if type(GetNumSkillLines) ~= "function" or type(GetSkillLineInfo) ~= "function" then
+        return nil
+    end
+
+    -- Erst nachsehen, ohne etwas anzufassen. Bei den allermeisten Charakteren
+    -- stehen die Berufe offen sichtbar in der Liste, und dann ist hier Schluss:
+    -- kein Auf- und Zuklappen, keine Nebenwirkung, kein Ereignis.
+    local found = CollectSkillLineProfessions()
+    if #found > 0 then
+        return found
+    end
+
+    -- Eine eingeklappte Kategorie zaehlt GetNumSkillLines nicht mit. Welche
+    -- zugeklappt war, wird notiert und hinterher wiederhergestellt: Das
+    -- Faehigkeitenfenster des Spielers soll danach aussehen wie vorher.
+    local collapsed = {}
+    for index = 1, (GetNumSkillLines() or 0) do
+        local name, isHeader, isExpanded = GetSkillLineInfo(index)
+        if isHeader and not isExpanded and name then
+            collapsed[name] = true
+        end
+    end
+    if next(collapsed) == nil or type(ExpandSkillHeader) ~= "function" then
+        return found
+    end
+
+    -- Ab hier wird das Fähigkeitenfenster tatsächlich angefasst - und genau
+    -- das löst SKILL_LINES_CHANGED aus, also dasselbe Ereignis, das uns
+    -- hierher geführt hat. Ohne diese Sperre klappt das Addon die Kategorien
+    -- endlos auf und wieder zu: jedes Zuklappen erzeugt das nächste Ereignis,
+    -- jedes Ereignis den nächsten Durchlauf. Die Sperre gilt in Echtzeit, nicht
+    -- über einen Zähler, weil die Ereignisse erst im nächsten Bild eintreffen.
+    GC.Profile.skillHeadersTouchedAt = GC.Profile:Clock()
+    pcall(ExpandSkillHeader, 0)
+
+    found = CollectSkillLineProfessions()
 
     -- Rueckwaerts zuklappen: Jedes Zuklappen verschiebt die Zeilen darunter.
-    if anyCollapsed and type(CollapseSkillHeader) == "function" then
+    if type(CollapseSkillHeader) == "function" then
         for index = (GetNumSkillLines() or 0), 1, -1 do
             local name, isHeader = GetSkillLineInfo(index)
             if isHeader and name and collapsed[name] then
@@ -85,6 +120,7 @@ local function ReadSkillLineProfessions()
             end
         end
     end
+    GC.Profile.skillHeadersTouchedAt = GC.Profile:Clock()
 
     return found
 end
@@ -323,13 +359,20 @@ function GC.Profile:Refresh()
     profile.classFile = classFile
     profile.classID = classID
     profile.level = UnitLevel("player")
-    profile.updatedAt = GC.Util.Now()
 
     if not profile.raidSpecKey and detectedSpecKey then
         profile.raidSpecKey = detectedSpecKey
+        changed = true
     end
+    -- Der Zeitstempel wandert nur mit, wenn sich wirklich etwas geaendert hat.
+    -- Vorher sprang er bei jedem Ereignis nach vorn; gildenweit stand dann
+    -- "gerade aktualisiert" an Profilen, an denen seit Wochen nichts passiert
+    -- war - und ein Vergleich zweier Staende war damit wertlos.
     if changed then
+        profile.updatedAt = GC.Util.Now()
         GC:FireCallback("PROFILE_UPDATED", profile, true)
+    elseif not tonumber(profile.updatedAt) then
+        profile.updatedAt = GC.Util.Now()
     end
     return profile
 end
@@ -399,16 +442,59 @@ function GC.Profile:Confirm(raidSpecKey, secondarySpecKey, mainStatus, flex)
     return profile
 end
 
+-- === Entprellung ===========================================================
+--
+-- SKILL_LINES_CHANGED feuert in TBC bei jedem Fertigkeitspunkt - auch bei
+-- Waffenfertigkeit, also mitten im Kampf im Sekundentakt. Jeder Durchlauf liest
+-- Talente, Berufe und die komplette Fähigkeitsliste neu. Gesammelt wird deshalb:
+-- zehn Punkte in drei Sekunden ergeben einen Durchlauf.
+--
+-- Die zweite Sperre ist wichtiger: Das Auf- und Zuklappen der Kategorien in
+-- ReadSkillLineProfessions löst selbst SKILL_LINES_CHANGED aus. Ohne
+-- SKILL_EVENT_LOCK trieb sich das Addon damit endlos selbst an - der
+-- wahrscheinlichste Grund für die gemeldeten Bildraten-Einbrüche.
+local REFRESH_DEBOUNCE = 3
+local SKILL_EVENT_LOCK = 5
+
+function GC.Profile:ScheduleRefresh(delay)
+    if not GC.DB or not GC.DB.data then
+        return false
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:Refresh()
+        return true
+    end
+    if self.refreshPending then
+        return false
+    end
+    self.refreshPending = true
+    C_Timer.After(tonumber(delay) or REFRESH_DEBOUNCE, function()
+        GC.Profile.refreshPending = false
+        GC.Profile:Refresh()
+    end)
+    return true
+end
+
+-- Als Methode statt als anonymer Handler: Die Sperre gegen den selbst
+-- erzeugten Ereignissturm ist die wichtigste Zeile dieser Datei, und was sich
+-- nicht aufrufen laesst, laesst sich auch nicht pruefen.
+function GC.Profile:OnGameEvent(event)
+    if event == "SKILL_LINES_CHANGED"
+        and (self:Clock() - (self.skillHeadersTouchedAt or -math.huge)) < SKILL_EVENT_LOCK then
+        -- Das war unser eigenes Auf- und Zuklappen, nicht der Spieler.
+        return false
+    end
+    return self:ScheduleRefresh()
+end
+
 local profileEvents = CreateFrame("Frame")
 profileEvents:RegisterEvent("CHARACTER_POINTS_CHANGED")
 profileEvents:RegisterEvent("PLAYER_LEVEL_UP")
 profileEvents:RegisterEvent("PLAYER_GUILD_UPDATE")
 profileEvents:RegisterEvent("SKILL_LINES_CHANGED")
 profileEvents:RegisterEvent("TRADE_SKILL_SHOW")
-profileEvents:SetScript("OnEvent", function()
-    if GC.DB and GC.DB.data then
-        GC.Profile:Refresh()
-    end
+profileEvents:SetScript("OnEvent", function(_, event)
+    GC.Profile:OnGameEvent(event)
 end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Profile, function(self)

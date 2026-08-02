@@ -105,6 +105,22 @@ Dummy.__index = function(self, key)
         return function()
             return setmetatable({}, Dummy)
         end
+    -- Elternrahmen und Rahmenebene bleiben ablesbar. Ohne sie liesse sich nicht
+    -- pruefen, ob ein Knopf IM Eingabefeld ueber dessen EditBox liegt - und
+    -- genau daran scheiterte das Kalendersymbol der Abmeldung: gleiche Ebene,
+    -- also fing die EditBox den Klick ab.
+    elseif key == "SetParent" then
+        return function(frame, parent)
+            frame.parent = parent
+        end
+    elseif key == "SetFrameLevel" then
+        return function(frame, level)
+            frame.frameLevel = tonumber(level)
+        end
+    elseif key == "GetFrameLevel" then
+        return function(frame)
+            return frame.frameLevel
+        end
     end
     if type(key) ~= "string" or not key:match("^%u") then
         return nil
@@ -6066,6 +6082,452 @@ do
     assert(con_summary ~= nil, "Die Verbrauchsauswertung wurde nicht gespeichert")
     assert(con_summary.participants[1].consumables.ELIXIR == 2,
         "Zwei verschiedene Elixiere zählen aus den Logs nur einmal, live aber zweimal")
+end
+
+-- === Fortschritt des Gildenabgleichs ========================================
+--
+-- Der Balken unten in der Werkstatt loest die Paketzahl ab. Er darf nie 100
+-- Prozent zeigen, solange etwas offen ist, und "zuletzt vollstaendig" nur
+-- stempeln, wenn der Durchlauf auch vollstaendig war.
+do
+    sync_savedBulk = addon.Sync.bulkOutstanding
+    sync_savedSerial = addon.Sync.serialPending
+    sync_savedFailed = addon.Sync.progressFailed
+    sync_savedStatus = addon.Sync.syncStatus
+    sync_savedWants = addon.Workshop.pendingWants
+
+    -- Aus frueheren Testbloecken liegen angefangene Uebertragungen herum; sie
+    -- gelten inzwischen als verloren und wuerden den Zustand faerben.
+    sync_incoming = {
+        addon.Sync.guildProfileIncoming,
+        addon.Workshop.incoming,
+        addon.Inventory.guildBankIncoming,
+        addon.GearAudit.equipmentIncoming,
+        addon.WarcraftLogs.syncIncoming,
+        addon.RaidMonitor.incoming,
+    }
+    sync_savedIncoming = {}
+    for index, transfers in ipairs(sync_incoming) do
+        sync_savedIncoming[index] = {}
+        for key, value in pairs(transfers) do
+            sync_savedIncoming[index][key] = value
+            transfers[key] = nil
+        end
+    end
+
+    addon.Sync.syncStatus = nil
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Workshop.pendingWants = {}
+
+    sync_idle = addon.Sync:GetSyncStatus()
+    assert(sync_idle.state == "IDLE",
+        "Ohne je gelaufenen Abgleich meldet der Balken einen Zustand: "
+        .. sync_idle.state .. " (offen: " .. sync_idle.outstanding
+        .. ", aus " .. sync_idle.outbound .. " / ein " .. sync_idle.inbound
+        .. " / fehlt " .. sync_idle.missing .. ")")
+    assert(sync_idle.percent == 100, "Ohne offene Arbeit steht der Balken nicht auf voll")
+
+    -- Vier ausgehende Pakete: Der Zyklus laeuft, der Balken bleibt unter 100.
+    addon.Sync:NoteBulkQueued()
+    addon.Sync:NoteBulkQueued()
+    addon.Sync:NoteBulkQueued()
+    addon.Sync:NoteBulkQueued()
+    sync_running = addon.Sync:GetSyncStatus()
+    assert(sync_running.state == "RUNNING", "Vier offene Pakete gelten nicht als laufender Abgleich")
+    assert(sync_running.outstanding == 4, "Die offenen Pakete werden nicht gezählt")
+    assert(sync_running.percent < 100, "Der Balken meldet 100 Prozent, obwohl Pakete offen sind")
+
+    addon.Sync:NoteBulkFinished(true)
+    addon.Sync:NoteBulkFinished(true)
+    sync_half = addon.Sync:GetSyncStatus()
+    assert(sync_half.percent == 50, "Die Hälfte der Pakete ergibt nicht die Hälfte des Balkens")
+
+    addon.Sync:NoteBulkFinished(true)
+    addon.Sync:NoteBulkFinished(true)
+    sync_done = addon.Sync:GetSyncStatus()
+    assert(sync_done.state == "SYNCED", "Ein vollständiger Durchlauf meldet nicht „synchron“")
+    assert(sync_done.percent == 100, "Ein vollständiger Durchlauf steht nicht auf 100 Prozent")
+    assert((sync_done.lastSyncedAt or 0) > 0, "Der Zeitpunkt des vollständigen Abgleichs fehlt")
+
+    -- Ein Durchlauf mit verlorenem Paket gilt als unvollstaendig und darf den
+    -- Stand nicht neu stempeln.
+    sync_stamp = sync_done.lastSyncedAt
+    addon.Sync:NoteBulkQueued()
+    addon.Sync:GetSyncStatus()
+    addon.Sync:NoteBulkFinished(false)
+    sync_lost = addon.Sync:GetSyncStatus()
+    assert(sync_lost.state == "INCOMPLETE", "Ein verlorenes Paket meldet trotzdem einen vollständigen Abgleich")
+    assert(sync_lost.lastSyncedAt == sync_stamp,
+        "Ein lückenhafter Durchlauf setzt den Stand „zuletzt vollständig“ neu")
+
+    -- Angekuendigte, aber nie gelieferte Berufe sind eine Luecke - auch wenn
+    -- gerade kein einziges Paket unterwegs ist.
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Workshop:NoteWanted({ { crafter = "Fehlt-Realm", professionKey = "schneiderei" } })
+    assert(addon.Workshop:GetPendingWantCount() == 1, "Eine angekündigte Berufsliste wird nicht vorgemerkt")
+    sync_gap = addon.Sync:GetSyncStatus()
+    assert(sync_gap.state == "RUNNING" and sync_gap.missing == 1,
+        "Ein angekündigter, nicht gelieferter Beruf gilt als vollständig synchronisiert")
+    addon.Workshop:ClaimRecipes({
+        crafter = "Fehlt-Realm",
+        professionKey = "schneiderei",
+        professionName = "Schneiderei",
+        recipeKeys = { "I1234" },
+        updatedAt = addon.Util.Now(),
+    })
+    assert(addon.Workshop:GetPendingWantCount() == 0,
+        "Der gelieferte Beruf bleibt als Lücke stehen")
+
+    addon.Sync.bulkOutstanding = sync_savedBulk
+    addon.Sync.serialPending = sync_savedSerial
+    addon.Sync.progressFailed = sync_savedFailed
+    addon.Sync.syncStatus = sync_savedStatus
+    addon.Workshop.pendingWants = sync_savedWants
+    for index, transfers in ipairs(sync_incoming) do
+        for key, value in pairs(sync_savedIncoming[index]) do
+            transfers[key] = value
+        end
+    end
+end
+
+-- === Die Zahlen des Balkens sind echte Zahlen ===============================
+--
+-- Ein Balken, der schätzt, ist schlimmer als keiner. Hier wird gegengerechnet:
+-- Jedes Paket darf genau einmal vorkommen, und was verloren ist, darf nicht
+-- weiter als "unterwegs" gelten.
+do
+    val_savedBulk = addon.Sync.bulkOutstanding
+    val_savedSerial = addon.Sync.serialPending
+    val_savedFailed = addon.Sync.progressFailed
+    val_savedStatus = addon.Sync.syncStatus
+    val_savedActive = addon.Sync.reliableActive
+    val_savedQueue = addon.Sync.reliableQueue
+
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Sync.reliableActive = nil
+    addon.Sync.reliableQueue = {}
+
+    -- Ein Fluestertransfer aus sechs Teilen ist sechs Pakete. Nicht zehn, weil
+    -- die ersten vier zugleich in der Sendewarteschlange stehen.
+    val_messages = {}
+    for val_index = 1, 6 do
+        val_messages[val_index] = "W|7|C|valtoken|" .. val_index .. "|6|x|x|x|0|0"
+    end
+    -- Wiederholungen parken statt sofort feuern, sonst brennt der Transfer im
+    -- Testrahmen alle acht Versuche in einem Zug ab.
+    val_savedThreshold = timerDelayThreshold
+    timerDelayThreshold = 1
+    -- Und das Sendebudget auf null: Nur so bleiben die Teile tatsächlich in der
+    -- Warteschlange liegen. Genau dieser Zustand - Teil steht in der
+    -- Warteschlange UND wartet auf sein ACK - ist der, in dem doppelt gezählt
+    -- wurde. Bei vollem Budget geht alles im selben Atemzug raus, und der
+    -- Fehler wäre unsichtbar.
+    val_savedQueueBulk = addon.Sync.bulkQueue
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkAllowance = 0
+    -- Ohne das hier bucht SendBulk die Leerlaufzeit nach und füllt das Budget
+    -- sofort wieder auf.
+    addon.Sync.bulkIdleAt = nil
+    assert(addon.Sync:QueueReliable(val_messages, "Heiler-Realm", "W", "valtoken") == true,
+        "Der Prüftransfer ließ sich nicht starten")
+    assert(#addon.Sync.bulkQueue > 0,
+        "Der Prüftransfer liegt gar nicht in der Warteschlange - der Doppelzählungsfall wird nicht getroffen")
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.outbound == 6,
+        "Ein Transfer aus sechs Teilen meldet " .. val_status.outbound
+        .. " offene Pakete - Teile werden doppelt gezählt")
+
+    -- Zwei bestätigen: vier bleiben offen, kein Paket mehr und keins weniger.
+    for val_part = 1, 2 do
+        addon.Sync:ReceiveReliableAck(
+            { "A", "7", "W", "valtoken", tostring(val_part) }, "Heiler-Realm")
+    end
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.outbound == 4,
+        "Nach zwei Bestätigungen stehen " .. val_status.outbound .. " statt vier Pakete offen")
+
+    -- Ein endgültig aufgegebenes Teil ist nicht mehr unterwegs, sondern weg.
+    -- Vorher zählte es bis zum Ende des ganzen Transfers als offen.
+    addon.Sync.reliableActive.attempts[3] = 99
+    addon.Sync:ReliablePartDispatched(addon.Sync.reliableActive.id, 3, false)
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.outbound == 3,
+        "Ein aufgegebenes Teilpaket gilt weiter als unterwegs (" .. val_status.outbound .. ")")
+    assert(val_status.failed >= 1, "Das aufgegebene Teilpaket fehlt in der Fehlerbilanz")
+
+    -- Und kommt es doch noch an, verschwindet es auch wieder aus der Bilanz.
+    val_failedBefore = val_status.failed
+    addon.Sync:ReceiveReliableAck({ "A", "7", "W", "valtoken", "3" }, "Heiler-Realm")
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.failed == val_failedBefore - 1,
+        "Ein spät bestätigtes Teilpaket bleibt als Verlust stehen")
+
+    addon.Sync.reliableActive = nil
+    addon.Sync.reliableQueue = {}
+    addon.Sync.bulkQueue = val_savedQueueBulk
+    addon.Sync.bulkAllowance = 4000
+    addon.Sync.bulkOutstanding = 0
+    timerDelayThreshold = val_savedThreshold
+
+    -- Eine abgebrochene eingehende Übertragung verschwindet von selbst. Die
+    -- Module räumen ihre Tabellen nur beim Empfang auf; kommt nichts mehr,
+    -- hing der Rest bis zum Ausloggen als "unvollständig" in der Zahl.
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Workshop.incoming["val|abgebrochen"] = {
+        parts = { "a" }, received = 1, total = 4,
+        receivedAt = addon.Util.Now() - 45,
+    }
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.inbound == 0 and val_status.failed == 3,
+        "Eine seit 45 Sekunden stehende Übertragung gilt noch als laufend")
+    addon.Workshop.incoming["val|abgebrochen"].receivedAt = addon.Util.Now() - (6 * 60)
+    val_status = addon.Sync:GetSyncStatus()
+    assert(addon.Workshop.incoming["val|abgebrochen"] == nil,
+        "Die abgelaufene Übertragung wird nicht aufgeräumt")
+
+    -- Die Stillstandssperre darf nur den Sendezähler anfassen. Bucht sie auch
+    -- Empfang und Lücken als Verlust, sind die zwei Sekunden später wieder da -
+    -- und der Zyklus fängt im Zweiminutentakt von vorn an.
+    addon.Workshop.incoming["val|abgebrochen"] = nil
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Sync.bulkOutstanding = 2
+    addon.Workshop:NoteWanted({ { crafter = "Stillstand-Realm", professionKey = "schmiedekunst" } })
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.outbound == 2 and val_status.missing == 1,
+        "Der Ausgangszustand der Stillstandsprüfung stimmt nicht")
+    addon.Sync.syncStatus.outboundChangedAt = addon.Util.Now() - 600
+    val_status = addon.Sync:GetSyncStatus()
+    assert(val_status.outbound == 0 and addon.Sync.bulkOutstanding == 0,
+        "Der stehengebliebene Sendezähler wurde nicht abgeräumt")
+    assert(val_status.failed == 2,
+        "Der Stillstand bucht " .. val_status.failed .. " statt der zwei hängenden Pakete")
+    assert(val_status.missing == 1,
+        "Die Stillstandssperre hat die bekannte Lücke mit abgeräumt - sie ist zwei Sekunden später wieder da")
+    addon.Workshop.pendingWants = {}
+    addon.Sync.bulkOutstanding = 0
+
+    addon.Sync.bulkOutstanding = val_savedBulk
+    addon.Sync.serialPending = val_savedSerial
+    addon.Sync.progressFailed = val_savedFailed
+    addon.Sync.syncStatus = val_savedStatus
+    addon.Sync.reliableActive = val_savedActive
+    addon.Sync.reliableQueue = val_savedQueue
+end
+
+-- === Balken statt Paketzahl in der Werkstatt ================================
+do
+    bar_page = addon.UI.pages.WORKSHOP
+    assert(bar_page.syncBar ~= nil, "Der Abgleichsbalken fehlt unten in der Werkstatt")
+    addon.UI:RefreshSyncBar(true)
+    assert(type(bar_page.syncBar.fraction) == "number", "Der Balken hat keinen Füllstand")
+    assert(bar_page.syncPercent.value ~= "", "Neben dem Balken steht kein Prozentwert")
+    assert(bar_page.workshopStatus.value:find("Berufspakete", 1, true) == nil,
+        "Unten in der Werkstatt steht wieder die Zahl empfangener Pakete")
+end
+
+-- === Kein Ereignissturm durch das eigene Auf- und Zuklappen =================
+--
+-- ReadSkillLineProfessions klappt eingeklappte Kategorien auf und wieder zu.
+-- Beides loest SKILL_LINES_CHANGED aus - also genau das Ereignis, das die
+-- Erfassung anstoesst. Ohne Sperre trieb sich das Addon damit endlos selbst an.
+do
+    skl_profile = addon.Profile:Get()
+    skl_savedAuto = skl_profile.professionAuto
+    skl_savedProfessions = skl_profile.professions
+    skl_realGetProfessions = GetProfessions
+
+    GetProfessions = nil
+    skl_profile.professionAuto = true
+    skl_profile.professions = {}
+    skillHeaderExpanded = false
+    skillHeaderToggles = 0
+    addon.Profile:RefreshProfessions(skl_profile)
+    assert(skillHeaderToggles == 2,
+        "Die eingeklappte Kategorie wird nicht mehr geöffnet und zurückgesetzt")
+    assert(addon.Profile.skillHeadersTouchedAt ~= nil,
+        "Das eigene Auf- und Zuklappen wird nicht vermerkt")
+
+    -- Das Ereignis, das dabei entsteht, darf keinen neuen Durchlauf anstossen.
+    addon.Profile.refreshPending = false
+    assert(addon.Profile:OnGameEvent("SKILL_LINES_CHANGED") == false,
+        "Das selbst ausgelöste SKILL_LINES_CHANGED startet einen neuen Durchlauf - Endlosschleife")
+
+    -- Ein anderes Ereignis ist davon nicht betroffen.
+    assert(addon.Profile:OnGameEvent("PLAYER_LEVEL_UP") == true,
+        "Die Sperre gegen den Ereignissturm hält auch fremde Ereignisse auf")
+
+    -- Und nach Ablauf der Sperre laeuft auch das echte Fähigkeitsereignis.
+    addon.Profile.refreshPending = false
+    addon.Profile.skillHeadersTouchedAt = addon.Profile:Clock() - 600
+    assert(addon.Profile:OnGameEvent("SKILL_LINES_CHANGED") == true,
+        "Ein echtes Fähigkeitsereignis wird dauerhaft verworfen")
+    addon.Profile.refreshPending = false
+
+    -- Sind die Berufe ohnehin sichtbar, wird gar nichts angefasst.
+    skillHeaderExpanded = true
+    skillHeaderToggles = 0
+    addon.Profile:RefreshProfessions(skl_profile)
+    assert(skillHeaderToggles == 0,
+        "Das Fähigkeitenfenster wird angefasst, obwohl die Berufe offen sichtbar sind")
+
+    GetProfessions = skl_realGetProfessions
+    skl_profile.professionAuto = skl_savedAuto
+    skl_profile.professions = skl_savedProfessions
+    skillHeaderExpanded = false
+end
+
+-- === Profile überholen sich nicht ===========================================
+do
+    ord_guild = addon.DB:GetGuild()
+    ord_key = addon.Util.NormalizeName("Ueberholer-Realm")
+    ord_guild.remoteProfiles[ord_key] = nil
+    ord_guild.remoteProfiles[addon.Util.NormalizeName("Ueberholer")] = nil
+
+    ord_new = { "P", "7", "MAGE", "MAGE:1", "0/0/0", "MAGE:1", "", "MAIN", "0", "1",
+        "", "", "", "", "5000", "", "", "" }
+    addon.Sync:ReceiveProfile(ord_new, "Ueberholer-Realm")
+    assert(ord_guild.remoteProfiles[ord_key].updatedAt == 5000,
+        "Das Profil wurde nicht übernommen")
+
+    ord_old = { "P", "7", "MAGE", "MAGE:2", "0/0/0", "MAGE:2", "", "ALT", "0", "1",
+        "", "", "", "", "4000", "", "", "" }
+    addon.Sync:ReceiveProfile(ord_old, "Ueberholer-Realm")
+    assert(ord_guild.remoteProfiles[ord_key].updatedAt == 5000,
+        "Ein älteres Profilpaket überschreibt den neueren Stand")
+    assert(ord_guild.remoteProfiles[ord_key].mainStatus == "MAIN",
+        "Der überholte Stand hat den neueren Inhalt ersetzt")
+end
+
+-- === Zwei Offiziere drücken gleichzeitig ====================================
+--
+-- Vorher: zwei Sitzungen mit zwei Kennungen, zwei Auswertungen mit je einem
+-- Teil der Teilnehmer, und "Sitzung beenden" schloss immer nur eine davon.
+-- Jetzt entscheidet eine Regel, die auf jedem Client dasselbe ergibt.
+do
+    dup_savedSession = addon.RaidMonitor.session
+    dup_savedLive = addon.DB:GetCharacter().liveSession
+    -- Beide Seiten müssen Sitzungen steuern dürfen, sonst kommt der Startruf
+    -- des anderen gar nicht erst durch die Rechteprüfung.
+    dup_care = addon.DB:GetGuild().memberCare
+    dup_savedRanks = dup_care.accessRanks
+    dup_savedConfigured = dup_care.accessRanksConfigured
+    dup_care.accessRanksConfigured = true
+    dup_care.accessRanks = {}
+    for dup_rank = 0, 9 do
+        dup_care.accessRanks[tostring(dup_rank)] = true
+    end
+
+    -- Die Regel selbst: früher gewinnt, bei gleicher Sekunde die kleinere
+    -- Kennung. Beides muss auf jedem Client gleich ausfallen.
+    assert(addon.RaidMonitor:IsPreferredSession(100, "b", 200, "a") == true,
+        "Die frühere Sitzung gewinnt nicht")
+    assert(addon.RaidMonitor:IsPreferredSession(200, "a", 100, "b") == false,
+        "Die spätere Sitzung verdrängt die frühere")
+    assert(addon.RaidMonitor:IsPreferredSession(100, "a", 100, "b") == true,
+        "Bei gleicher Startzeit entscheidet nicht die kleinere Kennung")
+    assert(addon.RaidMonitor:IsPreferredSession(100, "b", 100, "a") == false,
+        "Der Gleichstand wird nicht eindeutig aufgelöst")
+
+    -- Der eigentliche Fall: Ich habe gerade selbst gestartet, im selben Moment
+    -- trifft der Startruf des anderen ein. Seine Sitzung ist älter, also gilt
+    -- seine - und meine verschwindet, ohne als eigener Abend abgelegt zu werden.
+    dup_now = addon.Util.Now()
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:StartSession("dup-eigene", "Ich-Realm", dup_now, "Karazhan")
+    dup_storedBefore = #addon.DB:GetGuild().raidSessions
+    addon.RaidMonitor:OnMessage(
+        table.concat({ "RS", "7", "dup-fremde", tostring(dup_now - 3), "Karazhan" }, "|"),
+        "Heiler-Realm", "RAID")
+    assert(addon.RaidMonitor.session ~= nil, "Die Sitzung ist ganz verschwunden")
+    assert(addon.RaidMonitor.session.id == "dup-fremde",
+        "Die ältere Sitzung des anderen Offiziers setzt sich nicht durch")
+    assert(#addon.DB:GetGuild().raidSessions == dup_storedBefore,
+        "Die verworfene Sitzung wurde als eigener Raidabend abgelegt")
+
+    -- Umgekehrt: Meine ist älter, seine darf nichts verdrängen.
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:StartSession("dup-alt", "Ich-Realm", dup_now - 10, "Karazhan")
+    addon.RaidMonitor:OnMessage(
+        table.concat({ "RS", "7", "dup-neu", tostring(dup_now), "Karazhan" }, "|"),
+        "Heiler-Realm", "RAID")
+    assert(addon.RaidMonitor.session.id == "dup-alt",
+        "Eine später gestartete Sitzung verdrängt die eigene ältere")
+
+    -- Und ein halber Abend wird nicht wegen einer Kennung weggeworfen: Nach der
+    -- Schonfrist bleibt die eigene stehen, auch wenn die fremde gewinnt.
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor.parallelSessionWarned = nil
+    addon.RaidMonitor:StartSession("dup-lang", "Ich-Realm", dup_now - 3600, "Karazhan")
+    addon.RaidMonitor:OnMessage(
+        table.concat({ "RS", "7", "dup-aelter", tostring(dup_now - 7200), "Karazhan" }, "|"),
+        "Heiler-Realm", "RAID")
+    assert(addon.RaidMonitor.session.id == "dup-lang",
+        "Ein seit einer Stunde laufender Mitschnitt wird wegen einer fremden Kennung verworfen")
+
+    -- Die Absage nennt den, der schneller war.
+    dup_ok, dup_message = addon.RaidMonitor:BeginSession()
+    assert(dup_ok == false, "Eine zweite Sitzung ließ sich trotz laufender starten")
+    assert(dup_message:find("Ich-Realm", 1, true) or dup_message:find("Ich", 1, true),
+        "Die Absage nennt nicht, wer die Sitzung gestartet hat: " .. tostring(dup_message))
+
+    addon.RaidMonitor:DiscardSession()
+    addon.RaidMonitor.parallelSessionWarned = nil
+    addon.RaidMonitor.session = dup_savedSession
+    addon.DB:GetCharacter().liveSession = dup_savedLive
+    dup_care.accessRanks = dup_savedRanks
+    dup_care.accessRanksConfigured = dup_savedConfigured
+end
+
+-- === Knöpfe im Eingabefeld sind anklickbar ==================================
+--
+-- Gemeldet: "Den Kalender bei den Abmeldungen kann man NICHT öffnen, es geht
+-- nur rechts unten in der Ecke." Knopf und EditBox waren Kinder desselben
+-- Rahmens und lagen damit auf derselben Ebene; die EditBox fing den Klick ab.
+-- Anklickbar blieb genau ihr Innenabstand - rechts zehn, oben und unten je
+-- sechs Pixel.
+do
+    for _, pick_key in ipairs({ "FROM_PICK", "TO_PICK" }) do
+        pick_button = addon.UI.pages.ROSTER.absenceEdits[pick_key]
+        pick_edit = addon.UI.pages.ROSTER.absenceEdits[pick_key:gsub("_PICK$", "")]
+        assert(pick_button ~= nil, "Das Kalendersymbol fehlt im Feld " .. pick_key)
+        assert(pick_button.parent == pick_edit.container,
+            "Das Kalendersymbol hängt nicht im Eingabefeld (" .. pick_key .. ")")
+        assert((pick_button.frameLevel or 0) > ((pick_edit.container.frameLevel or 1)),
+            "Das Kalendersymbol liegt nicht über der EditBox - die fängt den Klick ab ("
+            .. pick_key .. ")")
+        -- Und es tut noch, was es soll.
+        addon.UI.datePicker = nil
+        pick_button.scripts.OnClick()
+        assert(addon.UI.datePicker ~= nil and addon.UI.datePicker.shown == true,
+            "Der Kalender öffnet sich nicht (" .. pick_key .. ")")
+        addon.UI.datePicker:Hide()
+    end
+
+    -- Dasselbe Muster, dieselbe Falle: das × der Rezeptsuche.
+    pick_clear = addon.UI.pages.WORKSHOP.workshopSearchClear
+    assert(pick_clear.parent == addon.UI.pages.WORKSHOP.workshopSearch.container,
+        "Das × der Rezeptsuche hängt nicht im Suchfeld")
+    assert((pick_clear.frameLevel or 0)
+        > ((addon.UI.pages.WORKSHOP.workshopSearch.container.frameLevel or 1)),
+        "Das × der Rezeptsuche liegt nicht über der EditBox")
+end
+
+-- === Gildenübersicht mit Puffer =============================================
+do
+    assert(addon.Constants.ACTIVE_RAIDER_LIMIT == 35,
+        "Die Gildenübersicht führt nicht 35 aktive Raider")
+    assert(#addon.UI.pages.OVERVIEW.raiderRows == addon.Constants.ACTIVE_RAIDER_LIMIT,
+        "Die Übersicht hat weniger Zeilen als Plätze")
+    ovw_content = addon.UI.pages.OVERVIEW.raiderRows[1]
+    assert(ovw_content ~= nil, "Die Zeilen der Übersicht fehlen")
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

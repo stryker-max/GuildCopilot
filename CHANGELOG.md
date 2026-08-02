@@ -7,6 +7,73 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.86 – Addon
+
+**Neu**
+
+- **Ladebalken statt Paketzahl.** Unten in der Gildenwerkstatt stand bisher
+  „110 Berufspakete empfangen". Die Zahl beantwortete die Frage nicht, die man
+  dort stellt. Jetzt steht dort ein Balken mit Prozentwert: Er zählt, was noch
+  offen ist — ausgehende Pakete, angefangene Übertragungen und Berufe, die
+  jemand angekündigt und noch nicht geliefert hat. **100 % gibt es nur, wenn
+  davon nichts übrig ist.** Darunter in einem Satz, woran es hängt, und wann
+  zuletzt alles vollständig war. Im Fensterkopf steht derselbe Stand.
+- **Gildenübersicht mit Puffer: 35 statt 25 Plätze.** 25 war exakt die Größe
+  eines Schlachtzugs — Ersatzleute und gerade offline gegangene Stammspieler
+  fielen hinten heraus.
+
+**Behoben**
+
+- **Zwei Offiziere gleichzeitig auf „Sitzung starten": der Abend wurde zweimal
+  mitgeschrieben.** Es entstanden zwei Sitzungen mit zwei Kennungen, jeder
+  behielt seine eigene, und die Teilnehmer verteilten sich auf beide — je
+  nachdem, wessen Startruf zuerst ankam. „Sitzung beenden" schloss immer nur
+  eine davon; die andere lief weiter. Jetzt entscheidet eine Regel, die auf
+  jedem Rechner dasselbe Ergebnis liefert: **die früher gestartete Sitzung
+  gewinnt**, bei gleicher Sekunde die kleinere Kennung. Wer verliert, bekommt
+  „Die Raidsitzung wurde bereits von *Name* gestartet – deine wurde damit
+  zusammengeführt." Ein bereits laufender Abend wird dabei nie verworfen: Nach
+  zwei Minuten bleibt die eigene Sitzung stehen, und es gibt stattdessen eine
+  Warnung.
+- **„Es läuft bereits eine Sitzung"** sagt jetzt auch, **wer** sie gestartet
+  hat — und das Fenster „Raidinstanz betreten" verschwindet nicht mehr wortlos,
+  wenn jemand schneller war.
+- **Das Kalendersymbol der Abmeldung ließ sich kaum anklicken.** In der Mitte
+  passierte nichts, nur ganz am Rand — praktisch nur in der unteren rechten
+  Ecke. Knopf und Eingabefeld lagen auf derselben Ebene, und das Eingabefeld
+  fing den Klick ab; anklickbar blieb genau der schmale Rand, den es nicht
+  bedeckt. Der Knopf sitzt jetzt sichtbar **über** dem Feld und ist auf ganzer
+  Fläche anklickbar. Das `×` der Rezeptsuche hatte denselben Fehler.
+- **Bildraten-Einbrüche durch eine Endlosschleife bei der Berufserfassung.**
+  Um eingeklappte Kategorien im Fähigkeitenfenster lesen zu können, klappt das
+  Addon sie kurz auf und wieder zu. Genau das löst aber `SKILL_LINES_CHANGED`
+  aus — also dasselbe Ereignis, das die Erfassung anstößt. Das Addon trieb sich
+  damit endlos selbst an, bei jedem, der mindestens eine Kategorie zugeklappt
+  hatte. Jetzt wird zuerst nachgesehen, ohne etwas anzufassen; nur wenn das
+  nichts findet, wird auf- und zugeklappt, und das dabei entstehende Ereignis
+  wird erkannt und übergangen. Zusätzlich ist die Erfassung entprellt —
+  `SKILL_LINES_CHANGED` feuert in TBC auch für jeden Waffenfertigkeitspunkt,
+  also mitten im Kampf im Sekundentakt.
+- **Ruckler beim Ein- und Ausloggen vieler Gildenmitglieder.** Jedes
+  eingehende Profil zeichnete die offene Seite sofort und vollständig neu. Der
+  Sammel-Timer aus 0.9.49 war dafür gebaut, dieser eine Pfad lief an ihm vorbei.
+- **Ein älteres Profil konnte ein neueres überschreiben.** Pakete desselben
+  Absenders können sich überholen; bisher gewann schlicht das zuletzt
+  eingetroffene. Jetzt gewinnt der neuere Zeitstempel.
+- **„Zuletzt geändert" stimmte nicht.** Der Zeitstempel des eigenen Profils
+  sprang bei jedem Spielereignis nach vorn, auch wenn sich nichts geändert
+  hatte.
+
+**Geändert**
+
+- **Seitenleiste geordnet.** „Warcraft Logs" steht jetzt im Abschnitt **Raid**,
+  vor der Raidauswertung, die es beliefert — statt unter „Roster". Der
+  Abschnitt „Roster" heißt jetzt **Gilde** und führt Mitgliederpflege und
+  Gildenwerkstatt.
+- **„Alle synchron" im Fensterkopf** meinte bisher „alle haben dieselbe
+  Addon-Version", nicht „die Daten sind vollständig". Das ist jetzt
+  auseinandergehalten.
+
 ## 0.9.85 – Addon
 
 **Behoben**
