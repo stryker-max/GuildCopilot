@@ -7,6 +7,44 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.87 – Addon
+
+**Behoben**
+
+- **Verbrauchsgegenstände wurden falsch gezählt – live wie beim Import.** Der
+  Vergleich mit dem Warcraft-Logs-Bericht vom 02.08. hat vier Ursachen gezeigt,
+  die sich gegenseitig überlagert haben:
+  - **Trommeln zählten bei allen, die den Buff bekamen.** Eine Trommel bufft
+    die ganze Gruppe; gutgeschrieben wurde sie jedem Mitglied. Im Log haben
+    fünf Spieler Trommeln geworfen, angezeigt wurden sie bei acht – darunter
+    zwei, die den ganzen Abend keine einzige geworfen haben, und einer mit 68
+    statt 28. Gezählt wird jetzt nur noch, wer sie tatsächlich wirft.
+  - **Tränke mit Buff zählten doppelt.** Hast-, Zerstörungs- und Heldentrank
+    erzeugen einen Zauber *und* eine eigene Aura; beide wurden gezählt. Vier
+    Hasttränke standen deshalb als acht da.
+  - **Die geläufigsten Manatränke fehlten in der Liste.** Die Salben und
+    Flaschen aus Zangarmarschen und Netherstrum waren unbekannt – allein auf
+    sie kamen im Vergleichslog 146 Anwendungen. Wer 24 Manatränke benutzt hat,
+    stand mit **1** da, wer 23 benutzt hat, mit **0**. Ebenfalls nachgetragen:
+    Heldentrank, Großes Arkanelixier, Elixier des Ansturms und Elixier des
+    Adepten. Zwei Tränke trugen falsche Namen und heißen jetzt richtig Feuer-
+    und Frostschutztrank.
+  - **Essen, Fläschchen und Elixiere zählten je Abend nur einmal.** Wer nach
+    drei Wipes dreimal gegessen hat, stand mit einem Essen da. Gezählt wird
+    jetzt der Verbrauch, nicht der Zustand – auch beim Import aus Warcraft
+    Logs, der die richtigen Zahlen bereits geliefert hat und hier wieder
+    eingeebnet bekam.
+- **Fläschchen und Elixiere von vor dem Pull tauchen auf.** Wer sich vor dem
+  Raid bufft, erzeugt kein Kampfereignis – ein vollständig gebuffter Raid stand
+  deshalb mit lauter Nullen da (23 von 25 Teilnehmern ohne Fläschchen). Beim
+  Sitzungsstart und bei jedem, der später dazustößt, wird jetzt einmal
+  abgelesen, was er schon trägt.
+- **Sitzungsliste: Einträge lagen übereinander.** „02.08. 19:37 Höhle des
+  Schlangenschreins +Logs" passte nicht in eine Zeile, brach um und überlagerte
+  den nächsten Eintrag. Beschriftungen in Knöpfen brechen jetzt grundsätzlich
+  nicht mehr um, lange Instanznamen stehen in ihrer geläufigen Kurzform, und
+  dieselbe Quelle wird nur einmal genannt (statt „+Sync+Logs+Sync").
+
 ## 0.9.86 – Addon
 
 **Neu**

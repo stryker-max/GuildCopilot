@@ -10,11 +10,17 @@ public static class SpellIds
 {
     public static readonly int[] Consumables =
     {
-        28495, 28499, 28507, 28508, 28494, 28511, 28512, 38908,
+        28495, 28499, 28507, 28508, 28494, 28506, 28511, 28512, 38908,
+        // Salben und Flaschen aus Zangarmarschen und Netherstrum - in TBC der
+        // meistbenutzte Manatrank ueberhaupt. Was hier fehlt, filtert die
+        // Abfrage weg: In einem Vergleichslog blieben so 146 Anwendungen
+        // unsichtbar.
+        41617, 41618, 41619, 41620,
         16666, 27869,
         35476, 35475, 35478, 35477, 35474,
         28518, 28519, 28520, 28521, 28540,
         28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
+        17539, 33720, 33721,
         28017, 28019,
         // Sattgegessen-Buffs. Jedes Gericht hat eine eigene ID; die reinen
         // "Food"-Regenerationsauren stehen bewusst nicht hier, weil sie keine

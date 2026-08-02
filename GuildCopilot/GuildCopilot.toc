@@ -2,7 +2,7 @@
 ## Title: Guild Copilot
 ## Notes: Gildenassistent für Rekrutierung, Roster, Berufe und Raidauswertung in Burning Crusade Classic Anniversary.
 ## Author: Guild Copilot Team
-## Version: 0.9.86
+## Version: 0.9.87
 ## SavedVariables: GuildCopilotDB
 ## IconTexture: Interface\AddOns\GuildCopilot\Media\GuildCopilotLogo
 

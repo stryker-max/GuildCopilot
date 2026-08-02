@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.86",
+    VERSION = "0.9.87",
     SCHEMA_VERSION = 7,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
@@ -154,17 +154,35 @@ GC.DefaultWhisperTriggers = {
 -- jemand anders ausdruecklich haben will.
 GC.MaxRecruitmentFilterWords = 40
 
--- Verbrauchsgegenstände werden nach Spell-ID gezählt. "repeatable" trennt
--- Gegenstände, die pro Anwendung zählen (Tränke, Runen, Trommeln), von
--- dauerhaften Buffs, die pro Sitzung nur einmal zählen sollen.
+-- Verbrauchsgegenstände werden nach Spell-ID gezählt. Gezählt wird der
+-- VERBRAUCH, nicht der Besitz: Wer dreimal Buffood isst, steht mit drei
+-- Essen da, wer zwei Fläschchen leert, mit zwei.
+--
+-- "track" entscheidet, welches Kampfereignis zählt - und daran hing der
+-- größte Teil der falschen Zahlen:
+--
+--   CAST  Der Gegenstand wird benutzt und erzeugt ein Wirkereignis beim
+--         Benutzer. Nur das zählt, der daraus entstehende Buff wird
+--         ignoriert. Sonst bekäme jedes Gruppenmitglied eine Trommel
+--         gutgeschrieben, die der Trommler geworfen hat, und ein Hasttrank
+--         zählte doppelt (einmal als Zauber, einmal als eigene Aura).
+--   AURA  Der Gegenstand erzeugt gar kein Wirkereignis, nur eine Aura beim
+--         Beschenkten. Das trifft auf "Sattgegessen" zu: Gegessen wird,
+--         der Buff erscheint Sekunden später, einen Zauber gibt es nie.
+--
+-- "scan" markiert die dauerhaften Buffs, die zu Sitzungsbeginn - und wenn
+-- jemand später dazustößt - einmal von den Anwesenden abgelesen werden.
+-- Fläschchen, Elixiere und Essen kommen vor dem Raid auf den Charakter, oft
+-- lange vor dem ersten Pull. Ohne diese Momentaufnahme steht dort dauerhaft
+-- eine Null, obwohl der Raid vollständig gebufft antritt.
 GC.ConsumableCategories = {
-    { key = "POTION", label = "Tränke", repeatable = true },
-    { key = "RUNE", label = "Runen", repeatable = true },
-    { key = "DRUM", label = "Trommeln", repeatable = true },
-    { key = "FLASK", label = "Fläschchen", repeatable = false },
-    { key = "ELIXIR", label = "Elixiere", repeatable = false },
-    { key = "FOOD", label = "Essen", repeatable = false },
-    { key = "OIL", label = "Öle/Steine", repeatable = false },
+    { key = "POTION", label = "Tränke", track = "CAST" },
+    { key = "RUNE", label = "Runen", track = "CAST" },
+    { key = "DRUM", label = "Trommeln", track = "CAST" },
+    { key = "FLASK", label = "Fläschchen", track = "CAST", scan = true },
+    { key = "ELIXIR", label = "Elixiere", track = "CAST", scan = true },
+    { key = "FOOD", label = "Essen", track = "AURA", scan = true },
+    { key = "OIL", label = "Öle/Steine", track = "CAST" },
 }
 
 GC.ConsumableCategoryByKey = {}
@@ -185,9 +203,22 @@ GC.Consumables = {
     [28507] = { category = "POTION", name = "Hasttrank" },
     [28508] = { category = "POTION", name = "Zerstörungstrank" },
     [28494] = { category = "POTION", name = "Trank der irren Stärke" },
-    [28511] = { category = "POTION", name = "Heldentrank" },
-    [28512] = { category = "POTION", name = "Eisenschildtrank" },
+    [28506] = { category = "POTION", name = "Heldentrank" },
+    -- 28511 und 28512 trugen bis 0.9.86 die Namen "Heldentrank" und
+    -- "Eisenschildtrank". Beide waren falsch: es sind die Schutztränke, und
+    -- der echte Heldentrank (28506) fehlte deshalb ganz.
+    [28511] = { category = "POTION", name = "Großer Feuerschutztrank" },
+    [28512] = { category = "POTION", name = "Großer Frostschutztrank" },
     [38908] = { category = "POTION", name = "Teufelsmanatrank" },
+    -- Die Salben und Flaschen aus Zangarmarschen und Netherstrum. Sie sind in
+    -- TBC der meistbenutzte Manatrank überhaupt und fehlten bis 0.9.86
+    -- komplett - im Vergleichslog vom 02.08.2026 kamen allein auf sie 146
+    -- Anwendungen, während die Spalte "Tränke" bei den Betroffenen auf null
+    -- stand.
+    [41617] = { category = "POTION", name = "Manatrank (Cenarische Salbe)" },
+    [41618] = { category = "POTION", name = "Manatrank (Nethergonenergie)" },
+    [41619] = { category = "POTION", name = "Heiltrank (Cenarische Salbe)" },
+    [41620] = { category = "POTION", name = "Heiltrank (Nethergondampf)" },
     [16666] = { category = "RUNE", name = "Dämonische Rune" },
     [27869] = { category = "RUNE", name = "Dunkle Rune" },
     [35476] = { category = "DRUM", name = "Trommeln der Schlacht" },
@@ -210,6 +241,11 @@ GC.Consumables = {
     [28509] = { category = "ELIXIR", name = "Elixier des übermächtigen Magierbluts" },
     [39625] = { category = "ELIXIR", name = "Elixier der übermächtigen Seelenstärke" },
     [39627] = { category = "ELIXIR", name = "Elixier der draenischen Weisheit" },
+    -- Aus dem Vergleichslog vom 02.08.2026 nachgetragen: drei gebräuchliche
+    -- Elixiere, die die Liste nicht kannte.
+    [17539] = { category = "ELIXIR", name = "Großes Arkanelixier" },
+    [33720] = { category = "ELIXIR", name = "Elixier des Ansturms" },
+    [33721] = { category = "ELIXIR", name = "Elixier des Adepten" },
     [28017] = { category = "OIL", name = "Überragendes Zauberöl" },
     [28019] = { category = "OIL", name = "Überragendes Manaöl" },
 

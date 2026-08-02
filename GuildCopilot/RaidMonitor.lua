@@ -156,7 +156,6 @@ function GC.RaidMonitor:GetParticipant(session, name, classFile)
             interrupts = 0,
             dispels = 0,
             consumables = NewCounters(),
-            seenConsumables = {},
         }
         session.participants[key] = participant
         session.participantOrder[#session.participantOrder + 1] = key
@@ -202,23 +201,27 @@ function GC.RaidMonitor:SyncParticipants()
     local now = GC.Util.Now()
     local present = {}
 
-    local function MarkPresent(name, classFile)
+    -- Die Einheit wird mitgereicht, weil daran haengt, was jemand beim
+    -- Eintreten schon an Fläschchen, Elixieren und Essen traegt. Das laesst
+    -- sich nur am lebenden Spieler ablesen, nicht im Kampfprotokoll.
+    local function MarkPresent(name, classFile, unit)
         local participant = name and self:GetParticipant(session, name, classFile)
         if participant then
             present[participant] = true
             participant.presentSince = participant.presentSince or now
+            self:ScanCarriedConsumables(unit, participant)
         end
     end
 
     -- Wer die Sitzung mitschreibt, ist immer dabei. Ohne diese Zeile bliebe
     -- eine Sitzung ausserhalb eines Raids ganz ohne Teilnehmer.
     local _, ownClassFile = UnitClass("player")
-    MarkPresent(GC:GetPlayerFullName(), ownClassFile)
+    MarkPresent(GC:GetPlayerFullName(), ownClassFile, "player")
 
     if self:IsInRaidGroup() and GetNumGroupMembers and GetRaidRosterInfo then
         for index = 1, (GetNumGroupMembers() or 0) do
             local name, _, _, _, _, classFile = GetRaidRosterInfo(index)
-            MarkPresent(name, classFile)
+            MarkPresent(name, classFile, "raid" .. index)
         end
     elseif self:IsInAnyGroup() and GetNumGroupMembers then
         -- In einer Gruppe gibt es kein Raidroster; dort zaehlen die
@@ -227,7 +230,7 @@ function GC.RaidMonitor:SyncParticipants()
             local unit = "party" .. index
             if UnitExists and UnitExists(unit) then
                 local _, classFile = UnitClass(unit)
-                MarkPresent(UnitName(unit), classFile)
+                MarkPresent(UnitName(unit), classFile, unit)
             end
         end
     end
@@ -995,53 +998,36 @@ function GC.RaidMonitor:OnEncounterEnd(_, encounterName, _, _, success)
     self:CloseSegment(GC.Util.Now())
 end
 
--- Essen laesst sich nicht ueber Zauber-IDs erfassen: Jedes Gericht hat eine
--- eigene, und es gibt Dutzende. Gemeinsam ist ihnen der Name der Aura, die sie
--- setzen. Ueber den wird erkannt, was keine Liste je vollstaendig abbilden
--- wuerde.
-local WELL_FED_AURAS = {
-    ["sattgegessen"] = true,
-    ["well fed"] = true,
-}
-
-local function ResolveConsumable(spellID, spellName, isAura)
+-- Ein Verbrauchsgegenstand wird gezaehlt, WENN er verbraucht wird - und zwar
+-- jedes Mal. Entscheidend ist, welches Ereignis dafuer der Beleg ist; das
+-- steht je Kategorie in GC.ConsumableCategories:
+--
+--   CAST  Nur das Wirkereignis beim Benutzer. Der Buff, der daraus wird,
+--         zaehlt ausdruecklich NICHT. Genau daran hing die groesste
+--         Verfaelschung: Trommeln buffen die ganze Gruppe, also bekam jedes
+--         Gruppenmitglied jede geworfene Trommel gutgeschrieben. Im
+--         Vergleichslog vom 02.08.2026 haben fuenf Spieler Trommeln geworfen -
+--         angezeigt wurden sie bei acht, einer davon mit 68 statt 28.
+--         Traenke mit Buff (Hast, Zerstoerung) zaehlten aus demselben Grund
+--         doppelt: einmal als Zauber, einmal als eigene Aura.
+--   AURA  Nur die Aura beim Beschenkten. Das gilt allein fuer Essen: Ein
+--         Wirkereignis gibt es dafuer nie, der Sattgegessen-Buff erscheint
+--         Sekunden nach dem Essen von selbst.
+--
+-- Der frueher zusaetzlich gepruefte Auraname ("Sattgegessen"/"Well Fed") ist
+-- entfallen. Er hat auf dem deutschen Client ohnehin nie getroffen - dort
+-- heisst die Aura schlicht "Satt", und genau so heisst auch der
+-- Kampfrausch-Debuff. Ein Namensvergleich haette also entweder nichts oder
+-- das Falsche gefunden; die Spell-IDs stehen in GC.Consumables.
+local function ResolveConsumable(spellID)
     local consumable = GC.Consumables[tonumber(spellID) or 0]
-    if consumable then
-        return consumable.category
+    if not consumable then
+        return nil, nil
     end
-    -- Die Sattgegessen-Aura ist immer eine Aura, nie ein gewirkter Zauber.
-    -- Cast-Ereignisse sparen sich damit das Kleinschreiben des Namens - im
-    -- Raid ist der unbekannte Cast der haeufigste Fall dieser Funktion.
-    if isAura and WELL_FED_AURAS[tostring(spellName or ""):lower()] then
-        return "FOOD"
-    end
-    return nil
+    return GC.ConsumableCategoryByKey[consumable.category], consumable
 end
 
-local function CountConsumable(monitor, session, playerName, spellID, spellName, isAura)
-    local categoryKey = ResolveConsumable(spellID, spellName, isAura)
-    if not categoryKey then
-        return
-    end
-    local participant = monitor:FindParticipant(session, playerName)
-    if not participant then
-        return
-    end
-
-    local category = GC.ConsumableCategoryByKey[categoryKey]
-    if not category then
-        return
-    end
-    if not category.repeatable then
-        -- Ohne ID - also bei ueber den Namen erkanntem Essen - haelt der
-        -- Kategorieschluessel den Platz, sonst zaehlte jede Aktualisierung
-        -- der Aura erneut.
-        local seenKey = tonumber(spellID) or categoryKey
-        if participant.seenConsumables[seenKey] then
-            return
-        end
-        participant.seenConsumables[seenKey] = true
-    end
+local function RecordConsumable(participant, category, consumable, spellID, spellName)
     participant.consumables[category.key] = (participant.consumables[category.key] or 0) + 1
 
     -- Zusaetzlich zum Zaehler ein Protokoll: WAS wurde WANN eingeworfen.
@@ -1053,7 +1039,6 @@ local function CountConsumable(monitor, session, playerName, spellID, spellName,
         log = {}
         participant.consumableLog = log
     end
-    local consumable = GC.Consumables[tonumber(spellID) or 0]
     log[#log + 1] = {
         t = GC.Util.Now(),
         n = (consumable and consumable.name)
@@ -1065,6 +1050,86 @@ local function CountConsumable(monitor, session, playerName, spellID, spellName,
         table.remove(log, 1)
         participant.consumableLogDropped = (participant.consumableLogDropped or 0) + 1
     end
+end
+
+local function CountConsumable(monitor, session, playerName, spellID, spellName, isAura)
+    local category, consumable = ResolveConsumable(spellID)
+    if not category then
+        return
+    end
+    -- Die eine Bedingung, die Trommelinflation und Doppelzaehlung erledigt.
+    if category.track == "AURA" then
+        if not isAura then
+            return
+        end
+    elseif isAura then
+        return
+    end
+    local participant = monitor:FindParticipant(session, playerName)
+    if not participant then
+        return
+    end
+    RecordConsumable(participant, category, consumable, spellID, spellName)
+end
+
+-- Buffs eines Raidmitglieds ablesen. Der Client bietet dafuer je nach
+-- Spielfassung eine andere Schnittstelle an; welche vorhanden ist, entscheidet
+-- sich zur Laufzeit. Faellt beides aus, wird nichts abgelesen - das ergibt
+-- unvollstaendige Zahlen, aber keine falschen.
+local function ForEachBuff(unit, callback)
+    if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
+        for index = 1, 40 do
+            local data = C_UnitAuras.GetBuffDataByIndex(unit, index)
+            if not data then
+                return true
+            end
+            callback(data.spellId, data.name)
+        end
+        return true
+    end
+    if UnitBuff then
+        for index = 1, 40 do
+            local name, _, _, _, _, _, _, _, _, spellID = UnitBuff(unit, index)
+            if not name then
+                return true
+            end
+            callback(spellID, name)
+        end
+        return true
+    end
+    return false
+end
+
+-- Fläschchen, Elixiere und Essen kommen vor dem Raid auf den Charakter - oft
+-- lange vor dem ersten Pull und damit lange vor dem Sitzungsbeginn. Aus dem
+-- Kampfprotokoll ist davon nichts zu holen; ein vollstaendig gebuffter Raid
+-- stand deshalb mit lauter Nullen da (im Vergleichslog vom 02.08.2026: 23 von
+-- 25 Teilnehmern ohne Fläschchen).
+--
+-- Einmal je Teilnehmer wird deshalb abgelesen, was er beim Eintreten schon
+-- traegt. Nur einmal - sonst zaehlte jeder Durchlauf des Anwesenheitsabgleichs
+-- denselben Buff erneut. Wer spaeter nachlegt, wird ganz normal ueber das
+-- Kampfprotokoll erfasst.
+function GC.RaidMonitor:ScanCarriedConsumables(unit, participant)
+    if not participant or participant.auraScanDone or not unit then
+        return
+    end
+    -- Erst ablesen, wenn der Spieler wirklich sichtbar ist: In einer anderen
+    -- Zone liefert die Abfrage nichts, und ein leeres Ergebnis darf nicht als
+    -- "hat nichts dabei" durchgehen.
+    if UnitExists and not UnitExists(unit) then
+        return
+    end
+    if UnitIsVisible and not UnitIsVisible(unit) then
+        return
+    end
+    participant.auraScanDone = true
+    ForEachBuff(unit, function(spellID, spellName)
+        local category, consumable = ResolveConsumable(spellID)
+        if category and category.scan then
+            RecordConsumable(participant, category, consumable, spellID, spellName)
+        end
+    end)
 end
 
 -- Der Combat Log liefert im Raid tausende Schadensereignisse pro Kampf. Sie

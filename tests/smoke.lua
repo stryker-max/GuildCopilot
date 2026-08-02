@@ -1581,8 +1581,24 @@ end
 addon.RaidMonitor:BeginSegment(currentTime)
 FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
 FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28495)
-FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 28518)
-FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 28518)
+-- Ein Trank mit Buff erzeugt beides: den Zauber UND die eigene Aura. Gezählt
+-- werden darf nur der Zauber, sonst steht jeder Hasttrank doppelt da.
+FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 28507)
+FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Schurke", 28507)
+-- Zwei Fläschchen über den Abend sind zwei Fläschchen, nicht eins.
+FireCombatLog("SPELL_CAST_SUCCESS", "Heiler", "Heiler", 28518)
+FireCombatLog("SPELL_CAST_SUCCESS", "Heiler", "Heiler", 28518)
+-- Trommeln buffen die ganze Gruppe. Verbraucht hat sie ausschliesslich der
+-- Werfer; wer den Buff bekommt, hat nichts ausgegeben.
+FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 35476)
+FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Schurke", 35476)
+FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Heiler", 35476)
+FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Tester", 35476)
+-- Essen erzeugt nie einen Zauber, nur die Aura. Dreimal gegessen ist dreimal
+-- Essen - auch wenn der Buff beim zweiten Mal nur aufgefrischt wird.
+FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 43764)
+FireCombatLog("SPELL_AURA_REFRESH", "Heiler", "Heiler", 43764)
+FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 33257)
 FireCombatLog("SPELL_INTERRUPT", "Schurke", "Prinz", nil, "Creature-1")
 FireCombatLog("SPELL_DISPEL", "Heiler", "Tester", nil)
 FireCombatLog("UNIT_DIED", "", "Tester", nil)
@@ -1590,8 +1606,12 @@ FireCombatLog("UNIT_DIED", "", "Prinz Malchezaar", nil, "Creature-1234")
 
 local rogue = liveSession.participants.schurke
 local healer = liveSession.participants.heiler
-assert(rogue.consumables.POTION == 2, "Wiederholbare Tränke wurden nicht mehrfach gezählt")
-assert(healer.consumables.FLASK == 1, "Ein dauerhaftes Fläschchen wurde doppelt gezählt")
+assert(rogue.consumables.POTION == 3, "Wiederholbare Tränke wurden nicht mehrfach gezählt")
+assert(healer.consumables.FLASK == 2, "Ein zweites Fläschchen wurde nicht gezählt")
+assert(rogue.consumables.DRUM == 1, "Die geworfene Trommel wurde nicht beim Werfer gezählt")
+assert(healer.consumables.DRUM == 0 and liveSession.participants.tester.consumables.DRUM == 0,
+    "Ein Trommelbuff wurde dem Empfänger als Verbrauch angerechnet")
+assert(healer.consumables.FOOD == 3, "Mehrfach gegessenes Buffood wurde nicht mehrfach gezählt")
 assert(rogue.interrupts == 1, "Der Interrupt wurde nicht gezählt")
 assert(healer.dispels == 1, "Der Dispel wurde nicht gezählt")
 assert(liveSession.participants.tester.deaths == 1, "Der Spielertod wurde nicht gezählt")
@@ -1625,7 +1645,7 @@ for _, participant in ipairs(storedSummary.participants) do
     end
 end
 assert(storedRogue.seconds >= 180, "Die Anwesenheitszeit wurde nicht mitgeschrieben")
-assert(storedRogue.consumables.POTION == 2, "Die Tränke fehlen in der Auswertung")
+assert(storedRogue.consumables.POTION == 3, "Die Tränke fehlen in der Auswertung")
 
 -- Die Zusammenfassung überlebt Serialisierung und Zerlegung in Chatpakete.
 local summaryMessages = addon.RaidMonitor:BuildSummaryMessages(storedSummary, "token1")
@@ -2700,8 +2720,11 @@ assert(wclTester.name == "Tester", "Die Teilnehmerreihenfolge stimmt nicht")
 assert(wclTester.seconds == 7200, "Die Anwesenheitszeit wurde nicht übernommen")
 assert(wclTester.interrupts == 3, "Die Interrupts wurden nicht übernommen")
 assert(wclTester.consumables.POTION == 2, "Wiederholbare Tränke wurden nicht gezählt")
-assert(wclTester.consumables.FLASK == 1,
-    "Ein dauerhaftes Fläschchen wurde mehrfach statt einmal gezählt")
+-- Drei Fläschchen sind drei Fläschchen. Bis 0.9.86 wurden dauerhafte Buffs hier
+-- auf eins je Zauber gestutzt - der Companion zaehlt aber bereits Verbraeuche,
+-- und die Kappe hat sie wieder eingeebnet.
+assert(wclTester.consumables.FLASK == 3,
+    "Die gemeldete Anzahl eines dauerhaften Buffs wurde auf eins gestutzt")
 assert(wclTester.consumables.ELIXIR == 0, "Eine unbekannte Spell-ID wurde einer Kategorie zugeordnet")
 
 -- Live- und Logs-Daten bleiben getrennt und überschreiben sich nicht.
@@ -3979,10 +4002,83 @@ end
 -- Tierfutter beglueckt das Jaegertier, nicht den Raidteilnehmer.
 assert(addon.Consumables[33272] == nil, "Tierfutter wird als Raidbuff gezählt")
 
--- Essen ist ein Dauerbuff: Es zaehlt je Spieler und Sitzung einmal, auch wenn
--- die Aura zwischendurch erneuert wird.
-assert(addon.ConsumableCategoryByKey.FOOD.repeatable == false,
-    "Essen wird als wiederholbarer Verbrauchsgegenstand gezählt")
+-- Essen ist der einzige Verbrauchsgegenstand ohne Wirkereignis: Gegessen wird,
+-- der Buff erscheint von selbst. Alles andere zaehlt ueber den Zauber - sonst
+-- bekaeme jedes Gruppenmitglied die Trommel des Trommlers gutgeschrieben.
+assert(addon.ConsumableCategoryByKey.FOOD.track == "AURA",
+    "Essen wird nicht über die Aura erfasst")
+for _, key in ipairs({ "POTION", "RUNE", "DRUM", "FLASK", "ELIXIR", "OIL" }) do
+    assert(addon.ConsumableCategoryByKey[key].track == "CAST",
+        key .. " wird über die Aura statt über den Zauber gezählt")
+end
+-- Was vor dem Sitzungsbeginn getrunken wurde, steht in keinem Kampfprotokoll.
+-- Diese drei werden deshalb zusaetzlich vom lebenden Spieler abgelesen.
+for _, key in ipairs({ "FLASK", "ELIXIR", "FOOD" }) do
+    assert(addon.ConsumableCategoryByKey[key].scan == true,
+        key .. " wird beim Sitzungsbeginn nicht vom Spieler abgelesen")
+end
+
+-- Aus dem Vergleichslog vom 02.08.2026 nachgetragen. Ohne sie stand die Spalte
+-- "Tränke" bei den Betroffenen auf null, obwohl allein auf die Salben 146
+-- Anwendungen kamen.
+for _, spellID in ipairs({ 41617, 41618, 41619, 41620, 28506 }) do
+    local entry = addon.Consumables[spellID]
+    assert(entry and entry.category == "POTION",
+        "Der Trank " .. spellID .. " fehlt in der Verbrauchstabelle")
+end
+for _, spellID in ipairs({ 17539, 33720, 33721 }) do
+    local entry = addon.Consumables[spellID]
+    assert(entry and entry.category == "ELIXIR",
+        "Das Elixier " .. spellID .. " fehlt in der Verbrauchstabelle")
+end
+end
+
+-- === Mitgebrachte Buffs beim Sitzungsbeginn ================================
+--
+-- Fläschchen, Elixiere und Essen kommen vor dem Raid auf den Charakter, oft
+-- lange vor dem ersten Pull. Aus dem Kampfprotokoll ist davon nichts zu holen;
+-- ohne diese Momentaufnahme steht ein vollständig gebuffter Raid mit lauter
+-- Nullen da – im Vergleichslog vom 02.08.2026 waren es 23 von 25 Teilnehmern
+-- ohne Fläschchen.
+do
+scanBuffs = {
+    { "Fläschchen der Festigung", 28518 },
+    { "Elixier des Adepten", 33721 },
+    { "Sattgegessen", 43764 },
+    { "Trommeln der Schlacht", 35476 },
+    { "Segen der Könige", 25898 },
+}
+function UnitIsVisible()
+    return true
+end
+function UnitBuff(_, index)
+    local entry = scanBuffs[index]
+    if not entry then
+        return nil
+    end
+    return entry[1], nil, nil, nil, nil, nil, nil, nil, nil, entry[2]
+end
+
+scanParticipant = { name = "Scan", consumables = {} }
+for _, category in ipairs(addon.ConsumableCategories) do
+    scanParticipant.consumables[category.key] = 0
+end
+addon.RaidMonitor:ScanCarriedConsumables("player", scanParticipant)
+assert(scanParticipant.consumables.FLASK == 1, "Das mitgebrachte Fläschchen wurde nicht abgelesen")
+assert(scanParticipant.consumables.ELIXIR == 1, "Das mitgebrachte Elixier wurde nicht abgelesen")
+assert(scanParticipant.consumables.FOOD == 1, "Das mitgebrachte Essen wurde nicht abgelesen")
+-- Ein laufender Trommelbuff ist kein mitgebrachter Verbrauch: Geworfen hat ihn
+-- jemand anderes, und genau diese Verwechslung hat die Trommelspalte aufgeblasen.
+assert(scanParticipant.consumables.DRUM == 0,
+    "Ein fremder Trommelbuff wurde als eigener Verbrauch abgelesen")
+
+-- Der Anwesenheitsabgleich läuft im Sekundentakt. Abgelesen wird trotzdem nur
+-- einmal, sonst wüchse dasselbe Fläschchen mit jedem Durchlauf.
+addon.RaidMonitor:ScanCarriedConsumables("player", scanParticipant)
+assert(scanParticipant.consumables.FLASK == 1, "Der Buffabgleich zählt bei jedem Durchlauf erneut")
+
+UnitBuff = nil
+UnitIsVisible = nil
 end
 
 -- === Bosserkennung über eine gepflegte Liste ===============================

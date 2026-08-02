@@ -292,7 +292,13 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     button.border:SetPoint("BOTTOMRIGHT", 1, -1)
     button.border:SetColorTexture(THEME.border[1], THEME.border[2], THEME.border[3], 1)
     button.background:SetDrawLayer("BORDER", 1)
-    button.label = CreateLabel(button, text, { align = "CENTER" })
+    -- Eine Beschriftung bricht in einem Knopf nie um. Ein Knopf hat eine feste
+    -- Höhe; eine zweite Zeile wächst darüber hinaus und legt sich über den
+    -- Nachbarn. Genau so sah die Sitzungsliste aus: "02.08. 19:37 Höhle des
+    -- Schlangenschreins +Logs" passte nicht in eine Zeile, brach um und
+    -- überlagerte den nächsten Eintrag. Zu lang heißt jetzt abgeschnitten,
+    -- nicht ineinandergeschoben.
+    button.label = CreateLabel(button, text, { align = "CENTER", height = height or 34 })
     button.label:SetAllPoints()
     button.active = false
 
@@ -6788,6 +6794,34 @@ local function FormatDuration(seconds)
     return minutes .. "m"
 end
 
+-- Die Sitzungsliste ist 206 Pixel breit; darin stehen Datum, Uhrzeit, Instanz
+-- und Quellenzeichen. "Höhle des Schlangenschreins" allein füllt sie schon.
+-- Die geläufige Kurzform sagt dasselbe und lässt Platz für den Rest; was hier
+-- nicht steht, bleibt unverändert und wird notfalls abgeschnitten statt
+-- umgebrochen.
+local SHORT_ZONE_NAMES = {
+    ["höhle des schlangenschreins"] = "Serpentinhöhle",
+    ["serpentshrine cavern"] = "Serpentinhöhle",
+    ["festung der stürme"] = "Festung der Stürme",
+    ["tempest keep"] = "Festung der Stürme",
+    ["gruuls unterschlupf"] = "Gruuls Lager",
+    ["gruul's lair"] = "Gruuls Lager",
+    ["magtheridons kammer"] = "Magtheridon",
+    ["magtheridon's lair"] = "Magtheridon",
+    ["schwarzer tempel"] = "Schwarzer Tempel",
+    ["black temple"] = "Schwarzer Tempel",
+    ["hyjalgipfel"] = "Hyjal",
+    ["hyjal summit"] = "Hyjal",
+    ["sonnenbrunnenplateau"] = "Sonnenbrunnen",
+    ["sunwell plateau"] = "Sonnenbrunnen",
+    ["zul'aman"] = "Zul'Aman",
+}
+
+local function ShortZoneName(zone)
+    zone = tostring(zone or "")
+    return SHORT_ZONE_NAMES[zone:lower()] or zone
+end
+
 local function FormatSessionDate(summary)
     if date and summary.startedAt and summary.startedAt > 0 then
         local ok, formatted = pcall(date, "%d.%m. %H:%M", summary.startedAt)
@@ -7199,13 +7233,22 @@ function GC.UI:RefreshStatistics()
             local zone = summary.zone ~= "" and summary.zone or "Raid"
             -- Kompakt und einzeilig: Nur die Zusatzquellen ("+Logs"), nicht
             -- die volle Liste - "[Live+Logs]" brach in die zweite Zeile um.
+            --
+            -- Je Quellenart nur ein Zeichen. Liegt derselbe Abend von zwei
+            -- Gildenmitgliedern vor, sind das zwei Sync-Auswertungen, aber eine
+            -- Quellenart; "+Sync+Logs+Sync" nannte dieselbe Herkunft zweimal
+            -- und machte die Zeile gerade dadurch zu lang.
             local extras = {}
+            local seenMarks = {}
             for _, candidate in ipairs(evening.sources) do
-                if (candidate.source or "LIVE") ~= "LIVE" then
-                    extras[#extras + 1] = SESSION_SOURCE_MARK[candidate.source] or "?"
+                local source = candidate.source or "LIVE"
+                local mark = SESSION_SOURCE_MARK[source] or "?"
+                if source ~= "LIVE" and not seenMarks[mark] then
+                    seenMarks[mark] = true
+                    extras[#extras + 1] = mark
                 end
             end
-            row:SetText(FormatSessionDate(summary) .. "  " .. zone
+            row:SetText(FormatSessionDate(summary) .. "  " .. ShortZoneName(zone)
                 .. (#evening.sources > 1 and #extras > 0
                     and ("  |cff4ec9ff+" .. table.concat(extras, "+") .. "|r") or ""))
             local active = false

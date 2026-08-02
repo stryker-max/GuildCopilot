@@ -36,11 +36,17 @@ export const FORMAT_HEADER = "GCPWCL3";
 // Unbekannte IDs werden dort ignoriert und erzeugen nie falsche Zahlen.
 // Die Liste darf daher grosszuegiger sein als die Addon-Tabelle.
 export const CONSUMABLE_IDS = [
-  28495, 28499, 28507, 28508, 28494, 28511, 28512, 38908,
+  28495, 28499, 28507, 28508, 28494, 28506, 28511, 28512, 38908,
+  // Salben und Flaschen aus Zangarmarschen und Netherstrum - in TBC der
+  // meistbenutzte Manatrank ueberhaupt. Sie fehlten, und was hier fehlt,
+  // filtert die Abfrage weg: In einem Vergleichslog blieben so 146
+  // Anwendungen unsichtbar.
+  41617, 41618, 41619, 41620,
   16666, 27869,
   35476, 35475, 35478, 35477, 35474,
   28518, 28519, 28520, 28521, 28540,
   28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
+  17539, 33720, 33721,
   28017, 28019,
   // Sattgegessen-Buffs. Jedes Gericht hat eine eigene ID; die reinen
   // "Food"-Regenerationsauren stehen bewusst nicht hier, weil sie keine Werte
@@ -259,9 +265,9 @@ export function collectConsumables(castEvents, buffEvents) {
   const buffsByActor = new Map();
   const abilitiesWithCasts = new Set();
 
-  function tally(events, field, allowedType, target) {
+  function tally(events, field, allowedTypes, target) {
     for (const event of events || []) {
-      if (event?.type !== allowedType) continue;
+      if (!allowedTypes.has(event?.type)) continue;
       const abilityID = Number(event.abilityGameID);
       if (!CONSUMABLE_SET.has(abilityID)) continue;
       const actorID = event[field];
@@ -273,8 +279,12 @@ export function collectConsumables(castEvents, buffEvents) {
     }
   }
 
-  tally(castEvents, "sourceID", "cast", castsByActor);
-  tally(buffEvents, "targetID", "applybuff", buffsByActor);
+  tally(castEvents, "sourceID", new Set(["cast"]), castsByActor);
+  // "refreshbuff" gehoert dazu: Wer nach einem Wipe dasselbe Gericht noch
+  // einmal isst, waehrend der Buff noch laeuft, erzeugt keine neue Anwendung,
+  // sondern eine Auffrischung. Ohne sie zaehlte ein ganzer Raidabend Essen
+  // als ein einziges Essen.
+  tally(buffEvents, "targetID", new Set(["applybuff", "refreshbuff"]), buffsByActor);
 
   const merged = new Map();
   for (const [actorID, counts] of castsByActor) {

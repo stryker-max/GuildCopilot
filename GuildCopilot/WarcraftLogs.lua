@@ -264,17 +264,13 @@ local function DecodeConsumables(payload)
         local consumable = spellID and GC.Consumables[tonumber(spellID)]
         local category = consumable and GC.ConsumableCategoryByKey[consumable.category]
         if category then
-            if category.repeatable then
-                counters[category.key] = counters[category.key] + count
-            elseif count > 0 then
-                -- Dauerhafte Buffs zählen wie in der Livesitzung EINMAL JE
-                -- ZAUBER, nicht einmal je Kategorie. Der Kommentar behauptete
-                -- vorher Gleichstand, die Rechnung war aber eine andere: Live
-                -- ergaben Kampf- und Wächterelixier zwei Einträge, derselbe
-                -- Abend aus Warcraft Logs nur einen. Dieselbe Spielweise stand
-                -- damit je nach Quelle mit anderen Zahlen da.
-                counters[category.key] = counters[category.key] + 1
-            end
+            -- Übernommen wird die gemeldete Anzahl, für JEDE Kategorie.
+            -- Vorher wurden dauerhafte Buffs auf eins je Zauber gestutzt: Wer
+            -- nach drei Wipes dreimal Buffood gegessen hatte, stand mit einem
+            -- Essen da, und dieselbe Kappe traf Fläschchen und Elixiere. Der
+            -- Companion zählt bereits Verbräuche, nicht Zustände - die zweite
+            -- Zählung hier hat sie nur wieder eingeebnet.
+            counters[category.key] = counters[category.key] + count
             if count > 0 then
                 items[#items + 1] = {
                     n = consumable.name,

@@ -406,12 +406,12 @@ public sealed class WclImporter
         var buffsByActor = new Dictionary<int, Dictionary<int, int>>();
         var abilitiesWithCasts = new HashSet<int>();
 
-        void Tally(IEnumerable<JsonElement> events, string field, string type,
+        void Tally(IEnumerable<JsonElement> events, string field, HashSet<string> types,
             Dictionary<int, Dictionary<int, int>> target, bool markCasts)
         {
             foreach (var element in events)
             {
-                if (!element.TryGetProperty("type", out var kind) || kind.GetString() != type) continue;
+                if (!element.TryGetProperty("type", out var kind) || !types.Contains(kind.GetString() ?? "")) continue;
                 if (!element.TryGetProperty("abilityGameID", out var ability) || ability.ValueKind != JsonValueKind.Number) continue;
                 var abilityId = ability.GetInt32();
                 if (!SpellIds.ConsumableSet.Contains(abilityId)) continue;
@@ -428,8 +428,12 @@ public sealed class WclImporter
             }
         }
 
-        Tally(castEvents, "sourceID", "cast", castsByActor, markCasts: true);
-        Tally(buffEvents, "targetID", "applybuff", buffsByActor, markCasts: false);
+        Tally(castEvents, "sourceID", new HashSet<string> { "cast" }, castsByActor, markCasts: true);
+        // "refreshbuff" gehoert dazu: Wer nach einem Wipe dasselbe Gericht noch
+        // einmal isst, waehrend der Buff laeuft, erzeugt eine Auffrischung statt
+        // einer neuen Anwendung. Ohne sie zaehlte ein ganzer Raidabend Essen als
+        // ein einziges Essen.
+        Tally(buffEvents, "targetID", new HashSet<string> { "applybuff", "refreshbuff" }, buffsByActor, markCasts: false);
 
         var merged = new Dictionary<int, Dictionary<int, int>>();
         foreach (var (actorId, counts) in castsByActor)

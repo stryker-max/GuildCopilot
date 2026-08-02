@@ -76,7 +76,7 @@ assert.equal(
 assert.deepEqual(
   sessionLines.slice(1),
   [
-    "P|Nexarius|MAGE|90|0|0|1|28499:2,28518:1|1",
+    "P|Nexarius|MAGE|90|0|0|1|28499:2,28518:2|1",
     "P|Thulgor|WARRIOR|60|1|2|0||0",
   ],
   "Die Teilnehmerzeilen stimmen nicht."
@@ -108,10 +108,18 @@ assert.ok(
   "Ein unbeteiligter Spieler wurde in die Auswertung aufgenommen."
 );
 
-// begincast und refreshbuff duerfen nicht mitzaehlen: 28499 bleibt bei 2.
+// begincast darf nicht mitzaehlen - ein angefangener Zauber ist kein Verbrauch.
 assert.ok(
   sessionLines[1].includes("28499:2"),
-  "Doppelereignisse wurden mitgezaehlt."
+  "Ein begonnener Zauber wurde als Verbrauch gezaehlt."
+);
+
+// refreshbuff dagegen SCHON: Wer ein zweites Mal isst oder trinkt, waehrend der
+// Buff noch laeuft, erzeugt eine Auffrischung statt einer neuen Anwendung. Ohne
+// sie zaehlte ein ganzer Raidabend Essen als ein einziges Essen.
+assert.ok(
+  sessionLines[1].includes("28518:2"),
+  "Die Auffrischung eines Dauerbuffs wurde nicht als zweiter Verbrauch gezaehlt."
 );
 
 // Ohne Kaempfe und ohne Ereignisse entsteht keine leere Auswertung.
