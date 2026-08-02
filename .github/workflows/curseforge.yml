@@ -91,67 +91,95 @@ jobs:
       # Vokabel und dann behauptet, es sei nichts da.
       #
       # Ein Einrichtungsschritt, der am Namen scheitert, ist der Fehler, nicht
-      # der Name. Gesucht wird deshalb ueber ALLE Secrets und Variables, und
-      # unterschieden wird an der Gestalt des Werts: Die Projektnummer besteht
-      # nur aus Ziffern, der Token nicht. Der empfohlene Name gewinnt, wenn es
-      # ihn gibt - danach entscheidet die Gestalt.
+      # der Name. Nachgesehen wird deshalb unter allen Namen, die hier schon
+      # vorgekommen sind oder naheliegen - und in BEIDEN Reitern, Secrets wie
+      # Variables. Der erste Name, unter dem etwas steht, gewinnt.
       #
-      # Werte werden nie ausgegeben, nur Namen. Ein Token, der versehentlich
+      # ACHTUNG, nicht "vereinfachen": Statt der Liste stand hier schon einmal
+      # der Griff nach dem gesamten secrets-Kontext auf einmal. Das ist deutlich
+      # kuerzer - aber GitHub sperrt einen Lauf, der das tut: Er endet sofort
+      # mit "action_required" und null Jobs, laeuft also gar nicht erst.
+      # Nachgewiesen an zwei Laeufen, die sich nur in diesem Punkt
+      # unterschieden. Wer einen weiteren Namen braucht, haengt ihn unten an.
+      #
+      # Ausgegeben werden nur Namen, nie Werte. Ein Token, der versehentlich
       # unter "Variables" landet, ist nicht von Haus aus maskiert - deshalb
       # setzt dieser Schritt die Maskierung selbst, bevor irgendetwas laeuft.
       - name: Zugangsdaten suchen
         id: creds
         env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
-          ALL_VARS: ${{ toJSON(vars) }}
+          TOKEN_CANDIDATES: |
+            CURSEFORGE_TOKEN=${{ secrets.CURSEFORGE_TOKEN }}
+            CURSEFORGE=${{ secrets.CURSEFORGE }}
+            CURSEFORGE_API_TOKEN=${{ secrets.CURSEFORGE_API_TOKEN }}
+            CURSEFORGE_API_KEY=${{ secrets.CURSEFORGE_API_KEY }}
+            CURSEFORGE_KEY=${{ secrets.CURSEFORGE_KEY }}
+            CF_TOKEN=${{ secrets.CF_TOKEN }}
+            CURSEFORGE_TOKEN (Variables)=${{ vars.CURSEFORGE_TOKEN }}
+            CURSEFORGE (Variables)=${{ vars.CURSEFORGE }}
+          PROJECT_CANDIDATES: |
+            CURSEFORGE_PROJECT_ID=${{ vars.CURSEFORGE_PROJECT_ID }}
+            CURSEFORGE_PROJECT=${{ vars.CURSEFORGE_PROJECT }}
+            CURSEFORGE_PROJECTID=${{ vars.CURSEFORGE_PROJECTID }}
+            CURSEFORGE_ID=${{ vars.CURSEFORGE_ID }}
+            PROJECT_ID=${{ vars.PROJECT_ID }}
+            CF_PROJECT_ID=${{ vars.CF_PROJECT_ID }}
+            CURSEFORGE_PROJECT_ID (Secrets)=${{ secrets.CURSEFORGE_PROJECT_ID }}
+            CURSEFORGE_PROJECT (Secrets)=${{ secrets.CURSEFORGE_PROJECT }}
+            CURSEFORGE_PROJECTID (Secrets)=${{ secrets.CURSEFORGE_PROJECTID }}
+            CURSEFORGE_ID (Secrets)=${{ secrets.CURSEFORGE_ID }}
+            PROJECT_ID (Secrets)=${{ secrets.PROJECT_ID }}
         run: |
           set -euo pipefail
 
-          merged="$(printf '%s\n%s\n' "$ALL_VARS" "$ALL_SECRETS" | jq -s 'add | del(.github_token)')"
+          # Erste Zeile mit einem Wert hinter dem Gleichheitszeichen gewinnt.
+          # Zurueck kommt "Name<TAB>Wert"; ausgegeben wird spaeter nur der Name.
+          first_filled() {
+            printf '%s\n' "$1" | while IFS= read -r line; do
+              case "$line" in
+                *=?*) printf '%s\t%s\n' "${line%%=*}" "${line#*=}"; break ;;
+              esac
+            done
+          }
 
-          secret_names="$(jq -r 'keys[]' <<< "$ALL_SECRETS" | grep -v '^github_token$' | paste -sd', ' - || true)"
-          var_names="$(jq -r 'keys[]' <<< "$ALL_VARS" | paste -sd', ' - || true)"
-          echo "Secrets:   ${secret_names:-keine}"
-          echo "Variables: ${var_names:-keine}"
+          token_hit="$(first_filled "$TOKEN_CANDIDATES")"
+          project_hit="$(first_filled "$PROJECT_CANDIDATES")"
 
-          resolved="$(jq -c '
-            def isToken:
-              (.key | test("curse"; "i"))
-              and ((.key | test("project|game_version|version_type"; "i")) | not)
-              and ((.value | length) >= 20);
-            def isProject:
-              (.key | test("project|curse"; "i")) and (.value | test("^[0-9]+$"));
-            to_entries as $e
-            | {
-                t: ((($e | map(select(.key == "CURSEFORGE_TOKEN")))
-                     + ($e | map(select(isToken)))) | .[0]),
-                p: ((($e | map(select(.key == "CURSEFORGE_PROJECT_ID")))
-                     + ($e | map(select(isProject)))) | .[0])
-              }
-            | {
-                tokenKey:   (.t.key   // ""), token:   (.t.value   // ""),
-                projectKey: (.p.key   // ""), project: (.p.value   // "")
-              }' <<< "$merged")"
+          token_key="${token_hit%%$'\t'*}"
+          token="${token_hit#*$'\t'}"
+          project_key="${project_hit%%$'\t'*}"
+          project="${project_hit#*$'\t'}"
+          [ -n "$token_hit" ] || { token_key=""; token=""; }
+          [ -n "$project_hit" ] || { project_key=""; project=""; }
 
-          token="$(jq -r '.token' <<< "$resolved")"
-          project="$(jq -r '.project' <<< "$resolved")"
-          token_key="$(jq -r '.tokenKey' <<< "$resolved")"
-          project_key="$(jq -r '.projectKey' <<< "$resolved")"
+          # Vertauscht? Die Projektnummer ist eine reine Zahl, der Token nicht.
+          # Wer beides in die jeweils andere Zeile getippt hat, soll deshalb
+          # nicht noch einmal von vorn anfangen muessen.
+          if [ -n "$token" ] && [ -z "${token//[0-9]/}" ] && [ -n "$project" ] && [ -n "${project//[0-9]/}" ]; then
+            echo "Token und Projektnummer sehen vertauscht aus - getauscht."
+            swap_key="$token_key"; swap="$token"
+            token_key="$project_key"; token="$project"
+            project_key="$swap_key"; project="$swap"
+          fi
 
           if [ -n "$token" ]; then
             echo "::add-mask::$token"
             echo "Token gefunden unter: $token_key"
             echo "CF_TOKEN=$token" >> "$GITHUB_ENV"
+          else
+            echo "Kein Token gefunden."
           fi
           if [ -n "$project" ]; then
             echo "Projektnummer gefunden unter: $project_key (Wert $project)"
             echo "CF_PROJECT=$project" >> "$GITHUB_ENV"
+          else
+            echo "Keine Projektnummer gefunden."
           fi
 
           {
             echo "hasToken=$([ -n "$token" ] && echo true || echo false)"
             echo "hasProject=$([ -n "$project" ] && echo true || echo false)"
-            echo "names=Secrets: ${secret_names:-keine} | Variables: ${var_names:-keine}"
+            echo "names=Token: ${token_key:-nichts gefunden} / Projektnummer: ${project_key:-nichts gefunden}"
           } >> "$GITHUB_OUTPUT"
 
       # Der Tag ist das Gedaechtnis: Steht er, war diese Version schon oben.

@@ -50,14 +50,19 @@ the other of the two tabs — everything entered, everything correct, and the ru
 still claimed nothing was there, because it looked up a vocabulary word instead
 of looking around.
 
-So it looks around. The run scans **every** secret and **every** variable and
-tells them apart by the shape of the value: the project number is digits only,
-the token is not. The recommended name wins if it exists; after that, shape
-decides. Values are never printed, only names — and a token that ends up in the
-plaintext Variables tab gets masked explicitly before anything else runs.
+So it looks around. `Zugangsdaten suchen` checks a list of plausible names for
+each value, in **both** tabs, and takes the first one that holds something. If
+the two were entered the wrong way round, it swaps them — the project number is
+digits only, the token is not. Values are never printed, only names, and a
+token that ends up in the plaintext Variables tab is masked explicitly before
+anything else runs. When something really is missing, the summary says which of
+the two it was, so the next attempt is not another guess.
 
-When something really is missing, the summary lists the names that **were**
-found, so the next attempt is not another guess.
+Extending that list is the intended way to support another name. What is **not**
+possible is reading the whole `secrets` context at once and searching it: GitHub
+blocks such a run outright — it ends immediately as `action_required` with zero
+jobs, which looks exactly like a workflow that never triggered. That was tried
+here and cost a release cycle; the comment above the step says so.
 
 To check the setup without a push: **Actions → CurseForge → Run workflow**. It
 publishes the current TOC version if no tag for it exists yet, so a version
