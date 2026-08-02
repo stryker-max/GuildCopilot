@@ -298,6 +298,29 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.83 – Die Raidsitzung überlebt den Verbindungsabbruch
+
+Bisher lag der laufende Abend ausschließlich im Arbeitsspeicher genau des Clients, der ihn führt. Ein Disconnect beim Offizier – und die halbe Auswertung war weg, ohne Vorwarnung und ohne Rest.
+
+**Die Sitzung liegt jetzt in den SavedVariables.** Und zwar als *dieselbe Tabelle*, nicht als Kopie: Während des Raids kostet das Sichern damit exakt nichts, weil nichts umgerechnet und nichts umkopiert wird. Geschrieben wird die Datei ohnehin erst beim Ausloggen. Zwei Dinge zieht `SaveSessionForResume()` in diesem letzten Moment gerade:
+
+- ein offener Kampfabschnitt wird geschlossen, damit ein laufender Pull nicht als Fragment stehen bleibt;
+- alle Anwesenheitsuhren werden angehalten und gutgeschrieben. Ohne das zählte die fortgesetzte Sitzung die Auszeit als Anwesenheit mit – bei einer Nacht Pause wären das zweistellige Stunden je Teilnehmer;
+- die Namenszuordnung des Kampflogs fliegt raus. Sie ist ein reiner Zwischenspeicher, kann tausende Rohschreibweisen enthalten und gehört nicht in eine gespeicherte Datei.
+
+**Beim nächsten Login läuft derselbe Abend weiter** – gleiche Kennung, gleiche Zahlen, gleiche Teilnehmer. Ist die Unterbrechung länger als acht Stunden, wird die Sitzung *nicht* fortgesetzt, aber auch nicht weggeworfen: Sie wird mit ihrem letzten bekannten Stand ausgewertet und abgelegt. Eine unvollständige Auswertung ist mehr wert als gar keine.
+
+**Ein Herzschlag hält die Sitzung im Raid zusammen.** Alle Addon-Nutzer im Raid schreiben denselben Abend ohnehin parallel mit; wer aber später dazustößt oder nach einem Abbruch zurückkommt, hat den Startruf verpasst und schriebe den Rest gar nicht mit. Der Herzschlag ist für diese Clients ein nachgereichter Startruf. Er ist bewusst sparsam gebaut:
+
+- gesendet wird höchstens alle 60 Sekunden, nur innerhalb der eigenen Gruppe und nur, solange eine Sitzung läuft;
+- gesendet wird von genau **einem**: Wer einen fremden Herzschlag zur eigenen Sitzung hört, schweigt bis zum nächsten Takt. Wer zuerst spricht, spricht für alle – fällt der aus, übernimmt beim nächsten Takt der Nächste, ganz ohne Absprache. Der Raidleiter wartet dabei am kürzesten, dann die Assistenten, dann der Rest, jeder mit einem zufälligen Aufschlag gegen Gleichstand;
+- getrieben wird der Takt von einem Rahmen, der nur während einer Sitzung sichtbar ist – dieselbe Bauweise wie die Bulk-Warteschlange in `Sync.lua`. Außerhalb einer Sitzung kostet der Herzschlag keinen einzigen Handleraufruf pro Bild. Ein wiederholender Timer kam dafür ausdrücklich nicht in Frage; `tests/validate.mjs` verbietet `C_Timer.NewTicker` im ganzen Addon;
+- eine fremde Sitzung verdrängt die eigene nie. Nur der Herzschlag zur *eigenen* Kennung gilt als „es redet schon jemand".
+
+**Sitzungen steuern jetzt ausschließlich Offiziere.** Bis 0.9.82 genügte zusätzlich der Raidrang – jeder Assistent konnte eine Sitzung starten und beenden. Das war zu weit gefasst: Assistent ist im Pull-Chaos schnell vergeben, und ein versehentliches „Sitzung beenden" schneidet den Abend mittendrin ab. Es entscheidet jetzt allein der Gildenrang, nämlich derselbe einstellbare Kreis, der auch die Mitgliederpflege öffnet (Vorgabe: Rang 0 und 1). Dieselbe Prüfung entscheidet über **eingehende** Sitzungspakete, und dort ist der Gildenrang ohnehin die belastbarere Angabe – der Raidrang eines fremden Absenders steht gar nicht fest.
+
+Abgedeckt durch vier neue Testblöcke in `tests/smoke.lua`: Sichern und Fortsetzen mit unveränderten Zahlen und ohne mitgezählte Auszeit, der liegengebliebene Neun-Stunden-Abend, der Herzschlag samt Unterdrückung durch einen fremden, der Einstieg eines Nachzüglers – und die Ablehnung eines Herzschlags ohne Steuerungsrecht.
+
 ## 0.9.82 – Nachprüfung der Fremdanalyse: fünf Restbefunde, drei davon aus 0.9.81
 
 Eine zweite Analyserunde gegen 0.9.81 hat fünf Punkte gemeldet. Alle bestätigt, alle umgesetzt. Drei davon waren **in 0.9.81 neu entstanden** – die Korrektur des Falschempfänger-Falls war unvollständig, und die richtige Abdeckungsrechnung war teuer erkauft.

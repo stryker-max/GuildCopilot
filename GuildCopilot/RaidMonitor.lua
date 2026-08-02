@@ -17,6 +17,29 @@ local MAX_PAYLOAD_BYTES = 165
 local MIN_ANSWER_INTERVAL = 30
 local INCOMING_TTL = 5 * 60
 
+-- Wie lange eine unterbrochene Sitzung fortgesetzt werden darf. Danach ist sie
+-- kein laufender Abend mehr, sondern ein liegengebliebener - sie wird beim
+-- naechsten Login ausgewertet und abgelegt, nicht weggeworfen.
+local MAX_RESUME_AGE = 8 * 60 * 60
+
+-- Der Herzschlag haelt die Sitzung im Raid zusammen: Nachzuegler und
+-- Wiedereinsteiger erfahren davon, ohne dass jemand etwas anstossen muss.
+-- Gesendet wird hoechstens alle SESSION_HEARTBEAT_INTERVAL Sekunden und immer
+-- nur von einem: Wer einen fremden Herzschlag hoert, schweigt bis zum
+-- naechsten Takt. Die Pruefung selbst laeuft im SESSION_HEARTBEAT_CHECK-Takt
+-- und kostet einen Vergleich.
+local SESSION_HEARTBEAT_INTERVAL = 60
+local SESSION_HEARTBEAT_CHECK = 20
+
+-- Der Rahmen, dessen OnUpdate den Herzschlag antreibt - dieselbe Bauweise wie
+-- die Bulk-Warteschlange in Sync.lua: Ein verstecktes Frame bekommt kein
+-- OnUpdate, ausserhalb einer Sitzung kostet der Herzschlag damit keinen
+-- einzigen Handleraufruf pro Bild. Verdrahtet wird das Skript unten bei den
+-- uebrigen Ereignisrahmen.
+local heartbeatFrame = CreateFrame("Frame")
+heartbeatFrame:Hide()
+local heartbeatElapsed = 0
+
 -- COMBAT_LOG_EVENT_UNFILTERED ist das haeufigste Ereignis im Spiel; im Raid
 -- feuert es tausende Male pro Sekunde. Schon die Zustellung an einen Handler,
 -- der sofort wieder aussteigt, kostet bei jedem einzelnen Ereignis Zeit.
@@ -58,6 +81,21 @@ local function NewCounters()
     return counters
 end
 
+-- Haelt alle laufenden Anwesenheitsuhren an und schreibt die bis dahin
+-- gesammelte Zeit gut. Ohne Zeitpunkt wird nur angehalten - dann ist gar nicht
+-- bekannt, bis wann jemand da war, und geschaetzte Zeit waere schlechter als
+-- keine.
+local function ClosePresence(session, at)
+    for _, participant in pairs(session.participants) do
+        if participant.presentSince then
+            if at then
+                participant.seconds = participant.seconds + math.max(0, at - participant.presentSince)
+            end
+            participant.presentSince = nil
+        end
+    end
+end
+
 function GC.RaidMonitor:IsInRaidGroup()
     return IsInRaid and IsInRaid() == true
 end
@@ -74,7 +112,7 @@ function GC.RaidMonitor:GetRaidRank(playerName)
     if not self:IsInRaidGroup() or not GetNumGroupMembers or not GetRaidRosterInfo then
         return nil
     end
-    local wanted = GC.Util.NormalizeName(GC.Util.PlayerShortName(playerName))
+    local wanted = GC.Util.NormalizeName(GC.Util.PlayerShortName(playerName or GC:GetPlayerFullName()))
     for index = 1, (GetNumGroupMembers() or 0) do
         local name, rank = GetRaidRosterInfo(index)
         if name and GC.Util.NormalizeName(GC.Util.PlayerShortName(name)) == wanted then
@@ -84,15 +122,18 @@ function GC.RaidMonitor:GetRaidRank(playerName)
     return nil
 end
 
--- Auswerten und steuern dürfen Raidleiter, Assistenten und die Gildenränge,
--- die auch die Mitgliederpflege öffnen dürfen.
+-- Eine Sitzung starten, beenden und einstellen darf nur ein Offizier: die
+-- Gildenränge mit Zugriff auf die Mitgliederpflege (Vorgabe Rang 0 und 1, in
+-- den Einstellungen änderbar und gildenweit abgeglichen).
+--
+-- Bis 0.9.82 genügte zusätzlich der Raidrang. Das war zu weit gefasst: Ein
+-- Assistent ist im Pull-Chaos schnell ernannt, und ein versehentliches
+-- „Sitzung beenden" schneidet den Abend mittendrin ab. Dieselbe Prüfung
+-- entscheidet auch über eingehende Sitzungspakete – dort ist der Gildenrang
+-- ohnehin die belastbarere Angabe, weil der Raidrang eines Fremden gar nicht
+-- feststeht.
 function GC.RaidMonitor:CanControlSession(playerName)
-    playerName = playerName or GC:GetPlayerFullName()
-    local raidRank = self:GetRaidRank(playerName)
-    if raidRank and raidRank >= 1 then
-        return true
-    end
-    return GC.Roster:CanAccessMemberCare(playerName)
+    return GC.Roster:CanAccessMemberCare(playerName or GC:GetPlayerFullName())
 end
 
 function GC.RaidMonitor:GetParticipant(session, name, classFile)
@@ -212,6 +253,7 @@ function GC.RaidMonitor:StartSession(sessionID, startedBy, startedAt, zone)
     }
     self:SetCombatLogTracking(true)
     self:SyncParticipants()
+    self:BeginSessionUpkeep()
     GC:FireCallback("RAID_SESSION_UPDATED")
     return self.session
 end
@@ -221,7 +263,7 @@ function GC.RaidMonitor:BeginSession()
         return false, "Es läuft bereits eine Sitzung."
     end
     if not self:CanControlSession() then
-        return false, "Nur Raidleiter, Assistenten und berechtigte Gildenränge dürfen eine Sitzung starten."
+        return false, "Nur die in den Einstellungen freigegebenen Gildenränge dürfen eine Sitzung starten."
     end
 
     local sessionID = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
@@ -235,7 +277,7 @@ function GC.RaidMonitor:EndSession()
         return false, "Es läuft keine Sitzung."
     end
     if not self:CanControlSession() then
-        return false, "Nur Raidleiter, Assistenten und berechtigte Gildenränge dürfen eine Sitzung beenden."
+        return false, "Nur die in den Einstellungen freigegebenen Gildenränge dürfen eine Sitzung beenden."
     end
 
     local summary = self:FinishSession(GC.Util.Now())
@@ -260,20 +302,163 @@ function GC.RaidMonitor:FinishSession(endedAt)
 
     endedAt = tonumber(endedAt) or GC.Util.Now()
     self:CloseSegment(endedAt)
-    local now = endedAt
-    for _, participant in pairs(session.participants) do
-        if participant.presentSince then
-            participant.seconds = participant.seconds + (now - participant.presentSince)
-            participant.presentSince = nil
-        end
-    end
+    ClosePresence(session, endedAt)
 
     local summary = self:BuildSummary(session, endedAt)
     self.session = nil
+    self:EndSessionUpkeep()
     self:SetCombatLogTracking(false)
     self:StoreSummary(summary)
     GC:FireCallback("RAID_SESSION_UPDATED")
     return summary
+end
+
+-- === Die laufende Sitzung überlebt den Verbindungsabbruch ================
+--
+-- Sie lag bisher ausschließlich im Arbeitsspeicher. Ein Disconnect, ein
+-- Absturz oder auch nur ein `/reload` warf damit den halben Abend weg – und
+-- zwar genau bei dem, der ihn führt.
+--
+-- Gespeichert wird deshalb in die SavedVariables, und zwar **dieselbe
+-- Tabelle, keine Kopie**: Während des Raids kostet das exakt nichts, weil
+-- nichts umgerechnet oder umkopiert wird. Geschrieben wird die Datei ohnehin
+-- erst beim Ausloggen, und dort steht sie dann fertig. Zwei Dinge müssen vor
+-- dem Schreiben noch geradegezogen werden – ein offener Kampfabschnitt und
+-- die laufende Anwesenheitsuhr –, sonst zählt die fortgesetzte Sitzung die
+-- Zeit über die Auszeit hinweg weiter.
+function GC.RaidMonitor:PersistSession()
+    if not GC.DB or not GC.DB.data then
+        return false
+    end
+    GC.DB:GetCharacter().liveSession = self.session
+    return true
+end
+
+function GC.RaidMonitor:ClearPersistedSession()
+    if not GC.DB or not GC.DB.data then
+        return
+    end
+    GC.DB:GetCharacter().liveSession = nil
+end
+
+-- Beim Ausloggen: offenen Abschnitt schließen, Anwesenheitsuhren anhalten und
+-- den Zeitpunkt festhalten. Die Namenszuordnung des Kampflogs fliegt raus –
+-- sie ist ein reiner Zwischenspeicher und kann tausende Rohschreibweisen
+-- enthalten, die niemand wieder braucht.
+function GC.RaidMonitor:SaveSessionForResume(at)
+    local session = self.session
+    if not session then
+        self:ClearPersistedSession()
+        return nil
+    end
+    at = tonumber(at) or GC.Util.Now()
+    self:CloseSegment(at)
+    ClosePresence(session, at)
+    session.nameLookup = nil
+    session.savedAt = at
+    self:PersistSession()
+    return session
+end
+
+-- Beim Login: fortsetzen, wenn die Unterbrechung kurz war. Ein liegen
+-- gebliebener Abend wird nicht weggeworfen, sondern mit seinem letzten
+-- bekannten Stand ausgewertet und abgelegt – lieber eine unvollständige
+-- Auswertung als gar keine.
+function GC.RaidMonitor:ResumeSession()
+    if self.session or not GC.DB or not GC.DB.data then
+        return nil
+    end
+    local session = GC.DB:GetCharacter().liveSession
+    if type(session) ~= "table" or type(session.id) ~= "string" or session.id == "" then
+        self:ClearPersistedSession()
+        return nil
+    end
+
+    -- Von Hand bearbeitete oder unter einer älteren Version geschriebene
+    -- SavedVariables dürfen den Mitschnitt nicht in einen Lua-Fehler laufen
+    -- lassen; fehlende Zweige werden ersetzt, nicht vorausgesetzt.
+    session.participants = type(session.participants) == "table" and session.participants or {}
+    session.participantOrder = type(session.participantOrder) == "table" and session.participantOrder or {}
+    session.pulls = type(session.pulls) == "table" and session.pulls or {}
+    session.nameLookup = nil
+    session.startedAt = tonumber(session.startedAt) or GC.Util.Now()
+    -- Ohne savedAt kam die Datei aus einem Absturz statt aus einem sauberen
+    -- Ausloggen. Dann ist unbekannt, wie lange danach noch gespielt wurde;
+    -- die offenen Uhren werden ohne Gutschrift angehalten. Lieber ein paar
+    -- Minuten zu wenig als eine über Nacht weiterlaufende Anwesenheit.
+    local savedAt = tonumber(session.savedAt)
+    ClosePresence(session, savedAt)
+
+    self.session = session
+    if (GC.Util.Now() - (savedAt or session.startedAt)) > MAX_RESUME_AGE then
+        local summary = self:FinishSession(savedAt or session.startedAt)
+        return nil, summary
+    end
+
+    self:SetCombatLogTracking(true)
+    self:SyncParticipants()
+    self:BeginSessionUpkeep()
+    GC:FireCallback("RAID_SESSION_UPDATED")
+    return session
+end
+
+-- === Herzschlag: dieselbe Sitzung auf allen Clients ======================
+--
+-- Alle Addon-Nutzer im Raid schreiben denselben Abend mit. Wer erst später
+-- dazustößt oder nach einem Verbindungsabbruch zurückkommt, hat den
+-- Startruf aber verpasst und schriebe den Rest des Abends gar nicht mit.
+--
+-- Der Herzschlag schließt diese Lücke, ohne dabei den Kanal zu belasten:
+-- Gesendet wird höchstens einmal je SESSION_HEARTBEAT_INTERVAL, und immer nur
+-- von einem – wer einen fremden Herzschlag hört, schweigt bis zum nächsten
+-- Takt. Wer zuerst spricht, spricht für alle; fällt der aus, übernimmt beim
+-- nächsten Takt der Nächste, ganz ohne Absprache. Damit nicht alle gleichzeitig
+-- losreden, wartet der Raidleiter am kürzesten, dann die Assistenten, dann der
+-- Rest, jeder noch mit einem zufälligen Aufschlag gegen Gleichstand.
+function GC.RaidMonitor:HeartbeatDelay()
+    local raidRank = self:GetRaidRank() or 0
+    local rankDelay = 10
+    if raidRank >= 2 then
+        rankDelay = 0
+    elseif raidRank >= 1 then
+        rankDelay = 5
+    end
+    return SESSION_HEARTBEAT_INTERVAL + rankDelay + (self.heartbeatJitter or 0)
+end
+
+function GC.RaidMonitor:NoteHeartbeat(at)
+    local session = self.session
+    if session then
+        session.heartbeatAt = tonumber(at) or GC.Util.Now()
+    end
+end
+
+function GC.RaidMonitor:PumpHeartbeat()
+    local session = self.session
+    if not session or not self:CanControlSession() or not self:IsInAnyGroup() then
+        return false
+    end
+    local last = tonumber(session.heartbeatAt) or 0
+    if (GC.Util.Now() - last) < self:HeartbeatDelay() then
+        return false
+    end
+    -- Auch ein fehlgeschlagener Sendeversuch gilt als Takt: Sonst versucht es
+    -- ein Client ohne Gruppe im Sekundentakt immer wieder.
+    self:NoteHeartbeat()
+    return GC.Sync:AnnounceSessionHeartbeat(session) == true
+end
+
+function GC.RaidMonitor:BeginSessionUpkeep()
+    self:PersistSession()
+    self.heartbeatJitter = math.random() * 4
+    self:NoteHeartbeat()
+    heartbeatElapsed = 0
+    heartbeatFrame:Show()
+end
+
+function GC.RaidMonitor:EndSessionUpkeep()
+    self:ClearPersistedSession()
+    heartbeatFrame:Hide()
 end
 
 function GC.RaidMonitor:BuildSummary(session, endedAt)
@@ -1059,7 +1244,34 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
             GC:FireCallback("ORDERS_BANNER",
                 "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(sender))
         end
+        self:NoteHeartbeat()
         return true
+    elseif fields[1] == "RH" then
+        -- Der Herzschlag einer laufenden Sitzung. Für alle, die den Startruf
+        -- verpasst haben, ist er zugleich der Startruf: Nachzügler und
+        -- Wiedereinsteiger schreiben ab hier denselben Abend mit.
+        if distribution == "WHISPER" then
+            return false
+        end
+        local sessionID = fields[3]
+        if type(sessionID) ~= "string" or sessionID == "" then
+            return false
+        end
+        if not self.session then
+            self:StartSession(sessionID, fields[6] ~= "" and fields[6] or sender,
+                tonumber(fields[4]), fields[5])
+            GC:FireCallback("ORDERS_BANNER",
+                "Laufende Raidsitzung übernommen von " .. GC.Util.PlayerShortName(sender))
+            self:NoteHeartbeat()
+            return true
+        end
+        -- Eine fremde Sitzung verdrängt die eigene nicht. Nur der Herzschlag
+        -- zur eigenen Sitzung zählt als „es redet schon jemand".
+        if self.session.id == sessionID then
+            self:NoteHeartbeat()
+            return true
+        end
+        return false
     elseif fields[1] == "RE" then
         local session = self.session
         if session and session.id == fields[3] then
@@ -1159,13 +1371,31 @@ function GC.RaidMonitor:OnZoneEntered()
     end)
 end
 
+-- Der Rahmen steht oben bei den Herzschlag-Konstanten; er ist nur sichtbar,
+-- solange eine Sitzung laeuft.
+heartbeatFrame:SetScript("OnUpdate", function(_, elapsed)
+    heartbeatElapsed = heartbeatElapsed + elapsed
+    if heartbeatElapsed < SESSION_HEARTBEAT_CHECK then
+        return
+    end
+    heartbeatElapsed = 0
+    GC.RaidMonitor:PumpHeartbeat()
+end)
+
 raidEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+-- Der letzte Moment, in dem der Mitschnitt noch geradegezogen werden kann:
+-- Danach schreibt WoW die SavedVariables, und was dort steht, ist der Stand,
+-- mit dem die Sitzung nach dem Wiedereinloggen weiterläuft.
+raidEvents:RegisterEvent("PLAYER_LOGOUT")
 
 -- Der Rahmen und die dauerhaften Ereignisse stehen oben in der Datei, damit
 -- StartSession und FinishSession das Combat-Log-Abo umschalten koennen.
 raidEvents:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
         GC.RaidMonitor:OnZoneEntered()
+        return
+    elseif event == "PLAYER_LOGOUT" then
+        GC.RaidMonitor:SaveSessionForResume()
         return
     end
     if not GC.RaidMonitor.session then
@@ -1183,5 +1413,26 @@ raidEvents:SetScript("OnEvent", function(_, event, ...)
         GC.RaidMonitor:OnEncounterStart(...)
     elseif event == "ENCOUNTER_END" then
         GC.RaidMonitor:OnEncounterEnd(...)
+    end
+end)
+
+-- Nach dem Login steht die Sitzung wieder da, wo sie beim Ausloggen aufgehört
+-- hat. Kurz gewartet wird trotzdem: Gruppen- und Zonendaten sind direkt nach
+-- dem Ladebildschirm noch nicht verlässlich, und ohne Gruppe fände der
+-- Herzschlag ohnehin keinen Kanal.
+GC:RegisterCallback("PLAYER_LOGIN", GC.RaidMonitor, function(self)
+    local function Resume()
+        local session, closed = self:ResumeSession()
+        if session then
+            GC:Print("Die unterbrochene Raidsitzung läuft weiter ("
+                .. #session.participantOrder .. " Teilnehmer).")
+        elseif closed then
+            GC:Print("Eine liegengebliebene Raidsitzung wurde ausgewertet und abgelegt.")
+        end
+    end
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(5, Resume)
+    else
+        Resume()
     end
 end)

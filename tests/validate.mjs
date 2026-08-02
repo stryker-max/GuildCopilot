@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.82",
+  "## Version: 0.9.83",
 ];
 
 for (const entry of requiredMetadata) {
@@ -287,6 +287,14 @@ const requiredImplementations = [
   ["Handshake-Fähigkeiten", /GC\.Capabilities/],
   ["Raidsitzung mit ausdrücklichem Start", /function GC\.RaidMonitor:BeginSession/],
   ["Rechteprüfung für die Raidauswertung", /CanControlSession/],
+  ["Sitzungssteuerung allein über den Gildenrang", /function GC\.RaidMonitor:CanControlSession\(playerName\)\s*\n\s*return GC\.Roster:CanAccessMemberCare/],
+  ["laufende Sitzung übersteht den Verbindungsabbruch", /function GC\.RaidMonitor:SaveSessionForResume/],
+  ["Sitzung wird beim Login fortgesetzt", /function GC\.RaidMonitor:ResumeSession/],
+  ["liegengebliebene Sitzung verfällt nicht unbegrenzt", /MAX_RESUME_AGE/],
+  ["Sitzung wird beim Ausloggen gesichert", /PLAYER_LOGOUT/],
+  ["Herzschlag hält die Sitzung im Raid zusammen", /function GC\.RaidMonitor:PumpHeartbeat/],
+  ["Herzschlag spricht nur einer", /function GC\.RaidMonitor:NoteHeartbeat/],
+  ["Herzschlag geht nur in die eigene Gruppe", /function GC\.Sync:AnnounceSessionHeartbeat/],
   ["Auswertung ohne Rohdatenspeicher", /function GC\.RaidMonitor:BuildSummary/],
   ["Consumables nach Spell-ID", /GC\.Consumables\[/],
   ["Auswertung über Raid- und Flüsterkanal", /DistributeSummary/],

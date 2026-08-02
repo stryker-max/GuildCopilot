@@ -6561,7 +6561,7 @@ function GC.UI:RefreshStatistics()
     else
         page.sessionStatus:SetText("|cff91a3b8Keine laufende Sitzung.|r\n"
             .. (canControl and "Du darfst eine Sitzung starten und beenden."
-                or "Nur Raidleiter, Assistenten und berechtigte Gildenränge dürfen Sitzungen steuern."))
+                or "Nur die in den Einstellungen freigegebenen Gildenränge dürfen Sitzungen steuern."))
         page.sessionButton:SetText("Sitzung starten")
     end
     SetButtonEnabled(page.sessionButton, canControl)

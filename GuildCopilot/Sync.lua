@@ -1440,6 +1440,24 @@ function GC.Sync:AnnounceSessionStart(session)
     }, "|"), channel)
 end
 
+-- Der Herzschlag trägt alles, was ein Nachzügler zum Mitschreiben braucht -
+-- er ist damit zugleich ein nachgereichter Startruf. Er geht nur in die eigene
+-- Gruppe und nur, solange eine Sitzung läuft; Näheres in RaidMonitor.lua.
+function GC.Sync:AnnounceSessionHeartbeat(session)
+    local channel = self:GroupChannel()
+    if not channel or not session then
+        return false
+    end
+    return self:Send(table.concat({
+        "RH",
+        tostring(GC.Constants.SCHEMA_VERSION),
+        session.id,
+        tostring(session.startedAt),
+        GC.Util.EscapeField(session.zone or ""),
+        GC.Util.EscapeField(session.startedBy or ""),
+    }, "|"), channel)
+end
+
 function GC.Sync:AnnounceSessionEnd(summary)
     local channel = self:GroupChannel()
     if not channel then

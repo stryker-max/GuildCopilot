@@ -1490,9 +1490,25 @@ assert(addon.RaidMonitor:GetRaidRank("Tester") == 2, "Der Raidleiter wurde nicht
 assert(addon.RaidMonitor:GetRaidRank("Heiler") == 1, "Der Assistent wurde nicht erkannt")
 assert(addon.RaidMonitor:GetRaidRank("Schurke") == 0, "Ein einfaches Raidmitglied wurde falsch eingestuft")
 assert(addon.RaidMonitor:CanControlSession("Heiler") == true,
-    "Ein Assistent darf die Auswertung nicht steuern")
+    "Ein freigegebener Gildenrang darf die Auswertung nicht steuern")
 assert(addon.RaidMonitor:CanControlSession("Schurke") == false,
     "Ein einfaches Raidmitglied darf die Auswertung steuern")
+
+-- Seit 0.9.83 entscheidet ausschliesslich der Gildenrang. Der Raidrang zaehlt
+-- nicht mehr: Heiler ist Assistent (Raidrang 1) und verliert die Steuerung
+-- trotzdem, sobald sein Gildenrang nicht mehr freigegeben ist.
+do
+    local careSettings = addon.DB:GetGuild().memberCare
+    local savedRanks = careSettings.accessRanks
+    careSettings.accessRanks = { ["1"] = true }
+    assert(addon.RaidMonitor:GetRaidRank("Heiler") == 1,
+        "Der Assistent wurde fuer die Rechtepruefung nicht mehr erkannt")
+    assert(addon.RaidMonitor:CanControlSession("Heiler") == false,
+        "Der Raidrang allein oeffnet die Sitzungssteuerung noch immer")
+    assert(addon.RaidMonitor:CanControlSession("Tester") == true,
+        "Der freigegebene Gildenrang verliert die Sitzungssteuerung")
+    careSettings.accessRanks = savedRanks
+end
 
 local sessionStarted = addon.RaidMonitor:BeginSession()
 assert(sessionStarted == true, "Die Raidsitzung wurde nicht gestartet")
@@ -1636,9 +1652,9 @@ raidRoster = {}
 addon.DB:GetGuild().memberCare.accessRanks = {}
 chatCountBefore = #chatMessages
 statisticsPage.sessionButton.scripts.OnClick()
-assert(statisticsPage.actionStatus.value:find("Nur Raidleiter", 1, true),
+assert(statisticsPage.actionStatus.value:find("freigegebenen Gildenränge", 1, true),
     "Die Ablehnung wird nicht in der Oberfläche gemeldet")
-assert(chatMessages[#chatMessages]:find("Nur Raidleiter", 1, true),
+assert(chatMessages[#chatMessages]:find("freigegebenen Gildenränge", 1, true),
     "Die Ablehnung wurde nicht zusätzlich im Chat gemeldet")
 
 -- Die Teilnehmertabelle selbst bleibt in der Oberfläche und wird nicht
@@ -2446,6 +2462,153 @@ partyRoster = {}
 unitNames.party1 = nil
 unitNames.party2 = nil
 addon.DB:GetGuild().raidSessions = {}
+
+-- === Die laufende Sitzung überlebt den Verbindungsabbruch ==================
+--
+-- Der Abend liegt während des Raids in den SavedVariables und wird beim
+-- Ausloggen geradegezogen; beim nächsten Login läuft er weiter.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    raidRoster = {
+        { "Tester", 2, "HUNTER" },
+        { "Heiler", 1, "PRIEST" },
+    }
+    assert(addon.RaidMonitor:BeginSession() == true,
+        "Die Sitzung für den Disconnect-Test startete nicht")
+    local live = addon.RaidMonitor.session
+    live.participants.heiler.deaths = 3
+    -- Gehalten wird dieselbe Tabelle, keine Kopie - sonst kostete das Sichern
+    -- während des Raids Rechenzeit.
+    assert(addon.DB:GetCharacter().liveSession == live,
+        "Die laufende Sitzung steht nicht in den SavedVariables")
+
+    currentTime = currentTime + 120
+    live.nameLookup = { ["Irgendwer"] = false }
+    addon.RaidMonitor:SaveSessionForResume()
+    assert(live.savedAt == currentTime, "Der Speicherzeitpunkt fehlt")
+    assert(live.nameLookup == nil,
+        "Die Namenszuordnung des Kampflogs landet in der gespeicherten Datei")
+    assert(live.participants.tester.presentSince == nil,
+        "Die Anwesenheitsuhr läuft nach dem Ausloggen weiter")
+    local savedSeconds = live.participants.tester.seconds
+    assert(savedSeconds >= 120, "Die Anwesenheitszeit bis zum Ausloggen fehlt")
+
+    addon.RaidMonitor.session = nil
+    currentTime = currentTime + 300
+    local resumed = addon.RaidMonitor:ResumeSession()
+    assert(resumed ~= nil, "Die unterbrochene Sitzung wurde nicht fortgesetzt")
+    assert(resumed.id == live.id, "Nach dem Wiedereinstieg läuft eine andere Sitzung")
+    assert(resumed.participants.heiler.deaths == 3, "Die gesammelten Zahlen gingen verloren")
+    assert(resumed.participants.tester.seconds == savedSeconds,
+        "Die Auszeit wurde als Anwesenheit mitgezählt")
+    assert(resumed.participants.tester.presentSince == currentTime,
+        "Die Anwesenheitsuhr läuft nach dem Wiedereinstieg nicht wieder")
+    assert(addon.RaidMonitor.combatLogTracking == true,
+        "Das Combat-Log-Abo bleibt nach dem Wiedereinstieg aus")
+
+    currentTime = currentTime + 60
+    addon.RaidMonitor:EndSession()
+    assert(addon.DB:GetCharacter().liveSession == nil,
+        "Die beendete Sitzung steht weiter in den SavedVariables")
+end
+
+-- Ein liegengebliebener Abend wird nicht fortgesetzt, aber auch nicht
+-- weggeworfen: Er wird mit seinem letzten bekannten Stand ausgewertet.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    assert(addon.RaidMonitor:BeginSession() == true,
+        "Die Sitzung für den Altlast-Test startete nicht")
+    local stale = addon.RaidMonitor.session
+    currentTime = currentTime + 60
+    addon.RaidMonitor:SaveSessionForResume()
+    addon.RaidMonitor.session = nil
+    currentTime = currentTime + (9 * 60 * 60)
+
+    local resumed, summary = addon.RaidMonitor:ResumeSession()
+    assert(resumed == nil, "Ein neun Stunden alter Abend läuft einfach weiter")
+    assert(summary ~= nil and summary.id == stale.id,
+        "Der liegengebliebene Abend wurde nicht ausgewertet")
+    assert(addon.RaidMonitor:GetSummary(stale.id, "LIVE") ~= nil,
+        "Die Auswertung des liegengebliebenen Abends fehlt")
+    assert(addon.DB:GetCharacter().liveSession == nil,
+        "Der liegengebliebene Abend steht weiter in den SavedVariables")
+    assert(addon.RaidMonitor.combatLogTracking == false,
+        "Das Combat-Log-Abo bleibt nach dem Auswerten an")
+end
+
+-- === Herzschlag: dieselbe Sitzung auf allen Clients ========================
+do
+    addon.DB:GetGuild().raidSessions = {}
+    assert(addon.RaidMonitor:BeginSession() == true,
+        "Die Sitzung für den Herzschlag-Test startete nicht")
+    local beat = addon.RaidMonitor.session
+
+    -- Der Startruf ist gerade erst raus; ein Herzschlag hinterher wäre nur
+    -- Verkehr.
+    assert(addon.RaidMonitor:PumpHeartbeat() == false,
+        "Der Herzschlag folgt dem Startruf sofort auf dem Fuß")
+
+    currentTime = currentTime + 120
+    assert(addon.RaidMonitor:PumpHeartbeat() == true, "Der Herzschlag blieb aus")
+    local beatMessage = LastAddonMessage()
+    assert(beatMessage:sub(1, 3) == "RH|", "Der Herzschlag hat den falschen Typ")
+    assert(beatMessage:find(beat.id, 1, true), "Der Herzschlag nennt die Sitzung nicht")
+    assert(#beatMessage <= 255, "Der Herzschlag überschreitet das Addon-Limit")
+    assert(sentAddon[#sentAddon][3] == "RAID", "Der Herzschlag ging nicht über den Raidkanal")
+    assert(addon.RaidMonitor:PumpHeartbeat() == false,
+        "Der Herzschlag wiederholt sich ohne jede Wartezeit")
+
+    -- Wer einen fremden Herzschlag zur eigenen Sitzung hört, schweigt bis zum
+    -- nächsten Takt: Es redet schon jemand.
+    currentTime = currentTime + 120
+    addon.RaidMonitor:OnMessage(table.concat({
+        "RH", tostring(addon.Constants.SCHEMA_VERSION), beat.id,
+        tostring(beat.startedAt), "Karazhan", "Tester",
+    }, "|"), "Heiler-Realm", "RAID")
+    assert(addon.RaidMonitor:PumpHeartbeat() == false,
+        "Zwei Clients senden den Herzschlag gleichzeitig")
+    addon.RaidMonitor:EndSession()
+end
+
+-- Wer den Startruf verpasst hat - Nachzügler oder Wiedereinsteiger -, steigt
+-- über den Herzschlag in denselben Abend ein.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:ClearPersistedSession()
+    addon.RaidMonitor:OnMessage(table.concat({
+        "RH", tostring(addon.Constants.SCHEMA_VERSION), "spaet-1",
+        tostring(currentTime - 600), "Karazhan", "Heiler",
+    }, "|"), "Heiler-Realm", "RAID")
+
+    local late = addon.RaidMonitor.session
+    assert(late ~= nil, "Der Nachzügler schreibt die laufende Sitzung nicht mit")
+    assert(late.id == "spaet-1", "Der Nachzügler schreibt eine andere Sitzung mit")
+    assert(late.startedBy == "Heiler", "Wer die Sitzung gestartet hat, ging verloren")
+    assert(addon.DB:GetCharacter().liveSession == late,
+        "Die übernommene Sitzung steht nicht in den SavedVariables")
+
+    -- Eine zweite, fremde Sitzung verdrängt die eigene nicht.
+    addon.RaidMonitor:OnMessage(table.concat({
+        "RH", tostring(addon.Constants.SCHEMA_VERSION), "spaet-2",
+        tostring(currentTime), "Karazhan", "Heiler",
+    }, "|"), "Heiler-Realm", "RAID")
+    assert(addon.RaidMonitor.session.id == "spaet-1",
+        "Ein fremder Herzschlag hat die laufende Sitzung ausgetauscht")
+
+    -- Ohne Steuerungsrecht wird ein Herzschlag gar nicht erst angenommen.
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:ClearPersistedSession()
+    addon.RaidMonitor:OnMessage(table.concat({
+        "RH", tostring(addon.Constants.SCHEMA_VERSION), "fremd-1",
+        tostring(currentTime), "Karazhan", "Schurke",
+    }, "|"), "Schurke-Realm", "RAID")
+    assert(addon.RaidMonitor.session == nil,
+        "Ein Herzschlag ohne Steuerungsrecht startet trotzdem eine Sitzung")
+
+    raidRoster = {}
+    addon.DB:GetGuild().raidSessions = {}
+end
 
 -- === Warcraft-Logs-Nachanalyse =============================================
 addon.DB:GetGuild().raidSessions = {}

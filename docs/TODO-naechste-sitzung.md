@@ -1,6 +1,6 @@
 # Offene Aufgaben für die nächste Sitzung
 
-Stand: 02.08.2026, nach Release 0.9.82 / Installer 1.0.6.
+Stand: 02.08.2026, nach Release 0.9.83 / Installer 1.0.6.
 
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
@@ -27,8 +27,10 @@ Lua bricht bei mehr als 200 lokalen Variablen je Funktion ab, und smoke.lua ist
 eine einzige – neue Testblöcke deshalb in `do ... end` kapseln.
 
 Nach jedem fertigen Punkt: Version in `GuildCopilot.toc`, `Constants.lua`,
-`README.md` und `tests/validate.mjs` gleichziehen, ROADMAP nachführen, nach
-`main` pushen und den Ordner `GuildCopilot/` in die WoW-Installation spiegeln
+`README.md`, `Installer/README.md` und `tests/validate.mjs` gleichziehen,
+**`CHANGELOG.md` und ROADMAP nachführen** (Owner-Wunsch: zu jeder Änderung
+gehört ein Changelog-Eintrag), nach `main` pushen und den Ordner
+`GuildCopilot/` in die WoW-Installation spiegeln
 (siehe `AGENTS.md`). Wird der Installer geändert, zusätzlich `<Version>` in
 `Installer/GuildCopilot-Installer.csproj`, `Installer/dist/version.txt`, die
 veröffentlichte EXE (`dotnet publish`, Befehl in `README.md`) und die SHA-256 in

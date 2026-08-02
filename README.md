@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.82
+# Guild Copilot 0.9.83
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -85,7 +85,9 @@ Der zweite Reiter der Werkstatt macht aus „kann das jemand craften?“ einen n
 
 ## Raidauswertung
 
-**Sitzung starten** vor dem Raid, **Sitzung beenden** danach — dazwischen laufen Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände je Teilnehmer mit. Bosskämpfe erkennt das Addon über die Encounter-Ereignisse des Clients; Trashkämpfe zählen nicht als Versuch. Starten und beenden dürfen Raidleiter, Assistenten und die für die Mitgliederpflege freigegebenen Ränge.
+**Sitzung starten** vor dem Raid, **Sitzung beenden** danach — dazwischen laufen Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände je Teilnehmer mit. Bosskämpfe erkennt das Addon über die Encounter-Ereignisse des Clients; Trashkämpfe zählen nicht als Versuch. Starten und beenden dürfen die für die Mitgliederpflege freigegebenen Ränge — in den Einstellungen wählbar, Vorgabe sind Gildenmeister und Offiziere.
+
+**Ein Verbindungsabbruch kostet den Abend nicht.** Die laufende Sitzung wird lokal gesichert und beim nächsten Login mit denselben Zahlen fortgesetzt; war die Unterbrechung länger als acht Stunden, wird sie mit ihrem letzten Stand ausgewertet statt verworfen. Unabhängig davon schreiben alle Addon-Nutzer im Raid denselben Abend parallel mit — auch wer erst später dazustößt.
 
 Ein Klick auf einen Teilnehmer öffnet sein **Verbrauchsprotokoll**: was wann eingeworfen wurde.
 
@@ -140,7 +142,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.6 und das Addon bei 0.9.82.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.6 und das Addon bei 0.9.83.
 
 ### Warum Windows beim Herunterladen warnt
 
