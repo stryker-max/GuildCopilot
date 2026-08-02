@@ -506,6 +506,195 @@ local function CreateCard(parent, title)
     return card
 end
 
+-- === Kalenderauswahl ======================================================
+--
+-- Anlass war eine Rueckmeldung aus der Gilde: Mit "JJJJ-MM-TT" kommen viele
+-- nicht zurecht, und tippen will das ohnehin niemand. Gespeichert wird
+-- weiterhin ISO - nur eintippen muss es keiner mehr.
+--
+-- Bewusst ein eigenes kleines Blatt und nicht Blizzards Kalender: Der ist ein
+-- vollstaendiges Fenster mit Gildenereignissen, laedt auf Anforderung nach und
+-- laesst sich nicht als Auswahlfeld einspannen.
+
+local MONTH_NAMES = {
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+}
+local WEEKDAY_SHORT = { "Mo", "Di", "Mi", "Do", "Fr", "Sa", "So" }
+local DATE_PICKER_ROWS = 6
+local DATE_PICKER_CELL = 30
+
+function GC.UI:BuildDatePicker()
+    if self.datePicker then
+        return self.datePicker
+    end
+    local host = self.frame or UIParent
+    -- Wie die Auftragsdialoge ein Kind des Hauptfensters mit eigener hoher
+    -- Ebene: In der Seite selbst wuerde das Blatt vom ScrollFrame beschnitten.
+    local picker = CreatePanel(host, THEME.window, THEME.accent)
+    picker:SetSize(7 * DATE_PICKER_CELL + 24, DATE_PICKER_ROWS * DATE_PICKER_CELL + 96)
+    local hostLevel = host.GetFrameLevel and host:GetFrameLevel() or 1
+    picker:SetFrameLevel((hostLevel or 1) + 90)
+    picker:SetBackdropColor(THEME.window[1], THEME.window[2], THEME.window[3], 1)
+    picker:EnableMouse(true)
+    self.datePicker = picker
+
+    picker.previous = CreateButton(picker, "‹", 26, 24, function()
+        GC.UI:ShiftDatePicker(-1)
+    end)
+    picker.previous:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -10)
+    picker.next = CreateButton(picker, "›", 26, 24, function()
+        GC.UI:ShiftDatePicker(1)
+    end)
+    picker.next:SetPoint("TOPRIGHT", picker, "TOPRIGHT", -12, -10)
+    picker.heading = CreateLabel(picker, "", {
+        align = "CENTER",
+        width = 7 * DATE_PICKER_CELL - 40,
+        height = 24,
+    })
+    picker.heading:SetPoint("TOP", picker, "TOP", 0, -10)
+
+    for index, short in ipairs(WEEKDAY_SHORT) do
+        local caption = CreateLabel(picker, short, {
+            muted = true,
+            align = "CENTER",
+            font = "GameFontNormalSmall",
+            width = DATE_PICKER_CELL,
+            height = 16,
+        })
+        caption:SetPoint("TOPLEFT", picker, "TOPLEFT",
+            12 + (index - 1) * DATE_PICKER_CELL, -40)
+    end
+
+    picker.days = {}
+    for cell = 1, DATE_PICKER_ROWS * 7 do
+        local column = (cell - 1) % 7
+        local row = math.floor((cell - 1) / 7)
+        local day = CreateButton(picker, "", DATE_PICKER_CELL - 2, DATE_PICKER_CELL - 2, function(button)
+            if button.iso then
+                GC.UI:ConfirmDatePicker(button.iso)
+            end
+        end)
+        day:SetPoint("TOPLEFT", picker, "TOPLEFT",
+            12 + column * DATE_PICKER_CELL, -58 - row * DATE_PICKER_CELL)
+        picker.days[cell] = day
+    end
+
+    picker.today = CreateButton(picker, "Heute", 70, 24, function()
+        GC.UI:ConfirmDatePicker(GC.Util.TodayISO())
+    end)
+    picker.today:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 12, 10)
+    picker.close = CreateButton(picker, "Schließen", 80, 24, function()
+        picker:Hide()
+    end)
+    picker.close:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -12, 10)
+
+    picker:Hide()
+    -- Wechselt die Seite oder schliesst das Fenster, geht das Blatt mit zu.
+    if host.HookScript then
+        host:HookScript("OnHide", function()
+            picker:Hide()
+        end)
+    end
+    return picker
+end
+
+function GC.UI:RefreshDatePicker()
+    local picker = self.datePicker
+    if not picker then
+        return
+    end
+    local year, month = picker.year, picker.month
+    picker.heading:SetText((MONTH_NAMES[month] or "?") .. " " .. year)
+
+    local daysInMonth = GC.Util.DaysInMonth(year, month) or 30
+    -- Wo im Raster faengt der Erste an? WeekdayOfISO zaehlt Montag als 1, das
+    -- Raster ebenso - der Versatz ist damit schlicht der Wochentag minus eins.
+    local offset = (GC.Util.WeekdayOfISO(GC.Util.FormatISO(year, month, 1)) or 1) - 1
+    local today = GC.Util.TodayISO()
+
+    for cell, button in ipairs(picker.days) do
+        local dayNumber = cell - offset
+        if dayNumber >= 1 and dayNumber <= daysInMonth then
+            local iso = GC.Util.FormatISO(year, month, dayNumber)
+            button.iso = iso
+            button:SetText(tostring(dayNumber))
+            button:Show()
+            -- Gefuellt ist der gewaehlte Tag, umrandet der heutige. Bewusst
+            -- ueber den Rahmen und nicht ueber die Textfarbe: Beim Verlassen
+            -- mit der Maus setzt der Knopf Hintergrund und Beschriftung selbst
+            -- zurueck, den Rahmen fasst er nicht an.
+            button:SetActive(iso == picker.selected)
+            local edge = iso == today and THEME.accent or THEME.border
+            button.border:SetColorTexture(edge[1], edge[2], edge[3], 1)
+        else
+            button.iso = nil
+            button:SetText("")
+            button:Hide()
+        end
+    end
+end
+
+function GC.UI:ShiftDatePicker(months)
+    local picker = self.datePicker
+    if not picker then
+        return
+    end
+    local month = picker.month + months
+    local year = picker.year
+    while month < 1 do
+        month = month + 12
+        year = year - 1
+    end
+    while month > 12 do
+        month = month - 12
+        year = year + 1
+    end
+    -- Der Bereich deckt sich mit dem, was IsValidISODate ueberhaupt annimmt.
+    picker.year = math.max(2000, math.min(2099, year))
+    picker.month = month
+    self:RefreshDatePicker()
+end
+
+function GC.UI:ConfirmDatePicker(iso)
+    local picker = self.datePicker
+    if not picker then
+        return
+    end
+    if picker.onPick then
+        picker.onPick(iso)
+    end
+    picker:Hide()
+end
+
+-- Oeffnet das Blatt an einem Eingabefeld. Steht dort bereits ein gueltiges
+-- Datum, faengt der Kalender in dessen Monat an, sonst im laufenden.
+function GC.UI:OpenDatePicker(anchor, onPick)
+    local picker = self:BuildDatePicker()
+    if picker:IsShown() and picker.anchor == anchor then
+        picker:Hide()
+        return
+    end
+
+    local current = GC.Util.NormalizeDateInput(anchor and anchor:GetText() or "")
+    local start = GC.Util.IsValidISODate(current) and current or GC.Util.TodayISO()
+    local year, month = start:match("^(%d%d%d%d)%-(%d%d)")
+    picker.year = tonumber(year) or 2026
+    picker.month = tonumber(month) or 1
+    picker.selected = GC.Util.IsValidISODate(current) and current or nil
+    picker.anchor = anchor
+    picker.onPick = onPick
+
+    picker:ClearAllPoints()
+    if anchor and anchor.container then
+        picker:SetPoint("TOPLEFT", anchor.container, "BOTTOMLEFT", 0, -4)
+    else
+        picker:SetPoint("CENTER", self.frame or UIParent, "CENTER", 0, 0)
+    end
+    self:RefreshDatePicker()
+    picker:Show()
+end
+
 local function ClassColor(classFile)
     local classInfo = GC.Classes[classFile]
     if not classInfo then
@@ -2294,8 +2483,8 @@ function GC.UI:BuildRosterPage()
     absenceHelp:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -46)
 
     local absenceFields = {
-        { key = "FROM", label = "Von  •  JJJJ-MM-TT", x = 18, width = 142 },
-        { key = "TO", label = "Bis  •  JJJJ-MM-TT", x = 170, width = 142 },
+        { key = "FROM", label = "Von", x = 18, width = 142, calendar = true },
+        { key = "TO", label = "Bis", x = 170, width = 142, calendar = true },
         { key = "REASON", label = "Grund (optional)", x = 322, width = 412 },
     }
     page.absenceEdits = {}
@@ -2309,7 +2498,26 @@ function GC.UI:BuildRosterPage()
         local edit = CreateEdit(absenceCard, field.width, 34)
         edit.container:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", field.x, -91)
         edit:SetMaxLetters(field.key == "REASON" and 80 or 10)
+        -- userInput unterscheidet Tippen von unserem eigenen SetText. Nur
+        -- Tippen macht das Formular zum Eigentum des Nutzers.
+        edit:SetScript("OnTextChanged", function(_, userInput)
+            if userInput then
+                page.absenceDirty = true
+            end
+        end)
         page.absenceEdits[field.key] = edit
+        if field.calendar then
+            -- Das Kalendersymbol sitzt im Feld rechts; getippt werden darf
+            -- weiterhin, der Kalender ist das Angebot, nicht die Pflicht.
+            local pick = CreateButton(absenceCard, "📅", 26, 26, function()
+                GC.UI:OpenDatePicker(edit, function(iso)
+                    edit:SetText(iso)
+                    page.absenceDirty = true
+                end)
+            end)
+            pick:SetPoint("RIGHT", edit.container, "RIGHT", -4, 0)
+            page.absenceEdits[field.key .. "_PICK"] = pick
+        end
     end
     page.saveAbsence = CreateButton(absenceCard, "Abmelden", 130, 32, function()
         local success, message = GC.Profile:SetAbsence(
@@ -2320,6 +2528,9 @@ function GC.UI:BuildRosterPage()
         page.absenceStatus:SetText(message or "")
         SetTextColor(page.absenceStatus, success and THEME.success or THEME.danger)
         if success then
+            -- Gespeichert heisst: Der gespeicherte Stand darf die Felder wieder
+            -- fuellen - und zeigt dann auch die umgerechnete ISO-Schreibweise.
+            page.absenceDirty = nil
             GC.UI:RefreshRoster()
         end
     end, "PRIMARY")
@@ -2328,6 +2539,7 @@ function GC.UI:BuildRosterPage()
         GC.Profile:ClearAbsence()
         page.absenceStatus:SetText("Abmeldung gelöscht und mit der Gilde synchronisiert.")
         SetTextColor(page.absenceStatus, THEME.success)
+        page.absenceDirty = nil
         GC.UI:RefreshRoster()
     end)
     page.clearAbsence:SetPoint("LEFT", page.saveAbsence, "RIGHT", 8, 0)
@@ -2572,14 +2784,23 @@ function GC.UI:RefreshRoster()
         SetTextColor(page.professionStatus, THEME.warning)
     end
 
+    -- Die drei Felder sind EIN Formular, nicht drei einzelne Felder.
+    --
+    -- Hier stand vorher je Feld ein "wenn es gerade keinen Fokus hat, fuell es
+    -- neu". Das schuetzt aber immer nur das Feld, in dem gerade getippt wird:
+    -- Wer das Von-Datum eintraegt und dann ins Bis-Feld klickt, verliert beim
+    -- naechsten Auffrischen das Von-Datum - es hatte ja keinen Fokus mehr und
+    -- wurde mit dem noch leeren gespeicherten Stand ueberschrieben. Wie oft das
+    -- passiert, haengt daran, wie viel gerade hereinkommt (Roster, Sync,
+    -- Profilantworten). Deshalb sah es auf dem einen Rechner nach "geht" und
+    -- auf dem anderen nach "loescht sich staendig" aus.
+    --
+    -- Angefasstes Formular gehoert dem Nutzer. Nachgefuellt wird erst wieder,
+    -- wenn er gespeichert oder geloescht hat.
     local absence = profile.absence or {}
-    if not page.absenceEdits.FROM:HasFocus() then
+    if not page.absenceDirty then
         page.absenceEdits.FROM:SetText(absence.from or "")
-    end
-    if not page.absenceEdits.TO:HasFocus() then
         page.absenceEdits.TO:SetText(absence.to or "")
-    end
-    if not page.absenceEdits.REASON:HasFocus() then
         page.absenceEdits.REASON:SetText(absence.reason or "")
     end
     local absenceState = GC.Profile:GetAbsenceState(profile)

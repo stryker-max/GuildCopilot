@@ -298,6 +298,23 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.84 – Abmeldung: Eingaben bleiben stehen, Datum per Kalender
+
+Aus der Gilde kamen zwei Rückmeldungen zum selben Feld, und die zweite erklärt die erste.
+
+**„Sobald er im zweiten Fenster ein Datum eingibt, löschen sich die Daten im ersten."** Das Auffrischen der Profilseite füllte jedes Abmeldefeld, das gerade **keinen Fokus** hatte, mit dem gespeicherten Stand nach. Solange man in einem Feld tippt, ist genau dieses eine geschützt – alle anderen nicht. Wer also das Von-Datum einträgt und ins Bis-Feld klickt, verliert das Von-Datum beim nächsten Auffrischen, denn gespeichert war dort noch nichts.
+
+Warum es beim Owner lief und beim Gildenmitglied nicht: Das Auffrischen hängt an eintreffenden Daten – Rosteraktualisierung, Profilantworten, Werkstattverkehr. Wer gerade wenig hereinbekommt, tippt in Ruhe zu Ende; wer in einer aktiven Gilde sitzt, bekommt mitten in der Eingabe ein Auffrischen. Derselbe Code, zwei völlig verschiedene Erfahrungen.
+
+Die drei Felder sind **ein Formular**, kein Trio von Einzelfeldern. Sobald der Nutzer tippt, gehört es ihm; nachgefüllt wird erst wieder nach Speichern oder Löschen. Unterschieden wird über das `userInput`-Flag von `OnTextChanged` – dasselbe Mittel, mit dem die Postfach-Entwürfe seit 0.9.82 arbeiten, denn unser eigenes `SetText` darf das Formular gerade **nicht** sperren, sonst stünde es nach dem ersten Auffrischen für immer. Der Regressionstest bildet genau den gemeldeten Ablauf ab und schlägt gegen den Stand von 0.9.83 fehl.
+
+**„Viele haben Probleme mit englischem Datumsformat, und tippen ist immer naja."** Beides ist jetzt beantwortet:
+
+- ein **Kalenderblatt** an den Feldern Von und Bis: deutsche Monatsnamen, Mo–So, Monatswechsel über ‹ ›, ein Knopf für heute. Der heutige Tag ist umrandet, der gewählte gefüllt – über den Rahmen und nicht über die Textfarbe, weil ein Knopf beim Verlassen mit der Maus Hintergrund und Beschriftung selbst zurücksetzt, den Rahmen aber nicht anfasst;
+- bewusst **kein** Blizzard-Kalender: Der ist ein vollständiges Fenster mit Gildenereignissen, lädt auf Anforderung nach und lässt sich nicht als Auswahlfeld einspannen;
+- der **Wochentag wird gerechnet, nicht erfragt.** `date()`/`time()` hängen an Zeitzone und Sommerzeit, und ein Kalenderblatt, das je nach Uhrzeit um einen Tag verrutscht, wäre schlimmer als keins. Gerechnet wird über die fortlaufende Tagesnummer, die es für den Abmeldevergleich ohnehin gibt, mit dem 1. Januar 2000 als Anker – einem Samstag. Gegengeprüft gegen alle 36.525 Tage von 2000 bis 2099;
+- getippt wird zusätzlich **`15.08.2026`** angenommen, ebenso einstellige Tage und zweistellige Jahre. Gespeichert und synchronisiert wird weiterhin ausschließlich ISO: Nur damit bleibt „liegt zwischen von und bis" ein simpler Stringvergleich. Ein unmögliches Datum wie `30.02.2026` wird nicht stillschweigend verbogen, sondern abgelehnt.
+
 ## 0.9.83 – Die Raidsitzung überlebt den Verbindungsabbruch
 
 Bisher lag der laufende Abend ausschließlich im Arbeitsspeicher genau des Clients, der ihn führt. Ein Disconnect beim Offizier – und die halbe Auswertung war weg, ohne Vorwarnung und ohne Rest.

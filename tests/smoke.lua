@@ -956,6 +956,43 @@ assert(twinkCrafterFound, "Der eigene Twink wird nicht als Hersteller geführt")
 
 assert(addon.Util.IsValidISODate("2026-02-28") == true, "Gültiges Abmeldedatum wurde abgelehnt")
 assert(addon.Util.IsValidISODate("2026-02-30") == false, "Ungültiges Abmeldedatum wurde akzeptiert")
+
+-- Datumsrechnung für die Kalenderauswahl. Der Wochentag wird gerechnet und
+-- nicht bei date() erfragt: Sonst verschöbe die Sommerzeit das Kalenderblatt.
+do
+    assert(addon.Util.DaysInMonth(2026, 2) == 28, "Februar 2026 hat nicht 28 Tage")
+    assert(addon.Util.DaysInMonth(2028, 2) == 29, "Das Schaltjahr 2028 hat keinen 29. Februar")
+    assert(addon.Util.DaysInMonth(2100, 2) == 28, "2100 wurde faelschlich als Schaltjahr gerechnet")
+    assert(addon.Util.DaysInMonth(2026, 13) == nil, "Ein 13. Monat liefert eine Laenge")
+    assert(addon.Util.FormatISO(2026, 8, 2) == "2026-08-02", "Das ISO-Datum wird falsch gebaut")
+
+    -- 1 = Montag bis 7 = Sonntag.
+    assert(addon.Util.WeekdayOfISO("2000-01-01") == 6, "Der Anker 01.01.2000 ist kein Samstag")
+    assert(addon.Util.WeekdayOfISO("2000-01-03") == 1, "Der 03.01.2000 ist kein Montag")
+    assert(addon.Util.WeekdayOfISO("2026-08-02") == 7, "Der 02.08.2026 ist kein Sonntag")
+    assert(addon.Util.WeekdayOfISO("2028-02-29") == 2, "Der Schalttag 2028 ist kein Dienstag")
+    assert(addon.Util.WeekdayOfISO("Unfug") == nil, "Ein Nichtdatum liefert einen Wochentag")
+
+    -- Getippt wird hier deutsch; gespeichert wird ISO.
+    assert(addon.Util.NormalizeDateInput("15.08.2026") == "2026-08-15",
+        "Ein deutsch getipptes Datum wurde nicht umgerechnet")
+    assert(addon.Util.NormalizeDateInput("5.8.2026") == "2026-08-05",
+        "Ein einstellig getipptes Datum wurde nicht umgerechnet")
+    assert(addon.Util.NormalizeDateInput("15.08.26") == "2026-08-15",
+        "Ein zweistelliges Jahr wurde nicht ergaenzt")
+    assert(addon.Util.NormalizeDateInput("2026-08-15") == "2026-08-15",
+        "Ein ISO-Datum wurde veraendert")
+    assert(addon.Util.NormalizeDateInput("30.02.2026") == "30.02.2026",
+        "Ein unmoegliches Datum wurde stillschweigend verbogen")
+    assert(addon.Util.NormalizeDateInput("") == "", "Eine leere Eingabe wurde veraendert")
+
+    -- Und die Abmeldung nimmt es an.
+    local germanSaved = addon.Profile:SetAbsence("24.12.2026", "26.12.2026", "Weihnachten")
+    assert(germanSaved == true, "Eine deutsch getippte Abmeldung wurde abgelehnt")
+    assert(addon.Profile:Get().absence.from == "2026-12-24",
+        "Die Abmeldung wurde nicht als ISO gespeichert")
+    addon.Profile:ClearAbsence()
+end
 local absenceSaved = addon.Profile:SetAbsence("2026-07-26", "2026-08-03", "Urlaub")
 assert(absenceSaved == true, "Eigene Abmeldung wurde nicht gespeichert")
 assert(addon.Profile:GetAbsenceState() == "ACTIVE", "Aktive Abmeldung wurde nicht erkannt")
@@ -5409,6 +5446,114 @@ do
     profile.professionSource = savedSource
     ownWorkshop.professions.schneiderei = savedOwn
     ownWorkshop.professions.verzauberkunst = savedEnchanting
+end
+
+-- === Abmeldung: angefangene Eingaben bleiben stehen =========================
+--
+-- Der gemeldete Fehler: Sobald im zweiten Feld ein Datum eingetragen wurde,
+-- war das erste leer. Ursache war das Auffrischen der Seite - es füllte jedes
+-- Feld ohne Fokus mit dem GESPEICHERTEN Stand nach, und der war noch leer.
+do
+    local absencePage = addon.UI.pages.ROSTER
+    local profile = addon.Profile:Get()
+    addon.Profile:ClearAbsence()
+    absencePage.absenceDirty = nil
+    addon.UI:RefreshRoster()
+
+    -- Von eintragen wie beim Tippen: userInput ist der einzige Unterschied
+    -- zwischen "der Nutzer war das" und "wir haben selbst gefüllt".
+    absencePage.absenceEdits.FROM:SetText("2026-09-01")
+    absencePage.absenceEdits.FROM.scripts.OnTextChanged(absencePage.absenceEdits.FROM, true)
+    assert(absencePage.absenceDirty == true,
+        "Eine Eingabe macht das Formular nicht zum Eigentum des Nutzers")
+
+    -- Genau hier ging es kaputt: irgendetwas frischt auf, während der Nutzer
+    -- im zweiten Feld steht.
+    addon.UI:RefreshRoster()
+    assert(absencePage.absenceEdits.FROM:GetText() == "2026-09-01",
+        "Das angefangene Von-Datum wurde beim Auffrischen geloescht")
+
+    absencePage.absenceEdits.TO:SetText("2026-09-08")
+    absencePage.absenceEdits.TO.scripts.OnTextChanged(absencePage.absenceEdits.TO, true)
+    addon.UI:RefreshRoster()
+    assert(absencePage.absenceEdits.FROM:GetText() == "2026-09-01"
+        and absencePage.absenceEdits.TO:GetText() == "2026-09-08",
+        "Die Eingaben ueberstehen das Auffrischen nicht")
+
+    -- Gespeichert gehoert das Formular wieder dem gespeicherten Stand.
+    absencePage.saveAbsence.scripts.OnClick()
+    assert(absencePage.absenceDirty == nil, "Nach dem Speichern bleibt das Formular gesperrt")
+    assert(profile.absence.from == "2026-09-01", "Die Abmeldung wurde nicht gespeichert")
+
+    -- Unser eigenes Nachfuellen darf das Formular NICHT sperren, sonst bliebe
+    -- es nach dem ersten Auffrischen fuer immer stehen.
+    addon.Profile:ClearAbsence()
+    absencePage.absenceDirty = nil
+    addon.UI:RefreshRoster()
+    assert(absencePage.absenceDirty == nil,
+        "Das eigene Nachfuellen wurde als Nutzereingabe gewertet")
+    assert(absencePage.absenceEdits.FROM:GetText() == "",
+        "Die geloeschte Abmeldung steht weiter im Feld")
+end
+
+-- === Abmeldung: Datum per Kalender wählen ===================================
+do
+    local absencePage = addon.UI.pages.ROSTER
+    addon.Profile:ClearAbsence()
+    absencePage.absenceDirty = nil
+    addon.UI:RefreshRoster()
+
+    -- Das Kalendersymbol am Von-Feld oeffnet das Blatt.
+    absencePage.absenceEdits.FROM_PICK.scripts.OnClick()
+    local picker = addon.UI.datePicker
+    assert(picker ~= nil and picker.shown == true, "Der Kalender oeffnet sich nicht")
+    assert(picker.anchor == absencePage.absenceEdits.FROM,
+        "Der Kalender haengt am falschen Feld")
+
+    -- Ohne Datum im Feld faengt er im laufenden Monat an.
+    local todayISO = addon.Util.TodayISO()
+    assert(picker.year == tonumber(todayISO:sub(1, 4)) and picker.month == tonumber(todayISO:sub(6, 7)),
+        "Der Kalender faengt nicht im laufenden Monat an")
+
+    -- Das Raster: Der Erste steht auf seinem Wochentag, nicht auf Feld eins.
+    local offset = addon.Util.WeekdayOfISO(addon.Util.FormatISO(picker.year, picker.month, 1)) - 1
+    assert(picker.days[offset + 1].iso == addon.Util.FormatISO(picker.year, picker.month, 1),
+        "Der Monatserste steht im Raster am falschen Wochentag")
+    assert(picker.days[offset] == nil or picker.days[offset].iso == nil,
+        "Vor dem Monatsersten steht ein anklickbarer Tag")
+    local lastDay = addon.Util.DaysInMonth(picker.year, picker.month)
+    assert(picker.days[offset + lastDay].iso == addon.Util.FormatISO(picker.year, picker.month, lastDay),
+        "Der letzte Tag des Monats fehlt im Raster")
+    assert(picker.days[offset + lastDay + 1] == nil or picker.days[offset + lastDay + 1].iso == nil,
+        "Nach dem Monatsende steht ein anklickbarer Tag")
+
+    -- Ein Klick auf den 15. traegt ihn ein und schliesst das Blatt.
+    local target = picker.days[offset + 15]
+    target.scripts.OnClick(target)
+    assert(absencePage.absenceEdits.FROM:GetText() == addon.Util.FormatISO(picker.year, picker.month, 15),
+        "Der gewaehlte Tag landet nicht im Feld")
+    assert(picker.shown == false, "Der Kalender bleibt nach der Auswahl offen")
+    assert(absencePage.absenceDirty == true,
+        "Die Kalenderauswahl macht das Formular nicht zum Eigentum des Nutzers")
+
+    -- Monatswechsel ueber den Jahreswechsel hinweg.
+    absencePage.absenceEdits.TO_PICK.scripts.OnClick()
+    picker.year, picker.month = 2026, 12
+    addon.UI:ShiftDatePicker(1)
+    assert(picker.year == 2027 and picker.month == 1, "Der Monatswechsel springt nicht ins neue Jahr")
+    addon.UI:ShiftDatePicker(-1)
+    assert(picker.year == 2026 and picker.month == 12, "Der Monatswechsel springt nicht zurueck")
+
+    -- "Heute" waehlt den heutigen Tag, egal welcher Monat gerade zu sehen ist.
+    picker.close.scripts.OnClick()
+    absencePage.absenceEdits.TO_PICK.scripts.OnClick()
+    picker.today.scripts.OnClick()
+    assert(absencePage.absenceEdits.TO:GetText() == todayISO,
+        "Der Knopf Heute traegt nicht das heutige Datum ein")
+
+    addon.Profile:ClearAbsence()
+    absencePage.absenceDirty = nil
+    addon.UI:RefreshRoster()
 end
 
 -- === Aufbewahrung: Boss-Abende überleben Stadt-Minis ========================

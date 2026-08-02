@@ -270,17 +270,70 @@ function GC.Util.AddDaysISO(days)
     return GC.Util.TodayISO()
 end
 
+local DAYS_PER_MONTH = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+
+function GC.Util.IsLeapYear(year)
+    year = tonumber(year)
+    if not year then
+        return false
+    end
+    return year % 400 == 0 or (year % 4 == 0 and year % 100 ~= 0)
+end
+
+function GC.Util.DaysInMonth(year, month)
+    month = tonumber(month)
+    if not month or month < 1 or month > 12 then
+        return nil
+    end
+    if month == 2 and GC.Util.IsLeapYear(year) then
+        return 29
+    end
+    return DAYS_PER_MONTH[month]
+end
+
+function GC.Util.FormatISO(year, month, day)
+    return string.format("%04d-%02d-%02d", tonumber(year) or 0, tonumber(month) or 0, tonumber(day) or 0)
+end
+
 function GC.Util.IsValidISODate(value)
     local year, month, day = tostring(value or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     year, month, day = tonumber(year), tonumber(month), tonumber(day)
     if not year or year < 2000 or year > 2099 or not month or month < 1 or month > 12 or not day then
         return false
     end
-    local daysPerMonth = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
-    if month == 2 and (year % 400 == 0 or (year % 4 == 0 and year % 100 ~= 0)) then
-        daysPerMonth[2] = 29
+    return day >= 1 and day <= (GC.Util.DaysInMonth(year, month) or 0)
+end
+
+-- Nimmt an, was Leute tatsaechlich tippen. Anlass war die Rueckmeldung aus der
+-- Gilde: Mit "JJJJ-MM-TT" kommen viele nicht zurecht und tragen 15.08.2026 ein.
+-- Das ist keine Fehleingabe, sondern die hier uebliche Schreibweise - sie wird
+-- deshalb angenommen und umgerechnet. Gespeichert und synchronisiert wird
+-- weiterhin ausschliesslich ISO: Nur damit funktionieren die Vergleiche
+-- "liegt zwischen von und bis" ueber einen simplen Stringvergleich.
+function GC.Util.NormalizeDateInput(value)
+    value = GC.Util.Trim(value)
+    if value == "" then
+        return ""
     end
-    return day >= 1 and day <= daysPerMonth[month]
+    if GC.Util.IsValidISODate(value) then
+        return value
+    end
+    -- 15.8.2026, 15.08.2026, 15/8/2026 und dieselben mit zweistelligem Jahr.
+    local day, month, year = value:match("^(%d%d?)[%.%-/](%d%d?)[%.%-/](%d%d%d%d)$")
+    if not day then
+        day, month, year = value:match("^(%d%d?)[%.%-/](%d%d?)[%.%-/](%d%d)$")
+        if year then
+            year = "20" .. year
+        end
+    end
+    if not day then
+        return value
+    end
+    local candidate = GC.Util.FormatISO(year, month, day)
+    if not GC.Util.IsValidISODate(candidate) then
+        return value
+    end
+    return candidate
 end
 
 local function ISODateOrdinal(value)
@@ -297,6 +350,23 @@ local function ISODateOrdinal(value)
         ordinal = ordinal + 1
     end
     return ordinal
+end
+
+-- Wochentag eines ISO-Datums, 1 = Montag bis 7 = Sonntag.
+--
+-- Gerechnet statt gefragt: date()/time() haengen an der Systemzeitzone und der
+-- Sommerzeit, und ein Kalenderblatt, das je nach Uhrzeit einen Tag verrutscht,
+-- waere schlimmer als keins. Die fortlaufende Tagesnummer oben gibt es ohnehin;
+-- als Anker dient der 1. Januar 2000, ein Samstag.
+local ANCHOR_ORDINAL = 730120
+local ANCHOR_WEEKDAY = 6
+
+function GC.Util.WeekdayOfISO(value)
+    local ordinal = ISODateOrdinal(value)
+    if not ordinal then
+        return nil
+    end
+    return ((ordinal - ANCHOR_ORDINAL + ANCHOR_WEEKDAY - 1) % 7) + 1
 end
 
 function GC.Util.DaysBetweenISO(left, right)

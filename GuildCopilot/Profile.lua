@@ -187,11 +187,13 @@ function GC.Profile:GetAbsenceState(profile, today)
 end
 
 function GC.Profile:SetAbsence(rangeFrom, rangeTo, reason)
-    rangeFrom = GC.Util.Trim(rangeFrom)
-    rangeTo = GC.Util.Trim(rangeTo)
+    -- Getippt wird hier auch "15.08.2026"; umgerechnet wird das vor der
+    -- Pruefung, gespeichert wird ausschliesslich ISO (siehe NormalizeDateInput).
+    rangeFrom = GC.Util.NormalizeDateInput(rangeFrom)
+    rangeTo = GC.Util.NormalizeDateInput(rangeTo)
     reason = GC.Util.Trim(reason):gsub("[|%%\r\n]", " ")
     if not GC.Util.IsValidISODate(rangeFrom) or not GC.Util.IsValidISODate(rangeTo) then
-        return false, "Bitte beide Daten als JJJJ-MM-TT eingeben."
+        return false, "Bitte beide Daten wählen – über das Kalendersymbol oder als TT.MM.JJJJ."
     end
     if rangeFrom > rangeTo then
         return false, "Das Bis-Datum darf nicht vor dem Von-Datum liegen."

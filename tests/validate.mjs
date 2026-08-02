@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.83",
+  "## Version: 0.9.84",
 ];
 
 for (const entry of requiredMetadata) {
@@ -256,6 +256,10 @@ const requiredImplementations = [
   ["Mitgliederpflege", /BuildMemberCarePage/],
   ["Abmeldung von bis", /SetAbsence/],
   ["Abmeldung in Profilsynchronisierung", /absence\.from/],
+  ["Abmeldeformular gehört dem Nutzer, sobald er tippt", /page\.absenceDirty = true/],
+  ["Kalenderauswahl für die Abmeldung", /function GC\.UI:OpenDatePicker/],
+  ["Kalenderblatt rechnet den Wochentag", /function GC\.Util\.WeekdayOfISO/],
+  ["deutsch getipptes Datum wird angenommen", /function GC\.Util\.NormalizeDateInput/],
   ["Inaktivitätsvorschläge", /GetMemberCareCandidates/],
   ["geschützte Ränge", /SetMemberCareRankProtected/],
   ["explizite Escape-Behandlung", /key == "ESCAPE"/],

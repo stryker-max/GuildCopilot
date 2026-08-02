@@ -7,6 +7,25 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.84 – Addon
+
+**Behoben**
+
+- **Abmeldung: angefangene Eingaben verschwanden.** Wer das Von-Datum eintrug
+  und dann ins Bis-Feld klickte, fand das erste Feld kurz darauf leer vor. Die
+  Felder wurden im Hintergrund mit dem gespeicherten — also noch leeren —
+  Stand überschrieben. Wie oft das passierte, hing daran, wie viel gerade an
+  Gildendaten hereinkam; deshalb trat es nicht bei jedem auf. Ein angefangenes
+  Formular bleibt jetzt stehen, bis es gespeichert oder gelöscht wird.
+
+**Neu**
+
+- **Datum per Kalender wählen.** Das Kalendersymbol in den Feldern Von und Bis
+  öffnet ein Monatsblatt mit deutschen Monatsnamen, Mo–So, Monatswechsel und
+  einem Knopf für heute. Der heutige Tag ist umrandet, der gewählte gefüllt.
+- Getippt wird auch **`15.08.2026`** angenommen und umgerechnet — die
+  Schreibweise `JJJJ-MM-TT` muss niemand mehr treffen.
+
 ## 0.9.83 – Addon
 
 **Neu**
