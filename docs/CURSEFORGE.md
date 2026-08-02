@@ -13,16 +13,15 @@ Project settings that belong with it:
 - **Uploaded file:** `GuildCopilot-Addon-<version>.zip` — top level is the folder `GuildCopilot`,
   no `.cmd`/`.exe`/`.mjs` anywhere in the archive (CurseForge rejects executables).
 
-Deliberately **not** on the page: installation steps (the CurseForge app does
-that), how the guild sync works under the hood, and per-button descriptions.
-The page says what the addon does for you, not how it is operated.
+Keep it short. Nobody reads a project page top to bottom — one line per feature,
+no installation steps (the app does that), no explanation of how the sync works.
+If something needs a paragraph, it belongs in the GitHub README instead.
 
 ---
 
 ## Summary
 
-> One line, shown under the project title and in search results. CurseForge
-> allows ~255 characters; this one is well under it.
+> One line, shown under the project title and in search results.
 
 ```
 Guild assistant for TBC Anniversary: recruitment, roster and member care, a shared profession catalogue with crafting orders, raid tracking and enchant/gem checks.
@@ -44,44 +43,20 @@ Recruitment, roster, professions, crafting orders, raid tracking and gear checks
 
 # Guild Copilot
 
-**A guild assistant for World of Warcraft: Burning Crusade Classic Anniversary.**
+**Guild assistant for World of Warcraft: Burning Crusade Classic Anniversary.**
 
-Who plays what, who is missing from the raid, who can craft that recipe, whose gear is missing an enchant, who applied last night. Guild Copilot collects it from the game and shares it with every guild member who also runs it.
+Who plays what, who is missing from the raid, who can craft that recipe, whose gear is missing an enchant, who applied last night.
 
-> ⚠️ **The interface is German.** The addon reads your client's own item and spell names, so it works on any locale — but menus and texts are German only.
+> ⚠️ **German interface.** Works on any client locale, but menus and texts are German only.
 
-## Recruitment
+- **Recruitment** — your guild profile feeds every advert and reply, and Guild Copilot tells you which specs your raid is actually missing
+- **Applicant inbox** — whispers and "looking for guild" messages collect themselves; answer from guild-wide templates
+- **Roster & member care** — who raids, who is on leave, who stopped logging in; officers share their decisions
+- **Guild workshop** — everyone's recipes in one searchable catalogue, with mats from your bags, your alts and the guild bank
+- **Crafting orders** — order from a guildmate and both of you see where it stands, including who owes whom
+- **Raid tracking** — attendance, attempts, wipes, deaths, interrupts and consumables per raider, boss fights only
+- **Gear checks** — missing enchants and empty sockets for the whole raid, rated by archetype and your content phase
 
-Fill in your guild profile once and it feeds every advertisement and reply. Guild Copilot tells you which specs your raid is actually missing — counting only players who can raid, not level 12 alts. One click posts to every channel you picked.
+Works on its own, better the more of your guild runs it.
 
-## Applicant inbox
-
-Whispers and "looking for guild" messages land in an inbox by themselves, with class and level. Answer from guild-wide templates, invite, or mute the repeat writers.
-
-## Roster and member care
-
-Who raids, who is on leave, who has not logged in for months. Officers file each case as an exception, postponed or done — shared guild-wide, so nobody works the same one twice. Removing a member stays a deliberate manual decision.
-
-## Guild workshop
-
-Everyone's recipes in one searchable catalogue: who can craft it, what it needs, and whether the mats are in your bags, your alts' or the guild bank.
-
-## Crafting orders
-
-Order something from a guildmate and both of you can see where it stands — accepted, in progress, crafted, handed over, paid. Including who owes whom what.
-
-## Raid tracking
-
-Attendance, attempts, wipes, deaths, interrupts and consumables per raider. Boss fights only, so trash does not inflate the numbers. Live sessions, Warcraft Logs and combat log imports all describe the same night in one entry.
-
-## Gear checks
-
-Missing enchants and empty sockets for the whole raid at a glance. Rated by archetype — a shadow priest is not a rogue — and by your guild's current content phase. Rate enchants yourself and your rules win.
-
----
-
-Guild Copilot works on its own and gets better the more of your guild runs it.
-
-An optional Windows helper on GitHub pulls Warcraft Logs reports or reads a local `WoWCombatLog.txt` — not part of this download, and not needed for anything above.
-
-**Source, issues and changelog:** https://github.com/stryker-max/GuildCopilot · MIT licensed.
+**Source, issues, changelog:** https://github.com/stryker-max/GuildCopilot · MIT
