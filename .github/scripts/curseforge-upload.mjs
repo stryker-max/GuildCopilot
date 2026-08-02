@@ -64,8 +64,22 @@ async function api(pathname, token) {
     headers: { "X-Api-Token": token },
   });
   if (!response.ok) {
-    fail(`${pathname} antwortete ${response.status} ${response.statusText}. `
-      + `Bei 401/403 stimmt der Token nicht.`);
+    if (response.status === 401 || response.status === 403) {
+      // 403 heisst hier nie "falsches Projekt" - diese Abfrage kennt das
+      // Projekt gar nicht. Es geht ausschliesslich um den Token selbst.
+      fail(`${pathname} antwortete ${response.status} ${response.statusText}.\n`
+        + `CurseForge lehnt den Token ab. Das Projekt spielt hier keine Rolle -\n`
+        + `diese Abfrage kennt es nicht, es geht nur um den Token.\n\n`
+        + `Der Reihe nach zu pruefen:\n`
+        + `  1. Ist der Token noch gueltig? Ein widerrufener Token antwortet genau so.\n`
+        + `     authors.curseforge.com -> Konto -> API Tokens.\n`
+        + `  2. Ist er vollstaendig eingefuegt? Der Schritt "Zugangsdaten suchen"\n`
+        + `     nennt seine Laenge; 36 Zeichen sind richtig.\n`
+        + `  3. Stammt er aus dem Autorenkonto (API Tokens) und nicht aus der\n`
+        + `     CurseForge-Core-API-Konsole? Nur der erste passt hierher.\n\n`
+        + `Ein neuer Token ist in beiden Faellen der kuerzeste Weg.`);
+    }
+    fail(`${pathname} antwortete ${response.status} ${response.statusText}.`);
   }
   return response.json();
 }

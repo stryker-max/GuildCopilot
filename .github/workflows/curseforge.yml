@@ -184,6 +184,21 @@ jobs:
           if [ -n "$token" ]; then
             echo "::add-mask::$token"
             echo "Token gefunden unter: $token_key"
+            # Ueber den Token selbst darf nichts im Log stehen - ueber seine
+            # GESTALT schon, und das ist der Unterschied zwischen "beim
+            # Einfuegen abgeschnitten" und "von CurseForge abgelehnt". Ohne das
+            # sagt ein 403 nur "irgendwas stimmt nicht".
+            case "$token" in
+              [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-*-*-*-*)
+                shape="Form einer UUID" ;;
+              *) shape="KEINE UUID-Form - vollstaendig eingefuegt?" ;;
+            esac
+            if [ "${#token}" -eq 36 ]; then
+              echo "Gestalt: ${#token} Zeichen, $shape - plausibel."
+            else
+              echo "Gestalt: ${#token} Zeichen, $shape."
+              echo "::warning::Ein CurseForge-Token hat 36 Zeichen, dieser hat ${#token}. Vermutlich unvollstaendig eingefuegt."
+            fi
             echo "CF_TOKEN=$token" >> "$GITHUB_ENV"
           else
             echo "Kein Token gefunden."
