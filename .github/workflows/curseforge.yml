@@ -11,10 +11,14 @@ name: CurseForge
 # Handgriff waere.
 #
 # Einmalig einzurichten (Settings -> Secrets and variables -> Actions):
-#   Secret   CURSEFORGE_TOKEN       API-Token aus dem CurseForge-Konto
-#   Variable CURSEFORGE_PROJECT_ID  Projektnummer von der Projektseite
-# Die Projektnummer wird auch als Secret angenommen - die beiden Reiter sind
-# leicht zu verwechseln, und daran soll die Einrichtung nicht scheitern.
+#   API-Token aus dem CurseForge-Konto
+#   Projektnummer von der Projektseite
+#
+# Auf einen bestimmten NAMEN kommt es dabei nicht an. Empfohlen sind
+# CURSEFORGE_TOKEN und CURSEFORGE_PROJECT_ID, gefunden wird beides aber auch
+# unter jedem anderen Namen und in beiden Reitern - Secrets wie Variables.
+# Erkannt wird es an der Gestalt des Werts: Die Projektnummer ist eine reine
+# Zahl, der Token ist es nicht. Der Grund steht bei "Zugangsdaten suchen".
 #
 # Die Spielversion muss NICHT hinterlegt werden: Sie wird aus "## Interface:"
 # der TOC abgeleitet (20506 -> 2.5.6). Nur falls CurseForge sie einmal anders
@@ -78,19 +82,87 @@ jobs:
           echo "gameVersion=$gameVersion" >> "$GITHUB_OUTPUT"
           echo "Addon $version, Spielfassung $gameVersion (Interface $interface)"
 
+      # Zugangsdaten suchen, statt sie an einer Stelle zu verlangen.
+      #
+      # Die Einrichtung ist dreimal an einem Namen gescheitert: Der Token lag
+      # als "CURSEFORGE" statt "CURSEFORGE_TOKEN" im Repository, und die
+      # Projektnummer im falschen der beiden Reiter. Beides war eingetragen,
+      # beides war richtig - nur hat der Lauf danach gesucht wie nach einer
+      # Vokabel und dann behauptet, es sei nichts da.
+      #
+      # Ein Einrichtungsschritt, der am Namen scheitert, ist der Fehler, nicht
+      # der Name. Gesucht wird deshalb ueber ALLE Secrets und Variables, und
+      # unterschieden wird an der Gestalt des Werts: Die Projektnummer besteht
+      # nur aus Ziffern, der Token nicht. Der empfohlene Name gewinnt, wenn es
+      # ihn gibt - danach entscheidet die Gestalt.
+      #
+      # Werte werden nie ausgegeben, nur Namen. Ein Token, der versehentlich
+      # unter "Variables" landet, ist nicht von Haus aus maskiert - deshalb
+      # setzt dieser Schritt die Maskierung selbst, bevor irgendetwas laeuft.
+      - name: Zugangsdaten suchen
+        id: creds
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARS: ${{ toJSON(vars) }}
+        run: |
+          set -euo pipefail
+
+          merged="$(printf '%s\n%s\n' "$ALL_VARS" "$ALL_SECRETS" | jq -s 'add | del(.github_token)')"
+
+          secret_names="$(jq -r 'keys[]' <<< "$ALL_SECRETS" | grep -v '^github_token$' | paste -sd', ' - || true)"
+          var_names="$(jq -r 'keys[]' <<< "$ALL_VARS" | paste -sd', ' - || true)"
+          echo "Secrets:   ${secret_names:-keine}"
+          echo "Variables: ${var_names:-keine}"
+
+          resolved="$(jq -c '
+            def isToken:
+              (.key | test("curse"; "i"))
+              and ((.key | test("project|game_version|version_type"; "i")) | not)
+              and ((.value | length) >= 20);
+            def isProject:
+              (.key | test("project|curse"; "i")) and (.value | test("^[0-9]+$"));
+            to_entries as $e
+            | {
+                t: ((($e | map(select(.key == "CURSEFORGE_TOKEN")))
+                     + ($e | map(select(isToken)))) | .[0]),
+                p: ((($e | map(select(.key == "CURSEFORGE_PROJECT_ID")))
+                     + ($e | map(select(isProject)))) | .[0])
+              }
+            | {
+                tokenKey:   (.t.key   // ""), token:   (.t.value   // ""),
+                projectKey: (.p.key   // ""), project: (.p.value   // "")
+              }' <<< "$merged")"
+
+          token="$(jq -r '.token' <<< "$resolved")"
+          project="$(jq -r '.project' <<< "$resolved")"
+          token_key="$(jq -r '.tokenKey' <<< "$resolved")"
+          project_key="$(jq -r '.projectKey' <<< "$resolved")"
+
+          if [ -n "$token" ]; then
+            echo "::add-mask::$token"
+            echo "Token gefunden unter: $token_key"
+            echo "CF_TOKEN=$token" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$project" ]; then
+            echo "Projektnummer gefunden unter: $project_key (Wert $project)"
+            echo "CF_PROJECT=$project" >> "$GITHUB_ENV"
+          fi
+
+          {
+            echo "hasToken=$([ -n "$token" ] && echo true || echo false)"
+            echo "hasProject=$([ -n "$project" ] && echo true || echo false)"
+            echo "names=Secrets: ${secret_names:-keine} | Variables: ${var_names:-keine}"
+          } >> "$GITHUB_OUTPUT"
+
       # Der Tag ist das Gedaechtnis: Steht er, war diese Version schon oben.
       # Das haelt auch einem erneuten Lauf, einem Force-Push oder einem
       # nachgereichten Commit stand.
       - name: Ist die Version neu?
         id: check
         env:
-          HAS_TOKEN: ${{ secrets.CURSEFORGE_TOKEN != '' }}
-          # Die Projektnummer ist kein Geheimnis und gehoert deshalb unter
-          # "Variables". Sie steht dort aber in einem ANDEREN Reiter als der
-          # Token, und genau daran ist die Einrichtung schon einmal gescheitert:
-          # Token eingetragen, Projektnummer nicht gefunden, Lauf endet gruen und
-          # laedt trotzdem nichts hoch. Beide Ablagen werden deshalb akzeptiert.
-          HAS_PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID != '' || secrets.CURSEFORGE_PROJECT_ID != '' }}
+          HAS_TOKEN: ${{ steps.creds.outputs.hasToken }}
+          HAS_PROJECT: ${{ steps.creds.outputs.hasProject }}
+          FOUND_NAMES: ${{ steps.creds.outputs.names }}
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
@@ -105,13 +177,13 @@ jobs:
           if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
             missing=""
             if [ "$HAS_TOKEN" != "true" ]; then
-              missing="das Secret CURSEFORGE_TOKEN"
+              missing="der API-Token"
             fi
             if [ "$HAS_PROJECT" != "true" ]; then
               if [ -n "$missing" ]; then
-                missing="$missing und die Variable CURSEFORGE_PROJECT_ID"
+                missing="$missing und die Projektnummer"
               else
-                missing="die Variable CURSEFORGE_PROJECT_ID"
+                missing="die Projektnummer"
               fi
             fi
             echo "::notice::CurseForge ist nicht eingerichtet - es fehlt $missing. Version $tag wurde NICHT veroeffentlicht."
@@ -120,14 +192,23 @@ jobs:
               echo
               echo "Es fehlt **$missing**."
               echo
-              echo "Einzutragen unter *Settings -> Secrets and variables -> Actions*:"
+              # Was tatsaechlich im Repository steht, gehoert in die Meldung.
+              # Ohne das raet man weiter am Namen herum - genau die Schleife,
+              # aus der dieser Schritt herausfuehren soll.
+              echo "Gefunden wurde: \`$FOUND_NAMES\`"
+              echo
+              echo "Der Name ist frei: Gesucht wird ueber alle Secrets UND Variables,"
+              echo "die Projektnummer an ihrer Gestalt (reine Ziffern), der Token an seiner."
+              echo "Nicht gefunden heisst also: Es ist wirklich keiner da - oder der Wert"
+              echo "sieht nicht aus wie erwartet (Leerzeichen? halb eingefuegt?)."
+              echo
+              echo "Einzutragen unter *Settings -> Secrets and variables -> Actions*,"
+              echo "empfohlene Namen:"
               echo
               echo "| Reiter | Name | Wert |"
               echo "| --- | --- | --- |"
               echo "| Secrets | \`CURSEFORGE_TOKEN\` | API-Token aus dem CurseForge-Konto |"
               echo "| Variables | \`CURSEFORGE_PROJECT_ID\` | Projektnummer von der Projektseite |"
-              echo
-              echo "Die Projektnummer wird auch als Secret angenommen, falls sie dort landet."
               echo
               echo "Danach genuegt *Actions -> CurseForge -> Run workflow*;"
               echo "\`$tag\` geht dann nachtraeglich raus, ohne neuen Push."
@@ -182,8 +263,8 @@ jobs:
       - name: Hochladen
         if: steps.check.outputs.publish == 'true'
         env:
-          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
-          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID || secrets.CURSEFORGE_PROJECT_ID }}
+          CURSEFORGE_TOKEN: ${{ env.CF_TOKEN }}
+          CURSEFORGE_PROJECT_ID: ${{ env.CF_PROJECT }}
           CURSEFORGE_GAME_VERSION: ${{ steps.version.outputs.gameVersion }}
           CURSEFORGE_VERSION_TYPE: ${{ vars.CURSEFORGE_VERSION_TYPE }}
           ZIP_PATH: ${{ steps.package.outputs.zip }}

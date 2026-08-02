@@ -44,12 +44,20 @@ Configure once under **Settings → Secrets and variables → Actions**:
 | Variable | `CURSEFORGE_GAME_VERSION` | only as an override — normally derived |
 | Variable | `CURSEFORGE_VERSION_TYPE` | only if that name is ambiguous |
 
-**Secrets and Variables are two different tabs on that page**, and mixing them
-up is how the first attempt failed: the token went in, the project number had
-nowhere obvious to go, and the run stayed green while uploading nothing. The
-project number is therefore accepted from either tab. Both values missing is
-the only state the run cannot fix by itself — it then names exactly which one
-is missing, in the run summary rather than in a notice nobody scrolls to.
+**Those names are a recommendation, not a requirement.** Setup failed three
+times over naming: the token sat there as `CURSEFORGE`, the project number in
+the other of the two tabs — everything entered, everything correct, and the run
+still claimed nothing was there, because it looked up a vocabulary word instead
+of looking around.
+
+So it looks around. The run scans **every** secret and **every** variable and
+tells them apart by the shape of the value: the project number is digits only,
+the token is not. The recommended name wins if it exists; after that, shape
+decides. Values are never printed, only names — and a token that ends up in the
+plaintext Variables tab gets masked explicitly before anything else runs.
+
+When something really is missing, the summary lists the names that **were**
+found, so the next attempt is not another guess.
 
 To check the setup without a push: **Actions → CurseForge → Run workflow**. It
 publishes the current TOC version if no tag for it exists yet, so a version
