@@ -352,8 +352,10 @@ jobs:
             echo "Ein weiterer Push zu dieser Version laedt nichts mehr hoch."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Auch nach einem gescheiterten Upload: Dann ist das fertige Archiv genau
+      # das, was man zum Hochladen von Hand braucht - und es liegt bereits hier.
       - uses: actions/upload-artifact@v4
-        if: steps.check.outputs.publish == 'true'
+        if: always() && steps.check.outputs.publish == 'true'
         with:
           name: GuildCopilot-Addon-${{ steps.version.outputs.version }}
           path: ${{ steps.package.outputs.zip }}

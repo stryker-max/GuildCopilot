@@ -59,27 +59,59 @@ export function changelogSection(changelogPath, version) {
   return body;
 }
 
+// Ein abgelehnter Aufruf muss sagen, WER abgelehnt hat.
+//
+// Ein 403 kann zweierlei heissen, und die Gegenmassnahmen haben nichts
+// miteinander zu tun: Entweder weist CurseForge den Token zurueck - dann hilft
+// ein neuer Token -, oder ein vorgelagerter Schutz laesst die Anfrage gar nicht
+// bis zur API durch; dann ist der Token in Ordnung und ein neuer aendert nichts.
+// Zu unterscheiden sind die beiden am Antwortkoerper: Die API antwortet knapp
+// und in JSON, ein Schutzwall mit einer HTML-Seite.
+function describeRejection(status, statusText, headers, body) {
+  const server = headers.get("server") ?? "?";
+  const rayID = headers.get("cf-ray");
+  const looksLikeHTML = /^\s*<(?:!doctype|html)/i.test(body);
+  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 300);
+
+  const lines = [`Antwort ${status} ${statusText} (Server: ${server}`
+    + `${rayID ? `, cf-ray: ${rayID}` : ""})`];
+  if (looksLikeHTML || rayID) {
+    lines.push(
+      ``,
+      `Das ist eine HTML-Seite, keine Antwort der Upload-API. Die Anfrage kommt`,
+      `also gar nicht bis zur API durch, sondern wird davor abgewiesen - ein`,
+      `neuer Token aendert daran nichts.`,
+      ``,
+      `Was hilft: den Upload nicht aus GitHub Actions fahren, sondern das`,
+      `Archiv von Hand hochladen (es liegt als Artefakt an diesem Lauf), oder`,
+      `bei CurseForge nachfragen, ob der Zugriff aus Rechenzentrums-IPs`,
+      `freigeschaltet werden kann.`,
+    );
+  } else {
+    lines.push(
+      ``,
+      `Die API selbst weist den Token zurueck. Der Reihe nach zu pruefen:`,
+      `  1. Ist der Token noch gueltig? Ein widerrufener antwortet genau so.`,
+      `     authors.curseforge.com -> Konto -> API Tokens.`,
+      `  2. Ist er vollstaendig eingefuegt? Der Schritt "Zugangsdaten suchen"`,
+      `     nennt seine Laenge; 36 Zeichen sind richtig.`,
+      `  3. Stammt er aus dem Autorenkonto (API Tokens) und nicht aus der`,
+      `     CurseForge-Core-API-Konsole? Nur der erste passt hierher.`,
+    );
+  }
+  lines.push(``, `Antwortanfang: ${snippet || "(leer)"}`);
+  return lines.join("\n");
+}
+
 async function api(pathname, token) {
   const response = await fetch(`${BASE_URL}${pathname}`, {
     headers: { "X-Api-Token": token },
   });
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      // 403 heisst hier nie "falsches Projekt" - diese Abfrage kennt das
-      // Projekt gar nicht. Es geht ausschliesslich um den Token selbst.
-      fail(`${pathname} antwortete ${response.status} ${response.statusText}.\n`
-        + `CurseForge lehnt den Token ab. Das Projekt spielt hier keine Rolle -\n`
-        + `diese Abfrage kennt es nicht, es geht nur um den Token.\n\n`
-        + `Der Reihe nach zu pruefen:\n`
-        + `  1. Ist der Token noch gueltig? Ein widerrufener Token antwortet genau so.\n`
-        + `     authors.curseforge.com -> Konto -> API Tokens.\n`
-        + `  2. Ist er vollstaendig eingefuegt? Der Schritt "Zugangsdaten suchen"\n`
-        + `     nennt seine Laenge; 36 Zeichen sind richtig.\n`
-        + `  3. Stammt er aus dem Autorenkonto (API Tokens) und nicht aus der\n`
-        + `     CurseForge-Core-API-Konsole? Nur der erste passt hierher.\n\n`
-        + `Ein neuer Token ist in beiden Faellen der kuerzeste Weg.`);
-    }
-    fail(`${pathname} antwortete ${response.status} ${response.statusText}.`);
+    // Der Koerper enthaelt keine Zugangsdaten - der Token steht im Kopf der
+    // ANFRAGE, nicht in der Antwort.
+    const body = await response.text().catch(() => "");
+    fail(`${pathname}: ${describeRejection(response.status, response.statusText, response.headers, body)}`);
   }
   return response.json();
 }
