@@ -47,6 +47,16 @@ concurrency:
   group: curseforge
   cancel-in-progress: false
 
+env:
+  # Die Projektnummer ist KEIN Geheimnis: Sie steht offen auf der
+  # CurseForge-Projektseite unter "About Project". Sie darf deshalb hier stehen,
+  # und dann muss ueberhaupt nichts mehr im Repository eingetragen werden -
+  # eintragen muss man nur noch den Token, der wirklich geheim ist.
+  #
+  # Eine Variable oder ein Secret mit passendem Namen hat weiterhin Vorrang;
+  # diese Zeile ist der Rueckfall, nicht die Vorschrift.
+  CURSEFORGE_PROJECT_ID_FIXED: ""
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -123,12 +133,21 @@ jobs:
             CURSEFORGE_PROJECTID=${{ vars.CURSEFORGE_PROJECTID }}
             CURSEFORGE_ID=${{ vars.CURSEFORGE_ID }}
             PROJECT_ID=${{ vars.PROJECT_ID }}
+            PROJECTID=${{ vars.PROJECTID }}
             CF_PROJECT_ID=${{ vars.CF_PROJECT_ID }}
+            CURSE_PROJECT_ID=${{ vars.CURSE_PROJECT_ID }}
+            CURSEFORGE_PROJEKT_ID=${{ vars.CURSEFORGE_PROJEKT_ID }}
+            CURSEFORGE_PROJEKTNUMMER=${{ vars.CURSEFORGE_PROJEKTNUMMER }}
+            PROJEKT_ID=${{ vars.PROJEKT_ID }}
             CURSEFORGE_PROJECT_ID (Secrets)=${{ secrets.CURSEFORGE_PROJECT_ID }}
             CURSEFORGE_PROJECT (Secrets)=${{ secrets.CURSEFORGE_PROJECT }}
             CURSEFORGE_PROJECTID (Secrets)=${{ secrets.CURSEFORGE_PROJECTID }}
             CURSEFORGE_ID (Secrets)=${{ secrets.CURSEFORGE_ID }}
             PROJECT_ID (Secrets)=${{ secrets.PROJECT_ID }}
+            PROJECTID (Secrets)=${{ secrets.PROJECTID }}
+            CURSEFORGE_PROJEKT_ID (Secrets)=${{ secrets.CURSEFORGE_PROJEKT_ID }}
+            PROJEKT_ID (Secrets)=${{ secrets.PROJEKT_ID }}
+            fest im Workflow=${{ env.CURSEFORGE_PROJECT_ID_FIXED }}
         run: |
           set -euo pipefail
 
