@@ -13,6 +13,40 @@ Project settings that belong with it:
 - **Uploaded file:** `GuildCopilot-Addon-<version>.zip` — top level is the folder `GuildCopilot`,
   no `.cmd`/`.exe`/`.mjs` anywhere in the archive (CurseForge rejects executables).
 
+## Releasing
+
+Uploading is automated. Pushing a version tag builds the archive and publishes
+it — the version in the tag must match `## Version:` in the TOC, or the run
+stops before anything is uploaded:
+
+```bash
+git tag v0.9.83 && git push origin v0.9.83
+```
+
+The workflow is `.github/workflows/curseforge.yml`, the upload itself
+`.github/scripts/curseforge-upload.mjs`. It runs `tests/validate.mjs` first,
+builds the archive without the `Companion` folder (that is where the `.cmd` and
+`.mjs` live), refuses an archive that still contains executables, and takes the
+release notes from the section of `CHANGELOG.md` that matches the version — a
+missing section fails the run. `workflow_dispatch` allows the same thing by hand
+with a choice of alpha/beta/release.
+
+Configure once under **Settings → Secrets and variables → Actions**:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `CURSEFORGE_TOKEN` | API token from the CurseForge account |
+| Variable | `CURSEFORGE_PROJECT_ID` | project number from the project page |
+| Variable | `CURSEFORGE_GAME_VERSION` | game version name, e.g. `2.5.6` |
+| Variable | `CURSEFORGE_VERSION_TYPE` | only if that name is ambiguous |
+
+The game version is resolved to CurseForge's numeric ID at runtime, because the
+mapping changes with every game patch. If the name does not exist, the run
+prints the available ones instead of failing blind.
+
+The installer is untouched by all of this — it keeps pulling the addon straight
+from `main`.
+
 Keep it short. Nobody reads a project page top to bottom — one line per feature,
 no installation steps (the app does that), no explanation of how the sync works.
 If something needs a paragraph, it belongs in the GitHub README instead.

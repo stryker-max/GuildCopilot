@@ -1,0 +1,108 @@
+name: CurseForge
+
+# Ein Versions-Tag veroeffentlicht das Addon auf CurseForge:
+#
+#   git tag v0.9.83 && git push origin v0.9.83
+#
+# Der Installer bleibt davon unberuehrt - der zieht sich das Addon weiterhin
+# direkt aus main. Hier geht es nur um den Shop.
+#
+# Einmalig einzurichten (Settings -> Secrets and variables -> Actions):
+#   Secret   CURSEFORGE_TOKEN         API-Token aus dem CurseForge-Konto
+#   Variable CURSEFORGE_PROJECT_ID    Projektnummer von der Projektseite
+#   Variable CURSEFORGE_GAME_VERSION  Name der Spielversion, z. B. 2.5.6
+#   Variable CURSEFORGE_VERSION_TYPE  optional, nur bei mehrdeutigem Namen
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      releaseType:
+        description: "Freigabestufe"
+        type: choice
+        default: release
+        options: [release, beta, alpha]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Erst pruefen, dann veroeffentlichen. validate.mjs haelt unter anderem
+      # die fuenf Versionsangaben im Repository zusammen; laeuft das nicht
+      # durch, hat auf CurseForge nichts zu suchen.
+      - name: Pruefen
+        run: node tests/validate.mjs
+
+      - name: Version bestimmen
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^## Version:[[:space:]]*//p' GuildCopilot/GuildCopilot.toc | tr -d '\r')"
+          if [ -z "$version" ]; then
+            echo "In der TOC steht keine Version." >&2
+            exit 1
+          fi
+          # Beim Tag-Lauf muessen Tag und TOC dasselbe sagen. Sonst laedt man
+          # unter dem Namen v0.9.83 ein Paket hoch, das 0.9.82 enthaelt.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tagged="${GITHUB_REF_NAME#v}"
+            if [ "$tagged" != "$version" ]; then
+              echo "Tag ($tagged) und TOC ($version) sind verschieden." >&2
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Addon-Version: $version"
+
+      # Oberste Ebene ist der Ordner GuildCopilot. Der Companion-Ordner bleibt
+      # draussen: CurseForge lehnt Archive mit ausfuehrbaren Dateien ab, und
+      # dort liegen eine .cmd und eine .mjs.
+      - name: Paket bauen
+        id: package
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          zip_name="GuildCopilot-Addon-${version}.zip"
+          rm -rf build && mkdir -p build/stage
+          cp -r GuildCopilot build/stage/GuildCopilot
+          rm -rf build/stage/GuildCopilot/Companion
+          (cd build/stage && zip -r -X "../${zip_name}" GuildCopilot >/dev/null)
+          echo "zip=build/${zip_name}" >> "$GITHUB_OUTPUT"
+
+          echo "Inhalt:"
+          unzip -Z1 "build/${zip_name}"
+          if unzip -Z1 "build/${zip_name}" | grep -Eiq '\.(cmd|exe|mjs|bat|ps1|sh)$'; then
+            echo "Das Archiv enthaelt ausfuehrbare Dateien - CurseForge lehnt das ab." >&2
+            exit 1
+          fi
+          if unzip -Z1 "build/${zip_name}" | grep -qv '^GuildCopilot/'; then
+            echo "Auf oberster Ebene steht mehr als der Ordner GuildCopilot." >&2
+            exit 1
+          fi
+
+      - name: Hochladen
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          CURSEFORGE_GAME_VERSION: ${{ vars.CURSEFORGE_GAME_VERSION }}
+          CURSEFORGE_VERSION_TYPE: ${{ vars.CURSEFORGE_VERSION_TYPE }}
+          ZIP_PATH: ${{ steps.package.outputs.zip }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.releaseType || 'release' }}
+        run: node .github/scripts/curseforge-upload.mjs
+
+      # Damit auch ohne CurseForge-Zugang nachvollziehbar ist, was hochging.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GuildCopilot-Addon-${{ steps.version.outputs.version }}
+          path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: warn
