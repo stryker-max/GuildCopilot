@@ -70,12 +70,18 @@ export function changelogSection(changelogPath, version) {
 function describeRejection(status, statusText, headers, body, token) {
   const server = headers.get("server") ?? "?";
   const rayID = headers.get("cf-ray");
+  // Entschieden wird AM KOERPER, nicht am cf-ray. Der Kopf besagt nur, dass
+  // Cloudflare vor curseforge.com steht - das tut er auch, wenn er die Anfrage
+  // sauber durchreicht und die API selbst antwortet. Genau daran ist diese
+  // Unterscheidung beim ersten Versuch gescheitert: Sie hielt eine
+  // ordentliche JSON-Ablehnung der API fuer einen Schutzwall und riet, den
+  // Upload aufzugeben - das Gegenteil dessen, was zu tun war.
   const looksLikeHTML = /^\s*<(?:!doctype|html)/i.test(body);
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 300);
 
   const lines = [`Antwort ${status} ${statusText} (Server: ${server}`
     + `${rayID ? `, cf-ray: ${rayID}` : ""})`];
-  if (looksLikeHTML || rayID) {
+  if (looksLikeHTML) {
     lines.push(
       ``,
       `Das ist eine HTML-Seite, keine Antwort der Upload-API. Die Anfrage kommt`,
