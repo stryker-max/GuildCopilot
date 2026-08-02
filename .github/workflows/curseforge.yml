@@ -1,22 +1,26 @@
 name: CurseForge
 
-# Ein Versions-Tag veroeffentlicht das Addon auf CurseForge:
+# Veroeffentlicht das Addon auf CurseForge - ohne Handarbeit.
 #
-#   git tag v0.9.83 && git push origin v0.9.83
-#
-# Der Installer bleibt davon unberuehrt - der zieht sich das Addon weiterhin
-# direkt aus main. Hier geht es nur um den Shop.
+# Ausgeloest wird der Lauf von jedem Push nach main. Ob wirklich hochgeladen
+# wird, entscheidet die Versionsnummer in der TOC: Gibt es zu ihr noch keinen
+# Tag "v<version>", ist sie neu und geht raus; danach setzt der Lauf den Tag.
+# Ein zweiter Push zur selben Version tut nichts mehr. Das ist absichtlich
+# nicht "bei jedem Push hochladen" - CurseForge bekaeme sonst dieselbe Version
+# mehrfach - und ebenso absichtlich nicht "bei jedem Tag", weil das wieder ein
+# Handgriff waere.
 #
 # Einmalig einzurichten (Settings -> Secrets and variables -> Actions):
-#   Secret   CURSEFORGE_TOKEN         API-Token aus dem CurseForge-Konto
-#   Variable CURSEFORGE_PROJECT_ID    Projektnummer von der Projektseite
-#   Variable CURSEFORGE_GAME_VERSION  Name der Spielversion, z. B. 2.5.6
-#   Variable CURSEFORGE_VERSION_TYPE  optional, nur bei mehrdeutigem Namen
+#   Secret   CURSEFORGE_TOKEN       API-Token aus dem CurseForge-Konto
+#   Variable CURSEFORGE_PROJECT_ID  Projektnummer von der Projektseite
+#
+# Die Spielversion muss NICHT hinterlegt werden: Sie wird aus "## Interface:"
+# der TOC abgeleitet (20506 -> 2.5.6). Nur falls CurseForge sie einmal anders
+# benennt, gibt es die Notbremse CURSEFORGE_GAME_VERSION.
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
   workflow_dispatch:
     inputs:
       releaseType:
@@ -24,49 +28,85 @@ on:
         type: choice
         default: release
         options: [release, beta, alpha]
+      force:
+        description: "Auch hochladen, wenn der Tag zur Version schon steht"
+        type: boolean
+        default: false
+
+# Zum Setzen des Versions-Tags nach erfolgreichem Upload.
+permissions:
+  contents: write
+
+concurrency:
+  group: curseforge
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # Erst pruefen, dann veroeffentlichen. validate.mjs haelt unter anderem
-      # die fuenf Versionsangaben im Repository zusammen; laeuft das nicht
-      # durch, hat auf CurseForge nichts zu suchen.
-      - name: Pruefen
-        run: node tests/validate.mjs
-
-      - name: Version bestimmen
+      - name: Version und Spielfassung bestimmen
         id: version
+        env:
+          GAME_VERSION_OVERRIDE: ${{ vars.CURSEFORGE_GAME_VERSION }}
         run: |
           set -euo pipefail
-          version="$(sed -n 's/^## Version:[[:space:]]*//p' GuildCopilot/GuildCopilot.toc | tr -d '\r')"
-          if [ -z "$version" ]; then
-            echo "In der TOC steht keine Version." >&2
+          toc="GuildCopilot/GuildCopilot.toc"
+          version="$(sed -n 's/^## Version:[[:space:]]*//p' "$toc" | tr -d '\r')"
+          interface="$(sed -n 's/^## Interface:[[:space:]]*//p' "$toc" | tr -d '\r')"
+          if [ -z "$version" ] || [ -z "$interface" ]; then
+            echo "In der TOC fehlt Version oder Interface." >&2
             exit 1
           fi
-          # Beim Tag-Lauf muessen Tag und TOC dasselbe sagen. Sonst laedt man
-          # unter dem Namen v0.9.83 ein Paket hoch, das 0.9.82 enthaelt.
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            tagged="${GITHUB_REF_NAME#v}"
-            if [ "$tagged" != "$version" ]; then
-              echo "Tag ($tagged) und TOC ($version) sind verschieden." >&2
-              exit 1
-            fi
+          if [ -n "${GAME_VERSION_OVERRIDE:-}" ]; then
+            gameVersion="$GAME_VERSION_OVERRIDE"
+          else
+            # 20506 -> 2.5.6. So heisst die Fassung auch bei CurseForge.
+            gameVersion="$((interface / 10000)).$(((interface % 10000) / 100)).$((interface % 100))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Addon-Version: $version"
+          echo "gameVersion=$gameVersion" >> "$GITHUB_OUTPUT"
+          echo "Addon $version, Spielfassung $gameVersion (Interface $interface)"
+
+      # Der Tag ist das Gedaechtnis: Steht er, war diese Version schon oben.
+      # Das haelt auch einem erneuten Lauf, einem Force-Push oder einem
+      # nachgereichten Commit stand.
+      - name: Ist die Version neu?
+        id: check
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "Erzwungen - der vorhandene Tag $tag wird ignoriert."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag steht bereits - diese Version ist veroeffentlicht. Nichts zu tun."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$tag fehlt - Version ist neu."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Erst pruefen, dann veroeffentlichen. validate.mjs haelt unter anderem
+      # die Versionsangaben im Repository zusammen.
+      - name: Pruefen
+        if: steps.check.outputs.publish == 'true'
+        run: node tests/validate.mjs
 
       # Oberste Ebene ist der Ordner GuildCopilot. Der Companion-Ordner bleibt
       # draussen: CurseForge lehnt Archive mit ausfuehrbaren Dateien ab, und
       # dort liegen eine .cmd und eine .mjs.
       - name: Paket bauen
         id: package
+        if: steps.check.outputs.publish == 'true'
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
@@ -89,19 +129,31 @@ jobs:
           fi
 
       - name: Hochladen
+        if: steps.check.outputs.publish == 'true'
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
           CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
-          CURSEFORGE_GAME_VERSION: ${{ vars.CURSEFORGE_GAME_VERSION }}
+          CURSEFORGE_GAME_VERSION: ${{ steps.version.outputs.gameVersion }}
           CURSEFORGE_VERSION_TYPE: ${{ vars.CURSEFORGE_VERSION_TYPE }}
           ZIP_PATH: ${{ steps.package.outputs.zip }}
           VERSION: ${{ steps.version.outputs.version }}
           RELEASE_TYPE: ${{ inputs.releaseType || 'release' }}
         run: node .github/scripts/curseforge-upload.mjs
 
-      # Damit auch ohne CurseForge-Zugang nachvollziehbar ist, was hochging.
+      # Erst nach dem Upload. Ein Tag auf eine Version, die es nicht auf
+      # CurseForge geschafft hat, wuerde jeden weiteren Versuch blockieren.
+      - name: Version als veroeffentlicht markieren
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Auf CurseForge veroeffentlicht"
+          git push origin "$tag"
+
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: steps.check.outputs.publish == 'true'
         with:
           name: GuildCopilot-Addon-${{ steps.version.outputs.version }}
           path: ${{ steps.package.outputs.zip }}

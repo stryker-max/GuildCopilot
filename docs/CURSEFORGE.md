@@ -15,21 +15,25 @@ Project settings that belong with it:
 
 ## Releasing
 
-Uploading is automated. Pushing a version tag builds the archive and publishes
-it — the version in the tag must match `## Version:` in the TOC, or the run
-stops before anything is uploaded:
+There is no manual release step. **Raise `## Version:` in the TOC, push to
+`main`, done** — the rest happens by itself.
 
-```bash
-git tag v0.9.83 && git push origin v0.9.83
-```
+What decides whether a push publishes is the version number, not the push: if
+no tag `v<version>` exists yet, the version is new and goes out, and the run
+sets the tag afterwards. A second push on the same version does nothing. That
+survives re-runs and force-pushes, and it keeps CurseForge from receiving the
+same version twice.
 
 The workflow is `.github/workflows/curseforge.yml`, the upload itself
 `.github/scripts/curseforge-upload.mjs`. It runs `tests/validate.mjs` first,
 builds the archive without the `Companion` folder (that is where the `.cmd` and
 `.mjs` live), refuses an archive that still contains executables, and takes the
 release notes from the section of `CHANGELOG.md` that matches the version — a
-missing section fails the run. `workflow_dispatch` allows the same thing by hand
-with a choice of alpha/beta/release.
+missing section fails the run before anything is uploaded. The tag is set only
+after a successful upload, so a failed run can simply be repeated.
+
+`workflow_dispatch` exists for the rare case: choose alpha/beta instead of
+release, or force a re-upload of a version whose tag already stands.
 
 Configure once under **Settings → Secrets and variables → Actions**:
 
@@ -37,12 +41,14 @@ Configure once under **Settings → Secrets and variables → Actions**:
 | --- | --- | --- |
 | Secret | `CURSEFORGE_TOKEN` | API token from the CurseForge account |
 | Variable | `CURSEFORGE_PROJECT_ID` | project number from the project page |
-| Variable | `CURSEFORGE_GAME_VERSION` | game version name, e.g. `2.5.6` |
+| Variable | `CURSEFORGE_GAME_VERSION` | only as an override — normally derived |
 | Variable | `CURSEFORGE_VERSION_TYPE` | only if that name is ambiguous |
 
-The game version is resolved to CurseForge's numeric ID at runtime, because the
-mapping changes with every game patch. If the name does not exist, the run
-prints the available ones instead of failing blind.
+The game version normally needs no configuration: it comes from
+`## Interface:` in the TOC (`20506` → `2.5.6`). Its numeric CurseForge ID is
+resolved at runtime, because that mapping changes with every game patch — and
+if the name does not exist, the run prints the available ones instead of
+failing blind.
 
 The installer is untouched by all of this — it keeps pulling the addon straight
 from `main`.
