@@ -67,7 +67,7 @@ export function changelogSection(changelogPath, version) {
 // bis zur API durch; dann ist der Token in Ordnung und ein neuer aendert nichts.
 // Zu unterscheiden sind die beiden am Antwortkoerper: Die API antwortet knapp
 // und in JSON, ein Schutzwall mit einer HTML-Seite.
-function describeRejection(status, statusText, headers, body) {
+function describeRejection(status, statusText, headers, body, token) {
   const server = headers.get("server") ?? "?";
   const rayID = headers.get("cf-ray");
   const looksLikeHTML = /^\s*<(?:!doctype|html)/i.test(body);
@@ -88,15 +88,21 @@ function describeRejection(status, statusText, headers, body) {
       `freigeschaltet werden kann.`,
     );
   } else {
+    // Die Laenge gehoert direkt hierher, nicht nur in einen frueheren Schritt:
+    // Wer diese Meldung liest, will als naechstes wissen, ob ueberhaupt ein
+    // vollstaendiger Token ankam - und soll dafuer nicht im Log hochscrollen.
+    const length = (token ?? "").length;
     lines.push(
       ``,
-      `Die API selbst weist den Token zurueck. Der Reihe nach zu pruefen:`,
-      `  1. Ist der Token noch gueltig? Ein widerrufener antwortet genau so.`,
-      `     authors.curseforge.com -> Konto -> API Tokens.`,
-      `  2. Ist er vollstaendig eingefuegt? Der Schritt "Zugangsdaten suchen"`,
-      `     nennt seine Laenge; 36 Zeichen sind richtig.`,
-      `  3. Stammt er aus dem Autorenkonto (API Tokens) und nicht aus der`,
-      `     CurseForge-Core-API-Konsole? Nur der erste passt hierher.`,
+      `Die API selbst weist den Token zurueck - erreichbar ist sie also.`,
+      `Der hinterlegte Token ist ${length} Zeichen lang; richtig sind 36.`,
+      length === 36
+        ? `Die Laenge stimmt, er ist also vollstaendig eingefuegt - dann ist er`
+          + ` schlicht nicht mehr gueltig (widerrufen oder ersetzt).`
+        : `Die Laenge stimmt NICHT - er wurde beim Einfuegen abgeschnitten.`,
+      ``,
+      `Neuen Token holen: authors.curseforge.com -> Konto -> API Tokens.`,
+      `Er muss von dort stammen, nicht aus der CurseForge-Core-API-Konsole.`,
     );
   }
   lines.push(``, `Antwortanfang: ${snippet || "(leer)"}`);
@@ -111,7 +117,7 @@ async function api(pathname, token) {
     // Der Koerper enthaelt keine Zugangsdaten - der Token steht im Kopf der
     // ANFRAGE, nicht in der Antwort.
     const body = await response.text().catch(() => "");
-    fail(`${pathname}: ${describeRejection(response.status, response.statusText, response.headers, body)}`);
+    fail(`${pathname}: ${describeRejection(response.status, response.statusText, response.headers, body, token)}`);
   }
   return response.json();
 }
