@@ -55,7 +55,7 @@ env:
   #
   # Eine Variable oder ein Secret mit passendem Namen hat weiterhin Vorrang;
   # diese Zeile ist der Rueckfall, nicht die Vorschrift.
-  CURSEFORGE_PROJECT_ID_FIXED: ""
+  CURSEFORGE_PROJECT_ID_FIXED: "1635468"
 
 jobs:
   publish:
