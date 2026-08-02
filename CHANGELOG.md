@@ -7,6 +7,23 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.85 – Addon
+
+**Behoben**
+
+- **Leere Kästchen statt Symbolen.** In den Abmeldefeldern Von und Bis stand
+  seit 0.9.84 ein leerer Kasten, wo das Kalendersymbol hingehört: Die
+  Spielschrift kennt kein Emoji und zeichnet dafür ein Ersatzzeichen. Dasselbe
+  galt für die Blätterpfeile im Postfach. Beide Symbole werden jetzt gezeichnet
+  statt geschrieben und können deshalb nicht mehr fehlen.
+- **Ankreuzkästchen ohne Haken.** Ob ein Kästchen angekreuzt war, verriet nur
+  die Füllfarbe — der Haken lag hinter dem Kästchen und war in der ganzen
+  Oberfläche unsichtbar. Er steht jetzt sichtbar darin.
+- **Das goldene Häkchen neben „Bestätigen"** stammte aus Blizzards
+  Benutzeroberfläche und passte weder farblich noch stilistisch. Es ist jetzt
+  ein schlichter grüner Haken — dieselbe Farbe, in der das Addon überall
+  „erledigt" meldet. Ebenso in der Checkliste „Erste Schritte".
+
 ## 0.9.84 – Addon
 
 **Behoben**

@@ -298,6 +298,25 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.85 – Die Oberfläche zeichnet ihre Symbole selbst
+
+**„Die Symbole passen nicht."** In den Abmeldefeldern Von und Bis stand ein leerer Kasten, wo 0.9.84 ein Kalendersymbol versprochen hatte. Kein Installationsfehler – der Kasten steckte im ausgelieferten Code.
+
+**Die Ursache ist alt und dreimal dokumentiert.** Die Spielschrift kennt nur den WinANSI-Vorrat: ASCII, Latin-1 und die Satzzeichen aus Windows-1252. Alles darüber hinaus zeichnet der Client als leeres Rechteck. An drei Stellen in `UI.lua` steht deshalb seit Längerem der Hinweis „kein Pfeilzeichen, nimm ein Wort“, und `validate.mjs` verbot seit 0.9.45 ausdrücklich „☆“ und „★“. Nur war das eine Liste bekannter Ausrutscher, keine Regel – und `📅` stand nicht darauf. Für einen Fließtext taugt „nimm ein Wort“ ohnehin, für einen Knopf von 26 Pixeln nicht.
+
+**Der zweite Weg war Blizzards Bildmaterial**, und der hat neben „Bestätigen“ ein goldenes, gemaltes Häkchen hinterlassen: `Interface\Buttons\UI-CheckBox-Check`. Es fehlt nie, aber es bringt seine eigene Farbe und seinen eigenen Stil mit und steht in dieser flachen, cyanfarbenen Oberfläche als Fremdkörper.
+
+**Beides fällt jetzt weg.** Die paar Zeichen, die diese Oberfläche braucht, malt sie selbst – aus derselben weißen Fläche, aus der schon Rahmen, Karten und Knöpfe bestehen:
+
+- `CreateMark` ist ein kleiner eigener Rahmen. Beschrieben wird jede Form im Feld `0..1` der Kantenlänge, damit sie in jeder Größe dieselbe bleibt. Schräges entsteht als **Treppe aus Quadraten** – eine gedrehte Fläche gibt die Oberfläche nicht her, und der Abstand ist die halbe Strichstärke: weiter auseinander zerfällt die Linie sichtbar in Punkte;
+- **Rahmen und nicht Textur**, und das ist zugleich der zweite Fehler dieser Version. Ein Kindrahmen liegt in WoW immer über den Flächen seines Elternteils, gleich welche Zeichenebene die Textur angibt. Das Häkchen der Ankreuzkästchen lag als Textur auf dem Schalter, der farbige Kasten darüber ist ein Kindrahmen – **das Häkchen war damit in der gesamten Oberfläche unsichtbar**, in jedem Kanalkästchen, jedem Rangschalter, bei „Main“ und „Twink“. Angekreuzt erkannte man nur noch an der Füllung. Es sitzt jetzt im Kasten und wird dunkel gezeichnet – die Füllung eines angekreuzten Kastens ist hell, ein helles Häkchen darauf wäre wieder eins, das man suchen muss;
+- gezeichnet werden drei Formen: **Haken** (zwei Striche), **Kalenderblatt** (zwei Ösen, Kopfleiste, Rahmen, drei mal zwei Tagesfelder – weniger ist nicht wiederzuerkennen, mehr läuft bei 17 Pixeln ineinander) und **Dreieck** (waagerechte Streifen; die Spitze bleibt ein kurzer Stummel, sonst verschwindet sie ganz);
+- damit verschwinden auch die verbliebenen Schriftzeichen: der Monatswechsel im Kalenderblatt trug „‹ ›“, die Postfach-Blätterknöpfe „◀ ▶“ – geometrische Formen, also derselbe leere Kasten;
+- das goldene Häkchen neben „Bestätigen“ und in der Checkliste „Erste Schritte“ ist jetzt ein **grüner Haken** in `THEME.success`, der Farbe, in der das Addon überall „erledigt“ meldet;
+- ein Knopf mit Symbol blendet beim Sperren mit ab. Vorher hing das allein an der Beschriftung – ein gesperrter Seitenwechsel hätte bedienbar ausgesehen.
+
+**Die Prüfung deckt jetzt den ganzen Zeichenvorrat ab.** `validate.mjs` liest jede Lua-Zeile und lehnt jedes Zeichen außerhalb von WinANSI ab, statt eine Liste bekannter Fälle zu führen. Reine Kommentarzeilen sind ausgenommen: Dort steht ein solches Zeichen genau deshalb, weil erklärt wird, warum es nicht in die Oberfläche gehört. Gegengeprüft mit einem eingeschmuggelten `📅`, das die Prüfung mit Datei, Zeile und Codepunkt meldet.
+
 ## 0.9.84 – Abmeldung: Eingaben bleiben stehen, Datum per Kalender
 
 Aus der Gilde kamen zwei Rückmeldungen zum selben Feld, und die zweite erklärt die erste.

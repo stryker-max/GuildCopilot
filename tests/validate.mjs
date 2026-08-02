@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.84",
+  "## Version: 0.9.85",
 ];
 
 for (const entry of requiredMetadata) {
@@ -223,7 +223,12 @@ for (const label of requiredLabels) {
 
 const requiredImplementations = [
   ["explizites Zuklappen der Klassenkarte", /if page\.expandedClass == currentClass then\s+page\.expandedClass = nil/],
-  ["sichtbares Kanal-Häkchen", /UI-CheckBox-Check/],
+  // Das Häkchen muss im Kasten sitzen, nicht auf dem Schalter: Der Kasten ist
+  // ein Kindrahmen und deckt jede Textur seines Elternteils ab. Genau so war
+  // das Häkchen in der ganzen Oberfläche unsichtbar.
+  ["sichtbares Kanal-Häkchen", /toggle\.mark = CreateCheckMark\(toggle\.box,/],
+  ["selbst gezeichnete Symbole", /local function CreateMark\(parent, size\)/],
+  ["Kalendersymbol statt Emoji", /SetButtonMark\(pick, CreateCalendarMark\(pick/],
   ["sortierbare Auswahl", /MoveSelectedClass/],
   ["Priorität im Werbetext", /dringend/],
   ["editierbare Antwortvorschau", /Antwortvorschau\s+•\s+editierbar/],
@@ -645,18 +650,18 @@ if (!/CreateButton\(header, "Einrichtung"/.test(uiSource)) {
   throw new Error("Der Knopf „Einrichtung“ fehlt im Fensterkopf.");
 }
 // Die Spielschrift kennt weder Haken noch Pfeil und zeichnet leere Kästen -
-// dieselbe Lektion wie bei der Profilbestätigung in 0.9.39.
+// dieselbe Lektion wie bei der Profilbestätigung in 0.9.39. Gezeichnet wird
+// der Haken seit 0.9.85 selbst; Blizzards goldene Hakentextur passte nicht in
+// diese flache Oberfläche.
 const onboardingCard = uiSource.slice(
   uiSource.indexOf("function GC.UI:BuildOnboardingCard"),
   uiSource.indexOf("function GC.UI:RefreshOnboarding")
 );
-for (const glyph of ["✓", "►", "○"]) {
-  if (onboardingCard.includes(glyph)) {
-    throw new Error(`Die Checkliste zeichnet ihre Zustände wieder als Schriftzeichen (${glyph}).`);
-  }
+if (!/row\.mark = CreateCheckMark\(row,/.test(onboardingCard)) {
+  throw new Error("Der erledigte Schritt wird nicht mehr mit einem Haken markiert.");
 }
-if (!onboardingCard.includes("UI-CheckBox-Check")) {
-  throw new Error("Der erledigte Schritt wird nicht mehr mit der Hakentextur markiert.");
+if (uiSource.includes("UI-CheckBox-Check")) {
+  throw new Error("Blizzards goldene Hakentextur ist wieder in der Oberfläche.");
 }
 
 // GetProfessions ist eine Retail-API und im Anniversary-Client nicht
@@ -832,8 +837,46 @@ if (!gearPage.includes("page.gearFindings:SetPoint")) {
   throw new Error("Der Funde-Block fehlt auf der Ausrüstungsseite.");
 }
 
-if (uiSource.includes("☆") || uiSource.includes("★")) {
-  throw new Error("Nicht unterstützte Unicode-Sterne werden noch als Favoritensymbole verwendet.");
+// Die WoW-Schrift kennt nur den WinANSI-Vorrat: ASCII, Latin-1 und die
+// Satzzeichen aus Windows-1252. Alles darüber hinaus — Pfeile, geometrische
+// Formen, Emoji — zeichnet der Client als leeren Kasten. Diese Prüfung gab es
+// bisher nur für „☆" und „★"; die Sterne waren aber nur der erste Fall. Später
+// kam „📅" in den Datumsfeldern der Abmeldung dazu, und derselbe leere Kasten
+// stand wieder in der Oberfläche. Deshalb jetzt der ganze Zeichenvorrat statt
+// einer Liste bekannter Ausrutscher.
+//
+// Reine Kommentarzeilen sind ausgenommen: Dort steht ein solches Zeichen genau
+// deshalb, weil erklärt wird, warum es nicht in die Oberfläche gehört.
+const winAnsiPunctuation = new Set(
+  "€‚ƒ„…†‡ˆ‰Š‹ŒŽ" +
+    "‘’“”•–—˜™š›œžŸ"
+);
+const rendersInWowFont = (character) => {
+  const code = character.codePointAt(0);
+  if (code === 0x09 || code === 0x0a || code === 0x0d) return true;
+  if (code >= 0x20 && code <= 0x7e) return true;
+  if (code >= 0xa0 && code <= 0xff) return true;
+  return winAnsiPunctuation.has(character);
+};
+
+for (const file of luaFiles) {
+  const lines = fs.readFileSync(path.join(root, file), "utf8").split("\n");
+  lines.forEach((line, index) => {
+    if (/^\s*--/.test(line)) {
+      return;
+    }
+    for (const character of line) {
+      if (rendersInWowFont(character)) {
+        continue;
+      }
+      const code = character.codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+      throw new Error(
+        `${file}:${index + 1} verwendet „${character}" (U+${code}); ` +
+          "die WoW-Schrift zeichnet dafür einen leeren Kasten. " +
+          "Ein Symbol gehört in UI.lua zu CreateMark, ein Pfeil wird ein Wort."
+      );
+    }
+  });
 }
 
 console.log(`OK: ${luaFiles.length} Lua-Dateien und die TOC-Struktur wurden geprüft.`);

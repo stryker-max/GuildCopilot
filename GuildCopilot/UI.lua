@@ -276,6 +276,128 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     return button
 end
 
+-- === Eigene Symbole =======================================================
+--
+-- Die WoW-Schrift kennt nur den WinANSI-Vorrat. Alles darueber hinaus -
+-- "📅", "◀", "←" - zeichnet der Client als leeren Kasten. Genau das stand
+-- zuletzt in den beiden Datumsfeldern der Abmeldung, und an drei Stellen im
+-- Code steht deshalb schon der Hinweis "kein Pfeilzeichen, nimm ein Wort".
+-- Fuer Saetze taugt das, fuer einen Knopf von 26 Pixeln nicht.
+--
+-- Blizzards fertige Symbole waeren der andere Weg. Sie sind der Grund, warum
+-- neben "Bestaetigen" bisher ein goldenes Haekchen stand: gemalt, gerahmt,
+-- glaenzend - in dieser flachen Oberflaeche ein Fremdkoerper.
+--
+-- Die paar Zeichen, die diese Oberflaeche braucht, malt sie deshalb selbst,
+-- aus derselben weissen Flaeche, aus der schon Rahmen, Karten und Knoepfe
+-- bestehen. Sie nehmen die Themenfarbe an, koennen nicht fehlen und sehen auf
+-- jedem Rechner gleich aus.
+
+-- Ein Symbol ist ein eigener kleiner Rahmen und wird gesetzt wie jedes andere
+-- Bedienelement. Rahmen und nicht Textur aus einem Grund: Ein Kindrahmen liegt
+-- immer ueber den Flaechen seines Elternteils, eine Textur nicht - daran ist
+-- das Haekchen der Kaestchen bisher gescheitert.
+--
+-- Beschrieben wird jede Form im Feld 0..1 der Kantenlaenge; damit bleibt sie
+-- in jeder Groesse dieselbe.
+local function CreateMark(parent, size)
+    local mark = CreateFrame("Frame", nil, parent)
+    mark:SetSize(size, size)
+    mark.size = size
+    mark.pieces = {}
+
+    -- x, y, Breite, Hoehe als Anteil der Kantenlaenge; y zaehlt von oben.
+    function mark:AddArea(x, y, width, height)
+        local piece = self:CreateTexture(nil, "OVERLAY")
+        piece:SetSize(math.max(1, width * self.size), math.max(1, height * self.size))
+        piece:SetPoint("TOPLEFT", self, "TOPLEFT", x * self.size, -y * self.size)
+        self.pieces[#self.pieces + 1] = piece
+        return piece
+    end
+
+    -- Ein schraeger Strich als Reihe ueberlappender Quadrate: Eine gedrehte
+    -- Flaeche gibt die Oberflaeche nicht her. Der Abstand ist die halbe
+    -- Strichstaerke - weiter auseinander zerfaellt die Linie sichtbar in
+    -- Punkte, enger kostet nur Flaechen ohne Gewinn.
+    function mark:AddStroke(fromX, fromY, toX, toY, thickness)
+        local steps = math.max(1, math.ceil(
+            math.max(math.abs(toX - fromX), math.abs(toY - fromY)) / (thickness * 0.5)))
+        for step = 0, steps do
+            local part = step / steps
+            self:AddArea(
+                fromX + (toX - fromX) * part - thickness * 0.5,
+                fromY + (toY - fromY) * part - thickness * 0.5,
+                thickness, thickness)
+        end
+    end
+
+    function mark:SetColor(color)
+        self.color = color
+        for _, piece in ipairs(self.pieces) do
+            SetTextureColor(piece, color)
+        end
+    end
+
+    return mark
+end
+
+-- Haekchen: kurzer Strich nach unten, langer nach oben.
+local function CreateCheckMark(parent, size, color)
+    local mark = CreateMark(parent, size)
+    mark:AddStroke(0.24, 0.52, 0.44, 0.74, 0.20)
+    mark:AddStroke(0.44, 0.74, 0.80, 0.26, 0.20)
+    mark:SetColor(color or THEME.success)
+    return mark
+end
+
+-- Kalenderblatt: zwei Oesen, Kopfleiste, Rahmen, sechs Tagesfelder. Weniger
+-- ist nicht wiederzuerkennen, mehr laeuft bei dieser Groesse ineinander.
+local function CreateCalendarMark(parent, size, color)
+    local mark = CreateMark(parent, size)
+    mark:AddArea(0.26, 0.00, 0.10, 0.18)
+    mark:AddArea(0.64, 0.00, 0.10, 0.18)
+    mark:AddArea(0.06, 0.10, 0.88, 0.12)
+    mark:AddArea(0.06, 0.22, 0.08, 0.72)
+    mark:AddArea(0.86, 0.22, 0.08, 0.72)
+    mark:AddArea(0.06, 0.86, 0.88, 0.08)
+    for column = 0, 2 do
+        for row = 0, 1 do
+            mark:AddArea(0.22 + column * 0.22, 0.36 + row * 0.24, 0.12, 0.14)
+        end
+    end
+    mark:SetColor(color or THEME.accent)
+    return mark
+end
+
+-- Dreieck aus waagerechten Streifen. Die Spitze bleibt ein kurzer Stummel,
+-- sonst verschwindet sie bei diesen Kantenlaengen ganz.
+local ARROW_MARK_ROWS = 7
+
+local function CreateArrowMark(parent, size, direction, color)
+    local mark = CreateMark(parent, size)
+    local thickness = 0.70 / ARROW_MARK_ROWS
+    local middle = (ARROW_MARK_ROWS - 1) / 2
+    for row = 0, ARROW_MARK_ROWS - 1 do
+        local width = 0.10 + 0.56 * (1 - math.abs(row - middle) / middle)
+        mark:AddArea(
+            direction == "LEFT" and (0.76 - width) or 0.24,
+            0.15 + row * thickness,
+            width, thickness)
+    end
+    mark:SetColor(color or THEME.text)
+    return mark
+end
+
+-- Ein Knopf traegt entweder Text oder ein Symbol. Beides zugleich passt in die
+-- Kantenlaengen nicht, um die es hier ueberhaupt geht.
+local function SetButtonMark(button, mark)
+    button:SetText("")
+    mark:ClearAllPoints()
+    mark:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button.mark = mark
+    return button
+end
+
 -- Live, per Addon verteilt oder aus Warcraft Logs nachgereicht.
 local SESSION_SOURCE_LABEL = {
     LIVE = "Live",
@@ -308,6 +430,11 @@ local function SetButtonEnabled(button, enabled)
         button:Disable()
     end
     button.label:SetAlpha(enabled and 1 or 0.45)
+    -- Traegt der Knopf ein Symbol statt einer Beschriftung, muss das Symbol
+    -- mit abblenden: Sonst sieht ein gesperrter Seitenwechsel bedienbar aus.
+    if button.mark then
+        button.mark:SetAlpha(enabled and 1 or 0.45)
+    end
 end
 
 local function CreateToggle(parent, text, onClick)
@@ -315,10 +442,17 @@ local function CreateToggle(parent, text, onClick)
     toggle:SetSize(22, 22)
     toggle.box = CreatePanel(toggle, THEME.input)
     toggle.box:SetAllPoints()
-    toggle.mark = toggle:CreateTexture(nil, "OVERLAY")
-    toggle.mark:SetPoint("TOPLEFT", toggle, "TOPLEFT", -4, 4)
-    toggle.mark:SetPoint("BOTTOMRIGHT", toggle, "BOTTOMRIGHT", 4, -4)
-    toggle.mark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    -- Das Haekchen gehoert in den Kasten, nicht auf den Schalter.
+    --
+    -- Es lag hier als Textur auf dem Schalter, der Kasten darueber ist ein
+    -- Kindrahmen - und ein Kindrahmen deckt die Flaechen seines Elternteils ab,
+    -- gleich welche Zeichenebene die Textur angibt. Das Haekchen war damit in
+    -- jedem Kaestchen der Oberflaeche unsichtbar; angekreuzt erkannte man nur
+    -- noch an der Fuellung. Gezeichnet wird es dunkel: Die Fuellung eines
+    -- angekreuzten Kastens ist hell, und ein helles Haekchen darauf waere
+    -- wieder eins, das man suchen muss.
+    toggle.mark = CreateCheckMark(toggle.box, 16, THEME.window)
+    toggle.mark:SetPoint("CENTER", toggle.box, "CENTER", 0, 0)
     toggle.text = CreateLabel(toggle, text)
     toggle.text:SetPoint("LEFT", toggle, "RIGHT", 8, 0)
 
@@ -539,13 +673,15 @@ function GC.UI:BuildDatePicker()
     picker:EnableMouse(true)
     self.datePicker = picker
 
-    picker.previous = CreateButton(picker, "‹", 26, 24, function()
+    picker.previous = CreateButton(picker, "", 26, 24, function()
         GC.UI:ShiftDatePicker(-1)
     end)
+    SetButtonMark(picker.previous, CreateArrowMark(picker.previous, 12, "LEFT"))
     picker.previous:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -10)
-    picker.next = CreateButton(picker, "›", 26, 24, function()
+    picker.next = CreateButton(picker, "", 26, 24, function()
         GC.UI:ShiftDatePicker(1)
     end)
+    SetButtonMark(picker.next, CreateArrowMark(picker.next, 12, "RIGHT"))
     picker.next:SetPoint("TOPRIGHT", picker, "TOPRIGHT", -12, -10)
     picker.heading = CreateLabel(picker, "", {
         align = "CENTER",
@@ -2116,10 +2252,11 @@ function GC.UI:BuildOnboardingCard(page, content)
         row.dot:SetTexture(WHITE_TEXTURE)
         row.dot:SetPoint("TOPLEFT", row, "TOPLEFT", 5, -5)
 
-        row.mark = row:CreateTexture(nil, "OVERLAY")
-        row.mark:SetSize(22, 22)
-        row.mark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-        row.mark:SetPoint("TOPLEFT", row, "TOPLEFT", -1, 3)
+        -- Der erledigte Schritt traegt ein Haekchen an der Stelle, an der
+        -- sonst der Punkt steht - in derselben gruenen Farbe, in der die
+        -- Oberflaeche ueberall "erledigt" meldet.
+        row.mark = CreateCheckMark(row, 16, THEME.success)
+        row.mark:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -2)
         row.mark:Hide()
 
         row.label = CreateLabel(row, "", { width = 420, height = 18 })
@@ -2417,9 +2554,7 @@ function GC.UI:BuildRosterPage()
     -- Der Erfolgsfall braucht keine Worte: ein Haken genuegt, und ein Datum
     -- passte neben dem Knopf ohnehin nicht hin. Nur ein Fehlschlag muss
     -- erklaeren, was zu tun ist.
-    page.profileStatusMark = profileCard:CreateTexture(nil, "OVERLAY")
-    page.profileStatusMark:SetSize(28, 28)
-    page.profileStatusMark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    page.profileStatusMark = CreateCheckMark(profileCard, 22, THEME.success)
     page.profileStatusMark:SetPoint("LEFT", confirm, "RIGHT", 8, 0)
     page.profileStatusMark:Hide()
 
@@ -2509,12 +2644,17 @@ function GC.UI:BuildRosterPage()
         if field.calendar then
             -- Das Kalendersymbol sitzt im Feld rechts; getippt werden darf
             -- weiterhin, der Kalender ist das Angebot, nicht die Pflicht.
-            local pick = CreateButton(absenceCard, "📅", 26, 26, function()
+            --
+            -- Gezeichnet, nicht geschrieben: Hier stand ein "📅", und die
+            -- WoW-Schrift kennt kein einziges Emoji - in beiden Feldern stand
+            -- deshalb ein leerer Kasten.
+            local pick = CreateButton(absenceCard, "", 26, 26, function()
                 GC.UI:OpenDatePicker(edit, function(iso)
                     edit:SetText(iso)
                     page.absenceDirty = true
                 end)
             end)
+            SetButtonMark(pick, CreateCalendarMark(pick, 17))
             pick:SetPoint("RIGHT", edit.container, "RIGHT", -4, 0)
             page.absenceEdits[field.key .. "_PICK"] = pick
         end
@@ -5620,17 +5760,19 @@ function GC.UI:BuildInboxPage()
     -- Ab dem zehnten Interessenten war der Rest bisher unerreichbar: Es gab
     -- weder eine Seitennavigation noch einen Hinweis, und einzeln loeschen liess
     -- sich nur, was auf der ersten Seite stand.
-    page.leadPrev = CreateButton(leadCard, "◀", 34, 26, function()
+    page.leadPrev = CreateButton(leadCard, "", 34, 26, function()
         page.leadPage = math.max(1, (page.leadPage or 1) - 1)
         GC.UI:RefreshInbox()
     end)
+    SetButtonMark(page.leadPrev, CreateArrowMark(page.leadPrev, 13, "LEFT"))
     page.leadPrev:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, -444)
     page.leadPageLabel = CreateLabel(leadCard, "", { muted = true, width = 108, align = "CENTER" })
     page.leadPageLabel:SetPoint("LEFT", page.leadPrev, "RIGHT", 6, 0)
-    page.leadNext = CreateButton(leadCard, "▶", 34, 26, function()
+    page.leadNext = CreateButton(leadCard, "", 34, 26, function()
         page.leadPage = (page.leadPage or 1) + 1
         GC.UI:RefreshInbox()
     end)
+    SetButtonMark(page.leadNext, CreateArrowMark(page.leadNext, 13, "RIGHT"))
     page.leadNext:SetPoint("LEFT", page.leadPageLabel, "RIGHT", 6, 0)
     page.clearInboxButton = CreateButton(leadCard, "Alle löschen", 188, 30, function()
         if not page.confirmClearInbox then
