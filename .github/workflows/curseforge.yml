@@ -13,6 +13,8 @@ name: CurseForge
 # Einmalig einzurichten (Settings -> Secrets and variables -> Actions):
 #   Secret   CURSEFORGE_TOKEN       API-Token aus dem CurseForge-Konto
 #   Variable CURSEFORGE_PROJECT_ID  Projektnummer von der Projektseite
+# Die Projektnummer wird auch als Secret angenommen - die beiden Reiter sind
+# leicht zu verwechseln, und daran soll die Einrichtung nicht scheitern.
 #
 # Die Spielversion muss NICHT hinterlegt werden: Sie wird aus "## Interface:"
 # der TOC abgeleitet (20506 -> 2.5.6). Nur falls CurseForge sie einmal anders
@@ -83,7 +85,12 @@ jobs:
         id: check
         env:
           HAS_TOKEN: ${{ secrets.CURSEFORGE_TOKEN != '' }}
-          HAS_PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID != '' }}
+          # Die Projektnummer ist kein Geheimnis und gehoert deshalb unter
+          # "Variables". Sie steht dort aber in einem ANDEREN Reiter als der
+          # Token, und genau daran ist die Einrichtung schon einmal gescheitert:
+          # Token eingetragen, Projektnummer nicht gefunden, Lauf endet gruen und
+          # laedt trotzdem nichts hoch. Beide Ablagen werden deshalb akzeptiert.
+          HAS_PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID != '' || secrets.CURSEFORGE_PROJECT_ID != '' }}
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
@@ -91,8 +98,40 @@ jobs:
           # vergessen worden - es ist schlicht noch nicht eingerichtet. Der Lauf
           # sagt das und endet gruen; ein dauerhaft rotes Repository waere nur
           # Laerm, den man nach zwei Tagen ignoriert.
+          #
+          # Gesagt wird aber, WAS genau fehlt, und zwar auch in der
+          # Zusammenfassung des Laufs: Eine Notiz an einem gruenen Haken sieht
+          # niemand, der nicht ohnehin schon sucht.
           if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
-            echo "::notice::CurseForge ist noch nicht eingerichtet - es fehlt das Secret CURSEFORGE_TOKEN oder die Variable CURSEFORGE_PROJECT_ID. Siehe docs/CURSEFORGE.md. Version $tag wurde NICHT veroeffentlicht."
+            missing=""
+            if [ "$HAS_TOKEN" != "true" ]; then
+              missing="das Secret CURSEFORGE_TOKEN"
+            fi
+            if [ "$HAS_PROJECT" != "true" ]; then
+              if [ -n "$missing" ]; then
+                missing="$missing und die Variable CURSEFORGE_PROJECT_ID"
+              else
+                missing="die Variable CURSEFORGE_PROJECT_ID"
+              fi
+            fi
+            echo "::notice::CurseForge ist nicht eingerichtet - es fehlt $missing. Version $tag wurde NICHT veroeffentlicht."
+            {
+              echo "## CurseForge: $tag wurde nicht veroeffentlicht"
+              echo
+              echo "Es fehlt **$missing**."
+              echo
+              echo "Einzutragen unter *Settings -> Secrets and variables -> Actions*:"
+              echo
+              echo "| Reiter | Name | Wert |"
+              echo "| --- | --- | --- |"
+              echo "| Secrets | \`CURSEFORGE_TOKEN\` | API-Token aus dem CurseForge-Konto |"
+              echo "| Variables | \`CURSEFORGE_PROJECT_ID\` | Projektnummer von der Projektseite |"
+              echo
+              echo "Die Projektnummer wird auch als Secret angenommen, falls sie dort landet."
+              echo
+              echo "Danach genuegt *Actions -> CurseForge -> Run workflow*;"
+              echo "\`$tag\` geht dann nachtraeglich raus, ohne neuen Push."
+            } >> "$GITHUB_STEP_SUMMARY"
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -144,7 +183,7 @@ jobs:
         if: steps.check.outputs.publish == 'true'
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
-          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID || secrets.CURSEFORGE_PROJECT_ID }}
           CURSEFORGE_GAME_VERSION: ${{ steps.version.outputs.gameVersion }}
           CURSEFORGE_VERSION_TYPE: ${{ vars.CURSEFORGE_VERSION_TYPE }}
           ZIP_PATH: ${{ steps.package.outputs.zip }}
@@ -163,6 +202,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" -m "Auf CurseForge veroeffentlicht"
           git push origin "$tag"
+          {
+            echo "## Auf CurseForge veroeffentlicht: $tag"
+            echo
+            echo "Spielfassung ${{ steps.version.outputs.gameVersion }}, Tag \`$tag\` gesetzt."
+            echo "Ein weiterer Push zu dieser Version laedt nichts mehr hoch."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: steps.check.outputs.publish == 'true'
