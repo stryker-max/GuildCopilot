@@ -81,9 +81,21 @@ jobs:
       # nachgereichten Commit stand.
       - name: Ist die Version neu?
         id: check
+        env:
+          HAS_TOKEN: ${{ secrets.CURSEFORGE_TOKEN != '' }}
+          HAS_PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID != '' }}
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
+          # Solange Token oder Projektnummer fehlen, ist nichts einzurichten
+          # vergessen worden - es ist schlicht noch nicht eingerichtet. Der Lauf
+          # sagt das und endet gruen; ein dauerhaft rotes Repository waere nur
+          # Laerm, den man nach zwei Tagen ignoriert.
+          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
+            echo "::notice::CurseForge ist noch nicht eingerichtet - es fehlt das Secret CURSEFORGE_TOKEN oder die Variable CURSEFORGE_PROJECT_ID. Siehe docs/CURSEFORGE.md. Version $tag wurde NICHT veroeffentlicht."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "${{ inputs.force }}" = "true" ]; then
             echo "Erzwungen - der vorhandene Tag $tag wird ignoriert."
             echo "publish=true" >> "$GITHUB_OUTPUT"
