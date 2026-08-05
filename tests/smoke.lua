@@ -1673,16 +1673,25 @@ for _, summaryMessage in ipairs(summaryMessages) do
 end
 local receivedSummary = addon.RaidMonitor:GetSummaries()[1]
 assert(receivedSummary ~= nil, "Die verteilte Auswertung wurde nicht übernommen")
-assert(receivedSummary.source == "SYNC", "Übernommene Daten sind nicht als Sync gekennzeichnet")
+-- Die Quelle nennt seit 0.9.89 den Aufzeichner. Ohne den Namen überschrieben
+-- sich zwei fremde Mitschnitte desselben Abends gegenseitig - und genau den
+-- zweiten braucht die Reparatur.
+assert(receivedSummary.source == "SYNC:Heiler",
+    "Übernommene Daten nennen nicht den Aufzeichner: " .. tostring(receivedSummary.source))
 assert(#receivedSummary.participants == 3, "Die übernommene Auswertung ist unvollständig")
 
--- Ein einfaches Raidmitglied darf keine Auswertung setzen.
+-- Auch ein einfaches Raidmitglied darf seinen Mitschnitt teilen. Es war dabei
+-- und hat mitgeschrieben; sein Rang ändert daran nichts, und ohne seine
+-- Fassung ließe sich eine fremde Lücke gar nicht schließen. Abgelegt wird sie
+-- unter SEINEM Namen und ersetzt nie den eigenen Mitschnitt.
 addon.DB:GetGuild().raidSessions = {}
 for _, summaryMessage in ipairs(summaryMessages) do
     addon.Sync:OnMessage("GuildCopilot", summaryMessage, "RAID", "Schurke-Realm")
 end
-assert(#addon.RaidMonitor:GetSummaries() == 0,
-    "Ein einfaches Raidmitglied konnte eine Auswertung einspielen")
+assert(#addon.RaidMonitor:GetSummaries() == 1,
+    "Der Mitschnitt eines einfachen Raidmitglieds wurde verworfen")
+assert(addon.RaidMonitor:GetSummaries()[1].source == "SYNC:Schurke",
+    "Der Mitschnitt wurde nicht dem richtigen Aufzeichner zugeordnet")
 
 -- Offiziere außerhalb des Raids fragen an; geantwortet wird per Flüstern,
 -- nicht über den offenen Gildenkanal.
@@ -1728,14 +1737,29 @@ assert(chatMessages[#chatMessages]:find("ausgewertet", 1, true),
     "Das Sitzungsende wurde nicht zusätzlich im Chat gemeldet")
 
 -- Auch eine abgelehnte Aktion meldet sich in beiden Kanälen.
+--
+-- Seit 0.9.89 ist das NICHT mehr der Sitzungsstart: Den darf jeder, weil er
+-- ausschließlich in den eigenen Mitschnitt schreibt. Rangbeschränkt bleibt,
+-- was auf fremde Daten wirkt - das Löschen einer Auswertung.
 raidRoster = {}
 addon.DB:GetGuild().memberCare.accessRanks = {}
+addon.DB:GetGuild().memberCare.accessRanksConfigured = true
 chatCountBefore = #chatMessages
-statisticsPage.sessionButton.scripts.OnClick()
-assert(statisticsPage.actionStatus.value:find("freigegebenen Gildenränge", 1, true),
-    "Die Ablehnung wird nicht in der Oberfläche gemeldet")
-assert(chatMessages[#chatMessages]:find("freigegebenen Gildenränge", 1, true),
+statisticsPage.deleteSessionButton.scripts.OnClick()
+statisticsPage.deleteSessionButton.scripts.OnClick()
+assert(statisticsPage.actionStatus.value:find("freigegebenen Ränge", 1, true),
+    "Die Ablehnung wird nicht in der Oberfläche gemeldet: "
+        .. tostring(statisticsPage.actionStatus.value))
+assert(chatMessages[#chatMessages]:find("freigegebenen Ränge", 1, true),
     "Die Ablehnung wurde nicht zusätzlich im Chat gemeldet")
+
+-- Und der Gegenbeweis zum gemeldeten Fehler: Ein Sitzungsstart wird jetzt
+-- NICHT mehr am Rang abgelehnt.
+addon.RaidMonitor.session = nil
+statisticsPage.sessionButton.scripts.OnClick()
+assert(addon.RaidMonitor.session ~= nil,
+    "Ohne freigegebenen Rang lässt sich keine eigene Sitzung starten")
+addon.RaidMonitor.session = nil
 
 -- Die Teilnehmertabelle selbst bleibt in der Oberfläche und wird nicht
 -- zeilenweise in den Chat geschrieben.
@@ -2676,15 +2700,36 @@ do
     assert(addon.RaidMonitor.session.id == "spaet-1",
         "Ein fremder Herzschlag hat die laufende Sitzung ausgetauscht")
 
-    -- Ohne Steuerungsrecht wird ein Herzschlag gar nicht erst angenommen.
+    -- Der gemeldete Fehler, als Test festgehalten.
+    --
+    -- Bis 0.9.88 verwarf der Empfänger jede Sitzungsnachricht, deren ABSENDER
+    -- in seiner eigenen Sicht kein Steuerungsrecht hatte - geprüft am
+    -- Gildenrang im lokalen Rosterabbild. Wen diese Einstellung noch nicht
+    -- erreicht hatte oder wessen Roster den Absender nicht kannte, der bekam
+    -- weder den Startruf noch einen der 60-Sekunden-Herzschläge mit. Der
+    -- Starter sah eine normal laufende Sitzung, der Empfänger hatte den Abend
+    -- schlicht nicht in seinen Einträgen.
+    --
+    -- Ein Herzschlag trägt nur das Etikett des Abends. Er wird deshalb von
+    -- jedem angenommen, unabhängig vom Rang des Absenders.
     addon.RaidMonitor.session = nil
     addon.RaidMonitor:ClearPersistedSession()
+    addon.DB:GetGuild().memberCare.accessRanks = {}
+    addon.DB:GetGuild().memberCare.accessRanksConfigured = true
     addon.RaidMonitor:OnMessage(table.concat({
         "RH", tostring(addon.Constants.SCHEMA_VERSION), "fremd-1",
-        tostring(currentTime), "Karazhan", "Schurke",
+        tostring(currentTime - 900), "Karazhan", "Schurke",
     }, "|"), "Schurke-Realm", "RAID")
-    assert(addon.RaidMonitor.session == nil,
-        "Ein Herzschlag ohne Steuerungsrecht startet trotzdem eine Sitzung")
+    assert(addon.RaidMonitor.session ~= nil,
+        "Ein Herzschlag ohne Steuerungsrecht des Absenders wird weiterhin verworfen")
+    assert(addon.RaidMonitor.session.id == "fremd-1",
+        "Der Nachzügler schreibt nicht denselben Abend mit")
+    -- Wer 15 Minuten nach Beginn einsteigt, hat 15 Minuten nicht gesehen.
+    assert(#(addon.RaidMonitor.session.gaps or {}) == 1,
+        "Der späte Einstieg hinterlässt keine Lücke")
+    assert(addon.RaidMonitor:SessionIsComplete() == false,
+        "Ein später Einstieg gilt als lückenloser Mitschnitt")
+    addon.DB:GetGuild().memberCare.accessRanksConfigured = false
 
     raidRoster = {}
     addon.DB:GetGuild().raidSessions = {}
@@ -6540,8 +6585,9 @@ do
         "Der Gleichstand wird nicht eindeutig aufgelöst")
 
     -- Der eigentliche Fall: Ich habe gerade selbst gestartet, im selben Moment
-    -- trifft der Startruf des anderen ein. Seine Sitzung ist älter, also gilt
-    -- seine - und meine verschwindet, ohne als eigener Abend abgelegt zu werden.
+    -- trifft der Startruf des anderen ein. Sein Abend ist älter, also gilt
+    -- seine Kennung - abgelegt wird deswegen aber nichts, mein Mitschnitt läuft
+    -- unter dem neuen Etikett einfach weiter.
     dup_now = addon.Util.Now()
     addon.RaidMonitor.session = nil
     addon.RaidMonitor:StartSession("dup-eigene", "Ich-Realm", dup_now, "Karazhan")
@@ -6564,25 +6610,38 @@ do
     assert(addon.RaidMonitor.session.id == "dup-alt",
         "Eine später gestartete Sitzung verdrängt die eigene ältere")
 
-    -- Und ein halber Abend wird nicht wegen einer Kennung weggeworfen: Nach der
-    -- Schonfrist bleibt die eigene stehen, auch wenn die fremde gewinnt.
+    -- Ein halber Abend darf durch eine fremde Kennung nichts verlieren. Seit
+    -- 0.9.89 wird deshalb nur noch das Etikett übernommen: Die Kennung wechselt,
+    -- die mitgeschriebenen Daten bleiben. Vorher entschied eine Schonfrist,
+    -- ob der eigene Mitschnitt weggeworfen wird - und danach liefen zwei
+    -- Auswertungen unter zwei Kennungen nebeneinander.
     addon.RaidMonitor.session = nil
-    addon.RaidMonitor.parallelSessionWarned = nil
     addon.RaidMonitor:StartSession("dup-lang", "Ich-Realm", dup_now - 3600, "Karazhan")
+    addon.RaidMonitor:GetParticipant(addon.RaidMonitor.session, "Schurke", "ROGUE")
+    addon.RaidMonitor.session.pulls[1] = { name = "Attumen", boss = true, result = "KILL" }
     addon.RaidMonitor:OnMessage(
         table.concat({ "RS", "7", "dup-aelter", tostring(dup_now - 7200), "Karazhan" }, "|"),
         "Heiler-Realm", "RAID")
-    assert(addon.RaidMonitor.session.id == "dup-lang",
-        "Ein seit einer Stunde laufender Mitschnitt wird wegen einer fremden Kennung verworfen")
+    assert(addon.RaidMonitor.session.id == "dup-aelter",
+        "Das Etikett des früher begonnenen Abends wurde nicht übernommen")
+    assert(addon.RaidMonitor.session.participants.schurke ~= nil,
+        "Der eigene Mitschnitt hat beim Etikettwechsel Teilnehmer verloren")
+    assert(#addon.RaidMonitor.session.pulls == 1,
+        "Der eigene Mitschnitt hat beim Etikettwechsel Versuche verloren")
+    assert(#(addon.RaidMonitor.session.gaps or {}) > 0,
+        "Der früher begonnene Abend hinterlässt keine Lücke im eigenen Mitschnitt")
+    assert(addon.RaidMonitor:SessionIsComplete() == false,
+        "Ein Mitschnitt mit Lücke gilt als lückenlos")
 
-    -- Die Absage nennt den, der schneller war.
+    -- Die Absage nennt den, der den ABEND eröffnet hat. Mit dem Etikett
+    -- wandert auch diese Angabe mit: Alle Clients führen denselben Abend unter
+    -- derselben Kennung, derselben Startzeit und demselben Eröffner - sonst
+    -- hieße derselbe Abend bei jedem anders.
     dup_ok, dup_message = addon.RaidMonitor:BeginSession()
     assert(dup_ok == false, "Eine zweite Sitzung ließ sich trotz laufender starten")
-    assert(dup_message:find("Ich-Realm", 1, true) or dup_message:find("Ich", 1, true),
-        "Die Absage nennt nicht, wer die Sitzung gestartet hat: " .. tostring(dup_message))
+    assert(dup_message:find("Heiler", 1, true),
+        "Die Absage nennt nicht, wer den Abend eröffnet hat: " .. tostring(dup_message))
 
-    addon.RaidMonitor:DiscardSession()
-    addon.RaidMonitor.parallelSessionWarned = nil
     addon.RaidMonitor.session = dup_savedSession
     addon.DB:GetCharacter().liveSession = dup_savedLive
     dup_care.accessRanks = dup_savedRanks
@@ -6816,6 +6875,110 @@ do
 
     UnlearnRestore()
     addon.Profile:RefreshProfessions(unlearn_profile)
+end
+
+-- === Reparatur eines lückenhaften Mitschnitts ===============================
+--
+-- Der eigene Mitschnitt hat ein Loch (Reload mitten im Abend). Ein anderer war
+-- durchgehend da. Aus dessen Fassung wird ergänzt – aber nur, wenn sie nach
+-- denselben Regeln gezählt hat und sich selbst als lückenlos meldet.
+do
+    addon.DB:GetGuild().raidSessions = {}
+
+    -- Der eigene Mitschnitt: lückenhaft, deshalb zu niedrige Zahlen.
+    rep_own = {
+        id = "abend-1", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "LIVE", rulesVersion = addon.Constants.RAID_RULES_VERSION,
+        complete = false, gaps = 1, pulls = 3, kills = 2, wipes = 1,
+        participants = {
+            { name = "Tester", seconds = 1000, deaths = 1, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = { POTION = 1, DRUM = 0 } },
+        },
+    }
+    addon.RaidMonitor:StoreSummary(rep_own)
+
+    -- Ein alter Client: dieselbe Zeit, dieselben Leute, aber Regelversion 1.
+    -- Seine Trommelzahl ist nach den alten Regeln entstanden und viel zu hoch.
+    -- Sie darf NICHT einfließen, obwohl sie größer ist.
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-1", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "SYNC:Uraltclient", recordedBy = "Uraltclient",
+        rulesVersion = 1, complete = true,
+        pulls = 99, kills = 99, wipes = 0,
+        participants = {
+            { name = "Tester", seconds = 4000, deaths = 9, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = { POTION = 8, DRUM = 68 } },
+        },
+    })
+
+    rep_ok = addon.RaidMonitor:TryRepair()
+    assert(rep_ok == false,
+        "Ein Mitschnitt mit anderer Zählregel-Version wurde eingerechnet")
+    assert(addon.RaidMonitor:GetSummary("abend-1", "REPAIR") == nil,
+        "Aus einer unvergleichbaren Quelle ist eine Reparatur entstanden")
+
+    -- Ein zweiter, ebenfalls lückenhafter Mitschnitt taugt auch nicht: Sein
+    -- höherer Wert wäre nur die bessere Untergrenze, nicht belegbar richtig.
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-1", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "SYNC:Auchweg", recordedBy = "Auchweg",
+        rulesVersion = addon.Constants.RAID_RULES_VERSION, complete = false,
+        pulls = 4, kills = 3, wipes = 1,
+        participants = {
+            { name = "Tester", seconds = 2000, deaths = 2, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = { POTION = 2, DRUM = 1 } },
+        },
+    })
+    assert(addon.RaidMonitor:TryRepair() == false,
+        "Eine selbst lückenhafte Quelle wurde zum Reparieren herangezogen")
+
+    -- Und jetzt einer, der den Abend lückenlos gesehen hat.
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-1", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "SYNC:Lueckenlos", recordedBy = "Lueckenlos",
+        rulesVersion = addon.Constants.RAID_RULES_VERSION, complete = true,
+        pulls = 4, kills = 3, wipes = 1,
+        participants = {
+            { name = "Tester", seconds = 3800, deaths = 2, resurrects = 1,
+              interrupts = 5, dispels = 0, consumables = { POTION = 3, DRUM = 2 } },
+            { name = "Nachzuegler", seconds = 900, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = { POTION = 1 } },
+        },
+    })
+    assert(addon.RaidMonitor:TryRepair() == true, "Die Reparatur ist ausgeblieben")
+
+    rep_fixed = addon.RaidMonitor:GetSummary("abend-1", "REPAIR")
+    assert(rep_fixed ~= nil, "Es ist keine ergänzte Fassung entstanden")
+    assert(rep_fixed.complete == true, "Die ergänzte Fassung gilt weiter als lückenhaft")
+
+    rep_tester = nil
+    rep_new = nil
+    for _, rep_p in ipairs(rep_fixed.participants) do
+        if rep_p.name == "Tester" then rep_tester = rep_p end
+        if rep_p.name == "Nachzuegler" then rep_new = rep_p end
+    end
+    assert(rep_tester ~= nil, "Der eigene Teilnehmer fehlt in der ergänzten Fassung")
+    -- Höchstwert, nicht Summe: 1000 und 3800 ergeben 3800, nicht 4800.
+    assert(rep_tester.seconds == 3800, "Die Anwesenheit wurde nicht ergänzt, sondern addiert oder verworfen")
+    assert(rep_tester.interrupts == 5, "Ein Zähler aus der Lücke fehlt")
+    assert(rep_tester.consumables.POTION == 3, "Verbrauchsgegenstände wurden nicht ergänzt")
+    -- Der entscheidende Wert: Die 68 Trommeln des alten Clients dürfen nirgends
+    -- auftauchen. Gültig ist allein die 2 aus der tauglichen Quelle.
+    assert(rep_tester.consumables.DRUM == 2,
+        "Die Trommelzahl eines alten Clients ist in die Reparatur gelangt: "
+            .. tostring(rep_tester.consumables.DRUM))
+    assert(rep_tester.deaths == 2, "Die Tode wurden nicht ergänzt")
+    assert(rep_new ~= nil, "Ein nur während der Lücke anwesender Spieler fehlt")
+    assert(rep_fixed.pulls == 4 and rep_fixed.kills == 3,
+        "Versuche und Siege wurden nicht ergänzt")
+    assert(rep_fixed.pulls ~= 99, "Die Versuchszahl des alten Clients ist eingeflossen")
+
+    -- Der eigene Rohmitschnitt bleibt unangetastet danebenstehen.
+    rep_raw = addon.RaidMonitor:GetSummary("abend-1", "LIVE")
+    assert(rep_raw ~= nil and rep_raw.participants[1].seconds == 1000,
+        "Der eigene Mitschnitt wurde durch die Reparatur verändert")
+
+    addon.DB:GetGuild().raidSessions = {}
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

@@ -263,12 +263,63 @@ function GC.RaidMonitor:StartSession(sessionID, startedBy, startedAt, zone)
         participantOrder = {},
         pulls = {},
         segment = nil,
+        -- Unter welchen Zaehlregeln dieser Abend mitgeschrieben wird. Sie
+        -- haengt an der SITZUNG, nicht am Speichern: Ein Abend, der gestern
+        -- unter alten Regeln begonnen und heute fortgesetzt wird, bleibt ein
+        -- Abend alter Regeln.
+        rulesVersion = GC.Constants.RAID_RULES_VERSION,
+        -- Zeitraeume, in denen dieser Client nicht mitgeschrieben hat.
+        gaps = {},
     }
     self:SetCombatLogTracking(true)
     self:SyncParticipants()
     self:BeginSessionUpkeep()
     GC:FireCallback("RAID_SESSION_UPDATED")
     return self.session
+end
+
+-- === Lücken im eigenen Mitschnitt ===========================================
+--
+-- Eine Lücke ist ein Zeitraum, in dem dieser Client nachweislich nicht
+-- mitgeschrieben hat: ein Reload, ein Verbindungsabbruch, ein später Einstieg
+-- in einen schon laufenden Abend. Sie ist die Voraussetzung für zwei Dinge –
+-- die eigene Auswertung darf sich als „lückenhaft" zu erkennen geben, und nur
+-- dann werden fremde Daten überhaupt angefordert.
+--
+-- Umgekehrt gilt: Nur ein lückenloser Mitschnitt darf zum Reparieren eines
+-- fremden herangezogen werden. Sonst wäre der höhere von zwei Werten nicht
+-- der vollständigere, sondern bloß der größere.
+local MIN_GAP_SECONDS = 5
+
+function GC.RaidMonitor:NoteGap(session, from, to)
+    session = session or self.session
+    if not session then
+        return false
+    end
+    session.gaps = session.gaps or {}
+    from = tonumber(from)
+    to = tonumber(to)
+    -- Ohne bekannten Beginn ist die Länge unbekannt (Absturz statt sauberem
+    -- Ausloggen). Der Eintrag steht trotzdem: Dass etwas fehlt, ist die
+    -- wichtigere Auskunft als wie viel.
+    if not from or not to then
+        session.gaps[#session.gaps + 1] = { unknown = true }
+        return true
+    end
+    if (to - from) < MIN_GAP_SECONDS then
+        return false
+    end
+    session.gaps[#session.gaps + 1] = { from = from, to = to }
+    return true
+end
+
+-- Hat dieser Mitschnitt den Abend lückenlos gesehen?
+function GC.RaidMonitor:SessionIsComplete(session)
+    session = session or self.session
+    if not session then
+        return false
+    end
+    return #(session.gaps or {}) == 0
 end
 
 -- === Zwei Sitzungen zur selben Zeit ========================================
@@ -297,34 +348,35 @@ function GC.RaidMonitor:IsPreferredSession(candidateAt, candidateID, currentAt, 
     return candidateID < tostring(currentID or "")
 end
 
--- Wie lange nach dem eigenen Start eine fremde Sitzung die eigene noch
--- verdraengen darf. Danach steckt in der eigenen ein mitgeschriebener Abend,
--- und der wiegt schwerer als eine aufgeraeumte Kennung: Dann laufen lieber zwei
--- Auswertungen nebeneinander, als dass eine stillschweigend geloescht wird.
-local SESSION_MERGE_GRACE = 120
+-- SESSION_MERGE_GRACE und DiscardSession sind mit 0.9.89 entfallen. Beide
+-- gab es nur, um zu entscheiden, WANN ein eigener Mitschnitt weggeworfen
+-- werden darf. Weggeworfen wird jetzt gar nichts mehr.
 
--- Die laufende Sitzung wegwerfen, ohne sie auszuwerten. Ausdruecklich NICHT
--- FinishSession: Es gibt hier nichts abzulegen - die Sitzung ist Sekunden alt
--- und war von Anfang an dieselbe wie die, die jetzt uebernommen wird.
-function GC.RaidMonitor:DiscardSession()
-    if not self.session then
-        return false
-    end
-    self.session = nil
-    self:EndSessionUpkeep()
-    self:SetCombatLogTracking(false)
-    return true
-end
-
--- Eine fremde Sitzungsmeldung gegen die eigene halten. Rueckgabe: ob die
--- eigene Sitzung danach die fremde ist.
+-- Eine fremde Sitzungsmeldung gegen die eigene halten.
+--
+-- Bis 0.9.88 hat diese Stelle die eigene Sitzung VERWORFEN, wenn die fremde
+-- nach der Regel oben gewann. Das war die falsche Richtung: Der eigene
+-- Mitschnitt ist das, was dieser Client mit eigenen Augen gesehen hat, und
+-- genau der ist beim Reparieren einer fremden Lücke die belastbare Quelle.
+--
+-- Übernommen wird deshalb nur noch das ETIKETT des Abends – die Kennung, unter
+-- der alle denselben Abend ablegen. Die Daten bleiben in jedem Fall die
+-- eigenen. Weil die Regel auf jedem Client dasselbe Ergebnis liefert, einigen
+-- sich am Ende alle auf dieselbe Kennung, ohne dass jemand etwas verliert.
+--
+-- Rueckgabe: ob diese Meldung denselben Abend meint wie die eigene Sitzung.
 function GC.RaidMonitor:AdoptForeignSession(sessionID, startedBy, startedAt, zone, sender)
     if type(sessionID) ~= "string" or sessionID == "" then
         return false
     end
     local session = self.session
     if not session then
-        self:StartSession(sessionID, startedBy, startedAt, zone)
+        -- Später eingestiegen: Der Abend läuft schon, mitgeschrieben wird ab
+        -- jetzt. Was davor passiert ist, fehlt - und steht als Lücke drin.
+        local now = GC.Util.Now()
+        local evening = tonumber(startedAt) or now
+        session = self:StartSession(sessionID, startedBy, evening, zone)
+        self:NoteGap(session, evening, now)
         GC:FireCallback("ORDERS_BANNER",
             "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(sender or startedBy or ""))
         return true
@@ -335,25 +387,24 @@ function GC.RaidMonitor:AdoptForeignSession(sessionID, startedBy, startedAt, zon
     if not self:IsPreferredSession(startedAt, sessionID, session.startedAt, session.id) then
         return false
     end
-    -- Die eigene Sitzung verliert. Nur wenn sie noch frisch ist, wird sie
-    -- verworfen - sonst haengt daran schon ein halber Abend.
-    if (GC.Util.Now() - (tonumber(session.startedAt) or 0)) > SESSION_MERGE_GRACE then
-        if not self.parallelSessionWarned then
-            self.parallelSessionWarned = true
-            GC:Print("|cffffb840Es laufen zwei Raidsitzungen parallel|r – deine von "
-                .. GC.Util.PlayerShortName(session.startedBy or "") .. " und eine von "
-                .. GC.Util.PlayerShortName(startedBy or sender or "") .. ". "
-                .. "Deine bleibt bestehen; beide werden getrennt ausgewertet.")
-        end
-        return false
+
+    -- Die fremde Kennung gewinnt. Angefasst werden nur Kennung und die
+    -- Eckdaten des Abends; Teilnehmer, Versuche und Zähler bleiben unberührt.
+    -- Hat der Abend früher begonnen als der eigene Mitschnitt, ist die
+    -- Differenz genau das, was diesem Client fehlt.
+    local ownStart = tonumber(session.startedAt) or GC.Util.Now()
+    local evening = tonumber(startedAt) or ownStart
+    if evening < ownStart then
+        self:NoteGap(session, evening, ownStart)
+        session.startedAt = evening
     end
-    self:DiscardSession()
-    self:StartSession(sessionID, startedBy, startedAt, zone)
-    GC:Print("Die Raidsitzung wurde bereits von "
-        .. GC.Util.PlayerShortName(startedBy or sender or "") .. " gestartet – "
-        .. "deine wurde damit zusammengeführt.")
-    GC:FireCallback("ORDERS_BANNER",
-        "Raidsitzung gestartet von " .. GC.Util.PlayerShortName(startedBy or sender or ""))
+    session.id = sessionID
+    session.startedBy = GC.Util.PlayerShortName(startedBy or sender or session.startedBy or "")
+    if session.zone == "" and zone then
+        session.zone = SanitizedText(zone)
+    end
+    self:PersistSession()
+    GC:FireCallback("RAID_SESSION_UPDATED")
     return true
 end
 
@@ -368,10 +419,12 @@ function GC.RaidMonitor:BeginSession()
         end
         return false, "Es läuft bereits eine Sitzung."
     end
-    if not self:CanControlSession() then
-        return false, "Nur die in den Einstellungen freigegebenen Gildenränge dürfen eine Sitzung starten."
-    end
-
+    -- Starten darf jeder. Ein Start schreibt ausschliesslich in den eigenen
+    -- Mitschnitt - er nimmt niemandem etwas weg und zwingt niemandem etwas
+    -- auf. Die Rangsperre stand hier, solange EINE Sitzung dem ganzen Raid
+    -- gehoerte; seit jeder seinen eigenen Abend fuehrt, hat sie keinen
+    -- Gegenstand mehr. Beenden (RE) wirkt weiterhin auf alle und bleibt
+    -- deshalb an den Rang gebunden.
     local sessionID = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
     local session = self:StartSession(sessionID, GC:GetPlayerFullName(), GC.Util.Now(), nil)
     GC.Sync:AnnounceSessionStart(session)
@@ -382,13 +435,16 @@ function GC.RaidMonitor:EndSession()
     if not self.session then
         return false, "Es läuft keine Sitzung."
     end
-    if not self:CanControlSession() then
-        return false, "Nur die in den Einstellungen freigegebenen Gildenränge dürfen eine Sitzung beenden."
-    end
+    -- Den EIGENEN Abend beendet jeder selbst - er schließt damit nur seinen
+    -- eigenen Mitschnitt ab. Der Ruf an alle (RE), der auch fremde Sitzungen
+    -- beendet, bleibt den freigegebenen Rängen vorbehalten.
+    local mayAnnounce = self:CanControlSession()
 
     local summary = self:FinishSession(GC.Util.Now())
-    if summary then
+    if summary and mayAnnounce then
         GC.Sync:AnnounceSessionEnd(summary)
+    end
+    if summary then
         -- Ohne festen Kanal: DistributeSummary waehlt RAID oder PARTY danach,
         -- in welcher Gruppe die Sitzung tatsaechlich lief.
         GC.Sync:DistributeSummary(summary)
@@ -415,6 +471,14 @@ function GC.RaidMonitor:FinishSession(endedAt)
     self:EndSessionUpkeep()
     self:SetCombatLogTracking(false)
     self:StoreSummary(summary)
+
+    -- Hatte der eigene Mitschnitt Lücken, wird jetzt genau dafür bei den
+    -- anderen nachgefragt. Das ist der einzige Anlass: Wer den Abend
+    -- lückenlos gesehen hat, braucht niemanden.
+    if not summary.complete then
+        self:RequestRepair(summary)
+    end
+
     GC:FireCallback("RAID_SESSION_UPDATED")
     return summary
 end
@@ -488,12 +552,23 @@ function GC.RaidMonitor:ResumeSession()
     session.pulls = type(session.pulls) == "table" and session.pulls or {}
     session.nameLookup = nil
     session.startedAt = tonumber(session.startedAt) or GC.Util.Now()
+    session.gaps = type(session.gaps) == "table" and session.gaps or {}
+    -- Eine Sitzung ohne vermerkte Regelversion stammt aus einer Fassung vor
+    -- 0.9.89. Ihre Zahlen bedeuten etwas anderes und werden deshalb nie mit
+    -- heutigen verrechnet.
+    session.rulesVersion = tonumber(session.rulesVersion) or 1
     -- Ohne savedAt kam die Datei aus einem Absturz statt aus einem sauberen
     -- Ausloggen. Dann ist unbekannt, wie lange danach noch gespielt wurde;
     -- die offenen Uhren werden ohne Gutschrift angehalten. Lieber ein paar
     -- Minuten zu wenig als eine über Nacht weiterlaufende Anwesenheit.
     local savedAt = tonumber(session.savedAt)
     ClosePresence(session, savedAt)
+
+    -- Genau hier entsteht die Lücke, die die Reparatur später schließen soll:
+    -- Zwischen dem letzten gespeicherten Stand und jetzt hat dieser Client
+    -- nichts mitbekommen. Nach einem Absturz ist nicht einmal bekannt, wie
+    -- lange das war.
+    self:NoteGap(session, savedAt, GC.Util.Now())
 
     self.session = session
     if (GC.Util.Now() - (savedAt or session.startedAt)) > MAX_RESUME_AGE then
@@ -541,7 +616,12 @@ end
 
 function GC.RaidMonitor:PumpHeartbeat()
     local session = self.session
-    if not session or not self:CanControlSession() or not self:IsInAnyGroup() then
+    -- Ohne Rangsperre: Der Herzschlag trägt das Etikett des Abends, und wer
+    -- später dazustößt, braucht es unabhängig davon, welchen Rang gerade
+    -- jemand hat. Ein Sturm entsteht dadurch nicht - wer einen fremden
+    -- Herzschlag hört, schweigt bis zum nächsten Takt, und der Rang entscheidet
+    -- weiterhin nur, wer zuerst spricht.
+    if not session or not self:IsInAnyGroup() then
         return false
     end
     local last = tonumber(session.heartbeatAt) or 0
@@ -580,6 +660,12 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
         participants = {},
         source = "LIVE",
         receivedAt = GC.Util.Now(),
+        -- Unter welchen Zaehlregeln diese Zahlen entstanden sind, und ob der
+        -- Abend dabei lueckenlos gesehen wurde. Beides entscheidet spaeter,
+        -- ob diese Auswertung eine fremde reparieren darf.
+        rulesVersion = tonumber(session.rulesVersion) or GC.Constants.RAID_RULES_VERSION,
+        complete = self:SessionIsComplete(session),
+        gaps = #(session.gaps or {}),
     }
 
     -- Der boss-Filter räumt auch Sitzungen älterer Versionen auf, die noch
@@ -735,6 +821,15 @@ function GC.RaidMonitor:SummaryKey(summary)
     return tostring(summary.id or "") .. "#" .. tostring(summary.source or "LIVE")
 end
 
+-- Die ART einer Quelle, ohne den Aufzeichner: "SYNC:Alex" wird zu "SYNC".
+-- Wo es darum geht, WIE eine Zahl zustande kam (Beschriftung, Anwesenheits-
+-- rechnung), zaehlt die Art; wo es darum geht, WESSEN Fassung das ist
+-- (Speicherschluessel), die volle Quelle.
+function GC.RaidMonitor:SourceKind(source)
+    source = tostring(source or "LIVE")
+    return source:match("^([^:]+)") or source
+end
+
 function GC.RaidMonitor:GetSummaryByKey(summaryKey)
     if not summaryKey then
         return nil
@@ -757,6 +852,188 @@ function GC.RaidMonitor:GetSummary(sessionID, source)
         end
     end
     return nil
+end
+
+-- === Reparatur eines lückenhaften Mitschnitts ==============================
+--
+-- Wer während des Abends rausfliegt oder neu lädt, hat ein Loch in seinen
+-- Zahlen. Andere im Raid haben denselben Abend durchgehend gesehen – aus
+-- deren Auswertung lässt sich das Loch schließen.
+--
+-- Verrechnet wird der HÖCHSTWERT je Teilnehmer und Zähler, nicht die Summe.
+-- Das ist der entscheidende Unterschied: Eine Summe würde doppelt zählen, was
+-- beide gesehen haben. Der höhere Wert dagegen ist genau der eines Clients,
+-- der mehr vom Abend mitbekommen hat – und niemand kann mehr Tode gesehen
+-- haben, als es gab.
+--
+-- Damit dieses Argument trägt, müssen ZWEI Bedingungen erfüllt sein, und beide
+-- sind hart:
+--
+--   1. Dieselbe Zählregel-Version. Ein Client vor 0.9.87 schreibt Trommeln
+--      jedem Beschenkten gut - im Vergleichslog 68 statt 28. Der Höchstwert
+--      würde also nicht den vollständigeren, sondern den kaputten Zähler
+--      übernehmen. Dasselbe gilt für die Anwesenheit vor 0.9.88, die
+--      Offlinezeit mitzählte. Fremde Regelversionen bleiben deshalb sichtbar
+--      nebeneinander stehen und werden nie eingerechnet.
+--
+--   2. Die fremde Quelle meldet sich selbst als lückenlos. Hatte sie eigene
+--      Löcher, ist ihr höherer Wert nur die bessere Untergrenze und nicht
+--      belegbar der richtige.
+--
+-- Warcraft-Logs- und Dateiimporte scheiden ohnehin aus: Ihre Anwesenheit ist
+-- reine Encounter-Zeit und ihre Verbrauchszählung folgt eigenen Regeln.
+--
+-- Das Ergebnis wird als EIGENE Quelle abgelegt. Der eigene Rohmitschnitt und
+-- die fremde Fassung bleiben unverändert daneben stehen - die Reparatur ist
+-- damit jederzeit nachvollziehbar und umkehrbar.
+local REPAIRABLE_SOURCES = {
+    LIVE = true,
+    SYNC = true,
+}
+
+function GC.RaidMonitor:CanRepairFrom(target, candidate)
+    if not target or not candidate or target == candidate then
+        return false
+    end
+    if not REPAIRABLE_SOURCES[self:SourceKind(candidate.source)] then
+        return false
+    end
+    if candidate.complete ~= true then
+        return false
+    end
+    if (tonumber(candidate.rulesVersion) or 1) ~= (tonumber(target.rulesVersion) or 1) then
+        return false
+    end
+    return self:IsSameEvening(target, candidate)
+end
+
+local function MergeHigher(into, from, key)
+    local value = tonumber(from[key]) or 0
+    if value > (tonumber(into[key]) or 0) then
+        into[key] = value
+    end
+end
+
+-- Baut aus dem eigenen Mitschnitt und allen tauglichen fremden eine ergänzte
+-- Fassung. Rueckgabe: die Auswertung und die Zahl der eingerechneten Quellen.
+function GC.RaidMonitor:BuildRepairedSummary(target)
+    if not target then
+        return nil, 0
+    end
+    local sources = {}
+    for _, candidate in ipairs(self:GetSummaries()) do
+        if self:CanRepairFrom(target, candidate) then
+            sources[#sources + 1] = candidate
+        end
+    end
+    if #sources == 0 then
+        return nil, 0
+    end
+
+    local repaired = GC.Util.DeepCopy(target)
+    repaired.source = "REPAIR"
+    repaired.receivedAt = GC.Util.Now()
+    repaired.complete = true
+    repaired.gaps = 0
+    repaired.repairedFrom = {}
+
+    local byKey = {}
+    for _, participant in ipairs(repaired.participants) do
+        byKey[GC.Util.PlayerKey(participant.name)] = participant
+    end
+
+    for _, candidate in ipairs(sources) do
+        repaired.repairedFrom[#repaired.repairedFrom + 1] =
+            candidate.recordedBy or GC.Util.PlayerShortName(candidate.startedBy or "")
+        MergeHigher(repaired, candidate, "pulls")
+        MergeHigher(repaired, candidate, "kills")
+        MergeHigher(repaired, candidate, "wipes")
+        if (tonumber(candidate.startedAt) or 0) < (tonumber(repaired.startedAt) or 0) then
+            repaired.startedAt = candidate.startedAt
+        end
+        if (tonumber(candidate.endedAt) or 0) > (tonumber(repaired.endedAt) or 0) then
+            repaired.endedAt = candidate.endedAt
+        end
+
+        for _, participant in ipairs(candidate.participants or {}) do
+            local key = GC.Util.PlayerKey(participant.name)
+            local own = byKey[key]
+            if not own then
+                -- Wen der eigene Mitschnitt gar nicht kennt, der war
+                -- vermutlich genau während der Lücke da.
+                own = GC.Util.DeepCopy(participant)
+                own.consumableLog = nil
+                own.consumableLogDropped = nil
+                byKey[key] = own
+                repaired.participants[#repaired.participants + 1] = own
+            else
+                own.classFile = own.classFile or participant.classFile
+                MergeHigher(own, participant, "seconds")
+                MergeHigher(own, participant, "deaths")
+                MergeHigher(own, participant, "resurrects")
+                MergeHigher(own, participant, "interrupts")
+                MergeHigher(own, participant, "dispels")
+                own.consumables = own.consumables or {}
+                for _, category in ipairs(GC.ConsumableCategories) do
+                    MergeHigher(own.consumables, participant.consumables or {}, category.key)
+                end
+            end
+        end
+    end
+    return repaired, #sources
+end
+
+-- Anlauf zur Reparatur aller eigenen lückenhaften Auswertungen dieses Abends.
+-- Wird nach jedem Empfang aufgerufen: Die fremden Fassungen treffen verstreut
+-- ein, und die erste taugliche soll nicht auf die letzte warten.
+function GC.RaidMonitor:TryRepair()
+    local repairedAny = false
+    -- Kandidaten sind die eigenen lückenhaften Mitschnitte. Welche fremden
+    -- Fassungen zu welchem Abend gehören, entscheidet BuildRepairedSummary
+    -- über IsSameEvening - hier braucht es keine zweite Zuordnung.
+    local targets = {}
+    for _, summary in ipairs(self:GetSummaries()) do
+        if self:SourceKind(summary.source) == "LIVE" and summary.complete ~= true then
+            targets[#targets + 1] = summary
+        end
+    end
+
+    for _, target in ipairs(targets) do
+        local repaired, count = self:BuildRepairedSummary(target)
+        if repaired then
+            -- Die fremden Fassungen treffen verstreut ein, und nach jeder wird
+            -- neu gerechnet. Gemeldet wird aber nur, wenn wirklich eine Quelle
+            -- dazugekommen ist - sonst stünde dieselbe Zeile fünfmal im Chat.
+            local existing = self:GetSummary(target.id, "REPAIR")
+            local before = existing and #(existing.repairedFrom or {}) or 0
+            if self:StoreSummary(repaired) and count > before then
+                repairedAny = true
+                GC:Print("Dein Mitschnitt dieses Raidabends hatte Lücken und wurde aus "
+                    .. count .. (count == 1 and " fremden Mitschnitt" or " fremden Mitschnitten")
+                    .. " ergänzt (" .. table.concat(repaired.repairedFrom, ", ")
+                    .. "). Deine eigene Fassung bleibt unverändert daneben stehen.")
+            end
+        end
+    end
+    if repairedAny then
+        GC:FireCallback("RAID_SESSION_UPDATED")
+    end
+    return repairedAny
+end
+
+-- Fordert die Auswertungen der anderen an, weil der eigene Mitschnitt Lücken
+-- hat. Gestreut, damit nicht alle gleichzeitig antworten.
+function GC.RaidMonitor:RequestRepair(summary)
+    if not GC.Sync then
+        return false
+    end
+    self.repairWantedUntil = GC.Util.Now() + 600
+    if not GC.Sync:Send("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION), "GUILD") then
+        return false
+    end
+    GC:Print("Dein Mitschnitt dieses Abends hat Lücken – die Auswertungen der "
+        .. "anderen werden angefordert.")
+    return true
 end
 
 -- === Derselbe Abend aus mehreren Quellen =================================
@@ -1248,6 +1525,13 @@ function GC.RaidMonitor:EncodeSummary(summary)
             tostring(summary.pulls or 0),
             tostring(summary.kills or 0),
             tostring(summary.wipes or 0),
+            -- Felder 10 und 11 haengen hinten an, damit eine aeltere Fassung
+            -- die Zeile weiter lesen kann: Sie liest die vorderen neun und
+            -- ignoriert den Rest. Umgekehrt liest diese Fassung eine alte
+            -- Zeile ohne die beiden Felder als "Regelversion 1, Vollstaendig-
+            -- keit unbekannt" - und verrechnet sie damit nie.
+            tostring(summary.rulesVersion or GC.Constants.RAID_RULES_VERSION),
+            summary.complete and "1" or "0",
         }, ","),
     }
 
@@ -1291,6 +1575,14 @@ function GC.RaidMonitor:DecodeSummary(payload)
                 participants = {},
                 source = "SYNC",
                 receivedAt = GC.Util.Now(),
+                -- Fehlen die beiden hinteren Felder, kommt die Auswertung aus
+                -- einer Fassung vor 0.9.89. Deren Zahlen bedeuten etwas
+                -- anderes (Trommeln beim Beschenkten, Anwesenheit inklusive
+                -- Offlinezeit) - sie gelten deshalb als Regelversion 1 und
+                -- ausdruecklich NICHT als lueckenlos. Damit koennen sie einen
+                -- eigenen Mitschnitt nie verfaelschen.
+                rulesVersion = tonumber(fields[10]) or 1,
+                complete = fields[11] == "1",
             }
         elseif fields[1] == "P" and summary then
             local participant = {
@@ -1340,10 +1632,18 @@ function GC.RaidMonitor:BuildSummaryMessages(summary, token)
     return messages
 end
 
+-- Auswertungen nimmt jedes Gildenmitglied entgegen, nicht nur die freigegebenen
+-- Ränge. Anders ginge das neue Modell nicht auf: Der Mitschnitt eines normalen
+-- Raiders ist genau die Quelle, aus der eine fremde Lücke geschlossen wird -
+-- er war da, er hat mitgeschrieben, sein Rang ändert daran nichts.
+--
+-- Was eintrifft, ist damit ausdrücklich FREMDE Zahlenlage und wird auch so
+-- behandelt: Sie wird unter dem Namen des Absenders abgelegt, überschreibt
+-- nie den eigenen Mitschnitt und fließt nur dann in eine Reparatur ein, wenn
+-- sie dieselbe Zählregel-Version trägt und sich selbst als lückenlos meldet.
+-- Auch dann entsteht daraus eine eigene, benannte Quelle, die sich ansehen und
+-- löschen lässt.
 function GC.RaidMonitor:ReceiveSummaryChunk(message, sender)
-    if not self:CanControlSession(sender) then
-        return false
-    end
 
     local schemaText, token, indexText, totalText, chunk =
         message:match("^RD|([^|]+)|([^|]+)|([^|]+)|([^|]+)|(.*)$")
@@ -1383,7 +1683,23 @@ function GC.RaidMonitor:ReceiveSummaryChunk(message, sender)
     if not summary then
         return false
     end
+    -- Die Quelle nennt den Aufzeichner. Vorher trugen ALLE empfangenen
+    -- Auswertungen schlicht "SYNC", und StoreSummary unterscheidet nach
+    -- Kennung UND Quelle - zwei Gildenmitglieder, die denselben Abend
+    -- mitgeschrieben hatten, ueberschrieben sich damit gegenseitig. Genau
+    -- diese zweite Fassung wird jetzt aber gebraucht: Sie ist es, aus der ein
+    -- lueckenhafter eigener Mitschnitt repariert wird.
+    summary.source = "SYNC:" .. GC.Util.PlayerShortName(sender or "")
+    summary.recordedBy = GC.Util.PlayerShortName(sender or "")
     local stored = self:StoreSummary(summary)
+
+    -- Jede eintreffende Fassung kann das fehlende Stück eines eigenen
+    -- lückenhaften Mitschnitts sein. Geprüft wird deshalb bei jedem Empfang
+    -- und nicht nur nach einer ausdrücklichen Anfrage - eine Auswertung, die
+    -- jemand Stunden später nachreicht, hilft genauso.
+    if stored then
+        self:TryRepair()
+    end
     -- Antwortzähler für "Auswertung anfordern": auch eine Antwort, die
     -- nichts Neues bringt, ist eine sichtbare Antwort.
     local stats = self.requestStats
@@ -1407,10 +1723,25 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
     if tonumber(fields[2]) ~= GC.Constants.SCHEMA_VERSION then
         return false
     end
-    if not self:CanControlSession(sender) then
-        return false
-    end
 
+    -- Hier stand bis 0.9.88 eine Rangprüfung über ALLE Sitzungsnachrichten:
+    -- „darf der Absender eine Sitzung steuern". Sie hat den gemeldeten Fehler
+    -- verursacht. Geprüft wurde der Gildenrang des Absenders in der EIGENEN
+    -- Sicht - er musste im eigenen Rosterabbild stehen und einen Rang aus
+    -- memberCare.accessRanks halten. Diese Einstellung wird zwar gildenweit
+    -- abgeglichen, aber wen sie noch nicht erreicht hat oder wessen Roster den
+    -- Absender nicht kennt, der verwarf den Startruf UND jeden Herzschlag -
+    -- dauerhaft und lautlos. Der Starter sah eine normal laufende Sitzung, der
+    -- Empfänger erfuhr nie davon.
+    --
+    -- Eine Berechtigung gehört auf die Sendeseite. Getrennt wird jetzt danach,
+    -- was eine Nachricht bewirkt:
+    --   RS/RH  sind Mitteilungen. Sie ändern beim Empfänger nur das Etikett
+    --          seines eigenen Mitschnitts - dafür braucht niemand einen Rang.
+    --   RE     beendet die Sitzung auch bei allen anderen. Das ist ein Befehl
+    --          und bleibt an den Rang gebunden.
+    --   RQ     fordert Auswertungen an. Offen für alle: Genau darauf beruht
+    --          die Reparatur eines lückenhaften eigenen Mitschnitts.
     if fields[1] == "RS" then
         -- Alle Addon-Nutzer im Raid zeichnen dieselbe Sitzung mit, damit die
         -- Auswertung nicht an einem einzelnen Client hängt. Läuft hier schon
@@ -1440,10 +1771,13 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
             return false
         end
         if not self.session then
-            self:StartSession(sessionID, fields[6] ~= "" and fields[6] or sender,
-                tonumber(fields[4]), fields[5])
-            GC:FireCallback("ORDERS_BANNER",
-                "Laufende Raidsitzung übernommen von " .. GC.Util.PlayerShortName(sender))
+            -- Ueber AdoptForeignSession statt direkt ueber StartSession: Nur
+            -- dort wird vermerkt, dass der Abend schon lief, bevor dieser
+            -- Client mitgeschrieben hat. Ohne diesen Vermerk gilt ein
+            -- Nachzuegler faelschlich als lueckenloser Mitschnitt - und wuerde
+            -- damit sogar zum Reparieren fremder Luecken herangezogen.
+            self:AdoptForeignSession(sessionID, fields[6] ~= "" and fields[6] or sender,
+                tonumber(fields[4]), fields[5], sender)
             self:NoteHeartbeat()
             return true
         end
@@ -1462,6 +1796,12 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
         end
         return false
     elseif fields[1] == "RE" then
+        -- Beenden wirkt auf alle und bleibt deshalb ein Recht der freigegebenen
+        -- Ränge. Ausgewertet wird trotzdem der EIGENE Mitschnitt: Das Ende
+        -- schließt den Abend, es übernimmt keine fremden Zahlen.
+        if not self:CanControlSession(sender) then
+            return false
+        end
         local session = self.session
         if session and session.id == fields[3] then
             local summary = self:FinishSession(tonumber(fields[4]))
@@ -1477,9 +1817,11 @@ end
 -- Offiziere außerhalb des Raids fragen die Auswertung gezielt an; geantwortet
 -- wird per Flüsterkanal, damit nichts über den offenen Gildenkanal geht.
 function GC.RaidMonitor:RequestSummaries()
-    if not self:CanControlSession() then
-        return false, "Für deinen Rang ist die Raidauswertung nicht freigeschaltet."
-    end
+    -- Ohne Rangsperre: Genau hierauf beruht die Reparatur eines lückenhaften
+    -- eigenen Mitschnitts, und eine Lücke fragt nicht nach dem Rang. Angefragt
+    -- werden Auswertungen des eigenen Raids, geantwortet wird geflüstert und
+    -- gedrosselt - hier ist nichts zu schützen, was nicht ohnehin jedem im
+    -- Addon offensteht.
     if not GC.Sync:Send("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION), "GUILD") then
         return false, "Die Anfrage konnte nicht gesendet werden."
     end

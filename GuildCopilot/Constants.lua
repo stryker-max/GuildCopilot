@@ -2,8 +2,28 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.88",
+    VERSION = "0.9.89",
     SCHEMA_VERSION = 7,
+    -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
+    -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
+    -- Clients einander verstehen. Diese hier beschreibt, ob zwei Zahlen
+    -- dasselbe bedeuten - und nur dann duerfen sie miteinander verrechnet
+    -- werden.
+    --
+    -- Sie steigt bei jeder Aenderung an der Bedeutung, auch wenn das Format
+    -- gleich bleibt:
+    --   1  bis 0.9.86 - Trommeln wurden jedem Beschenkten gutgeschrieben,
+    --      Traenke mit Buff zaehlten doppelt, Dauerbuffs je Abend nur einmal.
+    --   2  ab 0.9.89 - Zaehlung je Kategorie ueber genau eine Quelle (0.9.87)
+    --      und Anwesenheit ohne Offlinezeit (0.9.88).
+    --
+    -- Wozu: Ein Mitschnitt aus einer anderen Regelversion darf beim Reparieren
+    -- einer eigenen Luecke NICHT eingerechnet werden. Der Hoechstwert wuerde
+    -- sonst genau die kaputten Zaehler eines alten Clients uebernehmen - im
+    -- Vergleichslog vom 02.08.2026 waren das 68 Trommeln statt 28. Solche
+    -- Auswertungen bleiben sichtbar nebeneinander stehen, statt verrechnet zu
+    -- werden.
+    RAID_RULES_VERSION = 2,
     INTERFACE_VERSION = 20506,
     COMM_PREFIX = "GuildCopilot",
     MAX_CHAT_BYTES = 255,

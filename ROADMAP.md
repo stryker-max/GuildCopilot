@@ -298,6 +298,68 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.89 – Der eigene Abend gehört einem selbst
+
+**Die Meldung war ein Satz:** „Letztens hat jemand die Sitzung gestartet und ich hatte die Sitzung nicht in meinen Einträgen drin." Dahinter steckten ein handfester Fehler und eine Grundsatzfrage, und die Grundsatzfrage ist die wichtigere.
+
+### Der Fehler: eine Berechtigung auf der falschen Seite
+
+`RaidMonitor:OnMessage` verwarf **jede** Sitzungsnachricht, wenn `CanControlSession(sender)` falsch war. Das klingt nach einer Zugriffskontrolle, ist aber eine auf der Empfangsseite – und geprüft wurde der Gildenrang des Absenders **in der eigenen Sicht**: Er musste im lokalen Rosterabbild stehen und einen Rang aus `memberCare.accessRanks` halten (Vorgabe: Rang ≤ 1).
+
+Diese Einstellung wird zwar gildenweit abgeglichen, aber sie muss angekommen sein. Wen sie nicht erreicht hat, oder wessen Rosterabbild den Absender nicht kennt, der verwarf den Startruf – **und jeden der 60-Sekunden-Herzschläge gleich mit**. Genau der Herzschlag ist die Reparatur für einen verpassten Startruf; er lief in dieselbe Sperre. Damit war der Ausfall nicht flüchtig, sondern dauerhaft, und er meldete sich mit keiner Zeile. Auf der einen Seite lief eine ganz normale Sitzung, auf der anderen existierte der Abend nicht.
+
+Eine Berechtigung gehört auf die **Sendeseite**. Entschieden wird jetzt danach, was eine Nachricht bewirkt: `RS` und `RH` sind Mitteilungen und setzen beim Empfänger nur das Etikett seines eigenen Mitschnitts – dafür braucht niemand einen Rang. `RE` beendet die Sitzung auch bei allen anderen, ist also ein Befehl und bleibt rangbeschränkt.
+
+### Die Grundsatzfrage: wem gehört ein Raidabend?
+
+Bis 0.9.88 gehörte eine Sitzung dem **Raid**. Startete jemand früher, gewann seine Kennung, und `AdoptForeignSession` warf den eigenen Mitschnitt weg. Eine Schonfrist von zwei Minuten milderte das ab: Danach blieb der eigene stehen, und es liefen zwei Auswertungen nebeneinander.
+
+Das war die falsche Richtung. Der eigene Mitschnitt ist das, was dieser Client mit eigenen Augen gesehen hat – und genau der ist die belastbare Quelle, wenn bei jemand anderem eine Lücke zu füllen ist. Ihn wegzuwerfen, um eine Kennung aufzuräumen, verliert Substanz für Kosmetik.
+
+Der Wunsch des Owners war entsprechend: *„Ich möchte für mich meine eigene Sitzung starten, die mit anderen zwar geshared wird und abgeglichen wird"* – Abgleich als **Backup gegen Datenverlust**, nicht als Eigentumsübergang.
+
+Umgesetzt ist das als Trennung von **Etikett** und **Inhalt**. Übernommen wird nur noch die Kennung des Abends samt Startzeit und Eröffner, nach der schon vorhandenen deterministischen Regel (frühere Startzeit gewinnt, bei Gleichstand die kleinere Kennung). Weil die Regel auf jedem Client dasselbe Ergebnis liefert, einigen sich am Ende alle auf dieselbe Kennung – ohne dass jemand etwas verliert. `SESSION_MERGE_GRACE` und `DiscardSession` sind damit ersatzlos entfallen: Beide gab es nur, um zu entscheiden, wann weggeworfen wird.
+
+Dass die Architektur das trägt, war schon vorbereitet: `SummaryKey` identifiziert eine Auswertung über Kennung **und** Quelle, und `GetEvenings` fasst denselben Abend aus mehreren Quellen zu einem Eintrag zusammen. Was fehlte, war die Quelle selbst – alle empfangenen Auswertungen hießen `SYNC` und überschrieben sich damit gegenseitig. Von zwei Gildenmitgliedern, die denselben Abend mitgeschrieben hatten, blieb genau eins übrig. Die Quelle heißt jetzt `SYNC:Name`.
+
+### Lücken sind messbar, und zwar ohne neue Buchführung
+
+Eine Sitzung überlebt einen Reload bereits: `SaveSessionForResume` schreibt sie samt `savedAt` in die SavedVariables, `ResumeSession` holt sie zurück und hält die Anwesenheitsuhren **ohne Gutschrift** an – die Zeit dazwischen wurde ja nicht gespielt. Damit lag die Lücke längst vor, sie wurde nur nirgends festgehalten.
+
+`NoteGap` schreibt sie jetzt an die Sitzung, aus drei Anlässen: beim Fortsetzen nach einem Reload (`savedAt` bis jetzt), nach einem Absturz (ohne `savedAt` ist die Länge unbekannt – dass etwas fehlt, ist die wichtigere Auskunft) und beim späten Einstieg in einen laufenden Abend. Daraus folgt `SessionIsComplete`, und das wandert als `complete` in jede geteilte Auswertung.
+
+Der Herzschlag-Zweig lief dabei in eine Falle: Er rief bei fehlender eigener Sitzung direkt `StartSession` statt `AdoptForeignSession` und hätte einen Nachzügler damit als **lückenlosen** Mitschnitt geführt – der wäre dann sogar zum Reparieren fremder Lücken herangezogen worden. Beide Wege gehen jetzt über dieselbe Stelle.
+
+### Reparieren, ohne fremde Fehler zu importieren
+
+Verrechnet wird der **Höchstwert** je Teilnehmer und Zähler, nicht die Summe. Eine Summe zählte doppelt, was beide gesehen haben; der höhere Wert dagegen stammt von dem, der mehr vom Abend mitbekommen hat – und niemand kann mehr Tode gesehen haben, als es gab.
+
+Dieses Argument trägt aber nur unter Bedingungen, und die entscheidende kam vom Owner als Rückfrage: **„Was ist, wenn jemand eine alte Version hat, wo doppelt gezählt wird?"** Damit fällt die naive Höchstwert-Regel. Ein Client vor 0.9.87 schreibt Trommeln jedem Beschenkten gut – im Vergleichslog 68 statt 28 – und meldet Essen zu niedrig. Der Höchstwert übernähme also nicht den vollständigeren, sondern den kaputten Zähler. Dasselbe gilt für die Anwesenheit vor 0.9.88, die Offlinezeit mitzählte.
+
+`SCHEMA_VERSION` hilft dagegen nicht: Sie beschreibt das Nachrichtenformat, und das war bei 0.9.86 und 0.9.88 identisch – die Pakete kommen also durch. Gebraucht wird eine Angabe darüber, ob zwei Zahlen **dasselbe bedeuten**. `GC.Constants.RAID_RULES_VERSION` ist genau das und steigt bei jeder Bedeutungsänderung, auch wenn das Format gleich bleibt. Das Muster gab es im Haus schon: `GC.EnchantRuleSet.version` hängt seit jeher als `ruleVersion` an jeder Ausrüstungsprüfung.
+
+Verrechnet wird deshalb nur, was **beide** Bedingungen erfüllt: dieselbe Regelversion, und die Quelle meldet sich selbst als lückenlos. Eine selbst lückenhafte Quelle liefert nur die bessere Untergrenze, nicht belegbar den richtigen Wert. Warcraft-Logs- und Dateiimporte scheiden ohnehin aus – ihre Anwesenheit ist reine Encounter-Zeit. Alles Untaugliche bleibt sichtbar nebeneinander stehen, statt still einzufließen.
+
+Das Ergebnis ist eine eigene Quelle (`REPAIR`). Der eigene Rohmitschnitt und die fremde Fassung bleiben unverändert daneben – die Reparatur ist damit nachvollziehbar und umkehrbar.
+
+### Beobachtungen teilen, nicht Urteile
+
+Aus der Rückfrage folgt ein allgemeiner Grundsatz, und es lohnt sich, ihn zu benennen: **Über den Kanal gehören Beobachtungen, keine fertigen Urteile.**
+
+Die Ausrüstungsprüfung macht das schon richtig. Übertragen werden `itemID`, `enchantID` und leere Sockel; `BuildSyncedAudit` fällt jedes Urteil lokal mit den **eigenen** Regeln neu. Ein alter Client kann dort keine falschen Befunde einschleusen – der Weg ist von Bauart sicher, ganz ohne Versionsprüfung.
+
+Die Raidauswertung ist die Ausnahme: Sie überträgt fertige Zähler. Das lässt sich nicht ohne Weiteres ändern – Ereignisse einzeln mit Zeitstempel zu übertragen wäre ein Vielfaches an Datenverkehr –, und deshalb braucht genau sie die Regelversion. Wo künftig ein berechneter Wert den Client verlässt, gilt dieselbe Frage: Kann der Empfänger ihn selbst herleiten? Wenn nein, muss dabeistehen, nach welchen Regeln er entstanden ist.
+
+### Was die Tests dazu sagen
+
+Drei bestehende Erwartungen in `smoke.lua` hielten das alte Modell fest und mussten umgedreht werden – jede davon ist jetzt ein Test **für** das neue Verhalten:
+
+- Ein Herzschlag ohne Steuerungsrecht des Absenders wurde bisher verworfen. Genau das war der gemeldete Fehler; der Test prüft jetzt, dass er ankommt **und** eine Lücke hinterlässt.
+- Ein seit einer Stunde laufender Mitschnitt behielt seine Kennung. Jetzt wechselt das Etikett, und geprüft wird, dass Teilnehmer und Versuche dabei erhalten bleiben.
+- Ein einfaches Raidmitglied durfte keine Auswertung einspielen. Jetzt darf es – unter seinem Namen, und ohne den eigenen Mitschnitt zu berühren.
+
+Dazu ein neuer Block für die Reparatur, der ausdrücklich den Fall des Owners abbildet: Ein Mitschnitt mit 68 Trommeln aus Regelversion 1 liegt vor, ist vollständig und hat den höheren Wert – und darf trotzdem nirgends einfließen.
+
 ## 0.9.88 / Installer 1.0.7 – Eine Durchsicht und ihre Befunde
 
 Anlass war eine vollständige Durchsicht der Codebasis durch ein zweites Modell. Sie meldete drei schwerwiegende Korrektheitsprobleme und sieben weitere. **Alle fünfzehn Punkte wurden am Code nachgeprüft, alle waren zutreffend** – keine Falschmeldung. An vier Stellen war die Darstellung ungenau oder der vorgeschlagene Weg untauglich; das steht jeweils dabei, weil die Abweichung die eigentliche Entscheidung ist.

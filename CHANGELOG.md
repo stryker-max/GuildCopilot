@@ -7,6 +7,55 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.89 – Addon
+
+**Behoben**
+
+- **Eine von jemand anderem gestartete Raidsitzung fehlte in den eigenen
+  Einträgen.** Der Empfänger verwarf jede Sitzungsnachricht, deren *Absender*
+  in seiner eigenen Sicht kein Steuerungsrecht hatte – geprüft am Gildenrang im
+  lokalen Rosterabbild. Wen die zugehörige Einstellung noch nicht erreicht
+  hatte oder wessen Roster den Absender nicht kannte, der bekam weder den
+  Startruf noch einen der 60-Sekunden-Herzschläge mit, und zwar dauerhaft und
+  ohne jede Meldung. Der Starter sah eine normal laufende Sitzung, beim anderen
+  kam der Abend nie an. Startruf und Herzschlag sind Mitteilungen und brauchen
+  jetzt keine Berechtigung mehr.
+
+**Geändert**
+
+- **Jeder schreibt seinen eigenen Raidabend mit.** Bisher gehörte eine Sitzung
+  dem ganzen Raid: Startete jemand anderes früher, wurde der eigene Mitschnitt
+  verworfen und durch seinen ersetzt. Jetzt bleibt dein Mitschnitt immer deiner.
+  Übernommen wird nur noch das gemeinsame Etikett des Abends, damit alle
+  denselben Abend unter derselben Kennung ablegen – deine Teilnehmer, Versuche
+  und Zähler bleiben dabei unangetastet.
+- **Starten und Beenden darf jeder für sich.** Beides schreibt nur in den
+  eigenen Mitschnitt. Rangbeschränkt bleibt, was auf andere wirkt: der Ruf, der
+  die Sitzung bei allen beendet, und das Löschen einer Auswertung.
+- **Fremde Auswertungen tragen den Namen ihres Aufzeichners.** Vorher hießen
+  alle schlicht „Sync" und überschrieben sich gegenseitig – von zwei
+  Gildenmitgliedern, die denselben Abend mitgeschrieben hatten, blieb nur eins
+  übrig.
+
+**Neu**
+
+- **Lückenhafte Mitschnitte reparieren sich aus den Mitschnitten der anderen.**
+  Wer mitten im Abend neu lädt, rausfliegt oder später einsteigt, hat ein Loch
+  in seinen Zahlen. Das wird jetzt vermerkt, und beim Sitzungsende fordert der
+  Client genau dann die Auswertungen der anderen an. Ergänzt wird je Teilnehmer
+  und Zähler mit dem **höheren** Wert – nie mit der Summe, sonst zählte doppelt,
+  was beide gesehen haben. Das Ergebnis steht als eigene, benannte Fassung
+  neben deinem unveränderten Rohmitschnitt.
+- **Schutz gegen Zahlen aus alten Addon-Fassungen.** Jede Auswertung trägt
+  jetzt, nach welchen Zählregeln sie entstanden ist. Verrechnet werden nur
+  Fassungen derselben Regelversion, und nur solche, die sich selbst als
+  lückenlos melden. Ohne diese Schranke hätte ein Client vor 0.9.87 seine
+  überhöhten Trommelzahlen in fremde Auswertungen getragen – im Vergleichslog
+  waren das 68 statt 28. Ältere Auswertungen bleiben sichtbar nebeneinander
+  stehen, statt eingerechnet zu werden.
+- **Ein lückenhafter Abend sagt es.** In der Kopfzeile der Auswertung steht,
+  wenn dein Mitschnitt Lücken hat.
+
 ## 1.0.7 – Installer
 
 **Behoben**

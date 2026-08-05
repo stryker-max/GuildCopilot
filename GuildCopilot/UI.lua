@@ -495,7 +495,27 @@ local SESSION_SOURCE_MARK = {
     SYNC = "Sync",
     WCL = "Logs",
     LOG = "Datei",
+    REPAIR = "Ergänzt",
 }
+
+-- Eine Quelle trägt seit 0.9.89 den Aufzeichner: "SYNC:Alex". Für die
+-- Beschriftung zählt die Art, für die Unterscheidung mehrerer fremder
+-- Mitschnitte desselben Abends der Name dahinter.
+local function SessionSourceName(source)
+    return tostring(source or ""):match("^[^:]+:(.+)$")
+end
+
+local function SessionSourceLabel(source)
+    local kind = GC.RaidMonitor:SourceKind(source)
+    local label = SESSION_SOURCE_LABEL[kind] or tostring(source or "Unbekannt")
+    local who = SessionSourceName(source)
+    return who and (label .. " (" .. who .. ")") or label
+end
+
+local function SessionSourceMark(source)
+    local kind = GC.RaidMonitor:SourceKind(source)
+    return SESSION_SOURCE_MARK[kind] or "?", SessionSourceName(source)
+end
 
 -- Quellen, deren Anwesenheit reine Encounter-Zeit ist. Beginn und Ende
 -- beschreiben dort den ganzen Abend samt Pausen und Trash; ein Prozentwert
@@ -7242,7 +7262,7 @@ function GC.UI:RefreshStatistics()
             local seenMarks = {}
             for _, candidate in ipairs(evening.sources) do
                 local source = candidate.source or "LIVE"
-                local mark = SESSION_SOURCE_MARK[source] or "?"
+                local mark = SESSION_SOURCE_MARK[monitor:SourceKind(source)] or "?"
                 if source ~= "LIVE" and not seenMarks[mark] then
                     seenMarks[mark] = true
                     extras[#extras + 1] = mark
@@ -7266,7 +7286,12 @@ function GC.UI:RefreshStatistics()
             .. "  •  " .. FormatDuration((selected.endedAt or 0) - (selected.startedAt or 0))
             .. "  •  " .. (selected.pulls or 0) .. " Versuche, " .. (selected.kills or 0) .. " Siege, "
             .. (selected.wipes or 0) .. " Wipes  •  Quelle: "
-            .. (SESSION_SOURCE_LABEL[selected.source or "LIVE"] or tostring(selected.source or "Unbekannt")))
+            .. SessionSourceLabel(selected.source)
+            -- Ein lückenhafter Mitschnitt sagt das von sich aus. Wer eine Zahl
+            -- liest, soll nicht raten müssen, ob sie vollständig ist.
+            .. ((selected.gaps or 0) > 0
+                and ("  •  |cffffb840" .. selected.gaps .. " Lücke"
+                    .. ((selected.gaps > 1) and "n" or "") .. "|r") or ""))
     else
         page.sessionHeadline:SetText("")
     end
@@ -7294,8 +7319,12 @@ function GC.UI:RefreshStatistics()
             button:ClearAllPoints()
             button:SetPoint("TOPRIGHT", button:GetParent(), "TOPRIGHT", rightOffset, -14)
             rightOffset = rightOffset - 100
-            button:SetText((SESSION_SOURCE_MARK[candidate.source or "LIVE"] or "?")
-                .. " (" .. #(candidate.participants or {}) .. ")")
+            -- Bei zwei fremden Mitschnitten desselben Abends sagt "Sync (24)"
+            -- nichts darüber, wessen Fassung das ist. Der Name gehört deshalb
+            -- auf den Knopf, sobald es einen gibt.
+            local mark, who = SessionSourceMark(candidate.source)
+            button:SetText((who and (who .. ": ") or (mark .. " "))
+                .. "(" .. #(candidate.participants or {}) .. ")")
             SetButtonEnabled(button, true)
             button:SetActive(button.summaryID == selectedID)
         end
@@ -7304,7 +7333,7 @@ function GC.UI:RefreshStatistics()
     local sessionSeconds = selected
         and math.max(0, (selected.endedAt or 0) - (selected.startedAt or 0))
         or 0
-    if selected and ENCOUNTER_TIME_SOURCES[selected.source or ""] then
+    if selected and ENCOUNTER_TIME_SOURCES[GC.RaidMonitor:SourceKind(selected.source)] then
         -- Bei Logs ist die Anwesenheit reine Encounter-Zeit, Beginn/Ende
         -- beschreiben dagegen den ganzen Report inklusive Pausen und Trash.
         -- Der Prozentwert muss deshalb gegen die längste Encounter-Anwesenheit
@@ -9050,7 +9079,7 @@ function GC.UI:RefreshSessionReview()
             .. (SESSION_SOURCE_LABEL[summary.source or "LIVE"] or "?"))
 
         local sessionSeconds = math.max(0, (summary.endedAt or 0) - (summary.startedAt or 0))
-        if ENCOUNTER_TIME_SOURCES[summary.source or ""] then
+        if ENCOUNTER_TIME_SOURCES[GC.RaidMonitor:SourceKind(summary.source)] then
             sessionSeconds = 0
             for _, participant in ipairs(summary.participants or {}) do
                 sessionSeconds = math.max(sessionSeconds, tonumber(participant.seconds) or 0)

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.88",
+  "## Version: 0.9.89",
 ];
 
 for (const entry of requiredMetadata) {
@@ -428,8 +428,19 @@ const requiredImplementations = [
   // Zwei gleichzeitig gestartete Sitzungen muessen auf JEDEM Client zur selben
   // gewinnen, sonst schreibt die Gilde denselben Abend zweimal mit.
   ["eindeutige Regel bei zwei gleichzeitigen Sitzungen", /function GC\.RaidMonitor:IsPreferredSession/],
-  ["unterlegene Sitzung wird verworfen statt abgelegt", /function GC\.RaidMonitor:DiscardSession/],
   ["fremder Sitzungsstart wird geprüft statt ignoriert", /function GC\.RaidMonitor:AdoptForeignSession/],
+  // Seit 0.9.89 schreibt jeder seinen eigenen Abend mit. Ein fremder Startruf
+  // darf nur noch das Etikett setzen, niemals die eigenen Daten wegwerfen -
+  // sonst gibt es nichts, woraus sich eine fremde Lücke reparieren ließe.
+  ["eigener Mitschnitt wird nicht mehr verworfen", /Übernommen wird deshalb nur noch das ETIKETT/],
+  ["Lücken im eigenen Mitschnitt werden protokolliert", /function GC\.RaidMonitor:NoteGap/],
+  ["Vollständigkeit einer Auswertung ist prüfbar", /function GC\.RaidMonitor:SessionIsComplete/],
+  // Der Kern des Schutzes gegen alte Clients: Zahlen aus einer anderen
+  // Zählregel-Version dürfen nie eingerechnet werden.
+  ["Zählregel-Version je Auswertung", /RAID_RULES_VERSION/],
+  ["Reparatur nur aus tauglichen Quellen", /function GC\.RaidMonitor:CanRepairFrom/],
+  ["Reparatur rechnet den Höchstwert, nicht die Summe", /local function MergeHigher/],
+  ["fremde Auswertungen tragen ihren Aufzeichner", /summary\.source = "SYNC:"/],
   ["Knöpfe im Eingabefeld liegen über der EditBox", /local function AttachEditButton/],
   ["Kalendersymbol der Abmeldung hängt im Feld", /AttachEditButton\(edit, pick, 26\)/],
   ["Sperre gegen den selbst erzeugten Fähigkeitssturm", /skillHeadersTouchedAt/],
