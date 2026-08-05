@@ -298,6 +298,24 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.94 – Zeitüberschreitung ist nicht Verlust
+
+Die Kampfpause zum vierten Mal, und diesmal ging es nicht um die Umsetzung, sondern um eine falsche Annahme im Entwurf.
+
+0.9.92 hat den Grundsatz „bei ChatThrottleLib liegt höchstens ein Paket" eingeführt und gleich eine Sicherung dazu: Bleibt die Rückmeldung fünfzehn Sekunden aus, gilt das Paket als verloren und das nächste geht raus. Der Gedanke dahinter war, dass ein einziger ausbleibender Rückruf sonst den gesamten Abgleich anhält – ein berechtigtes Anliegen, mit einer unbelegten Annahme darunter: **dass eine Zeitüberschreitung Verlust bedeutet.**
+
+ChatThrottleLib v31 kennt für eingereihte Nachrichten weder eine Ablaufzeit noch einen Abbruch. Eine Nachricht, die dort liegt, bleibt liegen und wird gesendet, sobald der Kanal es zulässt; der Rückruf kommt dann. Fünfzehn Sekunden ohne Rückmeldung heißen also nicht „weg", sondern „Kanal ist voll" – und das ist genau die Lage, in der ein Abgleich läuft.
+
+Die Folge war das Gegenteil des Gewollten: Nach der Frist ging ein zweites Paket raus, während das erste weiter in der fremden Warteschlange lag. Nach der nächsten Frist ein drittes. Die Nachprüfung hat drei gleichzeitig offene Pakete gemessen. Ausgerechnet unter Last – wenn die Fristen überschritten werden – fiel die Zusicherung, die während eines Kampfes gelten soll.
+
+**Und der eigene Test schrieb das fest.** Er prüfte, dass nach dem Ablauf ein weiteres Paket rausgeht, und beschrieb das als „ein ausgebliebener Rückruf hält die Warteschlange dauerhaft an". Das ist dieselbe Sorte Fehler wie der „unberechtigte Anfrager" in 0.9.91: ein Test, der die Wirkung eines Fehlers als gewünschtes Verhalten festhält. Ein grüner Test beweist, dass der Code tut, was der Test erwartet – nicht, dass die Erwartung stimmt.
+
+**Zurückziehen geht nicht, also wird gewartet.** Der Platz bleibt belegt, bis ChatThrottleLib zurückmeldet. Es gibt keine Frist, nach der er von selbst frei wird, weil es keine Information gibt, die eine solche Frist rechtfertigen würde. Dass der Abgleich hängt, meldet die Fortschrittsanzeige über ihre eigene Sperre – das ist die richtige Stelle dafür, denn sie sagt es, ohne den Zustand zu verfälschen.
+
+**Die eine Ausnahme hängt an einer Tatsache, nicht an einer Uhr.** Ist die ChatThrottleLib gar nicht mehr geladen, kann sie auch nichts mehr zustellen. Erst dann ist das Paket wirklich verloren und der Platz darf frei werden. Dieser Weg kann keine Pakete anhäufen: Wo keine Bibliothek ist, liegt auch nichts in ihrer Warteschlange.
+
+Damit ist auch das ursprüngliche Anliegen von 0.9.92 gedeckt – der Abgleich steht nicht für den Rest der Sitzung –, nur eben über eine belegbare Bedingung statt über eine geratene Frist. Die Konstante `BULK_IN_FLIGHT_TIMEOUT` ist ersatzlos entfallen.
+
 ## 0.9.93 – Der Test, der den echten Fall nicht kannte
 
 0.9.92 hat die Kampfpause vollständig gemacht und dabei zwei neue Fehler eingebaut, einen davon schwerwiegend. Beide wurden vor der Veröffentlichung gefunden. Interessant ist, **warum der eigene Regressionstest sie nicht gefunden hat**.

@@ -47,11 +47,15 @@ local BULK_MAX_RETRIES = 8
 -- wachsenden zeitlichen Abstand, statt im selben Frame zu verbrennen.
 local BULK_RETRY_BACKOFF = 0.75
 local BULK_MAX_RETRY_DELAY = 4
--- Wie lange auf den Rueckruf von ChatThrottleLib gewartet wird, bevor das
--- uebergebene Paket als verloren gilt. Ohne diese Frist haelt ein einziger
--- ausgebliebener Rueckruf die ganze Warteschlange an - und weil immer nur ein
--- Paket unterwegs ist, faellt das sofort auf alles zurueck.
-local BULK_IN_FLIGHT_TIMEOUT = 15
+
+-- Liegt ueberhaupt eine benutzbare ChatThrottleLib vor? Die Frage stellt sich
+-- an zwei Stellen: vor der Uebergabe und - wichtiger - waehrend auf eine
+-- Rueckmeldung gewartet wird. Verschwindet die Bibliothek dazwischen, wartet
+-- die Warteschlange sonst auf einen Rueckruf, den niemand mehr ausloest.
+local function throttleAvailable()
+    local throttle = _G and _G.ChatThrottleLib
+    return throttle ~= nil and type(throttle.SendAddonMessage) == "function"
+end
 -- Der Rahmen, dessen OnUpdate die Bulk-Warteschlange antreibt. Er steht hier
 -- oben, damit SendBulk und PumpBulk ihn zeigen und verstecken koennen: Ein
 -- verstecktes Frame bekommt kein OnUpdate, eine leere Warteschlange kostet
@@ -456,7 +460,7 @@ end
 -- Rueckgabe: ob es raus ist, und ob der Abschluss noch aussteht.
 local function DispatchBulk(self, entry)
     local throttle = _G and _G.ChatThrottleLib
-    if throttle and type(throttle.SendAddonMessage) == "function" then
+    if throttleAvailable() then
         local queueName = GC.Constants.COMM_PREFIX .. ":" .. entry.distribution
             .. ":" .. (entry.target or "")
 
@@ -549,12 +553,31 @@ function GC.Sync:PumpBulk(elapsed)
     -- Kampfpruefung darueber. Beginnt der Kampf, ist damit hoechstens noch ein
     -- einziges Paket unterwegs.
     if self.bulkInFlight then
-        -- Bleibt der Rueckruf aus, darf die Warteschlange nicht dauerhaft
-        -- stehen. Nach dieser Frist gilt das Paket als verloren; gezaehlt hat
-        -- es die Fortschrittsanzeige ohnehin schon ueber ihre eigene Sperre.
-        if (GC.Util.Now() - (tonumber(self.bulkInFlightAt) or 0)) < BULK_IN_FLIGHT_TIMEOUT then
+        -- Der Platz bleibt belegt, bis ChatThrottleLib zurueckmeldet. Es gibt
+        -- keine Frist, nach der er von selbst frei wird.
+        --
+        -- 0.9.92 hatte hier einen Watchdog: nach fuenfzehn Sekunden galt das
+        -- Paket als verloren und das naechste ging raus. Die Annahme dahinter
+        -- war falsch. ChatThrottleLib v31 kennt fuer eingereihte Nachrichten
+        -- weder eine Ablaufzeit noch einen Abbruch - das Paket liegt weiter in
+        -- ihrer Warteschlange und wird gesendet, sobald der Kanal es zulaesst.
+        -- Wer den Platz freigibt, hat danach ZWEI Pakete draussen, nach dem
+        -- naechsten Ablauf drei. Genau das war unter Last messbar.
+        --
+        -- Zeitueberschreitung ist eben nicht Verlust, sondern nur Wartezeit.
+        -- Zurueckziehen laesst sich nichts, also wird gewartet. Dass der
+        -- Abgleich haengt, meldet die Fortschrittsanzeige ueber ihre eigene
+        -- Sperre (PROGRESS_STALL_SECONDS) - das ist die richtige Stelle dafuer,
+        -- denn sie sagt es, ohne den Zustand zu verfaelschen.
+        if throttleAvailable() then
             return
         end
+
+        -- Die einzige Ausnahme, und sie haengt an einer Tatsache statt an
+        -- einer Uhr: Ist ChatThrottleLib gar nicht mehr da, kann sie auch
+        -- nichts mehr zustellen. Erst dann ist das Paket wirklich verloren,
+        -- und der Platz darf frei werden - sonst stuende die Warteschlange
+        -- fuer den Rest der Sitzung.
         local lost = self.bulkInFlight
         self.bulkInFlight = nil
         self.bulkInFlightAt = nil

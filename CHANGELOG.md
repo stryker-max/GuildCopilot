@@ -7,6 +7,27 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.94 – Addon
+
+**Behoben**
+
+- **Die Sicherung aus 0.9.92 konnte selbst mehrere Pakete gleichzeitig
+  losschicken.** Sie erklärte ein Paket nach 15 Sekunden für verloren und gab
+  das nächste frei. Die ChatThrottleLib kennt für eingereihte Nachrichten aber
+  weder eine Ablaufzeit noch einen Abbruch — das vermeintlich verlorene Paket
+  lag weiter in ihrer Warteschlange und ging später hinaus. Unter Last sammelte
+  sich so eines nach dem anderen an, und die Zusage „im Kampf geht höchstens
+  eines raus" fiel damit wieder. Eine lange Wartezeit heißt nicht, dass etwas
+  verloren ist; zurückziehen lässt sich nichts, also wird gewartet. Dass der
+  Abgleich hängt, meldet weiterhin die Fortschrittsanzeige.
+
+  Der Platz wird nur noch in einem Fall ohne Rückmeldung frei: wenn die
+  ChatThrottleLib gar nicht mehr geladen ist und deshalb nichts mehr zustellen
+  kann. Das hängt an einer Tatsache statt an einer Uhr und kann keine Pakete
+  anhäufen.
+
+Der Fehler stammt aus 0.9.92 und war nie in einer veröffentlichten Fassung.
+
 ## 0.9.93 – Addon
 
 **Behoben**
