@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.87
+# Guild Copilot 0.9.88
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -142,7 +142,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.6 und das Addon bei 0.9.87.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.88.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -154,7 +154,7 @@ Wer sichergehen will, vergleicht die Prüfsumme:
 Get-FileHash .\GuildCopilot-Installer.exe -Algorithm SHA256
 ```
 
-SHA-256 der Fassung 1.0.6: `54274AE55A453B02C6A6DD0723B4DC3B72A2B1578425C3B052805B3405AC452E`
+SHA-256 der Fassung 1.0.7: `6C4DEC10699DDA9F4035E3F8704CBA7CF58839F060A3F43960C2C696C80F05E6`
 
 Wem das zu umständlich ist, nimmt `Install.cmd` — dort wird nichts ausgeführt, was Windows nicht ohnehin kennt.
 

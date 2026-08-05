@@ -129,6 +129,19 @@ function GC.Util.PlayerShortName(name)
     return name:match("^([^-]+)") or name
 end
 
+-- Der Schluessel, unter dem ein Charakter in allen Tabellen steht.
+--
+-- Derselbe Charakter erreicht das Addon je nach Quelle mit und ohne
+-- Realmanteil: GetPlayerFullName() haengt ihn immer an, UnitName() nie, und
+-- der Absender einer Addon-Nachricht mal so, mal so. Wer beides ungeprueft als
+-- Schluessel nimmt, fuehrt denselben Spieler doppelt - genau das ist in der
+-- Werkstatt passiert, waehrend Raidmonitor und Ausruestungspruefung laengst
+-- gekuerzt haben. Der Realm faellt deshalb ueberall weg; in einer TBC-Gilde
+-- sind ohnehin alle auf demselben Realm.
+function GC.Util.PlayerKey(name)
+    return GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+end
+
 function GC.Util.DeepCopy(value)
     if type(value) ~= "table" then
         return value

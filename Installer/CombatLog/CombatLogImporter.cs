@@ -109,7 +109,19 @@ public sealed class CombatLogImporter
 
         long lines = 0;
         long unparsable = 0;
+
+        // Aeltere Spielfassungen schreiben kein Jahr in den Zeitstempel. Bis
+        // 1.0.6 bekam deshalb jede Zeile das Jahr der Datei - ein Raidabend
+        // ueber Silvester landete damit komplett im Jahr des 1. Januar, und
+        // der Dezemberteil sprang um ein Jahr nach vorn.
+        //
+        // Im Log zeigt sich der Jahreswechsel als Monatsruecksprung (12 -> 1).
+        // Die Datei endet im Jahr ihres Zeitstempels; sie faengt also im Jahr
+        // davor an, wenn ihr erster Monat hinter dem letzten liegt.
         var fileYear = file.LastWriteTime.Year;
+        var firstMonth = FirstLoggedMonth(file);
+        var year = firstMonth > file.LastWriteTime.Month ? fileYear - 1 : fileYear;
+        var previousMonth = 0;
 
         log.Report($"Lese {CombatLogFinder.Describe(file)} …");
 
@@ -119,10 +131,22 @@ public sealed class CombatLogImporter
             lines++;
             if (lines % 250_000 == 0) log.Report($"  {lines:N0} Zeilen …");
 
-            if (!TryParseTimestamp(line, fileYear, out var when, out var payload))
+            if (!TryParseTimestamp(line, year, out var when, out var payload, out var yearFromLog))
             {
                 unparsable++;
                 continue;
+            }
+
+            // Nur selbst gesetzte Jahre duerfen nachgezogen werden. Steht das
+            // Jahr im Log, ist es richtig und der Ruecksprung schon eingebaut.
+            if (!yearFromLog)
+            {
+                if (previousMonth > 0 && when.Month < previousMonth)
+                {
+                    year++;
+                    when = when.AddYears(1);
+                }
+                previousMonth = when.Month;
             }
 
             var comma = payload.IndexOf(',');
@@ -213,8 +237,9 @@ public sealed class CombatLogImporter
             if (kind is null) continue;
 
             // Wer gezaehlt wird, haengt am Ereignis: Der Tod trifft das Ziel,
-            // gewirkt wird von der Quelle, ein dauerhafter Buff landet auf dem
-            // Ziel.
+            // gewirkt wird von der Quelle. Als Aura kommt hier nur noch Essen
+            // an (siehe Classify), und der Sattgegessen-Buff landet auf dem,
+            // der gegessen hat - also auf dem Ziel.
             var guidOfInterest = kind switch
             {
                 EventKind.Death => destGuid,
@@ -268,14 +293,56 @@ public sealed class CombatLogImporter
                 + "Wurde das Protokoll (/combatlog) während des Raids überhaupt aufgezeichnet?");
         }
 
-        output.Append(FormatHeader).Append('|').Append(blocks.Count).Append('\n');
-        foreach (var block in blocks)
+        // Ein WoWCombatLog.txt sammelt oft viele Raidabende. Passt nicht alles
+        // in das Importfeld des Addons, gehen die aeltesten - importieren will
+        // man den letzten Abend. Geschnitten wird ausschliesslich an der
+        // Abendgrenze: WoW wuerde den Text sonst stumm mitten in einer Zeile
+        // abschneiden, und das Addon nimmt den Rest als gueltigen Teilimport
+        // an. Ein halber Abend saehe hinterher aus wie ein vollstaendiger.
+        var kept = blocks;
+        if (HeaderLength(blocks.Count) + blocks.Sum(BlockLength) > AddonImport.Limit)
+        {
+            var fitting = new List<List<string>>();
+            var used = 0;
+            for (var index = blocks.Count - 1; index >= 0; index--)
+            {
+                var cost = BlockLength(blocks[index]);
+                if (HeaderLength(fitting.Count + 1) + used + cost > AddonImport.Limit) break;
+                fitting.Insert(0, blocks[index]);
+                used += cost;
+            }
+            if (fitting.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Schon der letzte Raidabend allein ist mit {BlockLength(blocks[^1]):N0} Zeichen "
+                    + $"groesser als die {AddonImport.Limit:N0} Zeichen, die das Importfeld im Addon "
+                    + "aufnimmt. Bitte den Raid in kuerzeren Protokolldateien aufzeichnen.");
+            }
+            warnings.Add($"Nur die letzten {fitting.Count} von {blocks.Count} Raidabenden passen in das "
+                         + $"Importfeld ({AddonImport.Limit:N0} Zeichen); die {blocks.Count - fitting.Count} "
+                         + "aelteren wurden weggelassen.");
+            kept = fitting;
+            participantCount = fitting.Sum(block => block.Count - 1);
+        }
+
+        output.Append(FormatHeader).Append('|').Append(kept.Count).Append('\n');
+        foreach (var block in kept)
         {
             foreach (var text in block) output.Append(text).Append('\n');
         }
 
-        return new CombatLogResult(output.ToString(), blocks.Count, participantCount, lines, warnings);
+        return new CombatLogResult(output.ToString(), kept.Count, participantCount, lines, warnings);
     }
+
+    /// <summary>
+    /// Zeichen, die ein Raidabend im Importfeld belegt - jede Zeile plus ihr
+    /// Zeilenumbruch, genau so, wie sie unten geschrieben wird.
+    /// </summary>
+    private static int BlockLength(List<string> block) => block.Sum(line => line.Length + 1);
+
+    private static int HeaderLength(int blockCount) =>
+        FormatHeader.Length + 1
+        + blockCount.ToString(CultureInfo.InvariantCulture).Length + 1;
 
     // ---------------------------------------------------------------------
     // Auswertung
@@ -356,6 +423,20 @@ public sealed class CombatLogImporter
     /// Wiederbelebungen bei nur 39 Spielertoden. Der Warcraft-Logs-Import
     /// zaehlt umgekehrt ueber den Zauber, weil die API kein SPELL_RESURRECT
     /// kennt; hier gibt es es, und dann ist es die genauere Quelle.
+    ///
+    /// Dieselbe Falle stellen die Verbrauchsgegenstaende, und hier stand sie
+    /// bis 1.0.6 offen: Gezaehlt wurden Wirkereignis UND Aura, aus einer
+    /// einzigen flachen Liste. Das ist genau der Fehler, den die Livesitzung
+    /// in 0.9.87 abgelegt hat (GC.ConsumableCategories, track = CAST/AURA):
+    ///   - Eine Trommel bufft die ganze Gruppe. Ueber die Aura bekam sie jedes
+    ///     Gruppenmitglied gutgeschrieben - im Vergleichslog vom 02.08.2026
+    ///     warfen fuenf Spieler Trommeln, angezeigt wurden acht, einer mit 68
+    ///     statt 28.
+    ///   - Hast-, Zerstoerungs- und Heldentrank erzeugen Zauber UND eigene
+    ///     Aura: vier Traenke standen als acht da.
+    ///   - Flaeschchen und Elixiere zaehlten ueber SPELL_AURA_REFRESH mehrfach.
+    /// Deshalb gilt jetzt je Gruppe genau eine Quelle - fuer Essen die Aura
+    /// (ein Wirkereignis gibt es dafuer nie), fuer alles andere der Zauber.
     /// </summary>
     private static EventKind? Classify(string subevent, int spellId) => subevent switch
     {
@@ -363,9 +444,10 @@ public sealed class CombatLogImporter
         "SPELL_RESURRECT" => EventKind.Resurrect,
         "SPELL_INTERRUPT" => EventKind.Interrupt,
         "SPELL_DISPEL" or "SPELL_STOLEN" => EventKind.Dispel,
-        "SPELL_CAST_SUCCESS" when SpellIds.ConsumableSet.Contains(spellId) => EventKind.Consumable,
+        "SPELL_CAST_SUCCESS" when SpellIds.ConsumableSet.Contains(spellId)
+            && !SpellIds.FoodAuraSet.Contains(spellId) => EventKind.Consumable,
         "SPELL_AURA_APPLIED" or "SPELL_AURA_REFRESH"
-            when SpellIds.ConsumableSet.Contains(spellId) => EventKind.Consumable,
+            when SpellIds.FoodAuraSet.Contains(spellId) => EventKind.Consumable,
         _ => null,
     };
 
@@ -440,9 +522,19 @@ public sealed class CombatLogImporter
     /// der Datei.
     /// </summary>
     internal static bool TryParseTimestamp(string line, int fallbackYear, out DateTime when, out string payload)
+        => TryParseTimestamp(line, fallbackYear, out when, out payload, out _);
+
+    /// <summary>
+    /// <paramref name="yearFromLog"/> meldet, ob das Jahr aus der Zeile kam.
+    /// Nur ein selbst gesetztes Jahr darf der Aufrufer beim Jahreswechsel
+    /// nachziehen.
+    /// </summary>
+    internal static bool TryParseTimestamp(string line, int fallbackYear, out DateTime when,
+        out string payload, out bool yearFromLog)
     {
         when = default;
         payload = string.Empty;
+        yearFromLog = false;
         var separator = line.IndexOf("  ", StringComparison.Ordinal);
         if (separator <= 0) return false;
 
@@ -455,12 +547,27 @@ public sealed class CombatLogImporter
         {
             return false;
         }
-        if (stamp.Count(character => character == '/') < 2)
+        yearFromLog = stamp.Count(character => character == '/') >= 2;
+        if (!yearFromLog)
         {
             when = new DateTime(fallbackYear, when.Month, when.Day, when.Hour, when.Minute, when.Second,
                 when.Millisecond, DateTimeKind.Unspecified);
         }
         return true;
+    }
+
+    /// <summary>
+    /// Monat der ersten lesbaren Zeitstempelzeile - die Grundlage dafuer, ob
+    /// die Datei ueber einen Jahreswechsel reicht. Unlesbare Kopfzeilen werden
+    /// uebersprungen; findet sich gar nichts, meldet die Methode 0.
+    /// </summary>
+    private static int FirstLoggedMonth(FileInfo file)
+    {
+        foreach (var line in File.ReadLines(file.FullName, Encoding.UTF8))
+        {
+            if (TryParseTimestamp(line, file.LastWriteTime.Year, out var when, out _)) return when.Month;
+        }
+        return 0;
     }
 
     /// <summary>

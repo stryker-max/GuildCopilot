@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using GuildCopilot.Installer.CombatLog;
 using GuildCopilot.Installer.Wcl;
 
 namespace GuildCopilot.Installer;
@@ -267,6 +268,8 @@ internal static class Program
                 throw new InvalidOperationException("Die Encounter-Teilnehmerauswahl ist fehlerhaft.");
             }
 
+            AssertCombatLogImport();
+
             Console.WriteLine("OK: Installer-Kernprüfungen bestanden.");
             return 0;
         }
@@ -274,6 +277,90 @@ internal static class Program
         {
             Console.Error.WriteLine($"Kernselbsttest fehlgeschlagen: {error.Message}");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Prueft den Offline-Import an einem von Hand gebauten Kampfprotokoll.
+    /// Beide Fehler, die hier abgesichert werden, waren im Vergleichslog vom
+    /// 02.08.2026 sichtbar und sind live laengst behoben - der Importer hat
+    /// sie bis 1.0.6 weitergemacht:
+    ///
+    ///   - Eine Trommel bufft die ganze Gruppe. Gezaehlt wird nur, wer sie
+    ///     wirft; der Buff beim Empfaenger ist kein Verbrauch.
+    ///   - Ein Trank mit Buff erzeugt Zauber UND Aura. Nur der Zauber zaehlt.
+    ///   - Essen erzeugt nie einen Zauber. Dort zaehlt allein der Buff.
+    ///
+    /// Dazu der Jahreswechsel: Ein Abend, der ueber Silvester reicht, gehoert
+    /// ins alte Jahr und nicht ins Jahr des Dateidatums.
+    /// </summary>
+    private static void AssertCombatLogImport()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"GuildCopilot-Selbsttest-{Guid.NewGuid():N}.txt");
+        try
+        {
+            File.WriteAllLines(path,
+            [
+                "12/31 23:50:00.000  ENCOUNTER_START,652,\"Attumen\",2,10",
+                "12/31 23:50:05.000  SPELL_CAST_SUCCESS,Player-1-01,\"Alex-Thunderstrike\",0,0,"
+                    + "Player-1-01,\"Alex-Thunderstrike\",0,0,35476,\"Trommeln der Schlacht\",0",
+                "12/31 23:50:05.100  SPELL_AURA_APPLIED,Player-1-01,\"Alex-Thunderstrike\",0,0,"
+                    + "Player-1-02,\"Bea-Thunderstrike\",0,0,35476,\"Trommeln der Schlacht\",0",
+                "12/31 23:50:06.000  SPELL_CAST_SUCCESS,Player-1-01,\"Alex-Thunderstrike\",0,0,"
+                    + "Player-1-01,\"Alex-Thunderstrike\",0,0,28507,\"Hasttrank\",0",
+                "12/31 23:50:06.500  SPELL_AURA_APPLIED,Player-1-01,\"Alex-Thunderstrike\",0,0,"
+                    + "Player-1-01,\"Alex-Thunderstrike\",0,0,28507,\"Hasttrank\",0",
+                "12/31 23:50:07.000  SPELL_AURA_APPLIED,Player-1-02,\"Bea-Thunderstrike\",0,0,"
+                    + "Player-1-02,\"Bea-Thunderstrike\",0,0,33257,\"Sattgegessen\",0",
+                "12/31 23:51:00.000  ENCOUNTER_END,652,\"Attumen\",2,10,1",
+                "1/1 00:10:00.000  ENCOUNTER_START,653,\"Moroes\",2,10",
+                "1/1 00:11:00.000  ENCOUNTER_END,653,\"Moroes\",2,10,1",
+            ]);
+            File.SetLastWriteTime(path, new DateTime(2027, 1, 1, 1, 0, 0));
+
+            var result = new CombatLogImporter().Run(path, new Progress<string>(_ => { }), CancellationToken.None);
+            var lines = result.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            var alex = lines.FirstOrDefault(line => line.StartsWith("P|Alex|", StringComparison.Ordinal));
+            var bea = lines.FirstOrDefault(line => line.StartsWith("P|Bea|", StringComparison.Ordinal));
+            if (alex is null || bea is null)
+            {
+                throw new InvalidOperationException("Der Offline-Import hat nicht beide Teilnehmer erzeugt.");
+            }
+
+            // Feld 7 der P-Zeile haelt die Verbrauchsgegenstaende, nach
+            // Spell-ID aufsteigend.
+            var alexConsumables = alex.Split('|')[7];
+            if (alexConsumables != "28507:1,35476:1")
+            {
+                throw new InvalidOperationException(
+                    $"Trommel oder Trank zaehlen falsch: \"{alexConsumables}\" statt \"28507:1,35476:1\".");
+            }
+
+            var beaConsumables = bea.Split('|')[7];
+            if (beaConsumables != "33257:1")
+            {
+                throw new InvalidOperationException(
+                    "Der Trommelbuff wurde dem Empfaenger gutgeschrieben oder das Essen fehlt: "
+                    + $"\"{beaConsumables}\" statt \"33257:1\".");
+            }
+
+            if (!lines[1].StartsWith("S|20261231-2350|", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Der Abend ueber Silvester steht im falschen Jahr: \"{lines[1]}\".");
+            }
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+                // Eine liegengebliebene Testdatei im Temp-Ordner ist harmlos.
+            }
         }
     }
 

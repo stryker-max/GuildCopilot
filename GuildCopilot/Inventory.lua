@@ -258,6 +258,9 @@ function GC.Inventory:ScanGuildBankTab(tabIndex)
     end
     local name, _, isViewable = SafeCall(GetGuildBankTabInfo, tabIndex)
     if isViewable == false then
+        -- Nicht einsehbar heisst: kommt auch spaeter nicht. Der Tab muss aus
+        -- der Warteliste, sonst wird er bei jedem Bankereignis neu versucht.
+        self.pendingTabs[tabIndex] = nil
         return false
     end
 
@@ -287,6 +290,11 @@ function GC.Inventory:ScanGuildBankTab(tabIndex)
         seenBy = GC.Util.PlayerShortName(GC:GetPlayerFullName()),
         fingerprint = TabFingerprint(counts),
     }
+    -- Dieser Tab ist gelesen und damit erledigt. Blieb er ausstehend, las
+    -- jedes weitere Bankereignis ihn erneut - zusammen mit allen zuvor
+    -- besuchten Tabs. Bei acht Tabs waren das bis zu 882 Slotabfragen je
+    -- Ereignis, und den offenen Tab traf es doppelt.
+    self.pendingTabs[tabIndex] = nil
     self.guildBankDirty = true
     GC:FireCallback("INVENTORY_UPDATED")
     return true
@@ -326,6 +334,25 @@ end
 -- Manifest zuerst: gesendet werden nur Tab, Zeitstempel und Fingerabdruck. Die
 -- eigentlichen Bestaende gehen erst raus, wenn jemand nachweislich einen
 -- aelteren Stand hat und danach fragt.
+
+-- Welcher von zwei Staenden gewinnt? Der neuere - und bei gleicher Sekunde der
+-- mit dem groesseren Fingerabdruck.
+--
+-- Dass es diese zweite Stufe gibt, ist keine Feinheit: updatedAt kennt nur
+-- ganze Sekunden (GetServerTime), zwei Staende derselben Sekunde sind also
+-- alltaeglich. Vorher forderte das Manifest bei gleicher Sekunde und
+-- abweichendem Fingerabdruck an, der Empfang verwarf denselben Stand aber,
+-- weil er "nicht neuer" war. Das Paar lief endlos: anfordern, senden,
+-- verwerfen, beim naechsten Manifest von vorn.
+--
+-- Entscheidend ist, dass BEIDE Seiten dieselbe Regel benutzen. Deshalb steht
+-- sie hier einmal und wird von Manifest und Empfang gemeinsam aufgerufen.
+local function WinsOverKnown(updatedAt, fingerprint, knownAt, knownFingerprint)
+    if updatedAt ~= knownAt then
+        return updatedAt > knownAt
+    end
+    return tostring(fingerprint or "") > tostring(knownFingerprint or "")
+end
 
 local function BuildMessage(fields)
     local escaped = {}
@@ -547,12 +574,12 @@ function GC.Inventory:ReceiveSync(fields, sender)
                 and #fingerprint <= 20 then
                 local known = tabs[tabIndex]
                 local knownAt = tonumber(known and known.updatedAt) or 0
-                -- Nur ein nachweislich neuerer Stand ist interessant. Ein
+                -- Nur ein Stand, der nach derselben Regel gewinnt, nach der
+                -- der Empfang ihn spaeter annimmt, ist interessant. Ein
                 -- Manifest ohne einen Tab sagt nichts ueber diesen Tab: der
                 -- Absender darf ihn vielleicht nicht sehen.
-                if updatedAt > knownAt
-                    or (updatedAt == knownAt and known
-                        and tostring(known.fingerprint or "") ~= fingerprint) then
+                if WinsOverKnown(updatedAt, fingerprint, knownAt,
+                    known and known.fingerprint) then
                     stale[#stale + 1] = tabIndex
                 end
             end
@@ -653,22 +680,29 @@ function GC.Inventory:ReceiveSync(fields, sender)
     self.guildBankCompleted[incomingKey] = now
 
     -- Die aktuellsten Daten gewinnen, rangunabhaengig. Ein aelterer Stand darf
-    -- einen neueren niemals ueberschreiben.
+    -- einen neueren niemals ueberschreiben - nach derselben Regel, nach der
+    -- das Manifest oben ueberhaupt angefordert hat.
     local tabs = self:GetGuildBank().tabs
     local known = tabs[tabIndex]
-    if known and (tonumber(known.updatedAt) or 0) >= updatedAt then
+    if known and not WinsOverKnown(updatedAt, fingerprint,
+        tonumber(known.updatedAt) or 0, known.fingerprint) then
         return
     end
     local assembled = {}
     for partIndex = 1, incoming.total do
         assembled[partIndex] = incoming.parts[partIndex] or ""
     end
+    local counts = DecodeCounts(table.concat(assembled))
     tabs[tabIndex] = {
         name = incoming.tabName,
-        counts = DecodeCounts(table.concat(assembled)),
+        counts = counts,
         updatedAt = updatedAt,
         seenBy = incoming.seenBy ~= "" and incoming.seenBy or GC.Util.PlayerShortName(sender),
-        fingerprint = incoming.fingerprint,
+        -- Selbst nachrechnen statt dem Absender zu glauben. Ein Fingerabdruck,
+        -- der nicht zu den empfangenen Bestaenden passt, wuerde ab jetzt im
+        -- eigenen Manifest stehen - und alle anderen forderten den Tab
+        -- dauerhaft neu an, obwohl er laengst da ist.
+        fingerprint = TabFingerprint(counts),
     }
     GC:FireCallback("INVENTORY_UPDATED")
 end

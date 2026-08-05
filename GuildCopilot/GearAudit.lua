@@ -1178,7 +1178,10 @@ function GC.GearAudit:StoreAudit(audit)
     if not audit or not audit.name or audit.name == "" then
         return false
     end
-    GC.DB:GetGuild().gearAudits[GC.Util.NormalizeName(audit.name)] = audit
+    -- Denselben Schluessel bilden wie GetAudit. Die Namen kommen hier bereits
+    -- gekuerzt an, aber die beiden Seiten duerfen sich nicht darauf verlassen,
+    -- dass das so bleibt.
+    GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(audit.name)] = audit
     GC:FireCallback("GEAR_AUDIT_UPDATED")
     return true
 end
@@ -1211,7 +1214,7 @@ function GC.GearAudit:GetAudit(name)
     if not name then
         return nil
     end
-    return GC.DB:GetGuild().gearAudits[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
+    return GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(name)]
 end
 
 -- === Rang-Auswahl für die Prüfliste ========================================
@@ -1286,12 +1289,17 @@ function GC.GearAudit:AuditSelf(automatic, forceSnapshot)
     end)
     self:StoreAudit(audit)
     self.selectedName = audit.name
-    -- Solange Slots unlesbar sind, lauscht die Pruefung auf nachgeladene
-    -- Item-Daten; ist alles gelesen, wird das Abo wieder beendet.
-    self:SetItemInfoWatch((audit.unreadableSlots or 0) > 0)
+    -- Solange Slots unlesbar sind UND die Pruefung noch einmal antritt,
+    -- lauscht sie auf nachgeladene Item-Daten. Nach dem letzten Versuch wird
+    -- das Abo beendet: Blieb es an, loeste jedes nachgeladene Item - auch aus
+    -- Bank, Auktionshaus oder einem Chatlink - eine neue Vollpruefung aus, die
+    -- am selben Limit sofort wieder scheiterte. Ein Ausruestungswechsel setzt
+    -- den Zaehler zurueck und gibt der Pruefung neue Versuche.
     if (audit.unreadableSlots or 0) > 0 then
         self.unreadableRetryCount = (self.unreadableRetryCount or 0) + 1
-        if self.unreadableRetryCount <= MAX_SELF_READ_RETRIES then
+        local retrying = self.unreadableRetryCount <= MAX_SELF_READ_RETRIES
+        self:SetItemInfoWatch(retrying)
+        if retrying then
             self:QueueSelfAudit(1)
             self:SetStatus("Eigene Gegenstandsdaten werden noch geladen; Prüfung wird wiederholt.")
             return false, "Ausrüstung noch nicht vollständig lesbar; die Prüfung wird automatisch wiederholt."
@@ -1299,6 +1307,7 @@ function GC.GearAudit:AuditSelf(automatic, forceSnapshot)
         self:SetStatus("Eigene Gegenstandsdaten sind noch nicht vollständig lesbar.")
         return false, "Unvollständige Ausrüstung wurde nicht an die Gilde übertragen."
     end
+    self:SetItemInfoWatch(false)
     self.unreadableRetryCount = 0
     self:QueueEquipmentSnapshot(audit, forceSnapshot)
     self:SetStatus(automatic and "Eigene Ausrüstung automatisch geprüft." or "Eigene Ausrüstung geprüft.")
@@ -1465,6 +1474,15 @@ end
 -- WoW erlaubt nur eine Inspektion gleichzeitig und nur in Reichweite. Die
 -- Warteschlange arbeitet deshalb einen Spieler nach dem anderen ab und
 -- überspringt jeden, der nicht erreichbar ist.
+--
+-- Wichtig dabei: "raid7" ist keine Spieleridentität, sondern ein Platz in der
+-- Raidaufstellung. Wer die Gruppe wechselt oder den Raid verlässt, verschiebt
+-- alle dahinter. Zwischen Einsammeln und Inspizieren liegen INSPECT_INTERVAL
+-- Sekunden je Eintrag – bei 24 Spielern eine gute halbe Minute, in der sich
+-- die Reihenfolge ändern kann. Deshalb wird beim Einsammeln die GUID
+-- festgehalten und vor jedem Zugriff geprüft, ob der Token noch denselben
+-- Spieler meint. Ohne diese Prüfung landet die Ausrüstung des neuen "raid7"
+-- unter dem Namen des früheren.
 
 function GC.GearAudit:CollectRaidTargets()
     local targets = {}
@@ -1480,10 +1498,47 @@ function GC.GearAudit:CollectRaidTargets()
             targets[#targets + 1] = {
                 unit = unit,
                 name = UnitName(unit),
+                guid = UnitGUID and UnitGUID(unit),
             }
         end
     end
     return targets
+end
+
+-- Meint dieser Token noch den Spieler aus der Warteschlange? Die GUID ist der
+-- harte Beleg; nur wo der Client keine herausgibt, muss der Name reichen.
+function GC.GearAudit:UnitMatchesTarget(unit, target)
+    if not unit or not target or not UnitExists or not UnitExists(unit) then
+        return false
+    end
+    if target.guid and UnitGUID then
+        return UnitGUID(unit) == target.guid
+    end
+    return UnitName ~= nil and UnitName(unit) == target.name
+end
+
+-- Liefert den Token, hinter dem der Spieler JETZT steht - oder nil, wenn er
+-- die Gruppe verlassen hat. Der gefundene Token wird im Eintrag vermerkt,
+-- damit der Wiederholungslauf nicht erneut suchen muss.
+function GC.GearAudit:ResolveUnit(target)
+    if not target then
+        return nil
+    end
+    if self:UnitMatchesTarget(target.unit, target) then
+        return target.unit
+    end
+    if not GetNumGroupMembers then
+        return nil
+    end
+    local inRaid = IsInRaid and IsInRaid()
+    for index = 1, (GetNumGroupMembers() or 0) do
+        local unit = (inRaid and "raid" or "party") .. index
+        if self:UnitMatchesTarget(unit, target) then
+            target.unit = unit
+            return unit
+        end
+    end
+    return nil
 end
 
 function GC.GearAudit:CanInspectUnit(unit)
@@ -1583,7 +1638,11 @@ function GC.GearAudit:ProcessQueue()
         return
     end
 
-    if not self:CanInspectUnit(target.unit) then
+    -- Erst nachsehen, wo der Spieler jetzt steht, dann erst fragen, ob er
+    -- erreichbar ist: Die Reichweitenpruefung auf einem verschobenen Token
+    -- beantwortet die Frage fuer den Falschen.
+    local unit = self:ResolveUnit(target)
+    if not unit or not self:CanInspectUnit(unit) then
         self.skipped = (self.skipped or 0) + 1
         C_Timer.After(0.05, function()
             self:ProcessQueue()
@@ -1596,17 +1655,20 @@ function GC.GearAudit:ProcessQueue()
     -- die Einheit, und die ist bei einer Wiederholung genau dieselbe.
     self.attemptID = (self.attemptID or 0) + 1
     local attemptID = self.attemptID
+    -- Die GUID stammt aus dem Einsammeln. Nur wo der Client keine liefert,
+    -- wird sie hier nachgeholt; sie dann frisch zu lesen waere wertlos, weil
+    -- sie genau die Verschiebung mitmachen wuerde, gegen die sie schuetzt.
     self.active = {
-        unit = target.unit,
+        unit = unit,
         name = target.name,
-        guid = UnitGUID and UnitGUID(target.unit),
+        guid = target.guid or (UnitGUID and UnitGUID(unit)),
         startedAt = GC.Util.Now(),
         retries = tonumber(target.retries) or 0,
         target = target,
         attemptID = attemptID,
     }
     if NotifyInspect then
-        NotifyInspect(target.unit)
+        NotifyInspect(unit)
     end
 
     C_Timer.After(INSPECT_TIMEOUT, function()
@@ -1630,7 +1692,26 @@ function GC.GearAudit:OnInspectReady(guid)
         return false
     end
 
-    local unit = active.unit
+    -- Zwischen Anfrage und Antwort kann sich die Aufstellung verschoben haben.
+    -- Wer jetzt hinter dem gemerkten Token steht, muss noch derselbe Spieler
+    -- sein - sonst wuerde fremde Ausruestung unter seinem Namen gespeichert.
+    -- Die GUID-Pruefung oben faengt das nicht ab: Sie vergleicht nur, ob die
+    -- Antwort zur Anfrage gehoert.
+    local unit = self:ResolveUnit(active)
+    if not unit then
+        self.skipped = (self.skipped or 0) + 1
+        self.active = nil
+        if ClearInspectPlayer then
+            ClearInspectPlayer()
+        end
+        if self.scanning then
+            C_Timer.After(0.05, function()
+                self:ProcessQueue()
+            end)
+        end
+        return true
+    end
+
     local _, classFile = UnitClass(unit)
     local audit = self:BuildAudit(active.name or UnitName(unit), classFile, function(slotID)
         return GetInventoryItemLink(unit, slotID)

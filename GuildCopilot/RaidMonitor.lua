@@ -206,11 +206,21 @@ function GC.RaidMonitor:SyncParticipants()
     -- sich nur am lebenden Spieler ablesen, nicht im Kampfprotokoll.
     local function MarkPresent(name, classFile, unit)
         local participant = name and self:GetParticipant(session, name, classFile)
-        if participant then
-            present[participant] = true
-            participant.presentSince = participant.presentSince or now
-            self:ScanCarriedConsumables(unit, participant)
+        if not participant then
+            return
         end
+        -- Wer die Verbindung verloren hat, bleibt Teilnehmer der Sitzung -
+        -- aber seine Anwesenheitsuhr steht. Vorher zaehlte die blosse
+        -- Raidmitgliedschaft: Wer nach zwanzig Minuten rausflog und nicht
+        -- wiederkam, stand am Ende mit der vollen Abenddauer da, solange ihn
+        -- niemand aus dem Raid nahm. Beim Wiedereinloggen laeuft die Uhr
+        -- einfach weiter; die bis dahin gesammelte Zeit bleibt erhalten.
+        if unit and UnitIsConnected and UnitIsConnected(unit) == false then
+            return
+        end
+        present[participant] = true
+        participant.presentSince = participant.presentSince or now
+        self:ScanCarriedConsumables(unit, participant)
     end
 
     -- Wer die Sitzung mitschreibt, ist immer dabei. Ohne diese Zeile bliebe
@@ -895,6 +905,7 @@ function GC.RaidMonitor:BeginSegment(startedAt)
         startedAt = tonumber(startedAt) or GC.Util.Now(),
         playerDeaths = 0,
         lastNPCDeath = nil,
+        bossDied = false,
         bossName = nil,
         bossInstance = nil,
     }
@@ -940,7 +951,7 @@ function GC.RaidMonitor:CloseSegment(endedAt)
         result = segment.encounterResult
     elseif presentCount > 0 and segment.playerDeaths >= wipeThreshold then
         result = "WIPE"
-    elseif segment.lastNPCDeath then
+    elseif segment.bossDied then
         result = "KILL"
     end
 
@@ -1168,7 +1179,15 @@ function GC.RaidMonitor:HandleCombatLogEvent(subevent, sourceGUID, sourceName, d
                 session.segment.playerDeaths = session.segment.playerDeaths + 1
             end
         elseif session.segment and tostring(destGUID or ""):find("Creature", 1, true) then
-            session.segment.lastNPCDeath = SanitizedText(destName, 36)
+            local npcName = SanitizedText(destName, 36)
+            session.segment.lastNPCDeath = npcName
+            -- Ein Sieg ist der Tod des BOSSES. Vorher genuegte irgendein toter
+            -- Gegner: Fehlte ENCOUNTER_END, machte der erste gestorbene Add
+            -- aus einem abgebrochenen Versuch einen "Kill".
+            if self:ResolveBoss(destName)
+                or (session.segment.bossName and npcName == session.segment.bossName) then
+                session.segment.bossDied = true
+            end
         end
         return
     end

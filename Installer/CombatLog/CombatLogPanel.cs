@@ -166,9 +166,15 @@ public sealed class CombatLogPanel : UserControl
             _copy.Enabled = true;
             var copied = Copy(result.Text, null);
 
-            _status.ForeColor = copied ? Theme.Success : Theme.Danger;
+            // Weggelassene Raidabende gehoeren in die Statuszeile, nicht nur
+            // ins Protokoll darunter: Wer sie dort uebersieht, haelt einen
+            // gekuerzten Import fuer einen vollstaendigen.
+            var omitted = result.Warnings.FirstOrDefault(
+                warning => warning.Contains("Importfeld", StringComparison.Ordinal));
+            _status.ForeColor = !copied ? Theme.Danger : omitted is not null ? Theme.Accent : Theme.Success;
             _status.Text = $"{result.Sessions} Raidabend(e) mit {result.Participants} Teilnehmerzeilen "
                          + $"aus {result.Lines:N0} Logzeilen. "
+                         + (omitted is not null ? omitted + " " : string.Empty)
                          + (copied
                              ? "Der Importcode liegt in der Zwischenablage.\n"
                              : "Die Zwischenablage war nicht erreichbar; mit „Erneut kopieren“ noch einmal versuchen.\n")
@@ -197,6 +203,18 @@ public sealed class CombatLogPanel : UserControl
     private bool Copy(string text, string? confirmation)
     {
         if (text.Length == 0) return false;
+        // Letzte Sicherung: Der Importer schneidet bereits an der Abendgrenze
+        // zu. Kaeme hier trotzdem etwas Zu grosses an, wuerde WoW es beim
+        // Einfuegen stumm abschneiden und der Teilimport saehe wie ein Erfolg
+        // aus - lieber gar nicht kopieren.
+        if (text.Length > AddonImport.Limit)
+        {
+            _log($"Der Importcode ist {text.Length:N0} Zeichen gross, das Addon nimmt {AddonImport.Limit:N0}.");
+            _status.ForeColor = Theme.Danger;
+            _status.Text = $"Der Importcode ist mit {text.Length:N0} Zeichen zu groß für das Addon "
+                         + $"(höchstens {AddonImport.Limit:N0}). WoW würde ihn beim Einfügen abschneiden.";
+            return false;
+        }
         try
         {
             Clipboard.SetText(text);

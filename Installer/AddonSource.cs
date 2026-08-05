@@ -100,17 +100,42 @@ public static class AddonSource
                 log.Report("Ersetze die vorhandene Fassung. Gespeicherte Einstellungen liegen im WTF-Ordner und bleiben erhalten.");
             }
 
-            // Der Ordner wird ueberschrieben statt geloescht. Ein geoeffnetes
-            // Explorer-Fenster oder eine laufende Datei im Companion-Ordner
-            // sperrt sonst das Loeschen und die Installation bricht ab - fuer
-            // ein offenes Fenster ist das kein akzeptabler Grund.
-            CopyDirectory(source, target);
-            RemoveStaleEntries(source, target, log);
-
-            if (!File.Exists(Path.Combine(target, "GuildCopilot.toc")))
+            // Der Ordner wird ueberschrieben statt geloescht oder umbenannt.
+            // Ein geoeffnetes Explorer-Fenster oder eine laufende Datei im
+            // Companion-Ordner sperrt sonst das Loeschen und die Installation
+            // bricht ab - fuer ein offenes Fenster ist das kein akzeptabler
+            // Grund. Aus demselben Grund gibt es keinen Verzeichnistausch:
+            // Auch das Umbenennen des Live-Ordners scheitert an einer offenen
+            // Datei darin.
+            //
+            // Jede Datei geht deshalb einzeln und in einem Schritt an ihren
+            // Platz (File.Replace), die vorherige Fassung wandert dabei in
+            // eine Sicherung. Bricht das Kopieren mittendrin ab - Datei
+            // gesperrt, Platte voll -, wird der vorherige Stand daraus wieder
+            // hergestellt. Vorher blieb in dem Fall eine Mischung aus zwei
+            // Versionen liegen, die im Spiel schwer zu deuten ist.
+            var replaced = new List<Replacement>();
+            try
             {
-                throw new InvalidOperationException("Nach dem Kopieren fehlt GuildCopilot.toc.");
+                InstallDirectory(source, target, replaced);
+
+                if (!File.Exists(Path.Combine(target, "GuildCopilot.toc")))
+                {
+                    throw new InvalidOperationException("Nach dem Kopieren fehlt GuildCopilot.toc.");
+                }
             }
+            catch
+            {
+                log.Report("Installation abgebrochen – der vorherige Stand wird wiederhergestellt.");
+                Rollback(replaced);
+                throw;
+            }
+
+            // Ab hier steht die neue Fassung. Die Sicherungen werden nicht mehr
+            // gebraucht, und erst jetzt darf aufgeraeumt werden: Was
+            // RemoveStaleEntries loescht, holt kein Rollback zurueck.
+            DropBackups(replaced);
+            RemoveStaleEntries(source, target, log);
             log.Report($"Version {version} installiert nach {target}");
             return version;
         }
@@ -214,16 +239,90 @@ public static class AddonSource
         }
     }
 
-    private static void CopyDirectory(string source, string target)
+    /// <summary>
+    /// Eine ersetzte Datei und die Sicherung ihrer vorherigen Fassung.
+    /// <c>Backup</c> ist null, wenn die Datei neu hinzugekommen ist - dann
+    /// gibt es nichts wiederherzustellen, sie muss beim Rollback weg.
+    /// </summary>
+    private sealed record Replacement(string Target, string? Backup);
+
+    private const string StagedSuffix = ".gcnew";
+    private const string BackupSuffix = ".gcold";
+
+    /// <summary>
+    /// Kopiert den Addon-Ordner Datei fuer Datei ueber die Installation.
+    /// Geschrieben wird immer erst daneben und dann in einem Schritt an den
+    /// richtigen Platz: Ein abgebrochener Schreibvorgang kann so keine halbe
+    /// Datei hinterlassen, die WoW spaeter zu laden versucht.
+    /// </summary>
+    private static void InstallDirectory(string source, string target, List<Replacement> replaced)
     {
         Directory.CreateDirectory(target);
         foreach (var file in Directory.EnumerateFiles(source))
         {
-            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+            var destination = Path.Combine(target, Path.GetFileName(file));
+            var staged = destination + StagedSuffix;
+            File.Copy(file, staged, overwrite: true);
+            if (File.Exists(destination))
+            {
+                var backup = destination + BackupSuffix;
+                File.Replace(staged, destination, backup, ignoreMetadataErrors: true);
+                replaced.Add(new Replacement(destination, backup));
+            }
+            else
+            {
+                File.Move(staged, destination);
+                replaced.Add(new Replacement(destination, null));
+            }
         }
         foreach (var folder in Directory.EnumerateDirectories(source))
         {
-            CopyDirectory(folder, Path.Combine(target, Path.GetFileName(folder)));
+            InstallDirectory(folder, Path.Combine(target, Path.GetFileName(folder)), replaced);
+        }
+    }
+
+    /// <summary>
+    /// Stellt den Stand vor der Installation wieder her - rueckwaerts, damit
+    /// zuerst zurueckgeht, was zuletzt ersetzt wurde. Fehler werden hier
+    /// geschluckt: Es laeuft bereits eine Ausnahme, und die ist die
+    /// interessantere Nachricht.
+    /// </summary>
+    private static void Rollback(List<Replacement> replaced)
+    {
+        for (var index = replaced.Count - 1; index >= 0; index--)
+        {
+            var entry = replaced[index];
+            try
+            {
+                if (entry.Backup is null)
+                {
+                    File.Delete(entry.Target);
+                }
+                else if (File.Exists(entry.Backup))
+                {
+                    File.Move(entry.Backup, entry.Target, overwrite: true);
+                }
+            }
+            catch
+            {
+                // Weitermachen: Jede Datei, die zurueckgeht, ist ein Gewinn.
+            }
+        }
+    }
+
+    private static void DropBackups(List<Replacement> replaced)
+    {
+        foreach (var entry in replaced)
+        {
+            if (entry.Backup is null) continue;
+            try
+            {
+                File.Delete(entry.Backup);
+            }
+            catch
+            {
+                // Eine liegengebliebene Sicherung raeumt RemoveStaleEntries auf.
+            }
         }
     }
 

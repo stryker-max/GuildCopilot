@@ -298,6 +298,92 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.88 / Installer 1.0.7 – Eine Durchsicht und ihre Befunde
+
+Anlass war eine vollständige Durchsicht der Codebasis durch ein zweites Modell. Sie meldete drei schwerwiegende Korrektheitsprobleme und sieben weitere. **Alle fünfzehn Punkte wurden am Code nachgeprüft, alle waren zutreffend** – keine Falschmeldung. An vier Stellen war die Darstellung ungenau oder der vorgeschlagene Weg untauglich; das steht jeweils dabei, weil die Abweichung die eigentliche Entscheidung ist.
+
+### Der Offline-Importer hatte den Fehler, den 0.9.87 live abgestellt hat
+
+0.9.87 hat vier Ursachen für falsch gezählte Verbrauchsgegenstände beseitigt – **in der Livesitzung**. Der Importer aus der `WoWCombatLog.txt` hat sie weiter gemacht: `Classify` zählte `SPELL_CAST_SUCCESS` **und** `SPELL_AURA_APPLIED`/`SPELL_AURA_REFRESH` aus einer einzigen flachen ID-Liste, und die Aura wurde dem **Ziel** gutgeschrieben. Damit war exakt das wieder da, was der Vergleichslog vom 02.08.2026 gezeigt hatte: die Trommel bei jedem, der den Buff bekam, der Hasttrank doppelt, Fläschchen mehrfach über Auffrischungen.
+
+Bemerkenswert ist, wie gut das versteckt war. Der Docstring der Methode behauptete wörtlich, gezählt werde „genau das, was die Livesitzung auch zaehlt" – und erklärte darunter ausführlich die Doppelzählung bei Wiederbelebungen, die dort tatsächlich behoben ist. Dieselbe Überlegung war für Verbrauchsgegenstände nie angestellt worden. Auch die Prüfung „die 50 Spell-IDs stimmen zwischen Lua, C# und Companion überein" ging glatt durch, weil nicht die **Liste** abwich, sondern die **Regel**.
+
+Die Trennung liegt jetzt in `SpellIds`: `Consumables` sind die Gegenstände mit Wirkereignis, `FoodAuras` die Sattgegessen-Buffs. `ConsumableSet` bleibt die Vereinigung, denn abgefragt und übertragen wird weiterhin alles – unterschieden wird nur beim **Zählen**. Das entspricht `GC.ConsumableCategories` im Addon (`track = "AURA"` allein für Essen). Der Warcraft-Logs-Weg hatte übrigens von Anfang an eine eigene, ebenfalls richtige Regel: Gibt es zu einer ID überhaupt Zauber, gewinnt der Zauber. Drei Wege, drei Auslegungen, von denen zwei stimmten.
+
+Abgesichert ist das jetzt mit einem Selbsttest, der ein kleines Kampfprotokoll von Hand baut: Eine Trommel, geworfen von Alex und als Buff bei Bea angekommen, muss bei Alex mit 1 und bei Bea mit 0 stehen; ein Hasttrank mit Zauber und eigener Aura zählt einmal; Essen zählt allein über den Buff.
+
+### Ein zu großer Import kam halb an und sah wie ein Erfolg aus
+
+Das Importfeld im Addon nimmt 60.000 Zeichen (`SetMaxLetters` in `UI.lua`). WoW schneidet längeren Text beim Einfügen stillschweigend ab, und der Parser nimmt den Rest als gültigen Teilimport – der Abend fehlt halb, ohne dass irgendwo ein Fehler steht. Der Warcraft-Logs-Bereich prüfte das seit jeher und beschrieb die Falle sogar im Kommentar; der Companion prüfte sie; der Offline-Import kopierte ungeprüft.
+
+Die Zahl stand an zwei Stellen und steht jetzt an einer: `AddonImport.Limit`. Wichtiger ist, was bei Überschreitung passiert. Eine Fehlermeldung wäre hier nutzlos – eine `WoWCombatLog.txt` sammelt oft viele Abende, und der Nutzer kann daran nichts ändern. Der Importer schneidet deshalb **an der Abendgrenze** zu und behält die neuesten Abende: Das ist der Stand, den man importieren will. Ein halber Abend käme dagegen einem vollständigen zum Verwechseln ähnlich. Wie viele Abende weggelassen wurden, steht in der Statuszeile und nicht nur im Protokoll darunter, wo es zu leicht zu übersehen ist. Passt nicht einmal der letzte Abend allein, bricht der Import mit klarer Begründung ab.
+
+### „raid7" ist kein Spieler
+
+Der schärfste Befund. Die Warteschlange der Ausrüstungsprüfung merkte sich den Unit-Token („raid7") und den Namen beim Einsammeln, die **GUID aber erst unmittelbar vor dem Inspizieren**. Zwischen beidem liegen `INSPECT_INTERVAL` = 1,5 Sekunden je Eintrag, bei 24 Spielern also gut eine halbe Minute. Wechselt in dieser Zeit jemand die Gruppe oder verlässt den Raid, verschieben sich alle dahinter – und „raid7" meint einen anderen Spieler.
+
+Die vorhandene GUID-Prüfung schützte davor **nicht**, und der Grund ist subtil: Sie vergleicht die GUID aus `INSPECT_READY` mit der, die kurz zuvor gelesen wurde. Beide gehören dann zum *neuen* „raid7“ und stimmen überein. Die Prüfung beantwortet also nur „gehört diese Antwort zu meiner Anfrage", nicht „ist das noch derselbe Spieler". Gespeichert wurde anschließend die Ausrüstung des neuen Spielers unter dem beim Einsammeln gemerkten **Namen des alten**.
+
+Die Durchsicht empfahl, „Spieleridentität und GUID beim Einsammeln festzuhalten" – der Name wurde bereits beim Einsammeln festgehalten, nur die GUID nicht. Die Diagnose der Ursache war exakt richtig. Jetzt wird die GUID mit eingesammelt, und `ResolveUnit` prüft vor jedem Zugriff, ob der Token noch denselben Spieler meint; wenn nicht, wird der Spieler in der aktuellen Aufstellung gesucht. Geprüft wird an drei Stellen: vor der Reichweitenprüfung (die auf einem verschobenen Token die Frage für den Falschen beantwortet), vor `NotifyInspect` und noch einmal beim Eintreffen der Antwort. Wer den Raid ganz verlassen hat, wird übersprungen statt falsch gespeichert.
+
+### Die Gildenbank lief im Kreis
+
+Der Manifest-Empfänger forderte einen Tab an, wenn die Zeitstempel gleich, die Fingerabdrücke aber verschieden waren. Der Transfer-Empfänger verwarf genau diesen Stand, weil er „nicht neuer" war. Anfordern, senden, verwerfen – und beim nächsten Manifest von vorn. Das ist keine theoretische Möglichkeit: `updatedAt` kommt aus `GetServerTime()` und kennt nur ganze Sekunden.
+
+Behoben ist das nicht durch eine zusätzliche Bedingung an einer der beiden Stellen, sondern durch **eine gemeinsame Regel**: `WinsOverKnown` – der neuere Stand gewinnt, bei gleicher Sekunde der mit dem größeren Fingerabdruck. Beide Seiten rufen dieselbe Funktion auf, und damit fordert das Manifest nur noch an, was der Empfang auch annimmt. Dass die Regel bei Gleichstand willkürlich wirkt, ist Absicht: Sie muss nicht „richtig" sein, sondern **auf allen Clients gleich**.
+
+Dazu ein zweiter Punkt aus der Durchsicht: Der Fingerabdruck wurde vom Absender übernommen statt nachgerechnet. Passt er nicht zu den empfangenen Beständen, steht ab dann ein falscher Fingerabdruck im eigenen Manifest – und alle anderen fordern den Tab dauerhaft neu an. Er wird jetzt aus den dekodierten Beständen selbst berechnet. Das ist sicher, weil eine Übertragung entweder vollständig ankommt oder ganz verworfen wird; ein halber Tab kann nicht entstehen.
+
+Der Leistungsbefund im selben Modul war ebenfalls zutreffend und ließ sich exakt nachrechnen: Erledigte Fächer wurden nicht aus `pendingTabs` genommen, und der Ereignishandler las das offene Fach plus alle noch ausstehenden. Acht Fächer plus das offene, mal 98 Slots, ergibt die genannten **882 Abfragen je Bankereignis** – und nebenbei neun Oberflächen-Aktualisierungen. Ein Fach wird jetzt beim Lesen aus der Liste genommen, ein nicht einsehbares ebenfalls.
+
+### Die Kampfpause, die von der Addon-Umgebung abhing
+
+`SendBulk` übergab an ChatThrottleLib, **bevor** `InCombat()` überhaupt geprüft wurde – die Prüfung stand erst weiter unten in `PumpBulk`. Wer eine globale ChatThrottleLib geladen hatte, und das ist bei Raidern die Regel, für den war die Einstellung „Bulk-Sync im Kampf pausieren" wirkungslos. Ohne die Bibliothek pausierte der Versand zwar, der Antriebsrahmen blieb aber sichtbar und lief den ganzen Kampf über bei jedem Einzelbild an, nur um sofort wieder auszusteigen.
+
+Beim Verschieben der Prüfung nach oben lauerte eine Lua-Eigenheit, die einen stillen Totalausfall bedeutet hätte: `local function InCombat()` stand **hinter** `SendBulk`. Ein Aufruf von dort wäre zur Übersetzungszeit kein Zugriff auf die lokale Funktion gewesen, sondern auf eine gleichnamige **globale** – die es nicht gibt. Der Aufruf hätte immer `nil` ergeben und die Pause wäre weiterhin wirkungslos geblieben, nur diesmal ohne erkennbaren Grund. Die Funktion steht deshalb jetzt oben bei den Bulk-Konstanten, mit einem Kommentar, der genau das festhält.
+
+Der Rahmen legt sich im Kampf schlafen und wird von `PLAYER_REGEN_ENABLED` wieder geweckt – ein verstecktes Frame bekommt weiterhin Ereignisse, nur kein `OnUpdate`. Die Kampfdauer wird beim Aufwachen auf das Sendebudget angerechnet, dieselbe Verrechnung wie nach einer Leerlaufpause.
+
+### Werkstatt: kein Rückschritt, ein Schlüssel
+
+`ClaimRecipes` übernahm eingehende Rezeptlisten ohne Blick auf den vorhandenen `updatedAt`. Der Aufrufer hatte den bestehenden Eintrag sogar schon in der Hand – für die Prüfung auf eine Teillieferung – und verglich die Zeitstempel trotzdem nicht. Die Durchsicht nannte das etwas breiter, als es zutraf: Der Schutz gegen Teillieferungen fängt den Fall ab, dass ein verspätetes Paket die Liste **kürzt**. Voll trifft der Befund die vollständigen Schlüssellisten („K"), für die dieser Schutz bewusst abgeschaltet ist – dort konnte ein alter Stand die seitdem gelernten Rezepte entfernen. Der Zeitstempel wurde in jedem Fall zurückgedreht. Ein älterer Stand gewinnt jetzt nicht mehr; Gleichstand zählt als „schon da".
+
+Beim Namensschlüssel war der Befund technisch richtig, aber anders gelagert als beschrieben: Nicht „mehrere Bereiche entfernen den Realmanteil", sondern **die Werkstatt als einzige behielt ihn**, während Raidauswertung und Ausrüstungsprüfung längst kürzen. Da `GC:GetPlayerFullName()` den Realm immer anhängt, fremde Clients einen Charakter aber ohne melden, stand derselbe Spieler unter zwei Schlüsseln. Der Owner hat entschieden: **Cross-Realm gibt es hier nicht.** Damit ist `GC.Util.PlayerKey` die eine Stelle, die aus einem Namen einen Tabellenschlüssel macht – Kurzname, kleingeschrieben. Die Werkstatt benutzt sie durchgehend, und eine einmalige Migration führt vorhandene Einträge mit Realmanteil zusammen; bei doppelten Berufen gewinnt der neuere Stand.
+
+Nebenbei geprüft und ausdrücklich **in Ordnung**: `StoreAudit` schlüsselte ohne Kürzung, `GetAudit` mit. Das sieht nach einem Schlüsselbruch aus, ist aber folgenlos, weil beide Erzeuger den Namen vorher kürzen. Beide benutzen jetzt `PlayerKey`, damit die Symmetrie sichtbar ist – eine Verhaltensänderung ist es nicht.
+
+### Verlernen, Adds und ein Abo, das nicht aufhörte
+
+Ein **verlernter Beruf** blieb für immer stehen: Eine bestätigt leere Berufsliste setzte nur die Quelle auf „EMPTY" und kehrte zurück, ohne zu räumen und ohne zu synchronisieren. Die Vorsicht dahinter ist berechtigt – direkt nach dem Login ist die Liste oft nur noch nicht geladen. Sie braucht aber ein Ende. Der Ausweg ist kein Zeitfenster und kein Zähler, sondern ein Beleg: Geräumt wird, wenn **derselbe Spielstart die Berufe vorher schon einmal gelesen hat**. Dann gibt der Client die Liste nachweislich heraus, und leer heißt leer. Wer einen Beruf verlernt, hat ihn in derselben Sitzung vorher gesehen; wer nie welche hatte, verliert nichts.
+
+Die **Kill-Heuristik** griff, wenn `ENCOUNTER_END` fehlt – und wertete jeden toten Gegner als Sieg, weil sie nur auf „irgendein NPC ist gestorben" sah. Der erste gestorbene Add machte damit aus einem abgebrochenen Versuch einen Kill. Gewertet wird jetzt der Tod des **Bosses**: entweder löst der gestorbene Gegner in `GC.RaidBosses` auf, oder sein Name entspricht dem bereits erkannten Boss des Abschnitts. Abschnitte ohne erkannten Boss wurden ohnehin nie gewertet.
+
+Das **Item-Cache-Abo** der Selbstprüfung blieb nach dem letzten Versuch bestehen. Danach löste jedes nachgeladene Item eine neue Vollprüfung aus – auch eines aus der Bank, dem Auktionshaus oder einem Chatlink –, die am selben Limit sofort wieder scheiterte. Das Abo hält jetzt nur noch, solange auch wiederholt wird; ein Ausrüstungswechsel setzt den Zähler zurück und gibt neue Versuche.
+
+### Anwesenheit: eine Entscheidung, kein Fehler
+
+Die Durchsicht hat richtig erkannt, dass getrennte Raidmitglieder als anwesend zählten, und ebenso richtig offengelassen, ob das ein Fehler ist – das hängt davon ab, was „Teilnahme" bedeuten soll. Der Code war sich darin selbst uneins: Die Ausrüstungsprüfung fragte `UnitIsConnected` ab, der Raidmonitor nicht.
+
+Die Entscheidung des Owners: **Die Anwesenheitsuhr pausiert bei Verbindungsverlust.** Wer rausfliegt, bleibt Teilnehmer des Abends – er war ja da –, sammelt aber keine Zeit mehr. Beim Wiedereinloggen läuft die Uhr weiter, das bis dahin Gesammelte bleibt. Vorher stand ein Spieler, der nach zwanzig Minuten rausflog und nicht wiederkam, am Ende mit der vollen Abenddauer da, solange ihn niemand aus dem Raid nahm.
+
+### Installer: Rollback statt Verzeichnistausch
+
+Der Befund zur nicht-atomaren Installation war zutreffend: Es wurde direkt über die laufende Installation kopiert, und ein Abbruch mittendrin hinterließ eine Mischung zweier Versionen. Der **vorgeschlagene Weg** – in ein Staging-Verzeichnis kopieren und die Verzeichnisse atomar tauschen – war es nicht. Der Kommentar an genau dieser Stelle begründet seit jeher, warum nicht gelöscht wird: Ein offenes Explorer-Fenster oder eine laufende Datei im Companion-Ordner sperrt das Löschen. Ein Verzeichnistausch braucht dasselbe Umbenennen des Live-Ordners und scheitert an derselben Sperre. Der Vorschlag hätte das Problem zurückgeholt, das der Code bewusst umgeht.
+
+Gewählt ist deshalb der Weg, der beides kann: Jede Datei wird daneben geschrieben und dann mit `File.Replace` in einem Schritt an ihren Platz gesetzt, wobei die vorherige Fassung in eine Sicherung wandert. Eine halb geschriebene Datei kann so nie live werden. Scheitert etwas mittendrin, werden die bereits ersetzten Dateien aus ihren Sicherungen zurückgeholt. Das Aufräumen verwaister Dateien läuft erst **nach** dem Erfolg – was dort gelöscht wird, holt kein Rollback zurück.
+
+Dazu der Doppelklick: `SetBusy` griff erst in `InstallAsync`, also lange nach dem Klick. Der erste Schritt von „Nach Updates suchen" ist aber eine Netzabfrage, und währenddessen blieb der Knopf bedienbar – zwei Durchläufe konnten gleichzeitig in denselben Ordner installieren. Zusammen mit der nicht-atomaren Installation war das die gefährlichere Hälfte des Befundes. Ein Wiedereintrittsschutz deckt jetzt den gesamten Durchlauf ab, auch den beim Programmstart.
+
+### Der Jahreswechsel
+
+Alte Spielfassungen schreiben kein Jahr in den Zeitstempel; bis 1.0.6 galt für jede Zeile das Jahr der Datei. Ein Raidabend über Silvester bekam damit durchgehend das Jahr des 1. Januar, und der Dezemberteil sprang um ein Jahr nach vorn. Im Log zeigt sich der Wechsel als Monatsrücksprung (12 → 1); die Datei endet im Jahr ihres Zeitstempels, fängt also im Jahr davor an, wenn ihr erster Monat hinter dem letzten liegt. Nachgezogen werden ausschließlich selbst gesetzte Jahre – steht das Jahr im Log, ist es richtig.
+
+### Was die Tests dazugelernt haben
+
+Vier Regressionstests in `smoke.lua` (Add-Tod ist kein Sieg, Anwesenheitsuhr bei Verbindungsverlust, kein Rückschritt im Werkstatt-Abgleich, Verlernen wird sichtbar) und einer im Installer-Selbsttest (Verbrauchsgegenstände und Jahreswechsel an einem gebauten Kampfprotokoll). Jeder von ihnen schlägt gegen den Stand vor dieser Version fehl.
+
+Drei bestehende Erwartungen in `smoke.lua` mussten mitgezogen werden: Sie schrieben die Werkstatt-Schlüssel **mit** Realmanteil fest und hätten die Vereinheitlichung sonst blockiert. Das ist die beabsichtigte Änderung, kein Nachgeben gegenüber dem Test – die Erwartung prüft jetzt zusätzlich, dass der alte Schlüssel verschwunden ist.
+
 ## 0.9.87 – Verbrauchsgegenstände: gegen einen echten Log gerechnet
 
 Die Meldung war knapp: „Die Auswertung der Consumables hat gar nicht funktioniert", dazu ein Warcraft-Logs-Bericht vom 02.08. als Vergleich und der Hinweis „ich hatte mehr als 1 Bufffood". Der Vergleich hat nicht einen Fehler gezeigt, sondern **vier voneinander unabhängige**, die sich gegenseitig verdeckt haben. Deshalb steht hier jede Ursache einzeln mit ihrem Beleg.

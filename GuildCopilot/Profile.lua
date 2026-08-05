@@ -310,9 +310,27 @@ function GC.Profile:RefreshProfessions(profile)
 
     profile.professionSource = #detected > 0 and "OK" or "EMPTY"
     if #detected == 0 then
-        return false
+        -- Verlernt wird selten, aber es kommt vor. Bisher blieb der alte Beruf
+        -- dann fuer immer stehen und wurde weiter an die Gilde gemeldet: Die
+        -- leere Antwort setzte nur die Quelle auf "EMPTY" und kehrte um.
+        --
+        -- Geloescht wird deshalb genau dann, wenn dieselbe Sitzung vorher
+        -- schon einmal Berufe gelesen hat. Damit ist belegt, dass der Client
+        -- die Liste ueberhaupt herausgibt - direkt nach dem Login ist sie
+        -- regelmaessig noch leer, obwohl der Charakter Berufe hat, und dieses
+        -- Fenster darf nichts ausloeschen. Wer den Beruf tatsaechlich verlernt,
+        -- hat ihn in derselben Sitzung vorher gelesen.
+        if not self.sawProfessions then
+            return false
+        end
+        if not profile.professions[1] and not profile.professions[2] then
+            return false
+        end
+        profile.professions = {}
+        return true
     end
 
+    self.sawProfessions = true
     local changed = ProfessionChanged(profile.professions[1], detected[1])
         or ProfessionChanged(profile.professions[2], detected[2])
     profile.professions = { detected[1], detected[2] }

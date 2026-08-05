@@ -837,7 +837,14 @@ for _, workshopMessage in ipairs(workshopMessages) do
         "Aktuelle Clients verwenden nicht das kompakte Werkstattformat")
     addon.Workshop:ReceiveSync(addon.Util.SplitFields(workshopMessage), "Crafter-Realm")
 end
-assert(addon.DB:GetGuild().workshop.crafters["crafter-realm"] ~= nil, "Remote-Crafter wurde nicht gespeichert")
+-- Seit 0.9.88 steht ein Hersteller unter seinem Kurznamen, genau wie im
+-- Raidmonitor und in der Ausrüstungsprüfung. Vorher schlüsselte allein die
+-- Werkstatt mit Realmanteil: Derselbe Spieler stand einmal als "alex" (von
+-- fremden Clients gemeldet) und einmal als "alex-realm" (der eigene Charakter)
+-- in der Tabelle.
+assert(addon.DB:GetGuild().workshop.crafters["crafter"] ~= nil, "Remote-Crafter wurde nicht gespeichert")
+assert(addon.DB:GetGuild().workshop.crafters["crafter-realm"] == nil,
+    "Der Hersteller steht noch unter dem Schlüssel mit Realmanteil")
 local legacyWorkshopMessages = addon.Workshop:BuildProfessionMessages(ownWorkshop.professions.schneiderei, false)
 for _, workshopMessage in ipairs(legacyWorkshopMessages) do
     local legacyFields = addon.Util.SplitFields(workshopMessage)
@@ -1973,7 +1980,7 @@ assert(guildFallbackFound,
 for _, reliableMessage in ipairs(reliableMessages) do
     addon.Sync:OnMessage("GuildCopilot", reliableMessage, "WHISPER", "Heiler-Realm")
 end
-whisperedCrafter = addon.DB:GetGuild().workshop.crafters["heiler-realm"]
+whisperedCrafter = addon.DB:GetGuild().workshop.crafters["heiler"]
 assert(whisperedCrafter and whisperedCrafter.professions.schneiderei,
     "Werkstattdaten aus dem Flüsterkanal wurden fälschlich nur an die Raidauswertung geleitet")
 whisperedRecipeCount = 0
@@ -1992,11 +1999,11 @@ twinkShareMessages = addon.Workshop:BuildProfessionMessages(
 for _, twinkShareMessage in ipairs(twinkShareMessages) do
     addon.Sync:OnMessage("GuildCopilot", twinkShareMessage, "GUILD", "Mainchar-Realm")
 end
-assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"] ~= nil,
+assert(addon.DB:GetGuild().workshop.crafters["twinkschneider"] ~= nil,
     "Ein über den Gildenkanal geteilter Twink-Beruf wurde nicht dem Twink zugeordnet")
-assert(addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions.schneiderei ~= nil,
+assert(addon.DB:GetGuild().workshop.crafters["twinkschneider"].professions.schneiderei ~= nil,
     "Der geteilte Twink-Beruf fehlt beim Twink")
-assert(addon.DB:GetGuild().workshop.crafters["mainchar-realm"] == nil,
+assert(addon.DB:GetGuild().workshop.crafters["mainchar"] == nil,
     "Ein geteilter Twink-Beruf wurde fälschlich dem absendenden Charakter zugeordnet")
 
 -- === Katalog und Herstellerindex ===========================================
@@ -2035,8 +2042,8 @@ assert(catalogSize >= 80, "Der Rezeptkatalog wurde nicht gefüllt: " .. catalogS
 for _, keyListMessage in ipairs(keyListMessages) do
     addon.Sync:OnMessage("GuildCopilot", keyListMessage, "GUILD", "Schlüsselschmied-Realm")
 end
-keyOnlyCrafter = addon.DB:GetGuild().workshop.crafters["schlusselschmied-realm"]
-    or addon.DB:GetGuild().workshop.crafters["schlüsselschmied-realm"]
+keyOnlyCrafter = addon.DB:GetGuild().workshop.crafters["schlusselschmied"]
+    or addon.DB:GetGuild().workshop.crafters["schlüsselschmied"]
 assert(keyOnlyCrafter ~= nil, "Der Hersteller aus der Schlüsselliste fehlt")
 keyOnlyCount = 0
 for _ in pairs(keyOnlyCrafter.professions.schneiderei.recipeKeys) do
@@ -2108,12 +2115,12 @@ addon.Workshop:ClaimRecipes({
     professionName = "Schneiderei",
     recipeKeys = { "I15002" },
 })
-assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] ~= nil,
+assert(addon.DB:GetGuild().workshop.crafters["ausgetreten"] ~= nil,
     "Der Testeintrag für den Ausgetretenen fehlt")
 addon.Workshop:PruneDepartedCrafters()
-assert(addon.DB:GetGuild().workshop.crafters["ausgetreten-realm"] == nil,
+assert(addon.DB:GetGuild().workshop.crafters["ausgetreten"] == nil,
     "Ein ausgetretenes Gildenmitglied blieb mit seinen Rezepten in der Werkstatt")
-assert(addon.DB:GetGuild().workshop.crafters["fremdtwink-realm"] ~= nil,
+assert(addon.DB:GetGuild().workshop.crafters["fremdtwink"] ~= nil,
     "Der Twink eines Gildenmitglieds wurde fälschlich als ausgetreten entfernt")
 
 -- === Spieler statt Charaktere ===============================================
@@ -2465,7 +2472,7 @@ end
 for _, longMessage in ipairs(longMessages) do
     addon.Sync:OnMessage("GuildCopilot", longMessage, "GUILD", "Mainchar-Realm")
 end
-longReceived = addon.DB:GetGuild().workshop.crafters["twinkschneider-realm"].professions.ingenieurskunst
+longReceived = addon.DB:GetGuild().workshop.crafters["twinkschneider"].professions.ingenieurskunst
 assert(longReceived ~= nil, "Der Beruf mit langem Namen wurde nicht gespeichert")
 longReceivedCount = 0
 for _ in pairs(longReceived.recipeKeys) do
@@ -6624,6 +6631,191 @@ do
         "Die Übersicht hat weniger Zeilen als Plätze")
     ovw_content = addon.UI.pages.OVERVIEW.raiderRows[1]
     assert(ovw_content ~= nil, "Die Zeilen der Übersicht fehlen")
+end
+
+-- === Kein Sieg ohne toten Boss ==============================================
+-- Fehlt ENCOUNTER_END, entscheidet die Heuristik. Sie hat bis 0.9.87 jeden
+-- toten Gegner als Sieg gewertet - der erste gestorbene Add machte damit aus
+-- einem abgebrochenen Versuch einen "Kill".
+do
+    addon.RaidMonitor.session = nil
+    currentTime = currentTime + 600
+    addon.RaidMonitor:StartSession("addtest", "Tester", currentTime, "Karazhan")
+    addon.RaidMonitor:BeginSegment(currentTime)
+
+    -- Der Boss taucht im Abschnitt auf: Damit steht sein Name fest, auch wenn
+    -- er den Versuch überlebt.
+    FireCombatLog("SPELL_INTERRUPT", "Schurke", "Prinz Malchezaar", nil, "Creature-1234")
+    -- Und dann stirbt ein Add, nicht der Boss.
+    FireCombatLog("UNIT_DIED", "", "Verdorbener Diener", nil, "Creature-9999")
+
+    add_session = addon.RaidMonitor.session
+    assert(add_session.segment.bossName == "Prinz Malchezaar",
+        "Der Boss des Abschnitts wurde nicht erkannt")
+    assert(add_session.segment.bossDied ~= true,
+        "Der Tod eines Adds wurde als Bosstod verbucht")
+
+    currentTime = currentTime + 120
+    addon.RaidMonitor:CloseSegment(currentTime)
+    assert(#add_session.pulls == 1, "Der Versuch wurde nicht gewertet")
+    assert(add_session.pulls[1].result ~= "KILL",
+        "Ein Versuch ohne toten Boss wurde als Sieg gewertet")
+
+    -- Gegenprobe: Stirbt der Boss selbst, ist es ein Sieg.
+    addon.RaidMonitor:BeginSegment(currentTime)
+    FireCombatLog("UNIT_DIED", "", "Prinz Malchezaar", nil, "Creature-1234")
+    currentTime = currentTime + 120
+    addon.RaidMonitor:CloseSegment(currentTime)
+    assert(add_session.pulls[2].result == "KILL",
+        "Ein Kampf mit totem Boss wurde nicht als Sieg gewertet")
+
+    addon.RaidMonitor:EndSession()
+    addon.RaidMonitor.session = nil
+end
+
+-- === Anwesenheitsuhr steht bei Verbindungsverlust ===========================
+-- "Im Raid eingetragen" ist nicht dasselbe wie "da". Wer rausfliegt, bleibt
+-- Teilnehmer des Abends, sammelt aber keine Anwesenheit mehr.
+do
+    dc_previous = UnitIsConnected
+    raidRoster = {
+        { "Schurke", 2, "ROGUE" },
+        { "Heiler", 0, "PRIEST" },
+    }
+    currentTime = currentTime + 600
+    addon.RaidMonitor:StartSession("dctest", "Tester", currentTime, "Karazhan")
+    dc_session = addon.RaidMonitor.session
+    dc_participant = dc_session.participants.schurke
+    assert(dc_participant ~= nil, "Das Raidmitglied fehlt in der Sitzung")
+    assert(dc_participant.presentSince ~= nil, "Die Anwesenheitsuhr läuft nicht")
+
+    -- Verbindung weg: Die Uhr wird angehalten und die bisherige Zeit gebucht.
+    -- "Schurke" steht auf raid1.
+    UnitIsConnected = function(unit)
+        return unit ~= "raid1"
+    end
+    currentTime = currentTime + 300
+    addon.RaidMonitor:SyncParticipants()
+    assert(dc_participant.presentSince == nil,
+        "Die Anwesenheitsuhr läuft trotz Verbindungsverlust weiter")
+    dc_banked = dc_participant.seconds
+    assert(dc_banked > 0, "Die bis zum Verbindungsverlust gesammelte Zeit ging verloren")
+
+    -- Offline vergeht Zeit, die nicht zählen darf.
+    currentTime = currentTime + 3600
+    addon.RaidMonitor:SyncParticipants()
+    assert(dc_participant.seconds == dc_banked,
+        "Offlinezeit wurde als Anwesenheit gezählt")
+    assert(dc_session.participants.schurke ~= nil,
+        "Der getrennte Spieler wurde ganz aus der Sitzung geworfen")
+
+    -- Wieder da: Die Uhr läuft weiter, das Gesammelte bleibt.
+    UnitIsConnected = dc_previous
+    addon.RaidMonitor:SyncParticipants()
+    assert(dc_participant.presentSince ~= nil, "Nach dem Wiedereinloggen läuft die Uhr nicht weiter")
+    assert(dc_participant.seconds == dc_banked, "Die gesammelte Anwesenheit ging beim Wiedereinloggen verloren")
+
+    addon.RaidMonitor:EndSession()
+    addon.RaidMonitor.session = nil
+    raidRoster = {}
+end
+
+-- === Kein Rückschritt im Werkstatt-Abgleich =================================
+-- Ein verspätetes Paket oder ein Zweitclient mit altem Stand darf eine neuere
+-- Rezeptliste nicht zurückdrehen.
+do
+    ws_now = addon.Util.Now()
+    addon.Workshop:ClaimRecipes({
+        crafter = "Rueckschritt",
+        professionKey = "schneiderei",
+        professionName = "Schneiderei",
+        recipeKeys = { "I100", "I101", "I102" },
+        updatedAt = ws_now,
+    })
+    ws_crafter = addon.DB:GetGuild().workshop.crafters["rueckschritt"]
+    assert(ws_crafter ~= nil, "Der Hersteller wurde nicht gespeichert")
+
+    -- Dasselbe Paket noch einmal, aber älter und kürzer.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Rueckschritt",
+        professionKey = "schneiderei",
+        professionName = "Schneiderei",
+        recipeKeys = { "I100" },
+        updatedAt = ws_now - 600,
+    })
+    ws_count = 0
+    for _ in pairs(ws_crafter.professions.schneiderei.recipeKeys) do
+        ws_count = ws_count + 1
+    end
+    assert(ws_count == 3, "Ein älteres Paket hat die neuere Rezeptliste überschrieben")
+    assert(ws_crafter.professions.schneiderei.updatedAt == ws_now,
+        "Der Zeitstempel wurde auf den älteren Stand zurückgesetzt")
+
+    -- Ein neueres Paket geht selbstverständlich durch.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Rueckschritt",
+        professionKey = "schneiderei",
+        professionName = "Schneiderei",
+        recipeKeys = { "I100", "I101", "I102", "I103" },
+        updatedAt = ws_now + 600,
+    })
+    ws_count = 0
+    for _ in pairs(ws_crafter.professions.schneiderei.recipeKeys) do
+        ws_count = ws_count + 1
+    end
+    assert(ws_count == 4, "Ein neueres Paket wurde nicht übernommen")
+end
+
+-- === Verlernen wird sichtbar ================================================
+-- Eine leere Berufsliste direkt nach dem Login heißt "noch nicht geladen".
+-- Dieselbe Antwort, nachdem die Berufe schon einmal gelesen wurden, heißt
+-- "verlernt" - und muss die gespeicherten Berufe räumen.
+do
+    unlearn_profile = addon.Profile:Get()
+    unlearn_profile.professionAuto = true
+    unlearn_previous = GetProfessions
+    unlearn_previousSkillLines = GetNumSkillLines
+    -- "Keine Berufe" heißt: beide Wege sagen nichts. Die Retail-API fällt
+    -- sonst auf die Fähigkeitszeilen von Classic zurück, und die kennt der
+    -- Testclient.
+    function UnlearnEverything()
+        GetProfessions = function() return nil, nil end
+        GetNumSkillLines = function() return 0 end
+    end
+    function UnlearnRestore()
+        GetProfessions = unlearn_previous
+        GetNumSkillLines = unlearn_previousSkillLines
+    end
+
+    -- Frische Sitzung: leer heißt hier "die API gibt noch nichts heraus".
+    addon.Profile.sawProfessions = nil
+    unlearn_profile.professions = { { name = "Schneiderei", skillLevel = 375, maxSkillLevel = 375 } }
+    UnlearnEverything()
+    addon.Profile:RefreshProfessions(unlearn_profile)
+    assert(unlearn_profile.professions[1] ~= nil,
+        "Eine leere Antwort vor dem ersten Lesen hat die Berufe gelöscht")
+    assert(addon.Profile:GetProfessionSource(unlearn_profile) == "EMPTY",
+        "Die leere Antwort wurde nicht als solche vermerkt")
+
+    -- Jetzt liefert der Client die Berufe: Ab hier ist belegt, dass er sie kennt.
+    UnlearnRestore()
+    addon.Profile:RefreshProfessions(unlearn_profile)
+    assert(unlearn_profile.professions[1] ~= nil, "Die gelesenen Berufe fehlen")
+    assert(addon.Profile.sawProfessions == true, "Das erfolgreiche Lesen wurde nicht vermerkt")
+
+    -- Und nun wird verlernt.
+    UnlearnEverything()
+    unlearn_changed = addon.Profile:RefreshProfessions(unlearn_profile)
+    assert(unlearn_changed == true, "Das Verlernen wurde nicht als Änderung gemeldet")
+    assert(unlearn_profile.professions[1] == nil,
+        "Der verlernte Beruf steht weiterhin im Profil")
+
+    -- Zweimal dieselbe leere Antwort ist keine neue Änderung.
+    assert(addon.Profile:RefreshProfessions(unlearn_profile) == false,
+        "Eine unveränderte leere Berufsliste meldet immer wieder eine Änderung")
+
+    UnlearnRestore()
+    addon.Profile:RefreshProfessions(unlearn_profile)
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

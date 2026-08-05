@@ -7,6 +7,99 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 1.0.7 – Installer
+
+**Behoben**
+
+- **Der Offline-Import zählte Verbrauchsgegenstände doppelt.** Live war das in
+  0.9.87 abgestellt, der Importer aus der `WoWCombatLog.txt` hat es weiter
+  gemacht: Er zählte Wirkereignis *und* Aura aus einer einzigen Liste.
+  Trommeln wurden dadurch jedem gutgeschrieben, der den Buff bekam, Tränke mit
+  Buff zählten doppelt, Fläschchen und Elixiere mehrfach über
+  Aura-Auffrischungen. Gezählt wird jetzt je Gruppe genau eine Quelle: bei
+  Essen der Buff, sonst der Zauber – dieselbe Regel wie in der Livesitzung.
+- **Ein zu großer Import kam in WoW nur halb an.** Das Importfeld im Addon
+  nimmt 60.000 Zeichen; alles darüber schneidet WoW beim Einfügen
+  stillschweigend ab, und das Addon nimmt den Rest als gültigen Teilimport an.
+  Der Warcraft-Logs-Bereich prüfte das längst, der Offline-Import nicht. Jetzt
+  passt sich der Importcode an: Enthält die Datei mehr Raidabende, als
+  hineinpassen, gehen die ältesten – geschnitten wird nur an der Abendgrenze,
+  nie mitten in einem Abend. Wie viele weggelassen wurden, steht in der
+  Statuszeile statt nur im Protokoll.
+- **Ein Raidabend über Silvester bekam das falsche Jahr.** Alte
+  Spielfassungen schreiben kein Jahr in den Zeitstempel; bis 1.0.6 galt für
+  jede Zeile das Jahr der Datei, der Dezemberteil sprang damit ein Jahr nach
+  vorn. Der Jahreswechsel wird jetzt am Monatsrücksprung erkannt.
+- **Eine abgebrochene Installation konnte zwei Versionen vermischen.** Bisher
+  wurde direkt über die laufende Installation kopiert; brach das mittendrin ab,
+  blieb eine Mischung liegen. Jede Datei geht jetzt in einem Schritt an ihren
+  Platz, und scheitert etwas, wird der vorherige Stand wiederhergestellt. Am
+  bewussten Verzicht auf Löschen und Umbenennen ändert sich nichts – ein
+  offenes Explorer-Fenster darf die Installation weiterhin nicht aufhalten.
+- **Ein schneller Doppelklick auf „Nach Updates suchen" startete zwei
+  Durchläufe.** Der erste Schritt wartet auf das Netz, und in dieser Zeit blieb
+  der Knopf bedienbar. Im schlechtesten Fall installierten zwei Abläufe
+  gleichzeitig in denselben Ordner.
+
+## 0.9.88 – Addon
+
+**Behoben**
+
+- **Die Ausrüstungsprüfung konnte Ausrüstung dem falschen Spieler
+  zuschreiben.** „raid7" ist kein Spieler, sondern ein Platz in der
+  Aufstellung. Zwischen Einsammeln und Prüfen liegen 1,5 Sekunden je Spieler –
+  bei 24 Leuten eine gute halbe Minute, in der jemand die Gruppe wechseln oder
+  den Raid verlassen kann. Dann wurde die Ausrüstung des neuen „raid7" unter
+  dem Namen des früheren gespeichert. Jetzt wird beim Einsammeln die
+  Spieler-ID festgehalten und vor jedem Zugriff geprüft, ob der Platz noch
+  denselben Spieler meint.
+- **„Bulk-Sync im Kampf pausieren" wirkte bei den meisten gar nicht.** Wer eine
+  globale ChatThrottleLib geladen hatte – bei Raidern die Regel –, übergab die
+  Daten dort, bevor die Kampfprüfung überhaupt zur Sprache kam. Ohne die
+  Bibliothek pausierte der Versand zwar, der Antrieb lief aber den ganzen Kampf
+  über bei jedem Einzelbild weiter. Beides ist behoben; nach dem Kampf läuft
+  die Warteschlange von selbst wieder an.
+- **Die Gildenbank fand bei gleichem Zeitstempel nie zusammen.** Zeitstempel
+  kennen nur ganze Sekunden. Standen zwei Stände in derselben Sekunde, forderte
+  der eine Client die Daten an – und verwarf sie beim Empfang, weil sie „nicht
+  neuer" waren. Das lief endlos im Kreis. Jetzt entscheidet bei Gleichstand der
+  Fingerabdruck, auf beiden Seiten nach derselben Regel. Zusätzlich wird der
+  Fingerabdruck nach dem Empfang selbst nachgerechnet statt dem Absender
+  geglaubt.
+- **Ein Bankbesuch las die Fächer immer wieder neu.** Erledigte Fächer wurden
+  nicht aus der Warteliste genommen; jede Änderung las danach das offene Fach
+  doppelt und alle vorher besuchten gleich mit – bei acht Fächern bis zu 882
+  Abfragen pro Ereignis.
+- **Der Werkstatt-Abgleich konnte neuere Rezepte zurückdrehen.** Ein
+  verspätetes Paket oder ein Zweitclient mit altem Stand überschrieb die
+  Rezeptliste ungeprüft, bei einer vollen Liste samt der Rezepte, die seitdem
+  dazugelernt wurden. Ein älterer Stand gewinnt jetzt nicht mehr.
+- **Ein verlernter Beruf blieb für immer stehen.** Eine leere Berufsliste wurde
+  nur vermerkt, nie übernommen – der alte Beruf stand weiter im Profil und
+  wurde weiter an die Gilde gemeldet. Jetzt wird geräumt, sobald derselbe
+  Spielstart die Berufe vorher schon einmal gelesen hat. Die Vorsicht direkt
+  nach dem Login bleibt: Dort ist die Liste oft nur noch nicht geladen.
+- **Ohne Boss-Ende galt jeder tote Gegner als Sieg.** Meldet der Client das
+  Kampfende nicht, entscheidet die Heuristik – und die machte aus dem ersten
+  gestorbenen Add einen „Kill". Gewertet wird jetzt nur der Tod des Bosses.
+- **Nach unlesbarer eigener Ausrüstung lief die Prüfung endlos weiter.** War
+  die Ausrüstung nach allen Versuchen noch nicht lesbar, blieb das Abo auf
+  nachgeladene Gegenstandsdaten bestehen. Danach löste jedes geladene Item –
+  auch aus Bank, Auktionshaus oder einem Chatlink – eine neue Vollprüfung aus.
+- **Derselbe Spieler stand in der Werkstatt doppelt.** Nur dort enthielt der
+  Schlüssel den Realmanteil, während Raidauswertung und Ausrüstungsprüfung
+  längst den Kurznamen benutzen. Der eigene Charakter erschien deshalb einmal
+  als „alex" und einmal als „alex-realm". Bestehende Einträge werden beim
+  nächsten Start einmalig zusammengeführt.
+
+**Geändert**
+
+- **Anwesenheit zählt nur noch mit Verbindung.** Wer die Verbindung verliert,
+  bleibt Teilnehmer des Abends, seine Anwesenheitsuhr steht aber. Vorher zählte
+  die bloße Raidmitgliedschaft: Wer nach zwanzig Minuten rausflog und nicht
+  wiederkam, stand am Ende mit der vollen Abenddauer da, solange ihn niemand
+  aus dem Raid nahm.
+
 ## 0.9.87 – Addon
 
 **Behoben**

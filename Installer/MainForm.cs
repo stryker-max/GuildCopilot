@@ -39,6 +39,13 @@ public sealed class MainForm : Form
     /// </summary>
     private bool _updateAvailable;
 
+    /// <summary>
+    /// Laeuft gerade ein vollstaendiger Update-Durchlauf (Statusabfrage,
+    /// Installation, Selbstaktualisierung)? Der Durchlauf wartet zwischendurch
+    /// auf das Netz, und in dieser Zeit darf kein zweiter danebenlaufen.
+    /// </summary>
+    private bool _checking;
+
     public MainForm()
     {
         Text = "Guild Copilot Installer";
@@ -292,6 +299,19 @@ public sealed class MainForm : Form
 
     private async Task InitializeAsync()
     {
+        _checking = true;
+        try
+        {
+            await InitializeCoreAsync();
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task InitializeCoreAsync()
+    {
         SelfUpdate.CleanUp();
 
         var found = GameFinder.FindAddonFolders();
@@ -353,18 +373,38 @@ public sealed class MainForm : Form
     /// </summary>
     private async Task CheckForUpdatesAsync()
     {
-        await RefreshStatusAsync(checkRemote: true);
-
-        // Gefundenes Addon-Update wird sofort eingespielt: Wer auf "Nach
-        // Updates suchen" drueckt, will es haben - eine zweite Rueckfrage
-        // waere nur ein weiterer Klick auf dem Weg zum selben Ziel.
-        if (_updateAvailable)
+        // Der erste Schritt ist eine Netzabfrage, und waehrend sie laeuft,
+        // bleibt die Oberflaeche bedienbar. Ein zweiter Klick startete bisher
+        // einen zweiten vollstaendigen Durchlauf; im schlechtesten Fall haben
+        // zwei davon gleichzeitig in denselben Ordner installiert. SetBusy
+        // allein reicht dagegen nicht - es greift erst in InstallAsync, also
+        // lange nach dem Klick.
+        if (_checking) return;
+        _checking = true;
+        SetBusy(true);
+        try
         {
-            Log($"Neue Version {_availableVersion} gefunden – wird direkt installiert.");
-            await InstallAsync();
-        }
+            await RefreshStatusAsync(checkRemote: true);
 
-        await UpdateSelfAsync();
+            // Gefundenes Addon-Update wird sofort eingespielt: Wer auf "Nach
+            // Updates suchen" drueckt, will es haben - eine zweite Rueckfrage
+            // waere nur ein weiterer Klick auf dem Weg zum selben Ziel.
+            if (_updateAvailable)
+            {
+                Log($"Neue Version {_availableVersion} gefunden – wird direkt installiert.");
+                await InstallAsync();
+                // InstallAsync gibt die Knoepfe am Ende wieder frei; bis der
+                // Selbstaktualisierung durch ist, bleiben sie gesperrt.
+                SetBusy(true);
+            }
+
+            await UpdateSelfAsync();
+        }
+        finally
+        {
+            _checking = false;
+            SetBusy(false);
+        }
     }
 
     private async Task<bool> UpdateSelfAsync()

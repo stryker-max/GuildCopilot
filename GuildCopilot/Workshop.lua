@@ -373,6 +373,40 @@ function GC.Workshop:GetGuildWorkshop()
             end
         end
     end
+
+    -- Bis 0.9.87 stand der eigene Charakter mit Realmanteil in der Tabelle
+    -- ("alex-ewigerhain"), von fremden Clients gemeldete Herstellernamen aber
+    -- ohne ("alex"). Derselbe Spieler fuellte damit zwei Zeilen. Die alten
+    -- Schluessel werden einmalig auf den Kurznamen zusammengefuehrt; bei
+    -- doppelten Berufen gewinnt der neuere Stand.
+    if not workshop.crafterKeysMigrated then
+        workshop.crafterKeysMigrated = true
+        -- Erst sammeln, dann umhaengen: Waehrend eines pairs-Durchlaufs einen
+        -- NEUEN Schluessel zu setzen ist in Lua nicht definiert.
+        local moves = {}
+        for key, crafter in pairs(workshop.crafters) do
+            local shortKey = GC.Util.PlayerKey(key)
+            if shortKey ~= "" and shortKey ~= key and type(crafter) == "table" then
+                moves[#moves + 1] = { from = key, to = shortKey, crafter = crafter }
+            end
+        end
+        for _, move in ipairs(moves) do
+            local target = workshop.crafters[move.to]
+            if type(target) ~= "table" then
+                workshop.crafters[move.to] = move.crafter
+            else
+                target.professions = target.professions or {}
+                for professionKey, profession in pairs(move.crafter.professions or {}) do
+                    local known = target.professions[professionKey]
+                    if not known
+                        or (tonumber(profession.updatedAt) or 0) > (tonumber(known.updatedAt) or 0) then
+                        target.professions[professionKey] = profession
+                    end
+                end
+            end
+            workshop.crafters[move.from] = nil
+        end
+    end
     return workshop
 end
 
@@ -408,7 +442,7 @@ end
 -- Gildenroster und duerfen beim Aufraeumen nicht mit Ausgetretenen verwechselt
 -- werden.
 function GC.Workshop:ClaimRecipes(info)
-    local crafterKey = GC.Util.NormalizeName(info.crafter)
+    local crafterKey = GC.Util.PlayerKey(info.crafter)
     if crafterKey == "" or GC.Util.Trim(info.professionKey) == "" then
         return nil
     end
@@ -421,6 +455,22 @@ function GC.Workshop:ClaimRecipes(info)
         crafter.sharedBy = info.sharedBy
     end
 
+    -- Ein aelterer Stand darf einen neueren nicht zurueckdrehen. Das trifft
+    -- zwei reale Faelle: ein Paket, das sich im Gildenkanal verspaetet hat,
+    -- und einen Zweitclient, der seit Stunden laeuft und seinen alten Stand
+    -- weitermeldet. Beide haben bisher die Rezeptliste ueberschrieben - bei
+    -- einer vollen Schluesselliste ("K") samt der Rezepte, die seitdem
+    -- dazugelernt wurden.
+    --
+    -- Gleichstand zaehlt als "schon da": Derselbe Stand zweimal aendert
+    -- nichts, und die Ordnung bleibt damit eindeutig.
+    local incomingAt = tonumber(info.updatedAt) or GC.Util.Now()
+    local known = crafter.professions[info.professionKey]
+    if known and (tonumber(known.updatedAt) or 0) > incomingAt then
+        workshop.crafters[crafterKey] = crafter
+        return crafter
+    end
+
     local recipeKeys = {}
     for _, recipeKey in ipairs(info.recipeKeys or {}) do
         recipeKeys[recipeKey] = true
@@ -428,7 +478,7 @@ function GC.Workshop:ClaimRecipes(info)
     crafter.professions[info.professionKey] = {
         key = info.professionKey,
         name = info.professionName,
-        updatedAt = tonumber(info.updatedAt) or GC.Util.Now(),
+        updatedAt = incomingAt,
         fingerprintHash = info.fingerprintHash,
         recipeKeys = recipeKeys,
     }
@@ -1032,7 +1082,7 @@ function GC.Workshop:QueueProfessionSync(profession, compact, target, reliable, 
     -- Zusammen mit dem Beruf identifiziert der Herstellername ein Paket
     -- eindeutig, damit zwei eigene Charaktere mit demselben Beruf sich beim
     -- Einreihen nicht gegenseitig verdraengen.
-    local crafterKey = GC.Util.NormalizeName(crafterName or "")
+    local crafterKey = GC.Util.PlayerKey(crafterName or "")
     for index = #self.syncQueue, 1, -1 do
         if self.syncQueue[index].professionKey == profession.key
             and self.syncQueue[index].target == target
@@ -1067,7 +1117,7 @@ end
 function GC.Workshop:GetAccountProfessions()
     local entries = {}
     local ownName = GC:GetPlayerFullName()
-    local ownKey = GC.Util.NormalizeName(ownName)
+    local ownKey = GC.Util.PlayerKey(ownName)
     for _, profession in pairs(self:GetOwnData().professions) do
         entries[#entries + 1] = { crafter = ownName, profession = profession }
     end
@@ -1075,7 +1125,7 @@ function GC.Workshop:GetAccountProfessions()
         local characterName = (type(character) == "table" and character.fullName) or characterKey
         local workshop = type(character) == "table" and character.workshop
         if workshop and workshop.professions
-            and GC.Util.NormalizeName(characterName) ~= ownKey then
+            and GC.Util.PlayerKey(characterName) ~= ownKey then
             for _, profession in pairs(workshop.professions) do
                 entries[#entries + 1] = { crafter = characterName, profession = profession }
             end
@@ -1090,7 +1140,7 @@ function GC.Workshop:QueueKeyList(profession, crafterName)
         return false
     end
     local messages = self:BuildKeyListMessages(profession, crafterName)
-    local crafterKey = GC.Util.NormalizeName(crafterName or "")
+    local crafterKey = GC.Util.PlayerKey(crafterName or "")
     for index = #self.syncQueue, 1, -1 do
         local queued = self.syncQueue[index]
         if queued.professionKey == profession.key and queued.keyList
@@ -1213,7 +1263,7 @@ end
 -- obwohl er drei Berufe nie bekommen hat.
 
 local function WantKey(crafter, professionKey)
-    return GC.Util.NormalizeName(crafter) .. "|" .. tostring(professionKey or "")
+    return GC.Util.PlayerKey(crafter) .. "|" .. tostring(professionKey or "")
 end
 
 function GC.Workshop:NoteWanted(entries)
@@ -1338,7 +1388,7 @@ function GC.Workshop:ScheduleKeyListRequest(wanted)
     local now = GC.Util.Now()
     local pending = {}
     for _, entry in ipairs(wanted or {}) do
-        local suppressKey = GC.Util.NormalizeName(entry.crafter) .. "|" .. entry.professionKey
+        local suppressKey = GC.Util.PlayerKey(entry.crafter) .. "|" .. entry.professionKey
         local suppressedAt = self.suppressedKeyRequests[suppressKey]
         if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
             pending[#pending + 1] = entry
@@ -1365,7 +1415,7 @@ function GC.Workshop:SendKeyListRequest(wanted)
     local byCrafter = {}
     local order = {}
     for _, entry in ipairs(wanted or {}) do
-        local suppressKey = GC.Util.NormalizeName(entry.crafter) .. "|" .. entry.professionKey
+        local suppressKey = GC.Util.PlayerKey(entry.crafter) .. "|" .. entry.professionKey
         local suppressedAt = self.suppressedKeyRequests[suppressKey]
         if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
             self.suppressedKeyRequests[suppressKey] = now
@@ -1528,7 +1578,7 @@ end
 function GC.Workshop:ReceiveSync(fields, sender, distribution)
     local operation = fields[3]
     if operation == "Q" then
-        local senderKey = GC.Util.NormalizeName(sender)
+        local senderKey = GC.Util.PlayerKey(sender)
         local now = GC.Util.Now()
         self.requestReplies = self.requestReplies or {}
         local lastReply = self.requestReplies[senderKey]
@@ -1551,7 +1601,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         end
         return
     elseif operation == "M" then
-        local senderKey = GC.Util.NormalizeName(sender)
+        local senderKey = GC.Util.PlayerKey(sender)
         if senderKey == "" or distribution ~= "WHISPER" then
             return
         end
@@ -1603,7 +1653,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             local recipeCount = tonumber(countText)
             if crafter and professionKey and updatedAt and recipeCount
                 and #crafter <= 60 and #professionKey <= 80 and #fingerprint <= 20 then
-                local known = crafters[GC.Util.NormalizeName(crafter)]
+                local known = crafters[GC.Util.PlayerKey(crafter)]
                 local knownProfession = known and known.professions
                     and known.professions[professionKey]
                 local stale = not knownProfession
@@ -1627,7 +1677,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- Jemand verlangt die Schluesselliste eines Berufs. Angesprochen ist der
         -- genannte Hersteller; auch eine fremde Anfrage unterdrueckt die eigene.
         local wantedCrafter = GC.Util.Trim(fields[4] or "")
-        local wantedKey = GC.Util.NormalizeName(wantedCrafter)
+        local wantedKey = GC.Util.PlayerKey(wantedCrafter)
         self.suppressedKeyRequests = self.suppressedKeyRequests or {}
         local requested = {}
         for professionKey in tostring(fields[5] or ""):gmatch("[^,]+") do
@@ -1639,7 +1689,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             return
         end
         for _, entry in ipairs(self:GetAccountProfessions()) do
-            if GC.Util.NormalizeName(entry.crafter) == wantedKey
+            if GC.Util.PlayerKey(entry.crafter) == wantedKey
                 and requested[entry.profession.key] then
                 self:QueueKeyList(entry.profession, entry.crafter)
             end
@@ -1660,7 +1710,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             -- dasselbe Rezept nach.
             self.suppressedRequests[recipeKey] = now
         end
-        local wantedKey = GC.Util.NormalizeName(wantedCrafter)
+        local wantedKey = GC.Util.PlayerKey(wantedCrafter)
         if wantedKey == "" or #requestedKeys == 0 then
             return
         end
@@ -1669,7 +1719,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             filter[recipeKey] = true
         end
         for _, entry in ipairs(self:GetAccountProfessions()) do
-            if GC.Util.NormalizeName(entry.crafter) == wantedKey then
+            if GC.Util.PlayerKey(entry.crafter) == wantedKey then
                 self:QueueProfessionSync(entry.profession, true, nil, nil, entry.crafter, filter)
             end
         end
@@ -1700,12 +1750,12 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         return
     end
 
-    local senderKey = GC.Util.NormalizeName(sender)
+    local senderKey = GC.Util.PlayerKey(sender)
     if senderKey == "" then
         return
     end
     local crafterName = craftedBy ~= "" and craftedBy or sender
-    local crafterKey = GC.Util.NormalizeName(crafterName)
+    local crafterKey = GC.Util.PlayerKey(crafterName)
     if crafterKey == "" then
         crafterName = sender
         crafterKey = senderKey
@@ -1862,7 +1912,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
             else
                 entry.name = ResolveRecipeName(recipeKey, entry.name or recipe.name)
             end
-            local crafterKey = GC.Util.NormalizeName(crafterName)
+            local crafterKey = GC.Util.PlayerKey(crafterName)
             if not entry.crafterKeys[crafterKey] then
                 entry.crafterKeys[crafterKey] = true
                 entry.crafters[#entry.crafters + 1] = GC.Util.PlayerShortName(crafterName)
@@ -1895,12 +1945,12 @@ function GC.Workshop:GetCatalogIndex()
     -- Berufe der anderen eigenen Charaktere (z. B. die Verzauberkunst des
     -- Magier-Twinks auf dem Main), ohne auf eine Netzwerksynchronisierung zu
     -- warten - das Addon kennt die Daten ja bereits.
-    local ownKey = GC.Util.NormalizeName(ownName)
+    local ownKey = GC.Util.PlayerKey(ownName)
     for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
         local workshop = type(character) == "table" and character.workshop
         local characterName = (type(character) == "table" and character.fullName) or characterKey
         if workshop and workshop.professions
-            and GC.Util.NormalizeName(characterName) ~= ownKey then
+            and GC.Util.PlayerKey(characterName) ~= ownKey then
             AddCrafterToCatalog(catalog, characterName, workshop.professions)
         end
     end
@@ -1911,7 +1961,7 @@ function GC.Workshop:GetCatalogIndex()
     -- Reagenzien bleiben leer, bis die Nachlieferung eintrifft.
     local guildWorkshop = self:GetGuildWorkshop()
     for _, crafter in pairs(guildWorkshop.crafters) do
-        local crafterKey = GC.Util.NormalizeName(crafter.name)
+        local crafterKey = GC.Util.PlayerKey(crafter.name)
         for _, profession in pairs(crafter.professions or {}) do
             for recipeKey in pairs(profession.recipeKeys or {}) do
                 local known = guildWorkshop.catalog[recipeKey]
@@ -2025,9 +2075,9 @@ function GC.Workshop:PruneDepartedCrafters()
     local ownKeys = {}
     for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
         local characterName = (type(character) == "table" and character.fullName) or characterKey
-        ownKeys[GC.Util.NormalizeName(characterName)] = true
+        ownKeys[GC.Util.PlayerKey(characterName)] = true
     end
-    ownKeys[GC.Util.NormalizeName(GC:GetPlayerFullName())] = true
+    ownKeys[GC.Util.PlayerKey(GC:GetPlayerFullName())] = true
 
     local removed = 0
     for crafterKey, crafter in pairs(workshop.crafters) do
@@ -2129,7 +2179,7 @@ function GC.Workshop:GetSummary()
             professions[professionKey] = true
         end
         for _, crafter in ipairs(entry.crafters) do
-            crafters[GC.Util.NormalizeName(crafter)] = true
+            crafters[GC.Util.PlayerKey(crafter)] = true
         end
     end
     local crafterCount = 0

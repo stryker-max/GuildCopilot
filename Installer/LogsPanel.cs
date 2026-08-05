@@ -23,14 +23,10 @@ public sealed class LogsPanel : UserControl
     private string _importText = string.Empty;
 
     /// <summary>
-    /// So viele Zeichen nimmt das Importfeld im Addon entgegen
-    /// (SetMaxLetters in UI.lua). WoW schneidet laengeren Text beim Einfuegen
-    /// stillschweigend ab, und der Parser akzeptiert den Rest als gueltigen
-    /// Teilimport - der Abend fehlt dann halb, ohne dass irgendwo ein Fehler
-    /// steht. Deshalb wird die Groesse hier geprueft, bevor etwas in die
-    /// Zwischenablage geht.
+    /// Die Groesse wird geprueft, bevor etwas in die Zwischenablage geht;
+    /// warum, steht bei <see cref="AddonImport.Limit"/>.
     /// </summary>
-    private const int AddonImportLimit = 60000;
+    private const int AddonImportLimit = AddonImport.Limit;
 
     public LogsPanel(Settings settings, Action<string> log)
     {

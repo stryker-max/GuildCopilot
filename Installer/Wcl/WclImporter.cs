@@ -140,7 +140,11 @@ public sealed class WclImporter
             // Bewusst ueber den ganzen Report statt nur ueber die Bosskaempfe:
             // wiederbelebt wird fast immer zwischen den Pulls, dispelt und
             // unterbrochen wird auch auf Trash, und getrunken wird vor dem Pull.
-            var consumableFilter = "ability.id in (" + string.Join(", ", SpellIds.Consumables) + ")";
+            // Abgefragt wird die volle Menge - Zauber UND Essensbuffs. Die
+            // Trennung der beiden Gruppen entscheidet nur, wie gezaehlt wird,
+            // nicht was geholt wird.
+            var consumableFilter =
+                "ability.id in (" + string.Join(", ", SpellIds.ConsumableSet.OrderBy(id => id)) + ")";
             var resurrectFilter = "ability.id in (" + string.Join(", ", SpellIds.Resurrects) + ")";
             var requests = new (string Key, string DataType, string? Filter)[]
             {

@@ -8,6 +8,11 @@ namespace GuildCopilot.Installer.Wcl;
 /// </summary>
 public static class SpellIds
 {
+    /// <summary>
+    /// Verbrauchsgegenstaende, die ein Wirkereignis erzeugen: Traenke, Runen,
+    /// Trommeln, Flaeschchen, Elixiere, Oele. Fuer sie ist der Zauber der
+    /// Beleg; ihre Aura zaehlt NICHT mit. Essen steht in <see cref="FoodAuras"/>.
+    /// </summary>
     public static readonly int[] Consumables =
     {
         28495, 28499, 28507, 28508, 28494, 28506, 28511, 28512, 38908,
@@ -22,9 +27,22 @@ public static class SpellIds
         28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
         17539, 33720, 33721,
         28017, 28019,
-        // Sattgegessen-Buffs. Jedes Gericht hat eine eigene ID; die reinen
-        // "Food"-Regenerationsauren stehen bewusst nicht hier, weil sie keine
-        // Werte geben.
+    };
+
+    /// <summary>
+    /// Sattgegessen-Buffs. Jedes Gericht hat eine eigene ID; die reinen
+    /// "Food"-Regenerationsauren stehen bewusst nicht hier, weil sie keine
+    /// Werte geben.
+    ///
+    /// Diese Gruppe steht getrennt, weil sie anders gezaehlt wird: Essen
+    /// erzeugt nie ein Wirkereignis, der Buff ist der einzige Beleg. Alles
+    /// andere - Traenke, Runen, Trommeln, Flaeschchen, Elixiere, Oele - wird
+    /// ueber den Zauber gezaehlt, und dessen Aura zaehlt ausdruecklich NICHT.
+    /// Genau das entspricht GC.ConsumableCategories im Addon (track = "AURA"
+    /// nur fuer FOOD, sonst "CAST").
+    /// </summary>
+    public static readonly int[] FoodAuras =
+    {
         33254, 33256, 33257, 33259, 33261, 33263, 33265, 33268, 43764, 45245,
     };
 
@@ -53,6 +71,14 @@ public static class SpellIds
         20707, 20762, 20763, 20764, 20765, 27239,
     };
 
-    public static readonly HashSet<int> ConsumableSet = new(Consumables);
+    /// <summary>
+    /// Alle 50 uebertragbaren IDs - Zauber und Essensbuffs zusammen. Das
+    /// bleibt die Menge, die Warcraft Logs abgefragt und ins Addon geschickt
+    /// bekommt; nur das ZAEHLEN unterscheidet die beiden Gruppen.
+    /// </summary>
+    public static readonly HashSet<int> ConsumableSet =
+        new(Consumables.Concat(FoodAuras));
+
+    public static readonly HashSet<int> FoodAuraSet = new(FoodAuras);
     public static readonly HashSet<int> ResurrectSet = new(Resurrects);
 }

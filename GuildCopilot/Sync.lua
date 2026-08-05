@@ -53,6 +53,27 @@ local BULK_MAX_RETRY_DELAY = 4
 -- damit keinen einzigen Handleraufruf pro Frame. Verdrahtet wird das Skript
 -- unten bei den uebrigen Ereignisrahmen.
 local bulkFrame = CreateFrame("Frame")
+
+-- Werkstattkataloge und Gildenbankbestaende sind die einzigen wirklich grossen
+-- Uebertragungen im Addon. Im Kampf haben sie nichts verloren: Dort zaehlt
+-- jede Millisekunde, und niemand sieht in dem Moment in die Werkstatt.
+-- Die Warteschlange bleibt dabei stehen, es geht nichts verloren - sie laeuft
+-- weiter, sobald der Kampf vorbei ist.
+--
+-- Handshakes, Profile und Raidauswertungen laufen bewusst nicht hierueber:
+-- Sie sind wenige Bytes und teils zeitkritisch.
+--
+-- Diese Pruefung steht hier oben, weil SendBulk sie braucht. Stand sie weiter
+-- unten, war der Name in SendBulk zur Uebersetzungszeit noch kein lokaler -
+-- der Aufruf waere als globaler Zugriff auf ein nicht vorhandenes InCombat
+-- gelandet und haette immer nil ergeben.
+local function InCombat()
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        return true
+    end
+    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
+end
+
 local RELIABLE_WINDOW = 4
 local RELIABLE_RETRY_DELAY = 1.5
 -- Der Whisper-Transfer teilt sich das Kanalbudget mit ChatThrottleLib und dem
@@ -386,8 +407,14 @@ function GC.Sync:SendBulk(payload, distribution, target, callback, untracked)
         end
     end
 
+    -- Im Kampf geht nichts sofort raus - auch nicht ueber ChatThrottleLib.
+    -- Genau daran hing die Einstellung "Bulk-Sync im Kampf pausieren" bisher
+    -- vorbei: Wer eine globale ChatThrottleLib geladen hatte (die meisten
+    -- Raider haben eine), uebergab hier und war durch, bevor die Kampfpruefung
+    -- ueberhaupt zur Sprache kam. Das Paket wandert stattdessen in die eigene
+    -- Warteschlange und geht nach dem Kampf raus; verloren ist nichts.
     local throttle = _G and _G.ChatThrottleLib
-    if throttle and type(throttle.SendAddonMessage) == "function" then
+    if throttle and type(throttle.SendAddonMessage) == "function" and not InCombat() then
         local queueName = GC.Constants.COMM_PREFIX .. ":" .. distribution .. ":" .. (target or "")
         local ok = pcall(
             throttle.SendAddonMessage,
@@ -427,21 +454,6 @@ function GC.Sync:SendBulk(payload, distribution, target, callback, untracked)
     return true
 end
 
--- Werkstattkataloge und Gildenbankbestaende sind die einzigen wirklich grossen
--- Uebertragungen im Addon. Im Kampf haben sie nichts verloren: Dort zaehlt
--- jede Millisekunde, und niemand sieht in dem Moment in die Werkstatt.
--- Die Warteschlange bleibt dabei stehen, es geht nichts verloren - sie laeuft
--- weiter, sobald der Kampf vorbei ist.
---
--- Handshakes, Profile und Raidauswertungen laufen bewusst nicht hierueber:
--- Sie sind wenige Bytes und teils zeitkritisch.
-local function InCombat()
-    if type(InCombatLockdown) == "function" and InCombatLockdown() then
-        return true
-    end
-    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
-end
-
 function GC.Sync:PumpBulk(elapsed)
     elapsed = math.max(0, tonumber(elapsed) or 0)
     self.bulkAllowance = math.min(
@@ -449,9 +461,16 @@ function GC.Sync:PumpBulk(elapsed)
         (tonumber(self.bulkAllowance) or BULK_BURST_BYTES) + (elapsed * BULK_BYTES_PER_SECOND)
     )
 
+    -- Im Kampf schlafen legen statt jeden Frame leer durchzulaufen. Vorher
+    -- blieb der Rahmen sichtbar: Der Handler lief den ganzen Kampf ueber bei
+    -- jedem einzelnen Frame an, nur um sofort wieder auszusteigen.
+    -- PLAYER_REGEN_ENABLED weckt ihn unten wieder auf.
     if #self.bulkQueue > 0 and InCombat() then
+        self.bulkCombatAt = self.bulkCombatAt or GC.Util.Now()
+        bulkFrame:Hide()
         return
     end
+    self.bulkCombatAt = nil
 
     -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten
     -- Wartezeit erneut senden. Ohne diese Pause verbraucht ein Ratenlimit alle
@@ -1967,9 +1986,28 @@ syncEvents:SetScript("OnEvent", function(_, event, prefix, message, distribution
 end)
 
 -- Der Rahmen selbst steht oben bei den BULK-Konstanten; er ist nur sichtbar,
--- solange die Warteschlange Arbeit hat.
+-- solange die Warteschlange Arbeit hat und kein Kampf laeuft.
 bulkFrame:SetScript("OnUpdate", function(_, elapsed)
     GC.Sync:PumpBulk(elapsed)
+end)
+
+-- Ein verstecktes Frame bekommt weiterhin Ereignisse, nur kein OnUpdate. Genau
+-- das weckt die im Kampf schlafen gelegte Warteschlange wieder auf.
+bulkFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+bulkFrame:SetScript("OnEvent", function()
+    if #GC.Sync.bulkQueue == 0 then
+        return
+    end
+    -- Waehrend des Kampfes hat sich das Sendebudget weiter gefuellt; die
+    -- verstrichene Zeit wird beim Aufwachen in einem Schritt nachgebucht -
+    -- dieselbe Verrechnung wie nach einer Leerlaufpause.
+    local slept = 0
+    if GC.Sync.bulkCombatAt then
+        slept = math.max(0, GC.Util.Now() - GC.Sync.bulkCombatAt)
+        GC.Sync.bulkCombatAt = nil
+    end
+    bulkFrame:Show()
+    GC.Sync:PumpBulk(slept)
 end)
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
