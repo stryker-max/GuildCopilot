@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.96
+# Guild Copilot 0.9.97
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -66,6 +66,10 @@ Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten la
 **Rezepte.** Öffnet ein Gildenmitglied sein Berufsfenster, liest Guild Copilot den gesamten bekannten Bestand ein — einschränkende Filter werden dafür kurz zurückgesetzt und Kategorien aufgeklappt. Danach findest du über die Suche jedes Rezept der Gilde samt Herstellern, Reagenzien und Berufssymbol. Auch die Berufe deiner eigenen Twinks sind dabei, ohne auf eine Synchronisierung zu warten.
 
 **Materialbestand am Rezept.** Je Reagenz steht Bedarf, dein eigener Bestand (Taschen, Bank und Twinks) und der Gildenbankbestand mit Ampelfarbe: grün hast du selbst, gelb reicht erst mit der Gildenbank, rot fehlt auch dann. Darunter steht, was konkret fehlt.
+
+**Wartezeiten.** Umwandlungen, Spezialtuche und Sphären lassen sich nicht beliebig oft herstellen. Wer ein Rezept kann, kann es deshalb noch lange nicht heute — und genau das steht jetzt am Hersteller: „frühestens 21:40“. Abgelesen wird die laufende Sperre beim Öffnen des Berufsfensters, also dort, wo der Client sie überhaupt nennt; sie wandert wie alles andere über den Addon-Kanal in die Gilde. Auch im Wunsch-Hersteller-Feld beim Auftragserstellen steht sie, damit die Bestellung nicht bei dem landet, der heute nicht mehr kann.
+
+Die Angabe ist eine **Mindestangabe**, und das steht auch so da: Hat der Hersteller nach dem letzten Berufsfenster erneut hergestellt, ist er später frei — früher nie. Umgekehrt behauptet Guild Copilot nie, jemand sei frei: Das Spiel meldet für ein freies Rezept dasselbe wie für eines ganz ohne Wartezeit, und was sich nicht unterscheiden lässt, wird auch nicht behauptet.
 
 Die **Gildenbank** wird beim Besuch am Bankfach je Tab eingelesen und gildenweit geteilt. Da die Sichtbarkeit eines Tabs am Rang hängt, gilt alles pro Tab — ein eingeschränkter Blick löscht nie fremde Tabs. Deine eigenen Taschen- und Bankbestände bleiben auf dem Account und werden nie gesendet.
 
@@ -142,7 +146,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.96.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.97.
 
 ### Warum Windows beim Herunterladen warnt
 

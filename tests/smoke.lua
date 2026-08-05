@@ -7502,4 +7502,105 @@ do
     addon.Sync.bulkAllowance = nil
 end
 
+-- === Wartezeiten: "gesperrt bis", niemals "frei" ============================
+--
+-- Wer ein Rezept kann, kann es deshalb noch lange nicht heute. Die Sperre
+-- steht nur im Client und nur, solange das Berufsfenster offen ist.
+do
+    local cooldownClock = currentTime
+    local ownName = addon:GetPlayerFullName()
+
+    -- Das Berufsfenster meldet eine laufende Sperre auf der Mondstofftasche
+    -- (Index 2 der Testwerkstatt), auf dem Runenstoffballen keine.
+    GetTradeSkillCooldown = function(index)
+        return index == 2 and 7200 or nil
+    end
+    assert(addon.Workshop:ScanOpenProfession() == true,
+        "Der Berufsscan mit laufender Wartezeit schlug fehl")
+
+    local ownProfession = addon.Workshop:GetOwnData().professions.schneiderei
+    assert(ownProfession.cooldowns ~= nil and ownProfession.cooldowns.I14155 ~= nil,
+        "Die laufende Sperre wurde beim Scannen nicht mitgelesen")
+    assert(ownProfession.cooldowns.I14048 == nil,
+        "Ein Rezept ohne Wartezeit wurde als gesperrt gemerkt")
+    assert(addon.Workshop:GetRecipeCooldown("I14155", ownName) ~= nil,
+        "Die eigene Sperre ist über den Index nicht abfragbar")
+    assert(addon.Workshop:GetRecipeCooldown("I14048", ownName) == nil,
+        "Ein freies Rezept wird als gesperrt gemeldet")
+
+    -- Derselbe laufende Cooldown ist beim zweiten Blick keine Änderung. Ohne
+    -- das Runden auf die Minute würde jeder Scan ein Paket in die Gilde
+    -- schicken, nur weil Sekunden vergangen sind.
+    assert(addon.Workshop:RecordOwnCooldowns("Schneiderei", { I14155 = 7200 }) == false,
+        "Ein unveränderter Cooldown gilt als Änderung und löst einen Versand aus")
+
+    -- Gesendet wird, was läuft.
+    assert(addon.Workshop:SendCooldowns() >= 1, "Die eigenen Sperren wurden nicht gesendet")
+
+    -- In der Rezeptkarte steht die Sperre am Hersteller - und ausdrücklich als
+    -- Mindestangabe, nicht als Zusage.
+    -- Ein früherer Test steht im Auftragsboard; dort endet der Seitenaufbau
+    -- vor den Katalogkarten.
+    addon.UI.pages.WORKSHOP.workshopView = "CATALOG"
+    addon.UI.pages.WORKSHOP.workshopProfession.value = "Schneiderei"
+    addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
+    addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = "I14155"
+    addon.UI:RefreshWorkshop()
+    assert(addon.UI.pages.WORKSHOP.workshopDetails.value:find("frühestens", 1, true) ~= nil,
+        "Die Rezeptkarte nennt die laufende Sperre nicht: "
+            .. tostring(addon.UI.pages.WORKSHOP.workshopDetails.value))
+    assert(addon.UI.pages.WORKSHOP.workshopDetails.value:find("Mindestangaben", 1, true) ~= nil,
+        "Die Rezeptkarte gibt die Sperre als Zusage statt als Mindestangabe aus")
+
+    -- Ein fremder Hersteller meldet seine Sperre. Übertragen wird die
+    -- Restzeit; den Zeitpunkt bildet der Empfänger mit seiner eigenen Uhr.
+    local cooldownMessages = addon.Workshop:BuildCooldownMessages("Kesselflick-Ewigerhain",
+        { { key = "I14048", readyAt = currentTime + 3600 } })
+    assert(#cooldownMessages == 1, "Eine einzelne Sperre passt nicht in ein Paket")
+    assert(cooldownMessages[1]:find("|CD|", 1, true) ~= nil,
+        "Das Wartezeitenpaket trägt nicht die eigene Operation: " .. cooldownMessages[1])
+    addon.Workshop:ReceiveSync(addon.Util.SplitFields(cooldownMessages[1]), "Kesselflick-Ewigerhain")
+    local remoteReady = addon.Workshop:GetRecipeCooldown("I14048", "Kesselflick")
+    assert(remoteReady ~= nil, "Die gemeldete Sperre eines Gildenmitglieds wurde nicht übernommen")
+
+    -- Ein verspätetes Paket von vorhin darf den frischeren Stand nicht
+    -- zurückdrehen: Beide Angaben sind Untergrenzen, die größere gewinnt.
+    local staleMessages = addon.Workshop:BuildCooldownMessages("Kesselflick-Ewigerhain",
+        { { key = "I14048", readyAt = currentTime + 600 } })
+    addon.Workshop:ReceiveSync(addon.Util.SplitFields(staleMessages[1]), "Kesselflick-Ewigerhain")
+    assert(addon.Workshop:GetRecipeCooldown("I14048", "Kesselflick") == remoteReady,
+        "Ein älterer Stand hat die Sperre zurückgedreht")
+
+    -- Eine unmögliche Wartezeit wird nicht übernommen. Sonst könnte ein
+    -- fehlerhafter Client ein Rezept für Jahre als gesperrt melden.
+    addon.Workshop:ReceiveSync(addon.Util.SplitFields(
+        "W|" .. tostring(addon.Constants.SCHEMA_VERSION) .. "|CD|Grobi-Ewigerhain|I14155:99999999"),
+        "Grobi-Ewigerhain")
+    assert(addon.Workshop:GetRecipeCooldown("I14155", "Grobi") == nil,
+        "Eine absurd lange Wartezeit wurde übernommen")
+
+    -- Viele Sperren werden auf mehrere eigenständige Pakete verteilt. Jedes
+    -- steht für sich; es gibt nichts zusammenzusetzen.
+    local manyEntries = {}
+    for index = 1, 13 do
+        manyEntries[index] = { key = "E" .. tostring(30000 + index), readyAt = currentTime + 4000 }
+    end
+    assert(#addon.Workshop:BuildCooldownMessages("Kesselflick-Ewigerhain", manyEntries) == 2,
+        "Dreizehn Sperren wurden nicht auf zwei Pakete verteilt")
+
+    -- Abgelaufen heißt "keine Aussage", nicht "frei": Die Abfrage schweigt,
+    -- sobald der Zeitpunkt vorbei ist - auch wenn der Wert gespeichert bleibt.
+    currentTime = cooldownClock + 7300
+    assert(addon.Workshop:GetRecipeCooldown("I14155", ownName) == nil,
+        "Eine abgelaufene Sperre wird weiterhin als Sperre gemeldet")
+    currentTime = cooldownClock
+
+    -- Ein Client ohne diese Fassung schickt keine Wartezeiten; der Scan darf
+    -- den gespeicherten Stand dann nicht abräumen.
+    GetTradeSkillCooldown = nil
+    addon.Workshop:ScanOpenProfession()
+    assert(addon.Workshop:GetOwnData().professions.schneiderei.cooldowns.I14155 ~= nil,
+        "Ein Scan ohne Cooldown-API hat den gemerkten Stand gelöscht")
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

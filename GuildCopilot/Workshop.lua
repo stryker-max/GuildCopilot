@@ -45,6 +45,32 @@ local WANT_TTL = 120
 -- Sie wird deshalb aufgeraeumt, sobald sie zu gross wird.
 local MAX_SUPPRESSED_REQUESTS = 600
 
+-- Wartezeiten. Umwandlungen, Spezialtuche und Sphaeren sind nicht dadurch
+-- begrenzt, wer sie kann, sondern dadurch, wann er wieder darf - und genau das
+-- wusste die Werkstatt bisher nicht.
+--
+-- Gemerkt wird ausschliesslich eine LAUFENDE Sperre. Die API schweigt, wenn
+-- ein Rezept frei ist, und sie schweigt genauso, wenn es ueberhaupt keine
+-- Wartezeit kennt: Beides ist von aussen nicht zu unterscheiden. Deshalb sagt
+-- das Addon "gesperrt bis", niemals "frei".
+--
+-- Eine gemerkte Sperre altert anders als jede andere Zahl der Werkstatt. Sie
+-- wird nicht falsch, sondern hoechstens zu guenstig: Hat der Hersteller nach
+-- dem Ablesen erneut hergestellt, ist er SPAETER frei, nie frueher. Der
+-- gespeicherte Zeitpunkt ist damit eine Untergrenze - und wird ueberall als
+-- "fruehestens" beschriftet.
+local MIN_COOLDOWN_SECONDS = 60
+-- Die laengste Wartezeit in TBC sind vier Tage (Spezialtuche). Der Riegel gilt
+-- fremden Absendern: Ohne ihn koennte ein fehlerhafter Client ein Rezept fuer
+-- Jahre als gesperrt melden.
+local MAX_COOLDOWN_SECONDS = 14 * 24 * 60 * 60
+local MAX_COOLDOWNS_PER_CRAFTER = 40
+local MAX_COOLDOWNS_PER_MESSAGE = 12
+-- Gespeichert wird auf die Minute gerundet. Ohne das liefert jeder erneute
+-- Scan derselben laufenden Sperre einen um Sekunden verschobenen Zeitpunkt,
+-- und das Addon haelt jedes Mal fuer eine Aenderung, was keine ist.
+local COOLDOWN_ROUNDING = 60
+
 -- Rezeptschluessel sind Item- oder Zauber-IDs. Nach Typ gruppiert und als
 -- Differenzen aufsteigender Zahlen kosten 294 Schluessel rund 590 Bytes statt
 -- 34 KB voller Rezeptdaten - der Grund, weshalb ein Beruf beim Zweiten und
@@ -115,6 +141,36 @@ GC.Workshop.EncodeRecipeKeys = function(_, keys)
 end
 GC.Workshop.DecodeRecipeKeys = function(_, payload)
     return DecodeRecipeKeys(payload)
+end
+
+-- Uebertragen wird die RESTZEIT, nicht der Zeitpunkt. Zwei Rechner koennen
+-- verschieden gehen, und ein absoluter Zeitstempel wuerde diesen Fehler
+-- unbesehen uebernehmen - ausgerechnet bei einer Angabe, die nur als
+-- Zeitpunkt etwas wert ist. Der Empfaenger rechnet die Restzeit mit seiner
+-- eigenen Uhr um; die Sekunden Uebertragungsweg fallen bei Wartezeiten von
+-- Stunden nicht ins Gewicht.
+local function EncodeCooldowns(entries, now)
+    local parts = {}
+    for _, entry in ipairs(entries or {}) do
+        local remaining = math.floor((tonumber(entry.readyAt) or 0) - now)
+        if remaining >= MIN_COOLDOWN_SECONDS and remaining <= MAX_COOLDOWN_SECONDS then
+            parts[#parts + 1] = tostring(entry.key) .. ":" .. tostring(remaining)
+        end
+    end
+    return table.concat(parts, ";")
+end
+
+local function DecodeCooldowns(payload, now)
+    local entries = {}
+    for record in tostring(payload or ""):gmatch("[^;]+") do
+        local recipeKey, secondsText = record:match("^([IEN]%w+):(%d+)$")
+        local remaining = tonumber(secondsText)
+        if recipeKey and remaining and #recipeKey <= 60
+            and remaining >= MIN_COOLDOWN_SECONDS and remaining <= MAX_COOLDOWN_SECONDS then
+            entries[#entries + 1] = { key = recipeKey, readyAt = now + remaining }
+        end
+    end
+    return entries
 end
 
 local function NormalizeKey(value)
@@ -654,6 +710,25 @@ function GC.Workshop:ScheduleScan()
     end
 end
 
+-- Ein Berufsscan endet immer gleich: erst die Rezepte, dann die dabei
+-- abgelesenen Sperren. Beides bleibt getrennt, weil eine Wartezeit den
+-- Rezeptfingerabdruck nicht anfassen darf - sonst gaelte jeder Scan als
+-- geaenderter Rezeptstand und zoege einen vollstaendigen Abgleich nach sich,
+-- nur weil eine Umwandlung laeuft.
+--
+-- "cooldowns == nil" heisst "nicht abgelesen" und laesst den gespeicherten
+-- Stand unangetastet; eine leere Tabelle heisst "abgelesen, nichts gesperrt"
+-- und raeumt ihn ab. Der Unterschied ist der zwischen einer fehlenden und
+-- einer verneinenden Antwort.
+function GC.Workshop:FinishScan(professionName, skillLevel, maxSkillLevel, recipes, scannedCount, cooldowns)
+    local stored, changed = self:StoreProfession(
+        professionName, skillLevel, maxSkillLevel, recipes, scannedCount)
+    if stored and cooldowns and self:RecordOwnCooldowns(professionName, cooldowns) then
+        self:SendCooldowns()
+    end
+    return stored, changed
+end
+
 function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, scannedCount)
     if not next(recipes) then
         return false
@@ -678,6 +753,14 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
         maxSkillLevel = tonumber(maxSkillLevel) or 0,
         updatedAt = GC.Util.Now(),
         recipes = recipes,
+        -- Wartezeiten haengen am Charakter, nicht am Rezeptstand. Ein erneuter
+        -- Scan baut diese Tabelle vollstaendig neu auf und wuerde den
+        -- gemerkten Stand sonst jedes Mal mitnehmen - auch dann, wenn die
+        -- Spielfassung gar keine Wartezeiten liefert und es folglich nichts
+        -- gibt, was ihn ersetzt. Wurde beim Scan abgelesen, ueberschreibt
+        -- RecordOwnCooldowns die uebernommenen Werte unmittelbar danach.
+        cooldowns = previous and previous.cooldowns or nil,
+        cooldownsAt = previous and previous.cooldownsAt or nil,
     }
     profession.fingerprint = RecipeFingerprint(profession)
     profession.fingerprintHash = FingerprintHash(profession.fingerprint)
@@ -777,6 +860,8 @@ function GC.Workshop:ScanModernProfession()
     end
 
     local recipes = {}
+    -- Wie im klassischen Zweig: nil heisst "nicht abgelesen".
+    local cooldowns = type(api.GetRecipeCooldown) == "function" and {} or nil
     for _, recipeID in ipairs(recipeIDs) do
         local recipeInfo = SafeAPICall(api.GetRecipeInfo, recipeID)
         if recipeInfo and recipeInfo.name and recipeInfo.learned ~= false then
@@ -806,14 +891,21 @@ function GC.Workshop:ScanModernProfession()
                 profession = professionName,
                 reagents = reagents,
             }
+            if cooldowns then
+                local remaining = SafeAPICall(api.GetRecipeCooldown, recipeID)
+                if (tonumber(remaining) or 0) > 0 then
+                    cooldowns[recipeKey] = tonumber(remaining)
+                end
+            end
         end
     end
-    return self:StoreProfession(
+    return self:FinishScan(
         professionName,
         baseInfo.skillLevel or baseInfo.skillLineCurrentLevel,
         baseInfo.maxSkillLevel or baseInfo.skillLineMaxLevel,
         recipes,
-        #recipeIDs
+        #recipeIDs,
+        cooldowns
     )
 end
 
@@ -898,6 +990,15 @@ function GC.Workshop:ScanOpenProfession()
     PrepareClassicTradeSkill(professionName)
 
     local recipes = {}
+    -- Nur der Client kennt die Wartezeit, und er nennt sie nur, solange das
+    -- Berufsfenster offen ist. Sie wird deshalb hier mitgelesen, wo ohnehin
+    -- jede Zeile einmal angefasst wird - ein zweiter Durchlauf waere nichts
+    -- als zusaetzliche Arbeit im laufenden Spiel.
+    --
+    -- Fehlt die Abfrage in dieser Spielfassung, bleibt es bei nil: Dann ist
+    -- nichts abgelesen worden, und der gemerkte Stand bleibt stehen. Eine
+    -- leere Tabelle waere die Behauptung, es laufe nichts.
+    local cooldowns = GetTradeSkillCooldown and {} or nil
     local recipeCount = GetNumTradeSkills() or 0
     for recipeIndex = 1, recipeCount do
         local recipeName, recipeType = GetTradeSkillInfo(recipeIndex)
@@ -930,9 +1031,15 @@ function GC.Workshop:ScanOpenProfession()
                 profession = professionName,
                 reagents = reagents,
             }
+            if cooldowns then
+                local remaining = SafeAPICall(GetTradeSkillCooldown, recipeIndex)
+                if (tonumber(remaining) or 0) > 0 then
+                    cooldowns[recipeKey] = tonumber(remaining)
+                end
+            end
         end
     end
-    return self:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, recipeCount)
+    return self:FinishScan(professionName, skillLevel, maxSkillLevel, recipes, recipeCount, cooldowns)
 end
 
 -- "recipeKeyFilter" schraenkt die Nutzlast auf einzelne Rezepte ein. Damit
@@ -1280,6 +1387,242 @@ function GC.Workshop:GetPendingPacketCount()
     return #self.syncQueue + (self.bulkPending or 0) + reliable
 end
 
+-- === Wartezeiten ===========================================================
+
+local function RoundCooldown(readyAt)
+    return math.floor(((tonumber(readyAt) or 0) / COOLDOWN_ROUNDING) + 0.5) * COOLDOWN_ROUNDING
+end
+
+-- Die Sperren des eigenen Charakters, so wie sie beim letzten Blick ins
+-- Berufsfenster standen. Der eigene Stand ist als einziger vollstaendig: Was
+-- das Berufsfenster jetzt nicht mehr meldet, ist auch nicht mehr gesperrt.
+-- Deshalb wird hier ersetzt, waehrend fremde Staende nur ergaenzt werden.
+function GC.Workshop:RecordOwnCooldowns(professionName, remainingByKey)
+    local profession = self:GetOwnData().professions[NormalizeKey(professionName)]
+    if not profession then
+        return false
+    end
+
+    local now = GC.Util.Now()
+    local cooldowns, count = {}, 0
+    for _, recipeKey in ipairs(SortedKeys(remainingByKey)) do
+        local remaining = tonumber(remainingByKey[recipeKey]) or 0
+        if remaining >= MIN_COOLDOWN_SECONDS and remaining <= MAX_COOLDOWN_SECONDS
+            and count < MAX_COOLDOWNS_PER_CRAFTER then
+            cooldowns[recipeKey] = RoundCooldown(now + remaining)
+            count = count + 1
+        end
+    end
+
+    local previous = profession.cooldowns or {}
+    local changed = false
+    for recipeKey, readyAt in pairs(cooldowns) do
+        if previous[recipeKey] ~= readyAt then
+            changed = true
+        end
+    end
+    for recipeKey in pairs(previous) do
+        if not cooldowns[recipeKey] then
+            changed = true
+        end
+    end
+
+    profession.cooldowns = cooldowns
+    profession.cooldownsAt = now
+    if changed then
+        self.cooldownIndex = nil
+    end
+    return changed
+end
+
+-- Fremde Sperren. Ein Absender kennt immer nur seine eigenen Charaktere, also
+-- wird hier ausschliesslich ergaenzt: Das Fehlen eines Rezepts in einem Paket
+-- ist keine Aussage ueber dieses Rezept.
+function GC.Workshop:StoreCrafterCooldowns(crafterName, entries, sharedBy)
+    local crafterKey = GC.Util.PlayerKey(crafterName)
+    if crafterKey == "" or #(entries or {}) == 0 then
+        return false
+    end
+
+    local workshop = self:GetGuildWorkshop()
+    local crafter = workshop.crafters[crafterKey] or { professions = {} }
+    crafter.name = crafter.name or crafterName
+    crafter.professions = crafter.professions or {}
+    if GC.Util.Trim(sharedBy) ~= "" then
+        crafter.sharedBy = crafter.sharedBy or sharedBy
+    end
+
+    local now = GC.Util.Now()
+    local cooldowns = crafter.cooldowns or {}
+    local changed = false
+    for _, entry in ipairs(entries) do
+        local readyAt = RoundCooldown(entry.readyAt)
+        -- Der spaetere Zeitpunkt gewinnt. Beide Angaben sind Untergrenzen, und
+        -- die groessere ist die belastbarere - ein im Gildenkanal verspaetetes
+        -- Paket darf einen frischeren Stand nicht zurueckdrehen.
+        if readyAt > (tonumber(cooldowns[entry.key]) or 0) then
+            cooldowns[entry.key] = readyAt
+            changed = true
+        end
+    end
+
+    -- Abgelaufenes fliegt beim Schreiben heraus. Damit bleibt die Tabelle von
+    -- selbst klein, ohne einen eigenen Aufraeumlauf zu brauchen.
+    local live = {}
+    for recipeKey, readyAt in pairs(cooldowns) do
+        if (tonumber(readyAt) or 0) <= now then
+            cooldowns[recipeKey] = nil
+        else
+            live[#live + 1] = recipeKey
+        end
+    end
+    if #live > MAX_COOLDOWNS_PER_CRAFTER then
+        table.sort(live, function(left, right)
+            return (cooldowns[left] or 0) > (cooldowns[right] or 0)
+        end)
+        for index = MAX_COOLDOWNS_PER_CRAFTER + 1, #live do
+            cooldowns[live[index]] = nil
+        end
+    end
+
+    crafter.cooldowns = cooldowns
+    workshop.crafters[crafterKey] = crafter
+    if changed then
+        self.cooldownIndex = nil
+        GC:FireCallback("WORKSHOP_UPDATED")
+    end
+    return changed
+end
+
+-- Rezept -> Hersteller -> Zeitpunkt. Der Index behaelt bewusst auch abgelaufene
+-- Eintraege: Wuerde hier nach der Uhr gefiltert, waere das Ergebnis eine
+-- Momentaufnahme, die im Zwischenspeicher liegen bleibt und mit jeder Minute
+-- unrichtiger wird. Gefiltert wird deshalb erst bei der Abfrage.
+function GC.Workshop:GetCooldownIndex()
+    if self.cooldownIndex then
+        return self.cooldownIndex
+    end
+
+    local index = {}
+    local function Add(crafterName, recipeKey, readyAt)
+        readyAt = tonumber(readyAt) or 0
+        local crafterKey = GC.Util.PlayerKey(crafterName)
+        if readyAt <= 0 or crafterKey == "" or GC.Util.Trim(recipeKey) == "" then
+            return
+        end
+        local byCrafter = index[recipeKey]
+        if not byCrafter then
+            byCrafter = {}
+            index[recipeKey] = byCrafter
+        end
+        if (tonumber(byCrafter[crafterKey]) or 0) < readyAt then
+            byCrafter[crafterKey] = readyAt
+        end
+    end
+
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        for recipeKey, readyAt in pairs(entry.profession.cooldowns or {}) do
+            Add(entry.crafter, recipeKey, readyAt)
+        end
+    end
+    for crafterKey, crafter in pairs(self:GetGuildWorkshop().crafters) do
+        if type(crafter) == "table" then
+            for recipeKey, readyAt in pairs(crafter.cooldowns or {}) do
+                Add(crafter.name or crafterKey, recipeKey, readyAt)
+            end
+        end
+    end
+
+    self.cooldownIndex = index
+    return index
+end
+
+-- Der Zeitpunkt, vor dem dieser Hersteller dieses Rezept nachweislich nicht
+-- machen kann. nil heisst nicht "frei", sondern "keine bekannte Sperre".
+function GC.Workshop:GetRecipeCooldown(recipeKey, crafterName)
+    local byCrafter = self:GetCooldownIndex()[recipeKey]
+    if not byCrafter then
+        return nil
+    end
+    local readyAt = tonumber(byCrafter[GC.Util.PlayerKey(crafterName)])
+    if not readyAt or readyAt <= GC.Util.Now() then
+        return nil
+    end
+    return readyAt
+end
+
+-- Jede Nachricht steht fuer sich: Sperren sind einzelne Tatsachen, keine
+-- Liste, die vollstaendig ankommen muesste. Es gibt deshalb weder Token noch
+-- Teilzaehler noch ein Zusammensetzen beim Empfaenger - was ankommt, gilt,
+-- was fehlt, wird beim naechsten Mal mitgeteilt.
+function GC.Workshop:BuildCooldownMessages(crafterName, entries)
+    local messages = {}
+    local now = GC.Util.Now()
+    local crafterField = GC.Util.SafeChatText(GC.Util.Trim(crafterName or ""), 40)
+    local batch = {}
+
+    local function Flush()
+        if #batch == 0 then
+            return
+        end
+        local payload = EncodeCooldowns(batch, now)
+        batch = {}
+        if payload == "" then
+            return
+        end
+        messages[#messages + 1] = BuildMessage({
+            "W",
+            GC.Constants.SCHEMA_VERSION,
+            "CD",
+            crafterField,
+            payload,
+        })
+    end
+
+    for _, entry in ipairs(entries or {}) do
+        batch[#batch + 1] = entry
+        if #batch >= MAX_COOLDOWNS_PER_MESSAGE then
+            Flush()
+        end
+    end
+    Flush()
+    return messages
+end
+
+-- Die laufenden Sperren aller eigenen Charaktere. Ohne Ziel geht es an die
+-- Gilde, sonst gezielt an den Fragenden. Wer nichts zu melden hat - der
+-- Regelfall - sendet auch nichts.
+function GC.Workshop:SendCooldowns(target)
+    local now = GC.Util.Now()
+    local lists, order = {}, {}
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        for _, recipeKey in ipairs(SortedKeys(entry.profession.cooldowns)) do
+            local readyAt = tonumber(entry.profession.cooldowns[recipeKey]) or 0
+            if (readyAt - now) >= MIN_COOLDOWN_SECONDS then
+                local crafterKey = GC.Util.PlayerKey(entry.crafter)
+                local list = lists[crafterKey]
+                if not list then
+                    list = { crafter = entry.crafter, entries = {} }
+                    lists[crafterKey] = list
+                    order[#order + 1] = crafterKey
+                end
+                list.entries[#list.entries + 1] = { key = recipeKey, readyAt = readyAt }
+            end
+        end
+    end
+
+    local sent = 0
+    for _, crafterKey in ipairs(order) do
+        local list = lists[crafterKey]
+        for _, message in ipairs(self:BuildCooldownMessages(list.crafter, list.entries)) do
+            if GC.Sync:Send(message, target and "WHISPER" or "GUILD", target) then
+                sent = sent + 1
+            end
+        end
+    end
+    return sent
+end
+
 -- === Bekannte Luecken ======================================================
 --
 -- Ein fremdes Manifest sagt, welche Berufe es in der Gilde gibt. Was davon hier
@@ -1625,6 +1968,11 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         else
             self:QueueAllProfessions(SupportsCompactWorkshop(sender), nil, nil, true)
         end
+        -- Wer frisch eingeloggt ist, kennt die laufenden Sperren nicht. Sie
+        -- haengen an keinem Rezeptstand und wuerden deshalb von Manifest und
+        -- Nachforderung nicht erfasst. Ein Paket, und nur, wenn es ueberhaupt
+        -- etwas zu melden gibt.
+        self:SendCooldowns()
         return
     elseif operation == "M" then
         local senderKey = GC.Util.PlayerKey(sender)
@@ -1756,6 +2104,15 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
                 self:QueueProfessionSync(entry.profession, true, nil, nil, entry.crafter, filter)
             end
         end
+        return
+    elseif operation == "CD" then
+        -- Wartezeiten. Feld 4 nennt den Charakter, dem sie gehoeren - ein
+        -- Spieler meldet auch die seiner Twinks, genau wie bei den Rezepten.
+        local crafterName = GC.Util.Trim(fields[4] or "")
+        if crafterName == "" or #crafterName > 60 then
+            crafterName = sender
+        end
+        self:StoreCrafterCooldowns(crafterName, DecodeCooldowns(fields[5], GC.Util.Now()), sender)
         return
     end
     if operation ~= "D" and operation ~= "C" and operation ~= "K" then
@@ -2064,6 +2421,10 @@ function GC.Workshop:InvalidateCatalog()
     self.catalogIndex = nil
     self.catalogByKey = nil
     self.catalogSummary = nil
+    -- Der Wartezeitenindex haengt an derselben Charakterliste. Er ist billig
+    -- gebaut, und ihn hier stehen zu lassen waere genau die Art Halbwissen,
+    -- die spaeter niemand mehr zuordnet.
+    self.cooldownIndex = nil
 end
 
 -- Ein einzelnes Rezept nach Schluessel. Vorher suchten die Aufrufer linear
@@ -2112,6 +2473,7 @@ function GC.Workshop:PruneDepartedCrafters()
     end
     ownKeys[GC.Util.PlayerKey(GC:GetPlayerFullName())] = true
 
+    local now = GC.Util.Now()
     local removed = 0
     for crafterKey, crafter in pairs(workshop.crafters) do
         local name = type(crafter) == "table" and crafter.name or crafterKey
@@ -2122,6 +2484,16 @@ function GC.Workshop:PruneDepartedCrafters()
         if not keep then
             workshop.crafters[crafterKey] = nil
             removed = removed + 1
+        elseif type(crafter) == "table" and crafter.cooldowns then
+            -- Abgelaufene Sperren raeumt sonst nur der Hersteller selbst weg,
+            -- und zwar erst, wenn er das naechste Mal etwas meldet. Wer seit
+            -- Monaten nicht mehr am Berufsfenster stand, schleppt sie ewig mit.
+            for recipeKey, readyAt in pairs(crafter.cooldowns) do
+                if (tonumber(readyAt) or 0) <= now then
+                    crafter.cooldowns[recipeKey] = nil
+                    self.cooldownIndex = nil
+                end
+            end
         end
     end
 

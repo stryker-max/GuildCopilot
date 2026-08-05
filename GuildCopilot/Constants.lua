@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.96",
+    VERSION = "0.9.97",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -79,6 +79,8 @@ GC.Capabilities = {
     "inventory1",
     -- gearexempt1: versteht ausgenommene Ausruestungsplaetze im Snapshot.
     "gearexempt1",
+    -- cooldown1: versteht Wartezeiten von Rezepten ("W|…|CD|…").
+    "cooldown1",
 }
 
 GC.ProfessionOptions = {
