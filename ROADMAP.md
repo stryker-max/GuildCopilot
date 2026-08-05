@@ -298,6 +298,38 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.96 – Was die Sperre abräumt und was sie nur behauptet
+
+0.9.95 hat die Stillstandssperre daran gehindert, wartende Pakete auszubuchen. Dabei blieben zwei Fehler stehen, die älter sind als diese ganze Reihe.
+
+### Eine Abschreibung, die sich selbst wiederholt
+
+Die Sperre addierte den gesamten offenen Sendezähler zum Fehlerzähler und räumte danach `bulkOutstanding` und `serialPending` ab. `GetReliablePendingCount()` ist aber ebenfalls Teil dieses Werts und hängt an einer eigenen Liste, die hier nicht angefasst wird.
+
+Die Folge ist eine Schleife, die niemand vorgesehen hat: Der Gesamtwert sinkt nicht, weil die Flüsterteile weiterzählen. Damit greift auch die Zuweisung `outboundChangedAt = now` nicht, die nur bei einer Änderung erfolgt. Beim nächsten Statusabruf ist die Frist immer noch überschritten, und dieselbe Abschreibung läuft erneut – bei einem Anzeigetakt von einer halben Sekunde zweimal pro Sekunde, unbegrenzt. Die Nachprüfung hat den Zähler von 0 auf 2 und sofort auf 4 steigen sehen.
+
+Der Fehler ist alt; er brauchte nur einen ausstehenden Flüstertransfer zum Zeitpunkt eines Stillstands, um sichtbar zu werden. Behoben ist er an der Wurzel: Abgeschrieben wird ausschließlich, was hier auch abgeräumt wird. Die bestätigten Flüsterteile haben mit `GiveUpReliablePart` ihre eigene Aufgabe-Logik und gehen die Sperre nichts an. Zusätzlich rückt `outboundChangedAt` nach einer Abschreibung ausdrücklich weiter, statt sich auf eine Wertänderung zu verlassen – eine Bedingung, die genau dann nicht greift, wenn man sie braucht.
+
+### Pausiert ist nicht verloren
+
+`status.waiting` kannte nur den einen Fall: ein Paket liegt bei ChatThrottleLib. Pakete, die wegen der Kampfpause noch in der eigenen Warteschlange stehen, haben diesen Vermerk nicht – sie wurden ja bewusst nicht übergeben.
+
+Dauert ein Kampf länger als zwei Minuten, und das ist bei einem Bosskampf mit Wipe der Normalfall, hat die Sperre sie deshalb als verloren gebucht und den Zähler abgeräumt. Nach dem Kampf gingen sie ordnungsgemäß raus, aber der Fehlerzähler stand. Es ist derselbe Denkfehler wie in 0.9.94 und 0.9.95, zum dritten Mal an einer neuen Stelle: **Ein Paket, das noch bei uns liegt, ist nicht verloren, sondern wartet.**
+
+Die Sperre prüft jetzt beides – kein übergebenes Paket *und* eine leere eigene Warteschlange. Nur dann ist ein stehender Zähler wirklich ein Leck.
+
+Und weil ein Balken, der zehn Minuten „noch 12 Pakete" sagt, während im Raid gekämpft wird, keine Auskunft ist: Die Anzeige nennt die Kampfpause jetzt beim Namen.
+
+### Dreimal derselbe Satz
+
+Diese Reihe hat sechs Anläufe gebraucht, und ab 0.9.94 stand in jedem einzelnen derselbe Satz in einem anderen Gewand:
+
+- 0.9.94 – ein Paket bei ChatThrottleLib ist nicht verloren, es wartet
+- 0.9.95 – dasselbe Paket ist auch für die Anzeige nicht verloren
+- 0.9.96 – ein Paket in der eigenen Warteschlange erst recht nicht
+
+Der Grundsatz war ab 0.9.94 formuliert. Was fehlte, war die Frage, **an wie vielen Stellen** er noch nicht gilt – dieselbe Lücke wie bei der Gildenbank- und Werkstatt-Konvergenz in 0.9.91. Eine Regel einzuführen ist die kleinere Hälfte der Arbeit; die größere ist, jede Stelle zu finden, die noch nach der alten verfährt.
+
 ## 0.9.95 – Derselbe Denkfehler, eine Ebene höher
 
 0.9.94 hat in der Warteschlange festgehalten: Wartezeit ist kein Verlust. Die Fortschrittsanzeige wusste davon nichts und machte weiter wie bisher.

@@ -7,6 +7,27 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.96 – Addon
+
+**Behoben**
+
+- **Die gemeldete Zahl verlorener Pakete konnte ins Unendliche wachsen.** Die
+  Stillstandssperre schrieb den gesamten offenen Sendezähler als Verlust ab,
+  räumte aber nur einen Teil davon ab — die bestätigten Flüsterteile blieben
+  stehen. Damit sank der Gesamtwert nicht, der Zeitstempel rückte nicht weiter,
+  und dieselbe Abschreibung lief beim nächsten Statusabruf erneut: zweimal je
+  Sekunde. Abgeschrieben wird jetzt nur, was auch wirklich abgeräumt wird; die
+  Flüsterteile geben ohnehin selbst auf.
+- **Ein langer Kampf machte aus pausierten Paketen Verluste.** Dauert ein Kampf
+  länger als zwei Minuten, liegen die Pakete weiterhin vollständig in der
+  eigenen Warteschlange — die Sperre hat sie trotzdem als verloren gebucht,
+  obwohl sie nach dem Kampf ordnungsgemäß hinausgingen. Was nachweislich noch
+  bei uns liegt, gilt nicht mehr als verloren.
+- **Die Anzeige nennt die Kampfpause beim Namen.** Statt „noch 12 Pakete" steht
+  während des Kampfes „Im Kampf pausiert; es geht nach dem Kampf weiter."
+
+Alle drei stammen aus dieser Reihe und waren nie veröffentlicht.
+
 ## 0.9.95 – Addon
 
 **Behoben**

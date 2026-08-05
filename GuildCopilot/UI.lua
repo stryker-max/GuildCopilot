@@ -4214,6 +4214,7 @@ function GC.UI:RefreshSyncBar(force)
         status.outstanding,
         status.failed,
         status.waiting and "W" or "-",
+        status.paused and "K" or "-",
         ageMinutes,
         (status.peerSeenAt or 0) > 0 and "P" or "-",
         #GC.Workshop:GetMissingOwnProfessions(),
@@ -4236,7 +4237,9 @@ function GC.UI:RefreshSyncBar(force)
         -- deswegen nichts - unterwegs ist unterwegs.
         text = "|cff2ed9e6Abgleich läuft|r  •  noch " .. status.outstanding
             .. (status.outstanding == 1 and " Paket" or " Pakete")
-            .. (status.waiting
+            .. (status.paused
+                and ". Im Kampf pausiert; es geht nach dem Kampf weiter."
+                or status.waiting
                 and ". Der Chatkanal ist gerade ausgelastet; es geht weiter, sobald er frei wird."
                 or ". Das Fenster kann geschlossen werden.")
         color = THEME.accent

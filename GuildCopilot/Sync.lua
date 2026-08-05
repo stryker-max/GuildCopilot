@@ -757,9 +757,13 @@ function GC.Sync:GetSyncStatus()
     -- Zaehler, selbst getaktete Uebertragungen ueber serialPending, bestaetigte
     -- Fluesterteile ueber ihre ACK-Liste. Die Teile des dritten Wegs sind
     -- ausdruecklich von der Bulk-Zaehlung ausgenommen (siehe SendBulk).
-    local outbound = math.max(0, tonumber(self.bulkOutstanding) or 0)
+    -- Getrennt gehalten, weil nur der erste Teil von der Stillstandssperre
+    -- unten abgeraeumt werden KANN: Die bestaetigten Fluesterteile haengen an
+    -- ihrer eigenen Liste und geben mit GiveUpReliablePart selbst auf.
+    local sweepable = math.max(0, tonumber(self.bulkOutstanding) or 0)
         + math.max(0, tonumber(self.serialPending) or 0)
-        + self:GetReliablePendingCount()
+    local reliable = self:GetReliablePendingCount()
+    local outbound = sweepable + reliable
 
     -- Liegt nachweislich noch ein Paket bei ChatThrottleLib, wartet der
     -- Zaehler, er steht nicht still.
@@ -777,16 +781,41 @@ function GC.Sync:GetSyncStatus()
         and (now - waitingAt) > PROGRESS_STALL_SECONDS
         or false
 
+    -- Im Kampf steht die Warteschlange absichtlich. Das ist keine Stoerung und
+    -- gehoert auch nicht als solche angezeigt.
+    status.paused = #self.bulkQueue > 0 and InCombat() or false
+
+    -- Was nachweislich noch bei uns oder bei ChatThrottleLib liegt, ist nicht
+    -- verloren. Beides zusammen: ein uebergebenes Paket (bulkInFlight) und
+    -- alles, was noch in der eigenen Warteschlange steht.
+    --
+    -- Der zweite Teil hat gefehlt. Dauert ein Kampf laenger als zwei Minuten,
+    -- liegen die pausierten Pakete weiterhin vollstaendig in bulkQueue - die
+    -- Sperre hat sie trotzdem als verloren gebucht und den Zaehler abgeraeumt,
+    -- obwohl sie nach dem Kampf ordnungsgemaess rausgingen.
+    local held = self.bulkInFlight ~= nil or #self.bulkQueue > 0
+
     -- Der Sendezaehler ist der einzige Wert, der lecken kann. Kommt er zwei
-    -- Minuten lang nicht voran UND liegt nichts mehr bei ChatThrottleLib, gilt
-    -- das Ausstehende als verloren. Empfang und bekannte Luecken bleiben
+    -- Minuten lang nicht voran UND ist nichts mehr in der Leitung, gilt das
+    -- Ausstehende als verloren. Empfang und bekannte Luecken bleiben
     -- unangetastet - sie verfallen von selbst.
-    if outbound > 0 and not self.bulkInFlight and outbound == status.outbound
+    --
+    -- Ausgebucht wird ausschliesslich, was hier auch abgeraeumt wird.
+    -- Vorher ging der GESAMTE outbound-Wert in den Fehlerzaehler, obwohl die
+    -- Fluesterteile davon unberuehrt blieben: outbound sank dadurch nicht,
+    -- outboundChangedAt rueckte nie weiter, und derselbe Block feuerte beim
+    -- naechsten Statusabruf erneut - bei einem Anzeigetakt von einer halben
+    -- Sekunde wuchs der gemeldete Verlust unbegrenzt.
+    if sweepable > 0 and not held and outbound == status.outbound
         and (now - (status.outboundChangedAt or now)) > PROGRESS_STALL_SECONDS then
-        self.progressFailed = (tonumber(self.progressFailed) or 0) + outbound
+        self.progressFailed = (tonumber(self.progressFailed) or 0) + sweepable
         self.bulkOutstanding = 0
         self.serialPending = 0
-        outbound = self:GetReliablePendingCount()
+        outbound = reliable
+        -- Ausdruecklich weitersetzen: Bleibt outbound durch die Fluesterteile
+        -- gleich, greift die Zuweisung unten nicht, und die Sperre liefe sofort
+        -- wieder an.
+        status.outboundChangedAt = now
     end
     if outbound ~= status.outbound then
         status.outboundChangedAt = now

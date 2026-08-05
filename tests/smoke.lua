@@ -7423,4 +7423,83 @@ do
     addon.Sync.bulkAllowance = nil
 end
 
+-- === Die Stillstandssperre bucht nicht zweimal aus ==========================
+--
+-- Sie addierte den GESAMTEN offenen Sendezähler zum Fehlerzähler, räumte aber
+-- nur die eigenen Zähler ab. Die bestätigten Flüsterteile blieben davon
+-- unberührt, also sank der Gesamtwert nicht, der Zeitstempel rückte nicht
+-- weiter, und derselbe Block feuerte beim nächsten Statusabruf wieder - bei
+-- einem Anzeigetakt von einer halben Sekunde unbegrenzt.
+do
+    stall_previousReliable = addon.Sync.GetReliablePendingCount
+    addon.Sync.GetReliablePendingCount = function() return 2 end
+
+    inCombat = false
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+
+    stall_status = addon.Sync:GetSyncStatus()
+    addon.Sync.syncStatus.outboundChangedAt = addon.Util.Now() - 600
+    stall_status = addon.Sync:GetSyncStatus()
+    stall_first = stall_status.failed
+    stall_status = addon.Sync:GetSyncStatus()
+    stall_status = addon.Sync:GetSyncStatus()
+    assert(stall_status.failed == stall_first,
+        "Der Fehlerzähler wächst bei jedem Takt weiter: " .. stall_first
+            .. " --> " .. stall_status.failed)
+    -- Flüsterteile haben ihre eigene Aufgabe-Logik und werden hier gar nicht
+    -- ausgebucht.
+    assert(stall_first == 0,
+        "Bestätigte Flüsterteile wurden von der Stillstandssperre ausgebucht: " .. stall_first)
+
+    addon.Sync.GetReliablePendingCount = stall_previousReliable
+    addon.Sync.syncStatus = nil
+    addon.Sync.progressFailed = 0
+end
+
+-- === Im Kampf pausierte Pakete sind nicht verloren ==========================
+--
+-- Dauert ein Kampf länger als zwei Minuten, buchte die Sperre die pausierten
+-- Pakete als fehlgeschlagen - obwohl sie vollständig in der eigenen
+-- Warteschlange lagen und nach dem Kampf ordnungsgemäß rausgingen.
+do
+    inCombat = true
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Sync.bulkAllowance = nil
+
+    addon.Sync:SendBulk("WKPAUSE|1", "GUILD")
+    addon.Sync:SendBulk("WKPAUSE|2", "GUILD")
+    assert(#addon.Sync.bulkQueue == 2, "Die Pakete wurden im Kampf nicht aufgehoben")
+
+    pause_status = addon.Sync:GetSyncStatus()
+    assert(pause_status.paused == true, "Die Kampfpause wird nicht gemeldet")
+    addon.Sync.syncStatus.outboundChangedAt = addon.Util.Now() - 600
+    pause_status = addon.Sync:GetSyncStatus()
+    assert(pause_status.failed == 0,
+        "Im Kampf pausierte Pakete wurden als verloren gebucht: " .. pause_status.failed)
+    assert(#addon.Sync.bulkQueue == 2, "Die Warteschlange wurde angetastet")
+    assert(addon.Sync.bulkOutstanding == 2,
+        "Der Sendezähler wurde abgeräumt, obwohl die Pakete noch bei uns liegen")
+
+    -- Nach dem Kampf gehen sie ganz normal raus.
+    inCombat = false
+    addon.Sync:PumpBulk(10)
+    assert(#addon.Sync.bulkQueue == 0, "Nach dem Kampf lief die Warteschlange nicht weiter")
+
+    addon.Sync.syncStatus = nil
+    addon.Sync.progressFailed = 0
+    addon.Sync.bulkAllowance = nil
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
