@@ -298,6 +298,38 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.93 – Der Test, der den echten Fall nicht kannte
+
+0.9.92 hat die Kampfpause vollständig gemacht und dabei zwei neue Fehler eingebaut, einen davon schwerwiegend. Beide wurden vor der Veröffentlichung gefunden. Interessant ist, **warum der eigene Regressionstest sie nicht gefunden hat**.
+
+### Ein Attrappen-Test beweist nur, was die Attrappe kann
+
+Der Test zu 0.9.92 baut eine ChatThrottleLib nach. Sie sammelt die Rückrufe ein, und der Test löst sie später von Hand aus – asynchron also. Damit prüft er genau die Annahme, unter der er geschrieben wurde.
+
+Die echte ChatThrottleLib v31 hat einen Schnellweg: Ist der Kanal frei, sendet sie sofort und ruft den Rückruf **synchron** auf, noch innerhalb von `SendAddonMessage`. Dieser Weg kam in der Attrappe nicht vor, und der Code fiel genau dort um:
+
+```lua
+local ok = pcall(throttle.SendAddonMessage, ..., function(...)
+    self.bulkInFlight = nil        -- läuft SYNCHRON, hier ist noch nichts gesetzt
+    ...
+end, nil)
+if ok then
+    self.bulkInFlight = entry      -- ... und das trägt ein erledigtes Paket ein
+end
+```
+
+Der Rückruf räumte ein Feld auf, das noch gar nicht belegt war; danach schrieb sich das längst gesendete Paket als „unterwegs" ein. Ein Geist, den nur der Watchdog auflöst – fünfzehn Sekunden, **je Paket**. Ein Abgleich mit dreißig Paketen hätte über sieben Minuten gebraucht. Aus einer Korrektur, die den Durchsatz ausdrücklich nicht antasten sollte, wäre der Stillstand geworden.
+
+Die Lehre ist nicht „mehr testen", sondern: Eine Attrappe für fremden Code muss dessen **Vertragsspielraum** abbilden, nicht das eine Verhalten, das man sich vorgestellt hat. Ein Rückruf, dessen Zeitpunkt nicht zugesichert ist, kann synchron kommen – also gehört dieser Fall in den Test. Beide Fassungen der Attrappe stehen jetzt nebeneinander, die sammelnde und die sofort zurückrufende.
+
+### Und ein Vermerk ohne Identität
+
+Der zweite Fehler ist stiller. Der Rückruf löschte `bulkInFlight`, ohne zu prüfen, ob der Vermerk noch zu ihm gehört. Hat der Watchdog Paket A aufgegeben und läuft längst B, gibt A's verspäteter Rückruf B's Platz frei – und C startet, während B noch bei ChatThrottleLib liegt. Womit wieder zwei gleichzeitig unterwegs sind und die Zusicherung aus 0.9.92 dahin ist.
+
+Der Vermerk trägt jetzt eine laufende Nummer, und aufgeräumt wird nur bei Übereinstimmung. Der Watchdog dreht sie beim Aufgeben ebenfalls weiter, damit ein danach eintreffender Rückruf zu keinem laufenden Vorgang mehr gehört.
+
+Bemerkenswert daran: Dieser Fehler war erst **durch** die Korrektur aus 0.9.92 möglich. Vorher gab es keinen In-Flight-Vermerk, den ein fremder Rückruf hätte löschen können. Jede eingeführte Zustandsvariable bringt die Frage mit, wer sie unter welchen Umständen wieder zurücksetzen darf – und bei Rückrufen aus fremdem Code lautet die Antwort selten „jeder".
+
 ## 0.9.92 – Die Kampfpause, dritter und letzter Anlauf
 
 Derselbe Punkt zum dritten Mal, und diesmal stimmt auch die Beschreibung. Das ist die eigentliche Geschichte dieses Eintrags: Zweimal hintereinander wurde eine Korrektur als vollständig ausgegeben, die es nicht war.

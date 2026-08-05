@@ -459,6 +459,30 @@ local function DispatchBulk(self, entry)
     if throttle and type(throttle.SendAddonMessage) == "function" then
         local queueName = GC.Constants.COMM_PREFIX .. ":" .. entry.distribution
             .. ":" .. (entry.target or "")
+
+        -- Der Vermerk steht VOR der Uebergabe, und er traegt eine laufende
+        -- Nummer.
+        --
+        -- Beides ist noetig, und beides hat gefehlt:
+        --
+        --   Vorher gesetzt, weil ChatThrottleLib den Rueckruf bei freiem Kanal
+        --   SYNCHRON ausloest - noch innerhalb von SendAddonMessage. Stand der
+        --   Vermerk danach, loeschte der Rueckruf ein Feld, das noch gar nicht
+        --   gesetzt war, und anschliessend trug sich das laengst erledigte
+        --   Paket als "unterwegs" ein. Aufgeloest hat das nur der Watchdog -
+        --   fuenfzehn Sekunden, je Paket. Ein Abgleich mit dreissig Paketen
+        --   haette so ueber sieben Minuten gebraucht statt weniger Sekunden.
+        --
+        --   Mit Nummer, weil ein verspaeteter Rueckruf sonst den Vermerk eines
+        --   NEUEREN Pakets loescht. Hat der Watchdog Paket A freigegeben und
+        --   laeuft laengst B, gaebe A's Rueckruf faelschlich C frei - und dann
+        --   liegen wieder zwei gleichzeitig bei ChatThrottleLib, womit die
+        --   Kampfpause ihre Zusicherung verliert.
+        self.bulkDispatchToken = (tonumber(self.bulkDispatchToken) or 0) + 1
+        local token = self.bulkDispatchToken
+        self.bulkInFlight = entry
+        self.bulkInFlightAt = GC.Util.Now()
+
         local ok = pcall(
             throttle.SendAddonMessage,
             throttle,
@@ -471,19 +495,24 @@ local function DispatchBulk(self, entry)
             function(_, sent)
                 -- Erst dieser Rueckruf gibt das naechste Paket frei. Gesendet
                 -- wird es aber nicht von hier aus, sondern beim naechsten
-                -- OnUpdate des Rahmens - der prueft vorher wieder auf Kampf,
-                -- und ein Rueckruf, den ChatThrottleLib synchron ausloest,
-                -- kann so nicht in PumpBulk zurueckspringen.
-                self.bulkInFlight = nil
-                self.bulkInFlightAt = nil
+                -- OnUpdate des Rahmens - der prueft vorher wieder auf Kampf.
+                if self.bulkDispatchToken == token then
+                    self.bulkInFlight = nil
+                    self.bulkInFlightAt = nil
+                end
                 FinishBulkEntry(entry, sent ~= false)
             end,
             nil
         )
         if ok then
-            self.bulkInFlight = entry
-            self.bulkInFlightAt = GC.Util.Now()
             return true, true
+        end
+
+        -- Die Uebergabe selbst ist gescheitert: Der Vermerk muss wieder weg,
+        -- sonst haelt er die Warteschlange bis zum Watchdog an.
+        if self.bulkDispatchToken == token then
+            self.bulkInFlight = nil
+            self.bulkInFlightAt = nil
         end
     end
     return self:Send(entry.payload, entry.distribution, entry.target) == true, false
@@ -526,9 +555,14 @@ function GC.Sync:PumpBulk(elapsed)
         if (GC.Util.Now() - (tonumber(self.bulkInFlightAt) or 0)) < BULK_IN_FLIGHT_TIMEOUT then
             return
         end
-        FinishBulkEntry(self.bulkInFlight, false)
+        local lost = self.bulkInFlight
         self.bulkInFlight = nil
         self.bulkInFlightAt = nil
+        -- Die Nummer weiterdrehen: Trifft der Rueckruf des aufgegebenen Pakets
+        -- doch noch ein, gehoert er ab jetzt zu keinem laufenden Vorgang mehr
+        -- und darf keinen fremden Vermerk loeschen.
+        self.bulkDispatchToken = (tonumber(self.bulkDispatchToken) or 0) + 1
+        FinishBulkEntry(lost, false)
     end
 
     -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten

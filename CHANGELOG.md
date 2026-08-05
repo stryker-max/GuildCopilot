@@ -7,6 +7,29 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.93 – Addon
+
+**Behoben**
+
+- **Der Gildenabgleich wäre mit 0.9.92 fast zum Stillstand gekommen.** Die
+  ChatThrottleLib meldet bei freiem Kanal sofort zurück – noch während der
+  Übergabe. Der Vermerk „ein Paket ist unterwegs" wurde aber erst *danach*
+  gesetzt: Die Rückmeldung räumte damit ein Feld auf, das es noch gar nicht
+  gab, und anschließend trug sich das längst gesendete Paket als unterwegs ein.
+  Weiter ging es erst nach der 15-Sekunden-Sicherung – und das je Paket. Ein
+  Abgleich mit dreißig Paketen hätte über sieben Minuten gebraucht statt
+  weniger Sekunden. Der Vermerk steht jetzt vor der Übergabe.
+- **Eine verspätete Rückmeldung konnte ein fremdes Paket freigeben.** Sie
+  räumte den Vermerk auf, ohne zu prüfen, ob er noch zu ihr gehört. Wurde ein
+  Paket nach der Sicherung aufgegeben und lief längst das nächste, gab die
+  verspätete Meldung des alten das übernächste frei – und dann lagen wieder
+  zwei gleichzeitig draußen, womit die Kampfpause ihre Zusage verlor. Jede
+  Übergabe trägt jetzt eine laufende Nummer; aufgeräumt wird nur, was noch
+  zusammengehört.
+
+Beide Fehler stammen aus 0.9.92 und waren nie in einer veröffentlichten
+Fassung.
+
 ## 0.9.92 – Addon
 
 **Behoben**

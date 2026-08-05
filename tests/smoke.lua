@@ -7280,4 +7280,103 @@ do
     addon.Sync.bulkAllowance = nil
 end
 
+-- === Ein synchroner Rückruf darf keinen Geist hinterlassen ==================
+--
+-- Die echte ChatThrottleLib (v31) ruft bei freiem Kanal SYNCHRON zurück - noch
+-- innerhalb von SendAddonMessage. Der Test oben löst die Rückrufe von Hand aus
+-- und hat damit genau diesen Fall nicht abgedeckt: Stand der In-Flight-Vermerk
+-- erst NACH der Übergabe, löschte der Rückruf ein noch leeres Feld, und danach
+-- trug sich das längst erledigte Paket als "unterwegs" ein. Aufgelöst hat das
+-- nur der Watchdog - fünfzehn Sekunden, je Paket.
+do
+    ctlsync_payloads = {}
+    ChatThrottleLib = {
+        SendAddonMessage = function(_, _, _, payload, _, _, _, callback)
+            ctlsync_payloads[#ctlsync_payloads + 1] = payload
+            -- Freier Kanal: sofort zurückmelden, noch aus diesem Aufruf heraus.
+            if callback then
+                callback(nil, true)
+            end
+        end,
+    }
+
+    inCombat = false
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+    addon.Sync.bulkCooldown = 0
+
+    for ctlsync_index = 1, 30 do
+        addon.Sync:SendBulk("WKSYNC|" .. ctlsync_index, "GUILD")
+    end
+
+    assert(#ctlsync_payloads == 30,
+        "Bei synchronem Rückruf blieb die Warteschlange stehen: nur "
+            .. #ctlsync_payloads .. " von 30 Paketen übergeben")
+    assert(#addon.Sync.bulkQueue == 0,
+        "Die Warteschlange wurde nicht geleert: " .. #addon.Sync.bulkQueue)
+    assert(addon.Sync.bulkInFlight == nil,
+        "Nach einem synchronen Rückruf steht ein erledigtes Paket als unterwegs")
+
+    ChatThrottleLib = nil
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+end
+
+-- === Ein verspäteter Rückruf gibt kein fremdes Paket frei ===================
+--
+-- Hat der Watchdog Paket A aufgegeben und läuft längst B, darf A's verspäteter
+-- Rückruf nicht B's Vermerk löschen - sonst startet C, während B noch bei
+-- ChatThrottleLib liegt, und die Kampfpause verliert ihre Zusicherung.
+do
+    ctllate_payloads = {}
+    ctllate_callbacks = {}
+    ChatThrottleLib = {
+        SendAddonMessage = function(_, _, _, payload, _, _, _, callback)
+            ctllate_payloads[#ctllate_payloads + 1] = payload
+            ctllate_callbacks[#ctllate_callbacks + 1] = callback
+        end,
+    }
+
+    inCombat = false
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+    addon.Sync.bulkCooldown = 0
+
+    for ctllate_index = 1, 3 do
+        addon.Sync:SendBulk("WKLATE|" .. ctllate_index, "GUILD")
+    end
+    assert(#ctllate_payloads == 1, "Es wurde mehr als ein Paket übergeben")
+
+    -- A gilt nach der Frist als verloren, B geht raus.
+    addon.Sync.bulkInFlightAt = addon.Sync.bulkInFlightAt - 3600
+    addon.Sync:PumpBulk(5)
+    assert(#ctllate_payloads == 2, "Nach dem Watchdog wurde nicht nachgeschoben")
+    assert(addon.Sync.bulkInFlight ~= nil, "Paket B wurde nicht als unterwegs vermerkt")
+
+    -- Und jetzt trifft A doch noch ein.
+    ctllate_callbacks[1](nil, true)
+    assert(addon.Sync.bulkInFlight ~= nil,
+        "Ein verspäteter Rückruf hat den Vermerk eines neueren Pakets gelöscht")
+    addon.Sync:PumpBulk(5)
+    assert(#ctllate_payloads == 2,
+        "Es liegen zwei Pakete gleichzeitig bei ChatThrottleLib: " .. #ctllate_payloads)
+
+    -- B's eigener Rückruf gibt dagegen frei.
+    ctllate_callbacks[2](nil, true)
+    addon.Sync:PumpBulk(5)
+    assert(#ctllate_payloads == 3, "Der eigene Rückruf hat nicht freigegeben")
+
+    ChatThrottleLib = nil
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
