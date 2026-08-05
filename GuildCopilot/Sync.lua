@@ -407,34 +407,22 @@ function GC.Sync:SendBulk(payload, distribution, target, callback, untracked)
         end
     end
 
-    -- Im Kampf geht nichts sofort raus - auch nicht ueber ChatThrottleLib.
-    -- Genau daran hing die Einstellung "Bulk-Sync im Kampf pausieren" bisher
-    -- vorbei: Wer eine globale ChatThrottleLib geladen hatte (die meisten
-    -- Raider haben eine), uebergab hier und war durch, bevor die Kampfpruefung
-    -- ueberhaupt zur Sprache kam. Das Paket wandert stattdessen in die eigene
-    -- Warteschlange und geht nach dem Kampf raus; verloren ist nichts.
-    local throttle = _G and _G.ChatThrottleLib
-    if throttle and type(throttle.SendAddonMessage) == "function" and not InCombat() then
-        local queueName = GC.Constants.COMM_PREFIX .. ":" .. distribution .. ":" .. (target or "")
-        local ok = pcall(
-            throttle.SendAddonMessage,
-            throttle,
-            "BULK",
-            GC.Constants.COMM_PREFIX,
-            payload,
-            distribution,
-            target,
-            queueName,
-            function(_, sent)
-                Finish(sent ~= false)
-            end,
-            nil
-        )
-        if ok then
-            return true
-        end
-    end
-
+    -- JEDES Paket geht zuerst in die eigene Warteschlange - auch dann, wenn
+    -- eine globale ChatThrottleLib vorhanden ist. An ChatThrottleLib uebergibt
+    -- erst PumpBulk, und zwar Paket fuer Paket.
+    --
+    -- Bis 0.9.90 wurde hier direkt uebergeben, sofern kein Kampf lief. Damit
+    -- war die Einstellung "Bulk-Sync im Kampf pausieren" nur halb wirksam: Ein
+    -- Paket, das eine Sekunde vor dem Pull uebergeben wurde, lag nicht mehr in
+    -- der eigenen Warteschlange und liess sich nicht mehr anhalten. Die
+    -- Werkstatt reicht ihre gesamte Warteschlange in EINEM Durchlauf weiter
+    -- (PumpSyncQueue) - ein vollstaendiger Rezeptkatalog war damit komplett
+    -- ausser Reichweite, sobald der Kampf begann. Pausiert wurde nur noch,
+    -- was zufaellig waehrend des Kampfes eingereiht wurde.
+    --
+    -- Die eigene Warteschlange bleibt deshalb massgeblich. ChatThrottleLib
+    -- behaelt ihre Aufgabe - sie kennt den Verkehr anderer Addons und teilt
+    -- den Kanal fair auf -, bekommt aber immer nur das naechste Paket.
     self.bulkQueue[#self.bulkQueue + 1] = {
         payload = payload,
         distribution = distribution,
@@ -452,6 +440,39 @@ function GC.Sync:SendBulk(payload, distribution, target, callback, untracked)
     bulkFrame:Show()
     self:PumpBulk(idle)
     return true
+end
+
+-- Ein einzelnes Paket auf den Weg bringen. Liegt eine globale ChatThrottleLib
+-- vor, geht es ueber sie: Sie kennt auch den Verkehr anderer Addons und teilt
+-- den Kanal fair auf. Den Erfolg meldet sie erst spaeter ueber ihren Rueckruf -
+-- fuer die Warteschlange ist das Paket mit der Uebergabe erledigt, der
+-- Abschluss kommt dann von dort.
+--
+-- Rueckgabe: ob es raus ist, und ob der Abschluss noch aussteht.
+local function DispatchBulk(self, entry)
+    local throttle = _G and _G.ChatThrottleLib
+    if throttle and type(throttle.SendAddonMessage) == "function" then
+        local queueName = GC.Constants.COMM_PREFIX .. ":" .. entry.distribution
+            .. ":" .. (entry.target or "")
+        local ok = pcall(
+            throttle.SendAddonMessage,
+            throttle,
+            "BULK",
+            GC.Constants.COMM_PREFIX,
+            entry.payload,
+            entry.distribution,
+            entry.target,
+            queueName,
+            function(_, sent)
+                FinishBulkEntry(entry, sent ~= false)
+            end,
+            nil
+        )
+        if ok then
+            return true, true
+        end
+    end
+    return self:Send(entry.payload, entry.distribution, entry.target) == true, false
 end
 
 function GC.Sync:PumpBulk(elapsed)
@@ -490,11 +511,17 @@ function GC.Sync:PumpBulk(elapsed)
             return
         end
 
-        local sent = self:Send(entry.payload, entry.distribution, entry.target)
+        -- Das eigene Sendebudget gilt jetzt auch fuer den Weg ueber
+        -- ChatThrottleLib. Beide drosseln damit, und es gilt die jeweils
+        -- vorsichtigere Schranke - das ist gewollt: Der Kanal gehoert nicht
+        -- diesem Addon allein.
+        local sent, deferred = DispatchBulk(self, entry)
         if sent then
             self.bulkAllowance = self.bulkAllowance - cost
             table.remove(self.bulkQueue, 1)
-            FinishBulkEntry(entry, true)
+            if not deferred then
+                FinishBulkEntry(entry, true)
+            end
         else
             entry.retries = entry.retries + 1
             if entry.retries >= BULK_MAX_RETRIES then
@@ -1874,6 +1901,14 @@ function GC.Sync:DistributeSummary(summary, distribution, target)
     return #messages
 end
 
+-- "RQ|7" oder "RQ|7|<kennung>" - beides ist eine Anfrage nach Auswertungen.
+-- Bewusst kein Musterausdruck: "^RQ|7" wuerde auch auf "RQ|77" passen und
+-- damit eine Nachricht einer fremden Schemaversion durchlassen.
+local function IsSummaryRequest(message)
+    local head = "RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)
+    return message == head or message:sub(1, #head + 1) == (head .. "|")
+end
+
 function GC.Sync:OnMessage(prefix, message, distribution, sender)
     if prefix ~= GC.Constants.COMM_PREFIX then
         return
@@ -1945,7 +1980,11 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
             GC.GearAudit:ReceiveEquipmentChunk(message, sender)
         end
         return
-    elseif message == ("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
+    elseif distribution == "GUILD" and IsSummaryRequest(message) then
+        -- Seit 0.9.91 darf an die Anfrage eine Sitzungskennung angehaengt sein
+        -- ("RQ|7|<kennung>"), damit eine Reparatur gezielt nach EINEM Abend
+        -- fragen kann statt nach allem. Die nackte Form bleibt gueltig - sie
+        -- kommt von aelteren Clients und vom Knopf "Auswertung anfordern".
         if GC.RaidMonitor then
             GC.RaidMonitor:OnMessage(message, sender, distribution)
         end

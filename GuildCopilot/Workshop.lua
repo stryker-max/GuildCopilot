@@ -181,6 +181,28 @@ local function FingerprintHash(value)
     return tostring(hash)
 end
 
+-- Welcher von zwei Rezeptstaenden gewinnt? Der neuere - und bei gleicher
+-- Sekunde der mit dem groesseren Fingerabdruck.
+--
+-- Dieselbe Regel und derselbe Grund wie bei der Gildenbank: updatedAt kennt
+-- nur ganze Sekunden (GetServerTime), zwei Staende derselben Sekunde sind also
+-- alltaeglich. Bis 0.9.90 hatten die beiden Seiten hier verschiedene Regeln -
+-- das Manifest forderte bei JEDER Abweichung an (auch bei einem aelteren
+-- Stand), waehrend die Uebernahme nur strikt aeltere verwarf. Ergebnis: Ein
+-- Stand gleicher Sekunde wurde angefordert und ueberschrieb dann den
+-- vorhandenen, und ein aelterer wurde angefordert und verworfen - immer
+-- wieder, bei jedem Manifest.
+--
+-- Entscheidend ist wie dort, dass BEIDE Seiten dieselbe Funktion benutzen.
+local function ProfessionWins(updatedAt, fingerprintHash, knownAt, knownHash)
+    updatedAt = tonumber(updatedAt) or 0
+    knownAt = tonumber(knownAt) or 0
+    if updatedAt ~= knownAt then
+        return updatedAt > knownAt
+    end
+    return tostring(fingerprintHash or "") > tostring(knownHash or "")
+end
+
 local function RecipeCount(profession)
     local count = 0
     for _ in pairs(profession and profession.recipes or {}) do
@@ -462,11 +484,15 @@ function GC.Workshop:ClaimRecipes(info)
     -- einer vollen Schluesselliste ("K") samt der Rezepte, die seitdem
     -- dazugelernt wurden.
     --
-    -- Gleichstand zaehlt als "schon da": Derselbe Stand zweimal aendert
-    -- nichts, und die Ordnung bleibt damit eindeutig.
+    -- Bei gleicher Sekunde entscheidet der Fingerabdruck - nach derselben
+    -- Regel, nach der das Manifest ueberhaupt erst angefordert hat. Ein
+    -- blosser Vergleich der Zeitstempel liess hier jeden Stand derselben
+    -- Sekunde durch: Zwei verschiedene Rezeptstaende mit demselben Zeitstempel
+    -- ueberschrieben einander, und wer zuletzt eintraf, gewann.
     local incomingAt = tonumber(info.updatedAt) or GC.Util.Now()
     local known = crafter.professions[info.professionKey]
-    if known and (tonumber(known.updatedAt) or 0) > incomingAt then
+    if known and not ProfessionWins(incomingAt, info.fingerprintHash,
+        known.updatedAt, known.fingerprintHash) then
         workshop.crafters[crafterKey] = crafter
         return crafter
     end
@@ -1613,12 +1639,13 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             local updatedAt = tonumber(updatedText)
             local recipeCount = tonumber(countText)
             local known = crafter and crafter.professions and crafter.professions[professionKey]
+            -- Dieselbe gemeinsame Regel wie oben: angefordert wird nur, was
+            -- die Uebernahme spaeter auch annimmt.
             if professionKey and #professionKey <= 80 and updatedAt and recipeCount
                 and #fingerprintHash <= 20
                 and (not known
-                    or tonumber(known.updatedAt) ~= updatedAt
-                    or RecipeCount(known) ~= recipeCount
-                    or tostring(known.fingerprintHash or "") ~= fingerprintHash) then
+                    or ProfessionWins(updatedAt, fingerprintHash,
+                        known.updatedAt, known.fingerprintHash)) then
                 requested[#requested + 1] = professionKey
             end
         end
@@ -1656,10 +1683,16 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
                 local known = crafters[GC.Util.PlayerKey(crafter)]
                 local knownProfession = known and known.professions
                     and known.professions[professionKey]
+                -- Angefordert wird nur, was die Uebernahme spaeter auch
+                -- annimmt. Vorher stand hier eine reine Ungleichheitspruefung:
+                -- Sie meldete auch nachweislich AELTERE Staende als "fehlt",
+                -- der Absender schickte sie, und die Uebernahme verwarf sie
+                -- genau deshalb wieder - bei jedem Manifest von neuem. Die
+                -- Anzahl faellt als Kriterium weg; sie steckt im
+                -- Fingerabdruck.
                 local stale = not knownProfession
-                    or (tonumber(knownProfession.updatedAt) or 0) ~= updatedAt
-                    or RecipeKeyCount(knownProfession) ~= recipeCount
-                    or tostring(knownProfession.fingerprintHash or "") ~= fingerprint
+                    or ProfessionWins(updatedAt, fingerprint,
+                        knownProfession.updatedAt, knownProfession.fingerprintHash)
                 if stale then
                     wanted[#wanted + 1] = { crafter = crafter, professionKey = professionKey }
                 end

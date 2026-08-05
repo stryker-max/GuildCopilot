@@ -7,6 +7,41 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.91 – Addon
+
+**Behoben**
+
+- **Die Raid-Reparatur konnte verschiedene Abende vermischen.** Sie prüfte
+  überlappende Zeit und halbe Teilnehmerdeckung statt der Sitzungskennung —
+  zwei Gruppen derselben Gilde, die gleichzeitig unterwegs sind und sich ein
+  paar Leute teilen, erfüllen das. Dieselbe Prüfung war zugleich zu eng: Wer
+  den halben Abend weg war, kennt zu wenige Teilnehmer für die Hälfte und bekam
+  ausgerechnet dann keine Reparatur, wofür sie gedacht ist. Jetzt entscheidet
+  die Kennung des Abends, auf die sich alle Mitschreiber ohnehin einigen.
+- **Bei mehreren gleichzeitigen Reparaturen bekam nur der Erste seine Daten.**
+  Die Antwortdrossel galt global statt je Anfragendem — fliegen nach einem
+  Serverruckler drei Leute gleichzeitig raus, ging der zweite und dritte leer
+  aus. Außerdem fragte eine Reparatur pauschal nach allem, und jeder antwortete
+  mit bis zu fünf vollständigen Auswertungen. Gefragt wird jetzt nach genau dem
+  einen Abend, und gedrosselt wird je Anfragendem.
+- **Der Werkstatt-Abgleich fand bei gleichem Zeitstempel nicht zusammen.**
+  Dieselbe Sache, die für die Gildenbank schon behoben war: Das Manifest
+  forderte bei jeder Abweichung an — auch bei nachweislich älteren Ständen —,
+  während die Übernahme nur strikt ältere verwarf. Zwei verschiedene
+  Rezeptstände derselben Sekunde überschrieben einander, und wer zuletzt
+  eintraf, gewann. Beide Seiten benutzen jetzt dieselbe Regel: der neuere
+  gewinnt, bei gleicher Sekunde der mit dem größeren Fingerabdruck.
+- **Die Kampfpause griff nicht für schon übergebene Pakete.** Wer eine globale
+  ChatThrottleLib geladen hat, bekam sein Paket bisher sofort übergeben,
+  solange kein Kampf lief. Die Werkstatt reicht ihre gesamte Warteschlange in
+  einem Durchlauf weiter — ein vollständiger Rezeptkatalog war damit außer
+  Reichweite, sobald danach der Kampf begann. Die eigene Warteschlange bleibt
+  jetzt maßgeblich; an ChatThrottleLib geht immer nur das nächste Paket.
+- **Gildenbank: Der übertragene Fingerabdruck wird gegengeprüft.** Er entschied
+  den Konflikt, gespeichert wurde danach der selbst nachgerechnete — ohne
+  Vergleich. Passt er nicht zu den angekommenen Beständen, wird der Stand jetzt
+  verworfen, statt unter einer Angabe zu gewinnen, die die Daten nicht tragen.
+
 ## 0.9.90 – Addon
 
 **Behoben**

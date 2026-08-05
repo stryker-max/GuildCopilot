@@ -298,6 +298,48 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.91 – Nachprüfung: fünf Befunde, zwei davon aus der eigenen Vorwoche
+
+Eine zweite Durchsicht gegen `v0.9.89`. Von fünfzehn Befunden der ersten Runde waren dreizehn geschlossen; geblieben sind fünf neue. **Alle fünf wurden am Code nachgeprüft, alle trafen zu** – und zwei davon stecken in Code, der in derselben Sitzung entstanden ist. Das ist der interessantere Teil, also steht er zuerst.
+
+### Die Reparatur band sich an die falsche Zuordnung
+
+`CanRepairFrom` endete mit `IsSameEvening` – überlappender Zeitraum plus halbe Teilnehmerdeckung. Für die Abendliste ist das richtig: Ein Warcraft-Logs-Report und ein Dateiimport haben gar keine gemeinsame Kennung, dort muss geschätzt werden. Für die **Reparatur** ist es falsch, denn dort werden Zahlen verrechnet, und die Kennung liegt vor – seit 0.9.89 einigen sich alle Mitschreiber eines Abends über den Herzschlag auf dieselbe.
+
+Der Befund zeigte es am nachgestellten Fall: Eine lückenhafte Karazhan-Sitzung ließ sich aus einer gleichzeitig laufenden Gruul-Sitzung „reparieren", weil beide Gruppen sich ein paar Leute teilten.
+
+Beim Nachprüfen kam heraus, dass dieselbe Zeile auch in die **andere** Richtung falsch lag, und das wiegt schwerer: Die Deckungsschwelle von 50 % scheitert ausgerechnet dann, wenn der eigene Mitschnitt sehr lückenhaft ist. Wer den halben Abend weg war, kennt zu wenige Teilnehmer, um auf die Hälfte zu kommen – und bekam damit in genau dem Fall keine Reparatur, für den sie gebaut wurde. Kennungsgleichheit ersetzt beides und ist dabei einfacher als das, was sie ablöst.
+
+### Eine Anfrage für alle, eine Drossel für alle
+
+`RequestRepair` bekam die betroffene Auswertung übergeben und ignorierte sie: Hinaus ging ein pauschales `RQ|7`, und darauf antwortet jeder mit bis zu fünf vollständigen Auswertungen. Für eine einzelne Lücke ein Vielfaches an Funkverkehr.
+
+Schlimmer war die Drossel auf der Antwortseite: **ein** Zeitstempel für alle Anfragenden. Fliegen nach einem Serverruckler drei Leute gleichzeitig raus – der Regelfall, für den die Reparatur existiert –, stellt jeder seine Anfrage, und nur der erste bekam eine Antwort. Die anderen liefen 30 Sekunden ins Leere.
+
+Die Anfrage nennt jetzt die Kennung des Abends, die Antwort schickt nur diesen einen, und gedrosselt wird je Anfragendem. Der Router im Sync musste dafür mitziehen: Er verglich die Nachricht auf **Gleichheit** mit `"RQ|7"` und hätte die längere Form gar nicht durchgelassen. Ein Musterausdruck (`^RQ|7`) wäre die naheliegende Lösung gewesen und hätte auch auf `RQ|77` gepasst – also eine fremde Schemaversion durchgelassen; die Prüfung vergleicht deshalb ausdrücklich Kopf und Trennzeichen.
+
+**Ein Test hat dabei jahrelang das Falsche bewiesen.** In `smoke.lua` stand: „Einem unberechtigten Anfrager wurde die Auswertung geschickt". Er war grün – aber nicht, weil ein Recht geprüft wurde. Geblockt hat immer nur die globale Drossel, weil die vorige Anfrage Sekundenbruchteile vorher lief. Der Test hat also die Wirkung eines Fehlers als Sicherheitsmerkmal festgeschrieben. Er prüft jetzt, was tatsächlich gilt: dieselbe Person zweimal hintereinander wird gedrosselt, eine zweite Person nicht.
+
+### Dieselbe Bugklasse, ein Modul weiter
+
+In 0.9.88 wurde die Gildenbank-Konvergenz repariert: Das Manifest forderte bei gleicher Sekunde und abweichendem Fingerabdruck an, und der Empfang verwarf genau das wieder – eine Endlosschleife, gelöst durch **eine gemeinsame Gewinnregel** für beide Seiten.
+
+Der Werkstatt-Abgleich hat exakt dieselbe Struktur, und dort wurde die Regel nicht nachgezogen. `ClaimRecipes` verwarf nur strikt ältere Stände (`>`), während der Kommentar direkt darüber „Gleichstand zählt als schon da" behauptete – Code und Kommentar widersprachen einander, und der Code gewann. Zwei verschiedene Rezeptstände derselben Sekunde überschrieben einander, wer zuletzt eintraf, hatte recht. Auf der Manifestseite stand eine reine Ungleichheitsprüfung, die auch nachweislich ältere Stände als „fehlt" meldete, an zwei Stellen.
+
+Das ist die Lehre aus diesem Befund: Eine Klasse von Fehlern ist erst behoben, wenn alle Stellen erfasst sind, die sie teilen. `ProfessionWins` steht jetzt neben `WinsOverKnown` und wird von allen drei Stellen benutzt. Die Rezeptanzahl fällt als Kriterium weg – sie steckt im Fingerabdruck und erzeugte nur zusätzliche Fehlanforderungen.
+
+### Die Kampfpause war eine halbe
+
+In 0.9.88 wurde die Übergabe an ChatThrottleLib von der Kampfprüfung abhängig gemacht. Das war richtig und trotzdem nicht genug: Es verhindert nur, dass **während** des Kampfes übergeben wird. Ein Paket, das eine Sekunde vor dem Pull übergeben wurde, liegt nicht mehr in der eigenen Warteschlange und lässt sich nicht mehr anhalten.
+
+Und genau so arbeitet die Werkstatt: `PumpSyncQueue` reicht ihre **gesamte** Warteschlange in einem Durchlauf weiter. Ein vollständiger Rezeptkatalog war damit außer Reichweite, sobald danach der Kampf begann. Pausiert wurde nur, was zufällig währenddessen eingereiht wurde.
+
+Die Konsequenz ist eine Umkehr der Zuständigkeit: Die eigene Warteschlange ist jetzt die maßgebliche, und ChatThrottleLib bekommt in `PumpBulk` immer nur das nächste Paket. Sie behält damit ihre eigentliche Aufgabe – sie kennt den Verkehr anderer Addons und teilt den Kanal fair auf –, ohne die Kontrolle über die Reihenfolge zu übernehmen. Nebenwirkung, bewusst in Kauf genommen: Das eigene Sendebudget gilt jetzt auch für diesen Weg. Es drosseln also beide, und es gilt die vorsichtigere Schranke. Der Kanal gehört diesem Addon nicht allein.
+
+### Gewinnen mit einer Angabe, die die Daten nicht tragen
+
+Der letzte Befund ist Protokollhärtung und im normalen Ablauf unauffällig: Bei der Gildenbank entscheidet der **übertragene** Fingerabdruck den Konflikt, gespeichert wurde danach der **nachgerechnete** – ohne die beiden zu vergleichen. Passen sie nicht zusammen, hat sich ein Absender mit einer Angabe durchgesetzt, die seine Daten nicht belegen, und der Tab stand anschließend mit einem anderen Fingerabdruck da als dem, der die Entscheidung gewonnen hatte. Beim nächsten Manifest wurde er prompt wieder angefordert. Stimmen die beiden nicht überein, wird der Stand jetzt verworfen.
+
 ## 0.9.90 – Ein Balken, der nur eine Richtung kennt
 
 **Die Meldung:** „Wenn das Addon Berufe synchronisiert, dann ist der Fortschrittsbalken sehr sprunghaft, zb 80 % → 40 % → 90 % → 10 %, und das sehr schnell, so dass man nie weiß, wie weit der Fortschritt eigentlich ist."

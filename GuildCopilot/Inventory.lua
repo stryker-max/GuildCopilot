@@ -693,16 +693,28 @@ function GC.Inventory:ReceiveSync(fields, sender)
         assembled[partIndex] = incoming.parts[partIndex] or ""
     end
     local counts = DecodeCounts(table.concat(assembled))
+
+    -- Selbst nachrechnen statt dem Absender zu glauben - und das Ergebnis
+    -- gegen seine Angabe halten.
+    --
+    -- Gewonnen hat der Absender oben MIT seinem Fingerabdruck. Passt der nicht
+    -- zu den Bestaenden, die tatsaechlich angekommen sind, dann hat er sich
+    -- mit einer Angabe durchgesetzt, die seine Daten nicht tragen. Frueher
+    -- wurde in dem Fall stillschweigend der nachgerechnete gespeichert: Der
+    -- Tab galt als uebernommen, stand aber mit einem anderen Fingerabdruck da
+    -- als der, der die Entscheidung gewonnen hatte - und wurde beim naechsten
+    -- Manifest gleich wieder angefordert.
+    local recomputed = TabFingerprint(counts)
+    if fingerprint ~= "" and recomputed ~= fingerprint then
+        return
+    end
+
     tabs[tabIndex] = {
         name = incoming.tabName,
         counts = counts,
         updatedAt = updatedAt,
         seenBy = incoming.seenBy ~= "" and incoming.seenBy or GC.Util.PlayerShortName(sender),
-        -- Selbst nachrechnen statt dem Absender zu glauben. Ein Fingerabdruck,
-        -- der nicht zu den empfangenen Bestaenden passt, wuerde ab jetzt im
-        -- eigenen Manifest stehen - und alle anderen forderten den Tab
-        -- dauerhaft neu an, obwohl er laengst da ist.
-        fingerprint = TabFingerprint(counts),
+        fingerprint = recomputed,
     }
     GC:FireCallback("INVENTORY_UPDATED")
 end

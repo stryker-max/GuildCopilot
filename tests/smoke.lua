@@ -1696,17 +1696,44 @@ assert(addon.RaidMonitor:GetSummaries()[1].source == "SYNC:Schurke",
 -- Offiziere außerhalb des Raids fragen an; geantwortet wird per Flüstern,
 -- nicht über den offenen Gildenkanal.
 addon.RaidMonitor:StoreSummary(decoded)
-addon.RaidMonitor.lastAnswerAt = 0
+addon.RaidMonitor.lastAnswerAt = {}
 currentTime = currentTime + 60
 local answerCountBefore = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "RQ|7", "GUILD", "Heiler-Realm")
 assert(#sentAddon > answerCountBefore, "Auf die Auswertungsanfrage wurde nicht geantwortet")
 assert(sentAddon[#sentAddon][3] == "WHISPER", "Die Auswertung ging nicht über den Flüsterkanal")
 assert(sentAddon[#sentAddon][4] == "Heiler-Realm", "Die Auswertung ging an den falschen Empfänger")
-local ignoredRequestBefore = #sentAddon
+-- Dieselbe Anfrage vom selben Charakter gleich noch einmal: Die Drossel hält
+-- sie zurück.
+repeatRequestBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "RQ|7", "GUILD", "Heiler-Realm")
+assert(#sentAddon == repeatRequestBefore,
+    "Eine sofort wiederholte Anfrage desselben Charakters wurde erneut beantwortet")
+
+-- Ein ANDERER Charakter bekommt aber seine Antwort.
+--
+-- Bis 0.9.90 war die Drossel global: ein einziger Zeitstempel für alle. Fliegen
+-- nach einem Serverruckler drei Leute gleichzeitig raus, stellt jeder seine
+-- Reparaturanfrage - und nur der erste bekam etwas. Ausgerechnet der Fall, für
+-- den die Reparatur gebaut ist, war der, in dem sie ausfiel. Dieser Test hat
+-- das früher als „unberechtigter Anfrager" geprüft und damit das Falsche
+-- festgeschrieben: Geblockt hat nie ein Recht, sondern immer die Drossel.
+otherRequestBefore = #sentAddon
 addon.Sync:OnMessage("GuildCopilot", "RQ|7", "GUILD", "Schurke-Realm")
-assert(#sentAddon == ignoredRequestBefore,
-    "Einem unberechtigten Anfrager wurde die Auswertung geschickt")
+assert(#sentAddon > otherRequestBefore,
+    "Die Anfrage eines zweiten Charakters wurde von der Drossel des ersten verschluckt")
+assert(sentAddon[#sentAddon][4] == "Schurke-Realm",
+    "Die Antwort ging an den falschen Empfänger")
+
+-- Eine gezielte Anfrage nennt den Abend und bekommt auch nur den.
+addon.RaidMonitor.lastAnswerAt = {}
+targetedBefore = #sentAddon
+addon.Sync:OnMessage("GuildCopilot", "RQ|7|gibtesnicht", "GUILD", "Heiler-Realm")
+assert(#sentAddon == targetedBefore,
+    "Auf einen unbekannten Abend wurde trotzdem etwas geschickt")
+addon.RaidMonitor.lastAnswerAt = {}
+addon.Sync:OnMessage("GuildCopilot", "RQ|7|" .. tostring(decoded.id), "GUILD", "Heiler-Realm")
+assert(#sentAddon > targetedBefore, "Die gezielte Anfrage nach einem bekannten Abend blieb unbeantwortet")
 
 -- Die Auswertung erscheint auch in der Oberfläche.
 addon.UI:ShowPage("STATISTICS")
@@ -7052,6 +7079,128 @@ do
     addon.Sync.GetReliablePendingCount = bar_previousReliable
     addon.Sync.GetIncomingPendingCount = bar_previousIncoming
     addon.Workshop.GetPendingWantCount = bar_previousWant
+end
+
+-- === Reparatur bleibt beim eigenen Abend ====================================
+--
+-- Gemeldet aus der zweiten Durchsicht: Eine lückenhafte Karazhan-Sitzung wurde
+-- aus einer gleichzeitig laufenden Gruul-Sitzung "repariert". Zeitüberlappung
+-- und halbe Teilnehmerdeckung reichten aus - zwei Gruppen derselben Gilde, die
+-- sich ein paar Leute teilen, erfüllen das.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    rr_rules = addon.Constants.RAID_RULES_VERSION
+
+    addon.RaidMonitor:StoreSummary({
+        id = "kara-abend", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "LIVE", rulesVersion = rr_rules, complete = false, gaps = 1,
+        pulls = 1, kills = 1, wipes = 0,
+        participants = {
+            { name = "Tester", seconds = 500, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+            { name = "Heiler", seconds = 500, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+        },
+    })
+    -- Anderer Abend, andere Instanz, gleiche Zeit, dieselben zwei Leute.
+    addon.RaidMonitor:StoreSummary({
+        id = "gruul-abend", startedAt = 1000, endedAt = 5000, zone = "Gruuls Unterschlupf",
+        source = "SYNC:Fremd", recordedBy = "Fremd",
+        rulesVersion = rr_rules, complete = true,
+        pulls = 9, kills = 9, wipes = 0,
+        participants = {
+            { name = "Tester", seconds = 4000, deaths = 7, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+            { name = "Heiler", seconds = 4000, deaths = 7, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+        },
+    })
+
+    assert(addon.RaidMonitor:TryRepair() == false,
+        "Ein fremder Raidabend wurde als Reparaturquelle akzeptiert")
+    assert(addon.RaidMonitor:GetSummary("kara-abend", "REPAIR") == nil,
+        "Aus einem anderen Abend ist eine Reparatur entstanden")
+
+    -- Derselbe Abend repariert dagegen auch dann, wenn vom eigenen Mitschnitt
+    -- kaum etwas da ist. Genau dann wird sie gebraucht - und genau dann
+    -- scheiterte die alte Teilnehmerdeckung von 50 %.
+    addon.RaidMonitor:StoreSummary({
+        id = "kara-abend", startedAt = 1000, endedAt = 5000, zone = "Karazhan",
+        source = "SYNC:Dabei", recordedBy = "Dabei",
+        rulesVersion = rr_rules, complete = true,
+        pulls = 6, kills = 5, wipes = 1,
+        participants = {
+            { name = "Tester", seconds = 4800, deaths = 2, resurrects = 0,
+              interrupts = 3, dispels = 0, consumables = {} },
+            { name = "Heiler", seconds = 4800, deaths = 1, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+            { name = "Einer", seconds = 4800, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+            { name = "Zwei", seconds = 4800, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+            { name = "Drei", seconds = 4800, deaths = 0, resurrects = 0,
+              interrupts = 0, dispels = 0, consumables = {} },
+        },
+    })
+    assert(addon.RaidMonitor:TryRepair() == true,
+        "Der eigene Abend wurde nicht repariert")
+    rr_fixed = addon.RaidMonitor:GetSummary("kara-abend", "REPAIR")
+    assert(rr_fixed ~= nil, "Es ist keine ergänzte Fassung entstanden")
+    assert(rr_fixed.pulls == 6, "Die Versuche wurden nicht aus dem eigenen Abend ergänzt")
+    assert(rr_fixed.pulls ~= 9, "Die Versuche des fremden Abends sind eingeflossen")
+    for _, rr_p in ipairs(rr_fixed.participants) do
+        assert(rr_p.deaths ~= 7,
+            "Ein Zähler aus dem fremden Abend ist in die Reparatur gelangt")
+    end
+
+    addon.DB:GetGuild().raidSessions = {}
+end
+
+-- === Werkstatt: Gleichstand überschreibt nicht ==============================
+--
+-- Dieselbe Bugklasse wie bei der Gildenbank, hier zunächst übersehen: Der
+-- Kommentar sagte "Gleichstand zählt als schon da", der Code verwarf aber nur
+-- strikt ältere Stände.
+do
+    ws_stamp = addon.Util.Now()
+    addon.DB:GetGuild().workshop.crafters = {}
+
+    addon.Workshop:ClaimRecipes({
+        crafter = "Gleichstand", professionKey = "schneiderei",
+        professionName = "Schneiderei", recipeKeys = { "I1", "I2", "I3" },
+        updatedAt = ws_stamp, fingerprintHash = "500",
+    })
+    ws_entry = addon.DB:GetGuild().workshop.crafters["gleichstand"]
+    assert(ws_entry ~= nil, "Der Hersteller wurde nicht gespeichert")
+
+    -- Gleiche Sekunde, kleinerer Fingerabdruck: verliert.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Gleichstand", professionKey = "schneiderei",
+        professionName = "Schneiderei", recipeKeys = { "I9" },
+        updatedAt = ws_stamp, fingerprintHash = "100",
+    })
+    ws_count = 0
+    for _ in pairs(ws_entry.professions.schneiderei.recipeKeys) do
+        ws_count = ws_count + 1
+    end
+    assert(ws_count == 3,
+        "Ein Stand gleicher Sekunde hat den vorhandenen überschrieben")
+
+    -- Gleiche Sekunde, größerer Fingerabdruck: gewinnt. Irgendeine feste Regel
+    -- muss es geben, und sie muss auf jedem Client dieselbe sein.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Gleichstand", professionKey = "schneiderei",
+        professionName = "Schneiderei", recipeKeys = { "I1", "I2", "I3", "I4" },
+        updatedAt = ws_stamp, fingerprintHash = "900",
+    })
+    ws_count = 0
+    for _ in pairs(ws_entry.professions.schneiderei.recipeKeys) do
+        ws_count = ws_count + 1
+    end
+    assert(ws_count == 4,
+        "Der Gewinner des Gleichstands wurde nicht übernommen")
+
+    addon.DB:GetGuild().workshop.crafters = {}
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

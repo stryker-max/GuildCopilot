@@ -3,7 +3,9 @@ local _, GC = ...
 GC.RaidMonitor = {
     session = nil,
     incoming = {},
-    lastAnswerAt = 0,
+    -- Je Anfragendem ein Zeitstempel: Eine Anfrage darf die eines anderen
+    -- nicht aus der Drossel draengen.
+    lastAnswerAt = {},
     selectedSessionID = nil,
     combatLogTracking = false,
 }
@@ -904,7 +906,28 @@ function GC.RaidMonitor:CanRepairFrom(target, candidate)
     if (tonumber(candidate.rulesVersion) or 1) ~= (tonumber(target.rulesVersion) or 1) then
         return false
     end
-    return self:IsSameEvening(target, candidate)
+    -- Verrechnet werden Zahlen, und das darf nur innerhalb DESSELBEN Abends
+    -- geschehen. Beleg dafuer ist die Kennung: Seit 0.9.89 einigen sich alle
+    -- Mitschreiber eines Abends ueber den Herzschlag auf dieselbe.
+    --
+    -- Hier stand bis 0.9.90 IsSameEvening, und das war in beide Richtungen
+    -- falsch:
+    --
+    --   zu weit - geprueft werden ueberlappende Zeit und eine halbe
+    --   Teilnehmerdeckung. Zwei Gruppen derselben Gilde, die gleichzeitig
+    --   unterwegs sind und sich ein paar Leute teilen, erfuellen das. Im
+    --   Test wurde ein lueckenhafter Karazhan-Abend aus einer parallel
+    --   laufenden Gruul-Sitzung "repariert".
+    --
+    --   zu eng - die Deckungsschwelle scheitert ausgerechnet dann, wenn der
+    --   eigene Mitschnitt sehr lueckenhaft ist. Wer den halben Abend weg war,
+    --   kennt zu wenige Teilnehmer, um auf die Haelfte zu kommen - und bekam
+    --   damit gerade in dem Fall keine Reparatur, fuer den sie gedacht ist.
+    --
+    -- Fuer die Zuordnung in der Abendliste bleibt IsSameEvening richtig: Ein
+    -- Warcraft-Logs-Report und ein Dateiimport haben gar keine gemeinsame
+    -- Kennung. Verrechnet wird aus denen aber ohnehin nichts.
+    return tostring(target.id or "") == tostring(candidate.id or "")
 end
 
 local function MergeHigher(into, from, key)
@@ -1024,11 +1047,16 @@ end
 -- Fordert die Auswertungen der anderen an, weil der eigene Mitschnitt Lücken
 -- hat. Gestreut, damit nicht alle gleichzeitig antworten.
 function GC.RaidMonitor:RequestRepair(summary)
-    if not GC.Sync then
+    if not GC.Sync or not summary then
         return false
     end
     self.repairWantedUntil = GC.Util.Now() + 600
-    if not GC.Sync:Send("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION), "GUILD") then
+    -- Gefragt wird nach GENAU diesem Abend. Bis 0.9.90 ging hier eine nackte
+    -- Anfrage raus, und jeder antwortete mit bis zu fünf vollständigen
+    -- Auswertungen - für eine einzige Lücke ein Vielfaches an Funkverkehr,
+    -- und die Antworten drängten sich gegenseitig aus der Drossel.
+    if not GC.Sync:Send("RQ|" .. tostring(GC.Constants.SCHEMA_VERSION)
+        .. "|" .. tostring(summary.id or ""), "GUILD") then
         return false
     end
     GC:Print("Dein Mitschnitt dieses Abends hat Lücken – die Auswertungen der "
@@ -1809,7 +1837,9 @@ function GC.RaidMonitor:OnMessage(message, sender, distribution)
         end
         return false
     elseif fields[1] == "RQ" then
-        return self:AnswerSummaryRequest(sender)
+        -- Feld 3 ist optional: Steht dort eine Sitzungskennung, will der
+        -- Anfragende genau diesen Abend reparieren und bekommt auch nur den.
+        return self:AnswerSummaryRequest(sender, fields[3] ~= "" and fields[3] or nil)
     end
     return false
 end
@@ -1832,14 +1862,20 @@ function GC.RaidMonitor:RequestSummaries()
     return true, "Auswertung angefragt. Berechtigte Mitglieder antworten gleich."
 end
 
-function GC.RaidMonitor:AnswerSummaryRequest(requester)
+function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
     -- Beantwortet wird mit bis zu fünf Abenden, Bossabende zuerst - nur die
     -- allerneueste Zusammenfassung zu schicken war sinnlos: Die hatte der
     -- Anfragende fast immer selbst, die Speicherung lehnte ab, und der Knopf
     -- wirkte völlig wirkungslos.
+    --
+    -- Nennt die Anfrage dagegen einen bestimmten Abend, geht auch nur der
+    -- raus. Das ist der Fall der Reparatur, und dort ist alles andere
+    -- unnötiger Funkverkehr.
     local candidates = {}
     for _, summary in ipairs(self:GetSummaries()) do
-        candidates[#candidates + 1] = summary
+        if sessionID == nil or tostring(summary.id or "") == tostring(sessionID) then
+            candidates[#candidates + 1] = summary
+        end
     end
     table.sort(candidates, function(left, right)
         local leftBoss = (tonumber(left.pulls) or 0) > 0 and 1 or 0
@@ -1852,11 +1888,25 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester)
     if #candidates == 0 then
         return false
     end
+    -- Gedrosselt wird je Anfragendem, nicht global.
+    --
+    -- Vorher stand hier ein einziger Zeitstempel für alle. Fliegen nach einem
+    -- Serverruckler drei Leute gleichzeitig raus, stellt jeder von ihnen seine
+    -- Reparaturanfrage - und nur der erste bekam eine Antwort, die beiden
+    -- anderen liefen 30 Sekunden lang ins Leere. Ausgerechnet der Fall, für
+    -- den die Reparatur gebaut ist, war damit der, in dem sie ausfiel.
     local now = GC.Util.Now()
-    if (now - (self.lastAnswerAt or 0)) < MIN_ANSWER_INTERVAL then
+    local requesterKey = GC.Util.PlayerKey(requester or "")
+    self.lastAnswerAt = type(self.lastAnswerAt) == "table" and self.lastAnswerAt or {}
+    for key, at in pairs(self.lastAnswerAt) do
+        if (now - (tonumber(at) or 0)) > (MIN_ANSWER_INTERVAL * 10) then
+            self.lastAnswerAt[key] = nil
+        end
+    end
+    if (now - (tonumber(self.lastAnswerAt[requesterKey]) or 0)) < MIN_ANSWER_INTERVAL then
         return false
     end
-    self.lastAnswerAt = now
+    self.lastAnswerAt[requesterKey] = now
 
     for index = 1, math.min(5, #candidates) do
         local summary = candidates[index]
