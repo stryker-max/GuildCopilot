@@ -298,6 +298,24 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.92 – Die Kampfpause, dritter und letzter Anlauf
+
+Derselbe Punkt zum dritten Mal, und diesmal stimmt auch die Beschreibung. Das ist die eigentliche Geschichte dieses Eintrags: Zweimal hintereinander wurde eine Korrektur als vollständig ausgegeben, die es nicht war.
+
+**0.9.88** hat die Übergabe an ChatThrottleLib von der Kampfprüfung abhängig gemacht. Richtig, aber es verhindert nur, dass *während* des Kampfes übergeben wird.
+
+**0.9.91** hat die Übergabe von `SendBulk` nach `PumpBulk` verlagert, damit die eigene Warteschlange maßgeblich bleibt. Im Änderungseintrag stand daraufhin: „an ChatThrottleLib geht immer nur das nächste Paket". Das beschrieb die Absicht, nicht den Code. `PumpBulk` hat eine `while`-Schleife, und die lief weiter, solange das Sendebudget reichte — rund vier Kilobyte, also etwa achtzehn Pakete auf einen Schlag. Die Nachprüfung hat es mit 30 Paketen ausgemessen: 18 sofort bei ChatThrottleLib, 12 in der eigenen Warteschlange. Anhalten lässt sich nur das Zweite.
+
+Der Fortschritt gegenüber 0.9.88 war real — vorher konnte ein vollständiger Rezeptkatalog übergeben werden, jetzt waren es höchstens vier Kilobyte. Aber „begrenzt" ist nicht „pausiert", und die Formulierung im Änderungseintrag hat einen Rest als erledigt ausgegeben.
+
+**Jetzt** liegt bei ChatThrottleLib höchstens ein Paket. `bulkInFlight` hält fest, welches; die Schleife bricht nach einer erfolgreichen Übergabe ab, und freigegeben wird das nächste erst vom Rückruf des vorigen. Weil der Weg von dort wieder durch `PumpBulk` führt, kommt er an der Kampfprüfung vorbei — beginnt der Kampf, ist höchstens noch dieses eine Paket unterwegs. Weniger geht nicht, ohne eine bereits übergebene Nachricht zurückzuziehen, und das kann ChatThrottleLib nicht.
+
+**Warum das nichts kostet.** Der naheliegende Einwand gegen „eines nach dem anderen" ist Durchsatz. Hier ist keiner zu erwarten: Getaktet wird ohnehin auf 800 Byte pro Sekunde, bei rund 270 Byte je Paket also gut drei Pakete pro Sekunde. Die Serialisierung fügt je Paket ein Einzelbild hinzu — bei 60 Bildern je Sekunde etwa 16 Millisekunden gegen 300 Millisekunden Wartezeit aus der Drosselung. Der Engpass ist die Rate, nicht die Reihenfolge.
+
+**Was dabei neu entstehen konnte.** Wenn immer nur ein Paket unterwegs ist, hält ein einziger ausbleibender Rückruf ab sofort den *gesamten* Abgleich an — vorher wäre nur dieses eine Paket hängen geblieben. Der Rückruf kommt aus einer fremden Bibliothek, auf deren Zuverlässigkeit dieses Addon sich nicht verlassen sollte. `BULK_IN_FLIGHT_TIMEOUT` gibt ihm 15 Sekunden; danach gilt das Paket als verloren und die Warteschlange läuft weiter. Eine Härtung, die es ohne diese Änderung nicht gebraucht hätte.
+
+Der Regressionstest baut eine ChatThrottleLib nach und misst genau das nach, was die Durchsicht gemessen hat: 30 Pakete, davon genau eines übergeben; ohne Rückruf bewegt sich nichts; der Rückruf gibt genau eines frei; im Kampf gibt auch ein eintreffender Rückruf nichts mehr frei; nach dem Kampf läuft es weiter; und ein ausbleibender Rückruf blockiert nicht dauerhaft.
+
 ## 0.9.91 – Nachprüfung: fünf Befunde, zwei davon aus der eigenen Vorwoche
 
 Eine zweite Durchsicht gegen `v0.9.89`. Von fünfzehn Befunden der ersten Runde waren dreizehn geschlossen; geblieben sind fünf neue. **Alle fünf wurden am Code nachgeprüft, alle trafen zu** – und zwei davon stecken in Code, der in derselben Sitzung entstanden ist. Das ist der interessantere Teil, also steht er zuerst.

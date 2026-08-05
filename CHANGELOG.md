@@ -7,6 +7,25 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.92 – Addon
+
+**Behoben**
+
+- **„Bulk-Sync im Kampf pausieren" hält jetzt wirklich alles an.** Die Korrektur
+  aus 0.9.91 war noch unvollständig: Die Warteschlange gab so viele Pakete an
+  ChatThrottleLib ab, wie das Sendebudget hergab — bei 30 Paketen gingen 18
+  sofort raus und nur 12 blieben anhaltbar. Übergeben wird jetzt genau **ein**
+  Paket; erst dessen Rückmeldung gibt das nächste frei, und der Weg dorthin
+  führt wieder durch die Kampfprüfung. Beginnt der Kampf, ist damit höchstens
+  noch ein einzelnes Paket unterwegs.
+
+  Auf die Dauer des Abgleichs wirkt sich das nicht aus: Getaktet wird ohnehin
+  auf 800 Byte je Sekunde, und daran ändert die Reihenfolge nichts.
+
+  Bleibt eine Rückmeldung ganz aus, gilt das Paket nach 15 Sekunden als
+  verloren und die Warteschlange läuft weiter — sonst hielte ein einziger
+  ausbleibender Rückruf ab jetzt den gesamten Abgleich an.
+
 ## 0.9.91 – Addon
 
 **Behoben**

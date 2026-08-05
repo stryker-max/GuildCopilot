@@ -7203,4 +7203,81 @@ do
     addon.DB:GetGuild().workshop.crafters = {}
 end
 
+-- === Bei ChatThrottleLib liegt immer nur ein Paket ==========================
+--
+-- Gemeldet aus der dritten Durchsicht: Mit 30 Paketen gingen 18 sofort an
+-- ChatThrottleLib und nur 12 blieben in der eigenen Warteschlange. Die
+-- Schleife lief weiter, solange das Burst-Budget reichte - beginnt danach der
+-- Kampf, senden die 18 trotzdem weiter, denn anhalten lässt sich nur, was
+-- noch hier liegt.
+do
+    ctl_payloads = {}
+    ctl_callbacks = {}
+    ChatThrottleLib = {
+        SendAddonMessage = function(_, _, _, payload, _, _, _, callback)
+            ctl_payloads[#ctl_payloads + 1] = payload
+            ctl_callbacks[#ctl_callbacks + 1] = callback
+        end,
+    }
+
+    inCombat = false
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+    addon.Sync.bulkCooldown = 0
+
+    for ctl_index = 1, 30 do
+        addon.Sync:SendBulk("WKCTL|" .. ctl_index, "GUILD")
+    end
+
+    assert(#ctl_payloads == 1,
+        "Es liegt mehr als ein Paket bei ChatThrottleLib: " .. #ctl_payloads)
+    assert(#addon.Sync.bulkQueue == 29,
+        "Die eigene Warteschlange hat Pakete abgegeben: " .. #addon.Sync.bulkQueue)
+
+    -- Ohne Rückruf geht nichts weiter, auch nach mehreren Durchläufen nicht.
+    addon.Sync:PumpBulk(5)
+    addon.Sync:PumpBulk(5)
+    assert(#ctl_payloads == 1,
+        "Ohne Rückruf wurde ein weiteres Paket übergeben")
+
+    -- Der Rückruf gibt genau eines frei.
+    ctl_callbacks[1](nil, true)
+    addon.Sync:PumpBulk(5)
+    assert(#ctl_payloads == 2, "Der Rückruf hat das nächste Paket nicht freigegeben")
+    assert(#addon.Sync.bulkQueue == 28, "Es wurde mehr als ein Paket nachgeschoben")
+
+    -- Und jetzt der eigentliche Punkt: Beginnt der Kampf, während eines
+    -- unterwegs ist, kommt nichts mehr dazu - selbst wenn der Rückruf eintrifft.
+    inCombat = true
+    ctl_callbacks[2](nil, true)
+    addon.Sync:PumpBulk(5)
+    addon.Sync:PumpBulk(5)
+    assert(#ctl_payloads == 2,
+        "Im Kampf wurde weiter an ChatThrottleLib übergeben: " .. #ctl_payloads)
+    assert(#addon.Sync.bulkQueue == 28,
+        "Die Warteschlange wurde im Kampf angetastet")
+
+    -- Nach dem Kampf läuft es weiter.
+    inCombat = false
+    addon.Sync:PumpBulk(5)
+    assert(#ctl_payloads == 3, "Nach dem Kampf lief die Warteschlange nicht weiter")
+
+    -- Bleibt ein Rückruf ganz aus, darf die Warteschlange nicht dauerhaft
+    -- stehen: Nach der Frist gilt das Paket als verloren und es geht weiter.
+    ctl_stuckAt = addon.Sync.bulkInFlightAt
+    assert(ctl_stuckAt ~= nil, "Das übergebene Paket wurde nicht als unterwegs vermerkt")
+    addon.Sync.bulkInFlightAt = ctl_stuckAt - 3600
+    addon.Sync:PumpBulk(5)
+    assert(#ctl_payloads == 4,
+        "Ein ausgebliebener Rückruf hält die Warteschlange dauerhaft an")
+
+    ChatThrottleLib = nil
+    addon.Sync.bulkQueue = {}
+    addon.Sync.bulkInFlight = nil
+    addon.Sync.bulkInFlightAt = nil
+    addon.Sync.bulkAllowance = nil
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

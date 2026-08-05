@@ -47,6 +47,11 @@ local BULK_MAX_RETRIES = 8
 -- wachsenden zeitlichen Abstand, statt im selben Frame zu verbrennen.
 local BULK_RETRY_BACKOFF = 0.75
 local BULK_MAX_RETRY_DELAY = 4
+-- Wie lange auf den Rueckruf von ChatThrottleLib gewartet wird, bevor das
+-- uebergebene Paket als verloren gilt. Ohne diese Frist haelt ein einziger
+-- ausgebliebener Rueckruf die ganze Warteschlange an - und weil immer nur ein
+-- Paket unterwegs ist, faellt das sofort auf alles zurueck.
+local BULK_IN_FLIGHT_TIMEOUT = 15
 -- Der Rahmen, dessen OnUpdate die Bulk-Warteschlange antreibt. Er steht hier
 -- oben, damit SendBulk und PumpBulk ihn zeigen und verstecken koennen: Ein
 -- verstecktes Frame bekommt kein OnUpdate, eine leere Warteschlange kostet
@@ -464,11 +469,20 @@ local function DispatchBulk(self, entry)
             entry.target,
             queueName,
             function(_, sent)
+                -- Erst dieser Rueckruf gibt das naechste Paket frei. Gesendet
+                -- wird es aber nicht von hier aus, sondern beim naechsten
+                -- OnUpdate des Rahmens - der prueft vorher wieder auf Kampf,
+                -- und ein Rueckruf, den ChatThrottleLib synchron ausloest,
+                -- kann so nicht in PumpBulk zurueckspringen.
+                self.bulkInFlight = nil
+                self.bulkInFlightAt = nil
                 FinishBulkEntry(entry, sent ~= false)
             end,
             nil
         )
         if ok then
+            self.bulkInFlight = entry
+            self.bulkInFlightAt = GC.Util.Now()
             return true, true
         end
     end
@@ -492,6 +506,30 @@ function GC.Sync:PumpBulk(elapsed)
         return
     end
     self.bulkCombatAt = nil
+
+    -- Bei ChatThrottleLib liegt immer hoechstens EIN Paket.
+    --
+    -- Das ist der Punkt, an dem die Kampfpause vollstaendig wird. Bis 0.9.91
+    -- lief die Schleife unten weiter, solange das Burst-Budget reichte - rund
+    -- vier Kilobyte, also gut achtzehn Pakete auf einen Schlag. Die lagen dann
+    -- bei ChatThrottleLib und gingen auch waehrend des Kampfes weiter raus;
+    -- anhalten laesst sich nur, was noch in der eigenen Warteschlange steht.
+    --
+    -- Freigegeben wird das naechste Paket erst vom Rueckruf des vorigen, und
+    -- der Weg dorthin fuehrt wieder durch diese Funktion - also durch die
+    -- Kampfpruefung darueber. Beginnt der Kampf, ist damit hoechstens noch ein
+    -- einziges Paket unterwegs.
+    if self.bulkInFlight then
+        -- Bleibt der Rueckruf aus, darf die Warteschlange nicht dauerhaft
+        -- stehen. Nach dieser Frist gilt das Paket als verloren; gezaehlt hat
+        -- es die Fortschrittsanzeige ohnehin schon ueber ihre eigene Sperre.
+        if (GC.Util.Now() - (tonumber(self.bulkInFlightAt) or 0)) < BULK_IN_FLIGHT_TIMEOUT then
+            return
+        end
+        FinishBulkEntry(self.bulkInFlight, false)
+        self.bulkInFlight = nil
+        self.bulkInFlightAt = nil
+    end
 
     -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten
     -- Wartezeit erneut senden. Ohne diese Pause verbraucht ein Ratenlimit alle
@@ -519,9 +557,13 @@ function GC.Sync:PumpBulk(elapsed)
         if sent then
             self.bulkAllowance = self.bulkAllowance - cost
             table.remove(self.bulkQueue, 1)
-            if not deferred then
-                FinishBulkEntry(entry, true)
+            if deferred then
+                -- Es liegt jetzt eines bei ChatThrottleLib. Schluss fuer
+                -- diesen Durchlauf: Das naechste holt der Rueckruf, und der
+                -- kommt hier oben wieder an der Kampfpruefung vorbei.
+                return
             end
+            FinishBulkEntry(entry, true)
         else
             entry.retries = entry.retries + 1
             if entry.retries >= BULK_MAX_RETRIES then
