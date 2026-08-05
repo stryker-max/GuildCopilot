@@ -48,14 +48,16 @@ local BULK_MAX_RETRIES = 8
 local BULK_RETRY_BACKOFF = 0.75
 local BULK_MAX_RETRY_DELAY = 4
 
--- Liegt ueberhaupt eine benutzbare ChatThrottleLib vor? Die Frage stellt sich
--- an zwei Stellen: vor der Uebergabe und - wichtiger - waehrend auf eine
--- Rueckmeldung gewartet wird. Verschwindet die Bibliothek dazwischen, wartet
--- die Warteschlange sonst auf einen Rueckruf, den niemand mehr ausloest.
+-- Liegt eine benutzbare ChatThrottleLib vor? Die Frage stellt sich nur noch
+-- vor der Uebergabe. Als Grund, ein bereits uebergebenes Paket aufzugeben,
+-- taugt sie ausdruecklich NICHT: Die Bibliothek haelt ihre eigene Referenz
+-- und einen laufenden Frame, das Paket geht also weiter raus, auch wenn die
+-- globale Variable verschwindet.
 local function throttleAvailable()
     local throttle = _G and _G.ChatThrottleLib
     return throttle ~= nil and type(throttle.SendAddonMessage) == "function"
 end
+
 -- Der Rahmen, dessen OnUpdate die Bulk-Warteschlange antreibt. Er steht hier
 -- oben, damit SendBulk und PumpBulk ihn zeigen und verstecken koennen: Ein
 -- verstecktes Frame bekommt kein OnUpdate, eine leere Warteschlange kostet
@@ -569,23 +571,17 @@ function GC.Sync:PumpBulk(elapsed)
         -- Abgleich haengt, meldet die Fortschrittsanzeige ueber ihre eigene
         -- Sperre (PROGRESS_STALL_SECONDS) - das ist die richtige Stelle dafuer,
         -- denn sie sagt es, ohne den Zustand zu verfaelschen.
-        if throttleAvailable() then
-            return
-        end
-
-        -- Die einzige Ausnahme, und sie haengt an einer Tatsache statt an
-        -- einer Uhr: Ist ChatThrottleLib gar nicht mehr da, kann sie auch
-        -- nichts mehr zustellen. Erst dann ist das Paket wirklich verloren,
-        -- und der Platz darf frei werden - sonst stuende die Warteschlange
-        -- fuer den Rest der Sitzung.
-        local lost = self.bulkInFlight
-        self.bulkInFlight = nil
-        self.bulkInFlightAt = nil
-        -- Die Nummer weiterdrehen: Trifft der Rueckruf des aufgegebenen Pakets
-        -- doch noch ein, gehoert er ab jetzt zu keinem laufenden Vorgang mehr
-        -- und darf keinen fremden Vermerk loeschen.
-        self.bulkDispatchToken = (tonumber(self.bulkDispatchToken) or 0) + 1
-        FinishBulkEntry(lost, false)
+        -- 0.9.94 hatte hier noch eine Ausnahme: Ist die globale
+        -- ChatThrottleLib verschwunden, koenne sie nichts mehr zustellen, also
+        -- duerfe der Platz frei werden. Auch das war eine unbelegte Annahme.
+        -- Die Bibliothek haelt ihre eigene Referenz und einen laufenden Frame;
+        -- eine eingereihte Nachricht geht weiter raus und meldet zurueck,
+        -- ganz gleich ob die globale Variable noch existiert. Der Platz wurde
+        -- damit erneut frei, waehrend das Paket noch unterwegs war.
+        --
+        -- Es gibt keinen Zustand, aus dem sich "das Paket kommt nie an"
+        -- ableiten laesst. Also wird gewartet, und zwar ohne Ausnahme.
+        return
     end
 
     -- Hat der Client zuletzt eine Nachricht abgelehnt, erst nach einer echten
@@ -765,11 +761,27 @@ function GC.Sync:GetSyncStatus()
         + math.max(0, tonumber(self.serialPending) or 0)
         + self:GetReliablePendingCount()
 
-    -- Der Sendezaehler ist der einzige Wert, der lecken kann: Bleibt der
-    -- Rueckruf von ChatThrottleLib aus, faellt er nie zurueck. Kommt er zwei
-    -- Minuten lang nicht voran, gilt das Ausstehende als verloren. Empfang und
-    -- bekannte Luecken bleiben unangetastet - sie verfallen von selbst.
-    if outbound > 0 and outbound == status.outbound
+    -- Liegt nachweislich noch ein Paket bei ChatThrottleLib, wartet der
+    -- Zaehler, er steht nicht still.
+    --
+    -- Genau das hat die Sperre unten bis 0.9.94 nicht unterschieden: Sie hat
+    -- nach zwei Minuten ohne Bewegung alles als verloren verbucht - auch die
+    -- Pakete, die noch ordnungsgemaess in der fremden Warteschlange lagen.
+    -- Kamen deren Rueckmeldungen danach an, war der Fehlerzaehler laengst
+    -- hochgesetzt, und der Abgleich blieb bis zum Ausloggen "unvollstaendig",
+    -- obwohl jedes einzelne Paket angekommen war. Das ist derselbe Denkfehler,
+    -- den 0.9.94 in der Warteschlange abgestellt hat - Wartezeit ist kein
+    -- Verlust -, nur eine Ebene hoeher in der Anzeige.
+    local waitingAt = self.bulkInFlight and tonumber(self.bulkInFlightAt) or nil
+    status.waiting = waitingAt ~= nil
+        and (now - waitingAt) > PROGRESS_STALL_SECONDS
+        or false
+
+    -- Der Sendezaehler ist der einzige Wert, der lecken kann. Kommt er zwei
+    -- Minuten lang nicht voran UND liegt nichts mehr bei ChatThrottleLib, gilt
+    -- das Ausstehende als verloren. Empfang und bekannte Luecken bleiben
+    -- unangetastet - sie verfallen von selbst.
+    if outbound > 0 and not self.bulkInFlight and outbound == status.outbound
         and (now - (status.outboundChangedAt or now)) > PROGRESS_STALL_SECONDS then
         self.progressFailed = (tonumber(self.progressFailed) or 0) + outbound
         self.bulkOutstanding = 0

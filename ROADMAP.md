@@ -298,6 +298,24 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.95 – Derselbe Denkfehler, eine Ebene höher
+
+0.9.94 hat in der Warteschlange festgehalten: Wartezeit ist kein Verlust. Die Fortschrittsanzeige wusste davon nichts und machte weiter wie bisher.
+
+**Die Anzeige buchte Wartende als Verluste.** Kam der Sendezähler zwei Minuten nicht voran, räumte `GetSyncStatus` ihn ab und verbuchte alles als fehlgeschlagen. Die Sperre stammt aus einer Zeit, in der ein ausbleibender Rückruf tatsächlich der einzige Grund für einen stehenden Zähler war. Seit 0.9.92 liegt aber immer genau ein Paket bei ChatThrottleLib, und auf einem ausgelasteten Kanal kann das ohne Weiteres länger als zwei Minuten dauern. Der Normalfall unter Last lief damit in eine Sperre, die für den Ausnahmefall gebaut war.
+
+Bemerkenswert ist die Folge, weil sie nicht wieder verschwand: Trafen die Rückmeldungen danach ein, senkten sie zwar `bulkOutstanding`, aber der Fehlerzähler war längst gesetzt. Der Abgleich blieb bis zum Ausloggen „unvollständig", obwohl jedes einzelne Paket angekommen war. Eine falsche Aussage über einen erfolgreichen Vorgang, die sich selbst nicht mehr korrigieren konnte.
+
+Die Sperre setzt jetzt aus, solange `bulkInFlight` gesetzt ist — das ist der Beleg dafür, dass gewartet und nicht gehangen wird. Sie greift weiterhin, wenn der Zähler ohne ein Paket in der Leitung stehen bleibt; das war ihr eigentlicher Zweck und bleibt geprüft.
+
+**Und die Anzeige sagt jetzt, was los ist.** Ein Balken, der sich zehn Minuten nicht bewegt, ist auch dann unbrauchbar, wenn er nicht lügt. Wartet dasselbe Paket länger als die Sperrfrist, steht in der Zeile darunter, dass der Chatkanal ausgelastet ist und es weitergeht, sobald er frei wird. Das ist die Auskunft, die der frühere Watchdog geben wollte — nur ohne den Zustand dafür zu verfälschen.
+
+**Die letzte Ausnahme beim Warten ist entfallen.** 0.9.94 gab den Platz frei, wenn `_G.ChatThrottleLib` verschwunden war, und nannte das „eine Tatsache statt einer Uhr". Das war es nicht. Die Bibliothek hält ihre eigene Referenz und einen laufenden Zeitgeber; eine eingereihte Nachricht geht weiter hinaus und meldet zurück, ganz gleich, ob die globale Variable noch existiert. Der eigene Regressionstest hat das sogar vorgeführt — er ließ den alten Rückruf nach der Freigabe eintreffen, ohne dass jemandem auffiel, was das über die Annahme aussagt.
+
+Damit bleibt: Es gibt keinen beobachtbaren Zustand, aus dem sich „dieses Paket kommt nie an" ableiten lässt. Also wird ohne Ausnahme gewartet. Der Preis ist bekannt und wird bewusst getragen — verliert ChatThrottleLib wirklich einmal einen Rückruf, steht der Abgleich bis zum nächsten `/reload`. Dafür gilt die Zusicherung „im Kampf höchstens ein Paket" ohne Einschränkung, und das ist die Aussage, auf die sich eine Einstellung berufen können muss.
+
+Vier Anläufe hat diese eine Zusicherung gebraucht. Jeder einzelne scheiterte nicht an der Umsetzung, sondern an einer Annahme über fremden Code, die niemand nachgeprüft hatte: dass ein Rückruf asynchron kommt (0.9.93), dass eine Frist Verlust bedeutet (0.9.94), dass eine verschwundene Referenz Stillstand bedeutet (0.9.95).
+
 ## 0.9.94 – Zeitüberschreitung ist nicht Verlust
 
 Die Kampfpause zum vierten Mal, und diesmal ging es nicht um die Umsetzung, sondern um eine falsche Annahme im Entwurf.

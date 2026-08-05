@@ -7,6 +7,31 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.95 – Addon
+
+**Behoben**
+
+- **Ein langsamer Chatkanal machte aus einem gelungenen Abgleich einen
+  „unvollständigen".** Kam der Sendezähler zwei Minuten nicht voran, buchte die
+  Anzeige alles Ausstehende als verloren — auch die Pakete, die zu dem
+  Zeitpunkt völlig regulär beim Chatkanal warteten. Trafen deren Rückmeldungen
+  danach ein, war der Fehlerzähler längst hochgesetzt, und der Abgleich blieb
+  bis zum Ausloggen „unvollständig", obwohl jedes einzelne Paket angekommen
+  war. Solange nachweislich noch etwas unterwegs ist, wird jetzt nichts als
+  verloren gebucht.
+- **Stattdessen sagt die Anzeige, was los ist.** Wartet dasselbe Paket länger
+  als zwei Minuten auf den Kanal, steht dort „Der Chatkanal ist gerade
+  ausgelastet; es geht weiter, sobald er frei wird." Vorher stand bei einem
+  verstopften Kanal beliebig lange „läuft", ohne dass sich etwas rührte.
+- **Die letzte Ausnahme beim Warten ist entfallen.** 0.9.94 gab den Platz noch
+  frei, wenn die ChatThrottleLib nicht mehr geladen schien. Auch das war eine
+  unbelegte Annahme: Die Bibliothek hält ihre eigene Referenz und einen
+  laufenden Zeitgeber, ein eingereihtes Paket geht weiter hinaus und meldet
+  zurück. Es gibt keinen Zustand, aus dem sich „kommt nie an" ableiten ließe —
+  also wird ohne Ausnahme gewartet.
+
+Alle drei stammen aus 0.9.92 bis 0.9.94 und waren nie veröffentlicht.
+
 ## 0.9.94 – Addon
 
 **Behoben**

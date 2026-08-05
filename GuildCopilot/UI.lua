@@ -4213,6 +4213,7 @@ function GC.UI:RefreshSyncBar(force)
         status.percent,
         status.outstanding,
         status.failed,
+        status.waiting and "W" or "-",
         ageMinutes,
         (status.peerSeenAt or 0) > 0 and "P" or "-",
         #GC.Workshop:GetMissingOwnProfessions(),
@@ -4228,9 +4229,16 @@ function GC.UI:RefreshSyncBar(force)
         page.syncBar:SetProgress(status.percent / 100, THEME.accent)
         percentText = status.percent .. " %"
         percentColor = THEME.accent
+        -- Wartet seit über zwei Minuten dasselbe Paket auf den Kanal, steht
+        -- der Abgleich zwar nicht still, kommt aber auch nicht voran. Das
+        -- gehört gesagt: Sonst steht bei einem verstopften Kanal beliebig
+        -- lange "läuft", ohne dass sich etwas rührt. Als Verlust verbucht wird
+        -- deswegen nichts - unterwegs ist unterwegs.
         text = "|cff2ed9e6Abgleich läuft|r  •  noch " .. status.outstanding
             .. (status.outstanding == 1 and " Paket" or " Pakete")
-            .. ". Das Fenster kann geschlossen werden."
+            .. (status.waiting
+                and ". Der Chatkanal ist gerade ausgelastet; es geht weiter, sobald er frei wird."
+                or ". Das Fenster kann geschlossen werden.")
         color = THEME.accent
     elseif status.state == "INCOMPLETE" then
         page.syncBar:SetProgress(1, THEME.danger)

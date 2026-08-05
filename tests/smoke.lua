@@ -7283,13 +7283,33 @@ do
     assert(addon.Sync.bulkInFlight ~= nil,
         "Der Platz wurde freigegeben, ohne dass ChatThrottleLib zurückgemeldet hat")
 
-    -- Frei wird er erst, wenn ChatThrottleLib gar nicht mehr da ist - dann
-    -- kann sie auch nichts mehr zustellen. Das hängt an einer Tatsache statt
-    -- an einer Uhr und kann deshalb keine Pakete anhäufen.
+    -- Auch das Verschwinden der globalen Referenz gibt ihn nicht frei. Bis
+    -- 0.9.94 tat es das - mit derselben unbelegten Annahme wie beim Watchdog:
+    -- ChatThrottleLib hält ihre eigene Referenz und einen laufenden Frame, ein
+    -- eingereihtes Paket geht weiter raus und meldet zurück. Es gibt keinen
+    -- Zustand, aus dem sich "kommt nie an" ableiten ließe.
+    ctl_stub = ChatThrottleLib
     ChatThrottleLib = nil
     addon.Sync:PumpBulk(5)
-    assert(addon.Sync.bulkInFlight == nil,
-        "Ohne ChatThrottleLib bleibt die Warteschlange dauerhaft blockiert")
+    assert(addon.Sync.bulkInFlight ~= nil,
+        "Die fehlende globale Referenz hat den Platz freigegeben")
+    ChatThrottleLib = ctl_stub
+
+    -- Ein wartendes Paket darf nicht als Verlust verbucht werden. Vorher hat
+    -- die Zwei-Minuten-Sperre den Sendezähler abgeräumt und alles als
+    -- fehlgeschlagen gebucht - kamen die Rückmeldungen danach an, blieb der
+    -- Abgleich bis zum Ausloggen "unvollständig", obwohl jedes Paket ankam.
+    addon.Sync.syncStatus = nil
+    addon.Sync.progressFailed = 0
+    ctl_status = addon.Sync:GetSyncStatus()
+    addon.Sync.syncStatus.outboundChangedAt = addon.Util.Now() - 600
+    ctl_status = addon.Sync:GetSyncStatus()
+    assert(ctl_status.failed == 0,
+        "Ein noch bei ChatThrottleLib wartendes Paket wurde als verloren gebucht")
+    assert(ctl_status.waiting == true,
+        "Die Wartelage wird nicht gemeldet")
+    assert(addon.Sync.bulkOutstanding > 0,
+        "Der Sendezähler wurde abgeräumt, obwohl noch etwas unterwegs ist")
 
     ChatThrottleLib = nil
     addon.Sync.bulkQueue = {}
@@ -7366,23 +7386,22 @@ do
     addon.Sync.bulkAllowance = nil
     addon.Sync.bulkCooldown = 0
 
-    ctllate_stub = ChatThrottleLib
     addon.Sync:SendBulk("WKLATE|A", "GUILD")
     assert(#ctllate_payloads == 1, "Paket A wurde nicht übergeben")
 
-    -- A wird aufgegeben, weil ChatThrottleLib verschwindet - der einzige Weg,
-    -- der den Platz ohne Rückmeldung frei macht.
-    ChatThrottleLib = nil
-    addon.Sync:PumpBulk(5)
-    assert(addon.Sync.bulkInFlight == nil, "Paket A wurde nicht aufgegeben")
-
-    -- Danach ist sie wieder da (ein anderes Addon lädt sie nach), und B geht raus.
-    ChatThrottleLib = ctllate_stub
+    -- A meldet sich ordnungsgemäß zurück, B geht raus.
+    ctllate_callbacks[1](nil, true)
     addon.Sync:SendBulk("WKLATE|B", "GUILD")
     assert(#ctllate_payloads == 2, "Paket B wurde nicht übergeben")
     assert(addon.Sync.bulkInFlight ~= nil, "Paket B wurde nicht als unterwegs vermerkt")
     addon.Sync:SendBulk("WKLATE|C", "GUILD")
     assert(#ctllate_payloads == 2, "Paket C ging raus, obwohl B noch unterwegs ist")
+
+    -- Und jetzt meldet sich A ein ZWEITES Mal - eine Bibliothek, die ihren
+    -- Rückruf doppelt auslöst. Ohne die laufende Nummer gäbe dieser Rückruf
+    -- B's Platz frei, C ginge raus, und es lägen wieder zwei gleichzeitig
+    -- bei ChatThrottleLib.
+    ctllate_callbacks[1](nil, true)
 
     -- Und jetzt trifft A doch noch ein.
     ctllate_callbacks[1](nil, true)
