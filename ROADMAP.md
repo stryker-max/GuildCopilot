@@ -298,6 +298,41 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.90 – Ein Balken, der nur eine Richtung kennt
+
+**Die Meldung:** „Wenn das Addon Berufe synchronisiert, dann ist der Fortschrittsbalken sehr sprunghaft, zb 80 % → 40 % → 90 % → 10 %, und das sehr schnell, so dass man nie weiß, wie weit der Fortschritt eigentlich ist."
+
+Der Balken hat dabei nie falsch gerechnet. Er hat eine Frage beantwortet, die niemand gestellt hat.
+
+**Der Nenner ist der Umfang, und der wächst.** In `GetSyncStatus` stand:
+
+```lua
+status.total = math.max(status.total, status.done + outstanding)
+status.done  = math.max(0, status.total - outstanding)
+status.percent = math.floor((status.done / status.total) * 100)
+```
+
+`total` ist der Umfang des Durchlaufs und wächst mit, sobald neue Arbeit auftaucht – das war Absicht und steht so im Kommentar seit 0.9.86. Übersehen wurde die Folge für die Anzeige: Der *Anteil* fällt genau dann, wenn der Umfang steigt. Acht erledigte von zehn Paketen sind 80 %. Kommen zehn Pakete dazu, sind dieselben acht 8 von 20 und damit 40 %. Verloren gegangen ist nichts, die Bezugsgröße hat sich verdoppelt.
+
+Nachgerechnet ergibt das exakt die gemeldete Folge:
+
+| Takt | erledigt | offen | Umfang | Balken |
+|---|---|---|---|---|
+| 1 | 8 | 2 | 10 | 80 % |
+| 2 (zehn neue) | 8 | 12 | 20 | 40 % |
+| 3 | 18 | 2 | 20 | 90 % |
+| 4 (achtzehn neue) | 18 | 18 | 36 | 50 % |
+
+Der Berufsabgleich ist dafür der ungünstigste Fall überhaupt, weil die Arbeit dort in Wellen eintrifft: Jedes fremde Manifest hebt `GetPendingWantCount`, danach trudeln die Rezepte ein, dann kommt das nächste Manifest. Bei `PROGRESS_TICK` von einer halben Sekunde sieht man jede einzelne Welle.
+
+**Warum kein ehrlicherer Anteil hilft.** Der naheliegende Gedanke – `done` richtig zählen statt zurückzurechnen – ändert nichts. `done` ist bereits monoton: Wächst der Umfang um zehn, während zehn Pakete dazukommen, bleibt `done` stehen. Das Problem liegt nicht im Zähler, sondern darin, dass ein Anteil an einer **unbekannten Gesamtmenge** grundsätzlich nicht monoton sein kann. Solange nicht feststeht, wie viel Arbeit noch kommt, ist jede Prozentangabe eine Momentaufnahme, die der nächste Fund entwertet.
+
+Also wird die Frage geändert. Der Balken beantwortet ab jetzt nicht mehr „welcher Anteil des aktuell bekannten Umfangs ist erledigt", sondern „wie weit bin ich mindestens gekommen". Erledigtes bleibt erledigt, der Balken steigt nur. Technisch ist das eine Zeile – `status.percent` wird gegen seinen bisherigen Höchststand geklemmt –, dazu ein Zurücksetzen auf null beim Zyklusbeginn: Ohne das bliebe er auf den 100 % des vorigen Durchlaufs stehen, eben weil er nicht mehr zurückfällt.
+
+**Was dabei nicht verschwiegen wird.** Ein geklemmter Balken kann stehen bleiben, wenn viel Neues auftaucht – und genau dann soll er stehen bleiben, statt zurückzuspringen. Die Auskunft über den gewachsenen Umfang steht weiterhin daneben: „Abgleich läuft • noch N Pakete". Dort ist ein Sprung nach oben eine Information und keine Irritation, weil eine absolute Zahl keine Vollständigkeit behauptet.
+
+Die 99-Prozent-Deckelung bleibt, solange etwas offen ist. Ein Balken, der 100 % zeigt, während noch Pakete unterwegs sind, wäre die einzige Aussage, die schlimmer wäre als ein springender.
+
 ## 0.9.89 – Der eigene Abend gehört einem selbst
 
 **Die Meldung war ein Satz:** „Letztens hat jemand die Sitzung gestartet und ich hatte die Sitzung nicht in meinen Einträgen drin." Dahinter steckten ein handfester Fehler und eine Grundsatzfrage, und die Grundsatzfrage ist die wichtigere.

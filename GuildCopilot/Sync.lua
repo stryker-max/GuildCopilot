@@ -680,12 +680,38 @@ function GC.Sync:GetSyncStatus()
             -- Ein neuer Zyklus faengt mit einer leeren Fehlerbilanz an.
             self.progressFailed = 0
             status.failed = lostInbound
+            -- ... und bei null. Ohne dieses Zuruecksetzen bliebe der Balken
+            -- auf den 100 % des vorigen Durchlaufs stehen, weil er innerhalb
+            -- eines Zyklus nicht mehr zurueckfaellt.
+            status.total = 0
+            status.done = 0
+            status.percent = 0
         end
         status.total = math.max(status.total, status.done + outstanding)
         status.done = math.max(0, status.total - outstanding)
-        status.percent = status.total > 0
+
+        -- Der Balken faellt innerhalb eines Zyklus nie zurueck.
+        --
+        -- Der Anteil done/total ist zwar richtig gerechnet, als Anzeige aber
+        -- unbrauchbar: Der Nenner ist der UMFANG, und der waechst, sobald neue
+        -- Arbeit auftaucht. Beim Berufsabgleich passiert das laufend - jedes
+        -- eintreffende fremde Manifest meldet weitere fehlende Rezepte.
+        --
+        -- Gerechnet sah das so aus: 8 von 10 Paketen erledigt sind 80 %.
+        -- Kommen zehn Pakete dazu, sind dieselben 8 nur noch 8 von 20 - also
+        -- 40 %, ohne dass irgendetwas verloren gegangen waere. Bei einem Takt
+        -- von einer halben Sekunde ergab das die gemeldete Folge
+        -- 80 -> 40 -> 90 -> 10, und damit eine Anzeige, aus der sich der
+        -- Fortschritt nicht mehr ablesen liess.
+        --
+        -- Erledigtes bleibt erledigt, also steigt der Balken nur. Dass der
+        -- Umfang gewachsen ist, sagt die Zeile darunter mit der echten Zahl
+        -- der offenen Pakete - dort ist ein Sprung nach oben eine Auskunft
+        -- statt einer Irritation.
+        local percent = status.total > 0
             and math.min(99, math.floor((status.done / status.total) * 100))
             or 0
+        status.percent = math.max(tonumber(status.percent) or 0, percent)
         status.state = "RUNNING"
     else
         -- "Zuletzt vollstaendig" bekommt nur ein Zyklus, der auch vollstaendig

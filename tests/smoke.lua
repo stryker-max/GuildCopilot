@@ -6981,4 +6981,77 @@ do
     addon.DB:GetGuild().raidSessions = {}
 end
 
+-- === Der Fortschrittsbalken springt nicht zurück ============================
+--
+-- Gemeldet: "80 % --> 40 % --> 90 % --> 10 % und das sehr schnell, so dass man
+-- nie weiß, wie weit der Fortschritt eigentlich ist."
+--
+-- Ursache war der Nenner: Der Anteil lief gegen den UMFANG, und der wächst,
+-- sobald neue Arbeit auftaucht. Beim Berufsabgleich meldet jedes eintreffende
+-- fremde Manifest weitere fehlende Rezepte - dieselben acht erledigten Pakete
+-- sind erst 8 von 10 und kurz darauf 8 von 20.
+do
+    bar_previousReliable = addon.Sync.GetReliablePendingCount
+    bar_previousIncoming = addon.Sync.GetIncomingPendingCount
+    bar_previousWant = addon.Workshop.GetPendingWantCount
+    addon.Sync.GetReliablePendingCount = function() return 0 end
+    addon.Sync.GetIncomingPendingCount = function() return 0, 0 end
+    addon.Workshop.GetPendingWantCount = function() return 0 end
+
+    addon.Sync.syncStatus = nil
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.progressFailed = 0
+
+    function BarPercent(open)
+        addon.Sync.serialPending = open
+        return addon.Sync:GetSyncStatus().percent
+    end
+
+    -- Zyklusbeginn: zehn Pakete offen, nichts erledigt.
+    assert(BarPercent(10) == 0, "Ein neuer Zyklus fängt nicht bei null an")
+
+    -- Acht davon durch: 8 von 10.
+    bar_eighty = BarPercent(2)
+    assert(bar_eighty == 80, "8 von 10 erledigten Paketen ergeben nicht 80 %: " .. bar_eighty)
+
+    -- Und jetzt der gemeldete Fall: Zehn neue Pakete tauchen auf. Gerechnet
+    -- sind das 8 von 20 und damit 40 % - erledigt ist aber nach wie vor alles,
+    -- was erledigt war. Der Balken darf nicht zurückfallen.
+    bar_grown = BarPercent(12)
+    assert(bar_grown >= bar_eighty,
+        "Der Balken fällt zurück, wenn neue Arbeit auftaucht: "
+            .. bar_eighty .. " % --> " .. bar_grown .. " %")
+
+    -- Die offene Zahl daneben sagt weiterhin die Wahrheit über den Umfang.
+    assert(addon.Sync:GetSyncStatus().outstanding == 12,
+        "Die Zahl der offenen Pakete verschweigt den gewachsenen Umfang")
+
+    -- Echter Fortschritt hebt ihn weiter.
+    bar_ninety = BarPercent(2)
+    assert(bar_ninety > bar_grown, "Echter Fortschritt hebt den Balken nicht")
+
+    -- Noch eine Welle, diesmal eine große: wieder kein Rückfall.
+    bar_second = BarPercent(18)
+    assert(bar_second >= bar_ninety,
+        "Der Balken fällt bei der zweiten Welle zurück: "
+            .. bar_ninety .. " % --> " .. bar_second .. " %")
+
+    -- Solange etwas offen ist, steht er nie auf 100 - sonst behauptete er
+    -- Vollständigkeit, während noch Pakete unterwegs sind.
+    assert(bar_second < 100, "Der Balken meldet 100 %, obwohl noch etwas offen ist")
+
+    -- Ist alles durch, ist er voll.
+    assert(BarPercent(0) == 100, "Ein abgeschlossener Zyklus steht nicht auf 100 %")
+
+    -- Und der nächste Zyklus fängt wieder bei null an, statt auf den 100 %
+    -- des vorigen stehen zu bleiben.
+    assert(BarPercent(5) == 0, "Der neue Zyklus übernimmt die 100 % des vorigen")
+
+    addon.Sync.serialPending = 0
+    addon.Sync:GetSyncStatus()
+    addon.Sync.GetReliablePendingCount = bar_previousReliable
+    addon.Sync.GetIncomingPendingCount = bar_previousIncoming
+    addon.Workshop.GetPendingWantCount = bar_previousWant
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

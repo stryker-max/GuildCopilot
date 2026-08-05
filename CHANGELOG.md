@@ -7,6 +7,25 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.90 – Addon
+
+**Behoben**
+
+- **Der Fortschrittsbalken des Abgleichs sprang hin und her.** Gemeldet für den
+  Berufsabgleich: „80 % → 40 % → 90 % → 10 %, und das sehr schnell, so dass man
+  nie weiß, wie weit der Fortschritt eigentlich ist." Der Anteil lief gegen den
+  *Umfang*, und der wächst, sobald neue Arbeit auftaucht – beim Berufsabgleich
+  ständig, weil jedes eintreffende Manifest eines Gildenmitglieds weitere
+  fehlende Rezepte meldet. Acht erledigte von zehn Paketen sind 80 %; kommen
+  zehn Pakete dazu, sind dieselben acht nur noch 8 von 20 und damit 40 % –
+  obwohl nichts verloren ging. Bei einem Takt von einer halben Sekunde wirkte
+  das wie Zufall.
+
+  Erledigtes bleibt jetzt erledigt: Der Balken steigt innerhalb eines
+  Durchlaufs nur noch. Dass der Umfang gewachsen ist, steht weiterhin daneben –
+  in der echten Zahl der offenen Pakete, wo ein Sprung nach oben eine Auskunft
+  ist statt einer Irritation.
+
 ## 0.9.89 – Addon
 
 **Behoben**
