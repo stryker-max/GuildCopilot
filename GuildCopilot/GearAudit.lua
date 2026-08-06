@@ -494,13 +494,13 @@ end
 -- schaukeln sich zwei Clients gegenseitig auf.
 function GC.GearAudit:ReapplyEnchantRules()
     for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
-        for _, entry in ipairs(audit.slots or {}) do
-            if entry.verdict ~= "EMPTY" and (tonumber(entry.enchantID) or 0) > 0 then
-                local slot = { key = entry.key, enchantRequired = entry.required }
-                entry.verdict, entry.reason = self:EvaluateEnchant(
-                    slot, entry.enchantID, audit.role, entry.enchantName, audit.specKey)
-            end
-        end
+        -- Bewertung und Begruendung haengen am Regelsatz. Statt sie hier ein
+        -- zweites Mal nachzubauen, werden sie verworfen und von HydrateAudit
+        -- neu gebildet - derselbe Weg, den auch die Anzeige nimmt. Nebenbei
+        -- behaelt ein ausgenommener Slot dabei seine Ausnahme: Die alte
+        -- Schleife lief auch ueber EXEMPT-Eintraege und ueberschrieb sie mit
+        -- einer Verzauberungsbewertung.
+        self:RehydrateAudit(audit)
         audit.unknownEnchants = 0
         for _, entry in ipairs(audit.slots or {}) do
             if entry.verdict == "UNKNOWN" then
@@ -939,6 +939,16 @@ function GC.GearAudit:QueueEquipmentSnapshot(audit, force)
     return true
 end
 
+-- Der erzwungene Versand (AuditSelf mit forceSnapshot) bleibt, obwohl er die
+-- Fingerabdruckpruefung umgeht. Geprueft und verworfen wurde, ihn bei
+-- unveraendertem eigenem Stand zu unterdruecken: Dafuer muesste dieser Client
+-- wissen, ob der Anfragende einen Stand VON UNS hat, und das steht nirgends.
+-- addonUsers vermerkt nur, dass jemand das Addon faehrt und wann er zuletzt
+-- gesehen wurde - nicht, was in seiner gearAudits-Tabelle liegt; die hat eine
+-- eigene TTL von sieben Tagen und einen Knopf zum Leeren. Wer neu dazukommt,
+-- ist der Regelfall dieser Antwort, und genau er hat noch nichts. Gedrosselt
+-- wird stattdessen an zwei Stellen, die ohne Vermutung auskommen:
+-- EQUIPMENT_REPLY_INTERVAL und die Wahl der Antwortenden in Sync.
 function GC.GearAudit:ReplyWithEquipmentSnapshot()
     local now = GC.Util.Now()
     if self.lastEquipmentReplyAt
@@ -1245,8 +1255,19 @@ local function DropDerivedFields(audit)
         entry.label = nil
         entry.verdict = nil
         entry.reason = nil
-        entry.enchantName = nil
         entry.itemLink = nil
+        -- Der Verzauberungsname faellt nur weg, wenn HydrateAudit ihn auch
+        -- wieder herstellen KANN - und dafuer braucht es beide Kennzahlen.
+        --
+        -- Ohne diese Bedingung war er endgueltig verloren: Eine Pruefung, die
+        -- den Namen mitbringt, aber keine Gegenstands- und Verzauberungs-ID
+        -- (von Hand gebaute Datensaetze, sehr alte Bestaende), stand danach
+        -- dauerhaft ohne Verzauberung in der Detailzeile. Der Speichergewinn
+        -- bleibt davon unberuehrt: Im Regelfall traegt jeder belegte Slot
+        -- beide IDs, und genau die sind die Masse.
+        if (tonumber(entry.itemID) or 0) > 0 and (tonumber(entry.enchantID) or 0) > 0 then
+            entry.enchantName = nil
+        end
     end
     audit.hydrated = nil
 end
@@ -1298,14 +1319,30 @@ function GC.GearAudit:HydrateAudit(audit)
             if entry.itemLink then
                 name = self:ResolveEnchantName(entry.itemLink, entry.enchantID)
             end
+            -- Der zuletzt bekannte Name bleibt der Rueckfall. Das Aufloesen
+            -- braucht einen Tooltip, und der antwortet nicht, solange der
+            -- Gegenstand noch nicht im Zwischenspeicher des Clients liegt -
+            -- direkt nach dem Login also regelmaessig nicht. Ohne diesen
+            -- Rueckfall verschwaende ein einmal aufgeloester Name genau dann,
+            -- wenn die Ausruestungsseite zuerst aufgeschlagen wird.
             entry.enchantName = name
                 or self:ResolveEnchantNameByID(entry.itemID, entry.enchantID)
+                or entry.enchantName
             entry.verdict, entry.reason = self:EvaluateEnchant(
                 slot or { key = entry.key, enchantRequired = entry.required == true },
                 entry.enchantID, audit.role, entry.enchantName, audit.specKey)
         end
     end
     return audit
+end
+
+-- Abgeleitete Felder wegwerfen und sofort neu bilden. Diesen Weg nimmt alles,
+-- was am Regelsatz dreht - damit Bewertung und Begruendung an genau einer
+-- Stelle entstehen. Als Methode erreichbar, weil ReapplyEnchantRules weiter
+-- oben in der Datei steht als die lokale Hilfsfunktion.
+function GC.GearAudit:RehydrateAudit(audit)
+    DropDerivedFields(audit)
+    return self:HydrateAudit(audit)
 end
 
 function GC.GearAudit:CompactAudits()
@@ -1318,10 +1355,12 @@ function GC.GearAudit:StoreAudit(audit)
     if not audit or not audit.name or audit.name == "" then
         return false
     end
+    -- In die Ablage gehen nur die Messwerte; die Anzeigetexte traegt
+    -- HydrateAudit beim Lesen wieder nach.
+    DropDerivedFields(audit)
     -- Denselben Schluessel bilden wie GetAudit. Die Namen kommen hier bereits
     -- gekuerzt an, aber die beiden Seiten duerfen sich nicht darauf verlassen,
     -- dass das so bleibt.
-    DropDerivedFields(audit)
     GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(audit.name)] = audit
     GC:FireCallback("GEAR_AUDIT_UPDATED")
     return true
@@ -1485,6 +1524,9 @@ function GC.GearAudit:GetFindings(audit)
     if not audit then
         return findings
     end
+    -- Die Funde stehen in den abgeleiteten Feldern (label, verdict). Wer ein
+    -- Audit direkt aus der Ablage hereinreicht, bekommt sie hier nachgetragen.
+    self:HydrateAudit(audit)
 
     local missingEnchants = {}
     local socketSlots = {}
@@ -1903,6 +1945,11 @@ end
 local gearEvents = CreateFrame("Frame")
 gearEvents:RegisterEvent("INSPECT_READY")
 gearEvents:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+-- Der letzte Moment vor dem Schreiben der SavedVariables. Die Anzeige traegt
+-- die abgeleiteten Felder waehrend der Sitzung wieder an die gespeicherten
+-- Audits an - ohne diesen Schritt landeten sie am Ende doch in der Datei, und
+-- die 2,25 MB waeren zurueck.
+gearEvents:RegisterEvent("PLAYER_LOGOUT")
 
 -- UNIT_INVENTORY_CHANGED feuert fuer jede Einheit in der Gruppe; interessant
 -- ist ausschliesslich der eigene Charakter. Ungefiltert liefe der Handler im
@@ -1942,6 +1989,8 @@ gearEvents:SetScript("OnEvent", function(_, event, value)
     elseif event == "UNIT_INVENTORY_CHANGED" and value == "player" then
         GC.GearAudit.unreadableRetryCount = 0
         GC.GearAudit:QueueSelfAudit()
+    elseif event == "PLAYER_LOGOUT" then
+        GC.GearAudit:CompactAudits()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         -- Nur registriert, solange die letzte Selbstpruefung unvollstaendig
         -- war - die Datenbankabfrage pro Ereignis ist damit ueberfluessig.

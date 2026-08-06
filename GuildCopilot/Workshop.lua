@@ -59,6 +59,12 @@ local WANT_TTL = 120
 -- Eintrag je Rezept, in einer grossen Gilde ueber Stunden mehrere tausend.
 -- Sie wird deshalb aufgeraeumt, sobald sie zu gross wird.
 local MAX_SUPPRESSED_REQUESTS = 600
+-- Dasselbe fuer die Merkliste unterdrueckter SCHLUESSELLISTEN-Anfragen. Sie
+-- bekommt einen Eintrag je Hersteller UND Beruf und wuchs als einzige noch
+-- unbegrenzt: In einer Gilde mit 500 Mitgliedern und zwei Berufen je Spieler
+-- sind das bis zu tausend Eintraege, von denen nach
+-- MISSING_REQUEST_SUPPRESS Sekunden keiner mehr etwas unterdrueckt.
+local MAX_SUPPRESSED_KEY_REQUESTS = 400
 
 -- Rezeptschluessel sind Item- oder Zauber-IDs. Nach Typ gruppiert und als
 -- Differenzen aufsteigender Zahlen kosten 294 Schluessel rund 590 Bytes statt
@@ -1461,6 +1467,10 @@ end
 -- damit nicht alle gleichzeitig dasselbe verlangen.
 function GC.Workshop:ScheduleKeyListRequest(wanted)
     self.suppressedKeyRequests = self.suppressedKeyRequests or {}
+    -- Sammelnd aufraeumen, nach derselben Bauweise wie die unterdrueckten
+    -- Rezeptanfragen daneben.
+    PruneSuppressed(self.suppressedKeyRequests, MISSING_REQUEST_SUPPRESS,
+        MAX_SUPPRESSED_KEY_REQUESTS)
     local now = GC.Util.Now()
     local pending = {}
     for _, entry in ipairs(wanted or {}) do
@@ -1782,6 +1792,8 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         local wantedCrafter = GC.Util.Trim(fields[4] or "")
         local wantedKey = GC.Util.PlayerKey(wantedCrafter)
         self.suppressedKeyRequests = self.suppressedKeyRequests or {}
+        PruneSuppressed(self.suppressedKeyRequests, MISSING_REQUEST_SUPPRESS,
+            MAX_SUPPRESSED_KEY_REQUESTS)
         local requested = {}
         for professionKey in tostring(fields[5] or ""):gmatch("[^,]+") do
             requested[NormalizeKey(professionKey)] = true
