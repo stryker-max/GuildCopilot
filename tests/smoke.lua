@@ -5431,6 +5431,61 @@ do
     addon.Orders:MarkCrafted("soundtest-1")
     assert(playedSoundID == 3175, "Der Fortschritt pingt nicht wie die Karte")
 
+    -- Ein Auftrag erreicht uns nicht dann, wenn er sich ändert, sondern dann,
+    -- wenn wir davon erfahren. Beim Login schickt jeder Client alles, was er
+    -- kennt - bis hierher lief dabei die Klangfolge der letzten Tage erneut ab.
+    local function StateMessage(orderID, rev, status, changedAt, tag)
+        return table.concat({
+            "O", tostring(addon.Constants.SCHEMA_VERSION), "U", orderID,
+            tostring(rev), status, tostring(changedAt), tag or "",
+            "0", "", "", "0", "0", "", "", "", "",
+        }, "|")
+    end
+    local ownTag = addon.DB:GetAccountTag()
+
+    -- Was jetzt passiert, klingt weiter.
+    playedSoundID = nil
+    addon.Sync:OnMessage("GuildCopilot",
+        StateMessage("soundtest-1", 90, "SHIPPED", currentTime, ownTag),
+        "GUILD", "Heiler-Realm")
+    assert(addon.Orders:GetOrder("soundtest-1").status == "SHIPPED",
+        "Die frische Fremdänderung wurde nicht übernommen")
+    assert(playedSoundID == 3175,
+        "Eine Änderung von jetzt bleibt still - die Frist ist zu eng")
+
+    -- Ein Tag alt ist ein Nachholstand und bleibt stumm. Dafür ein eigener
+    -- Auftrag: Der Abschluss von soundtest-1 wird weiter unten geprüft, und
+    -- ein Status lässt sich nur einmal erreichen.
+    addon.Sync:OnMessage("GuildCopilot",
+        "O|7|C|soundtest-alt|I90002|Testbrenner|1|Heiler-Realm|bbbbbbbbbb|"
+            .. currentTime .. "|A|TRADE|0|0|", "GUILD", "Heiler-Realm")
+    assert(addon.Orders:Accept("soundtest-alt") == true,
+        "Die Annahme des Nachholstand-Auftrags scheiterte")
+    -- Der neue Auftrag hat die Bildschirmmeldung ausgelöst. Sie wird weiter
+    -- unten im abgeschalteten Zustand geprüft und muss vorher weg.
+    addon.UI.orderBanner.lines[1].age = nil
+    addon.UI.orderBanner:Hide()
+
+    playedSoundID = nil
+    addon.Sync:OnMessage("GuildCopilot",
+        StateMessage("soundtest-alt", 91, "DONE", currentTime - 86400, ownTag),
+        "GUILD", "Heiler-Realm")
+    assert(addon.Orders:GetOrder("soundtest-alt").status == "DONE",
+        "Der Nachholstand wurde gar nicht erst übernommen")
+    assert(playedSoundID == nil,
+        "Ein vor einem Tag abgeschlossener Auftrag spielte beim Empfang erneut einen Klang")
+
+    -- Verbucht wird er trotzdem: Sonst zählte ein Auftrag je nachdem mit, ob
+    -- man online war, als er fertig wurde.
+    orders_result = false
+    for _, countedID in ipairs(addon.Orders:GetStats().counted) do
+        if countedID == "soundtest-alt" then
+            orders_result = true
+        end
+    end
+    assert(orders_result == true,
+        "Der stumme Nachholstand wurde nicht verbucht - die Statistik hängt am Login")
+
     -- Übergabetext: {name} und {rezept} werden ersetzt.
     orders_result = { addon.UI:BuildOrderWhisper(addon.Orders:GetOrder("soundtest-1")) }
     assert(orders_result[1] ~= nil, "Der Flüster-Empfänger fehlt")

@@ -317,9 +317,36 @@ function GC.Orders:CountCompletion(order, previousStatus)
     return true
 end
 
+-- Ein Auftrag erreicht uns nicht dann, wenn er sich aendert, sondern dann, wenn
+-- wir davon erfahren. Beim Login beantwortet jeder Client die Abfrage mit allen
+-- ihm bekannten laufenden Auftraegen, und Kuriere reichen fremde Staende
+-- weiter. Fuer den Empfaenger sah bisher jeder davon aus wie eine Aenderung von
+-- jetzt: Bei jedem Login und jedem /reload lief die Klangfolge der letzten Tage
+-- erneut ab, fuer Auftraege, die laengst erledigt waren.
+--
+-- Gemeldet wird deshalb nur, was frisch ist. Der Vergleich ist zwischen zwei
+-- Rechnern zulaessig, weil changedAt aus GetServerTime kommt - dieselbe Uhr
+-- fuer alle auf dem Realm, kein Geraeteversatz.
+--
+-- Die Frist ist bewusst grosszuegig: Sie muss den Weg ueber die Warteschlange
+-- und eine Kampfpause aushalten, ohne eine echte Aenderung zu verschlucken.
+-- Ein Nachholstand ist immer um Stunden aelter, nie um Minuten.
+local NOTIFY_MAX_AGE = 120
+
+local function IsFreshChange(at)
+    return (GC.Util.Now() - (tonumber(at) or 0)) <= NOTIFY_MAX_AGE
+end
+
 -- Klang und Statistik an einer Stelle: Jede Statusaenderung laeuft hier durch.
-function GC.Orders:NoteStatusChanged(order, previousStatus)
-    self:PlayStatusSound(order, previousStatus)
+--
+-- "announce" trennt beides. Verbucht wird immer - die Statistik darf den
+-- Nachholstand nicht verlieren, sonst zaehlt ein Auftrag je nachdem mit, ob man
+-- online war, als er fertig wurde. Stumm bleibt nur der Lautsprecher. Ohne das
+-- Argument wird gemeldet: Die eigenen Aktionen sind per Definition von jetzt.
+function GC.Orders:NoteStatusChanged(order, previousStatus, announce)
+    if announce ~= false then
+        self:PlayStatusSound(order, previousStatus)
+    end
     self:CountCompletion(order, previousStatus)
 end
 
@@ -1099,8 +1126,13 @@ function GC.Orders:ReceiveState(fields, sender)
         AppendLog(order, logAt, logBy, logEvent, logNote)
     end
 
-    self:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
-    self:NoteStatusChanged(order, previousStatus)
+    -- Nur eine Aenderung von jetzt wird gemeldet; ein Nachholstand vom Login
+    -- laeuft still durch. Verbucht und angezeigt wird er trotzdem.
+    local fresh = IsFreshChange(order.changedAt)
+    if fresh then
+        self:NotifyRemoteChange(order, previousStatus, logEvent, logBy)
+    end
+    self:NoteStatusChanged(order, previousStatus, fresh)
     NotifyChanged()
     return true
 end
@@ -1433,7 +1465,11 @@ function GC.Orders:OnMessage(message, sender, distribution)
         if self:ReceiveCore(fields, sender) then
             local order = self:GetOrder(fields[4])
             if order and (order.rev or 0) == 0 then
-                self:NotifyNewOrder(order)
+                -- Dieselbe Frist wie beim Zustand: Ein Auftrag von vorgestern
+                -- ist keine Neuigkeit, nur weil wir ihn eben erst bekommen.
+                if IsFreshChange(order.createdAt) then
+                    self:NotifyNewOrder(order)
+                end
                 NotifyChanged()
             end
             return true

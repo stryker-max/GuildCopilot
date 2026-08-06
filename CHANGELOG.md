@@ -7,6 +7,24 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.99 – Addon
+
+**Behoben**
+
+- **Beim Einloggen lief die Klangfolge der letzten Tage erneut ab.** Jeder
+  Login und jedes `/reload` spielte Töne und Chatmeldungen für Aufträge, die
+  längst erledigt waren. Der Grund: Ein Auftrag erreicht dich nicht dann, wenn
+  er sich ändert, sondern dann, wenn du davon erfährst — beim Login schickt dir
+  jeder Gildenclient alles, was er kennt, und für dein Addon sah jeder dieser
+  Stände aus wie eine Änderung von jetzt.
+- **Gemeldet wird jetzt nur, was frisch ist.** Klang und Chatzeile laufen nur
+  noch für Änderungen der letzten zwei Minuten — also für das, was wirklich
+  gerade passiert: Auftrag rein, Fortschritt, Abschluss. Ein Nachholstand
+  bleibt still, egal auf welchem Weg er ankommt.
+- **Verbucht wird trotzdem alles.** Die Auftragsstatistik zählt den stummen
+  Nachholstand weiter mit; sonst hinge es am Zufall, ob man online war, als ein
+  Auftrag fertig wurde.
+
 ## 0.9.98 – Addon
 
 **Behoben**

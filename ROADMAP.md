@@ -298,6 +298,38 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.99 – Der Unterschied zwischen „passiert" und „erfahren"
+
+Gemeldet als Alltagsärgernis: Bei jedem Login und jedem `/reload` spielte Guild Copilot Töne und schrieb Meldungen für Gildenaufträge, die längst abgeschlossen waren. Gewünscht war das Offensichtliche — Klang nur dann, wenn *jetzt gerade* etwas passiert.
+
+### Ein Auftrag erreicht dich nicht, wenn er sich ändert
+
+Die Ursache steckt in einer Annahme, die im Code nirgends ausgesprochen war: dass der Moment des Empfangs der Moment der Änderung ist. Für lokale Aktionen stimmt das. Für alles, was über die Gilde hereinkommt, stimmt es nicht.
+
+Seit 0.9.55 ist jeder Client Kurier: Beim Login beantwortet **jeder** deine Abfrage mit allen ihm bekannten laufenden Aufträgen, und Dritte reichen fremde Stände weiter. `ReceiveState` nahm jeden davon entgegen und rief unmittelbar `NotifyRemoteChange` und `NoteStatusChanged` — ohne je zu fragen, wann die Änderung war. Dasselbe bei neuen Aufträgen in `ReceiveCore`. Der Auftrag wurde vor drei Tagen fertig; für deinen Client war es der Augenblick, in dem er es erfuhr.
+
+Das ist derselbe Denkfehler wie in 0.9.94 („Zeitüberschreitung ist nicht Verlust") und 0.9.95, nur an anderer Stelle: Ein Zustand wird mit dem Ereignis verwechselt, das ihn bekannt macht.
+
+### Die Frist, und warum sie tragfähig ist
+
+Gemeldet wird nur noch, was jünger als zwei Minuten ist. Der Vergleich ist zwischen zwei Rechnern zulässig, weil `changedAt` aus `GetServerTime()` stammt — dieselbe Uhr für alle auf dem Realm, kein Geräteversatz, den ein absoluter Zeitstempel sonst unbesehen übernähme. Genau aus demselben Grund überträgt die Werkstatt ihre Wartezeiten als *Restzeit*; hier ist es umgekehrt richtig, weil die Serverzeit gemeinsam ist.
+
+Zwei Minuten sind bewusst großzügig gewählt. Die Frist muss den Weg über die Sendewarteschlange und eine Kampfpause aushalten, ohne eine echte Änderung zu verschlucken. Ein Nachholstand ist dagegen nie um Minuten alt, sondern um Stunden oder Tage — zwischen beiden liegt keine Grauzone, die eine feinere Grenze bräuchte.
+
+### Was still bleibt und was nicht
+
+Getrennt wurden zwei Dinge, die bisher an derselben Stelle hingen. `NoteStatusChanged` machte Klang **und** Statistik in einem Aufruf. Nur der Klang bekommt die Frist; `CountCompletion` läuft weiter für jeden Stand, der hereinkommt. Sonst zählte ein Auftrag je nachdem mit, ob man zufällig online war, als er fertig wurde — eine Statistik, die von der Anwesenheit des Betrachters abhängt, ist keine.
+
+Unberührt bleiben die eigenen Aktionen: Wer selbst annimmt, Material meldet oder abschließt, hört das weiter sofort. Diese Aufrufe kennen die Frist gar nicht, denn sie sind per Definition von jetzt.
+
+### Geändert
+
+- `IsFreshChange` in `Orders.lua`, eine Frist von 120 Sekunden auf `changedAt` beziehungsweise `createdAt`;
+- `ReceiveState` meldet Fremdänderungen nur noch, wenn sie frisch sind — Klang und Chatzeile gemeinsam;
+- `ReceiveCore` kündigt einen neuen Auftrag nur an, wenn er gerade erst erstellt wurde;
+- `NoteStatusChanged` nimmt ein `announce`-Argument; ohne Angabe wird gemeldet, damit die lokalen Aufrufer unverändert laut bleiben;
+- ein Regressionstest über beide Fälle am selben Kanal: eine frische Fremdänderung klingt, eine einen Tag alte bleibt stumm und wird trotzdem verbucht. Er schlägt gegen 0.9.98 fehl.
+
 ## 0.9.98 – Die Wartezeit, die genau dort fehlte, wo sie jeder sucht
 
 0.9.97 hat die Wartezeiten eingeführt und dabei ausgerechnet den Beruf ausgelassen, an dem sie zuerst auffallen. Gemeldet wurde es am Tag nach der Veröffentlichung, mit dem denkbar knappsten Beleg: das Berufsfenster zeigt „Verbleibende Abklingzeit: 21 Std. 20 Min." auf der Sphäre der Leere, die Rezeptkarte daneben zeigt am selben Hersteller nichts.
