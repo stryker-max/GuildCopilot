@@ -379,10 +379,10 @@ function GC.Onboarding:WizardGo(delta)
     return self:GetWizardPage()
 end
 
--- "Spaeter" auf der Logoseite: Beim ersten Mal je Charakter folgt der
--- Hinweis, wie man die Einrichtung wieder aufruft - und genau einmal, denn
--- wer ihn gelesen hat, weiss es. Ein Fenster nach jedem Schliessen waere
--- Draengeln.
+-- Vorzeitiges Schliessen des Assistenten ("Spaeter" oder das ×): Beim
+-- ersten Mal je Charakter folgt der Hinweis, wie man die Einrichtung wieder
+-- aufruft - und genau einmal, egal ueber welchen Knopf, denn wer ihn gelesen
+-- hat, weiss es. Ein Fenster nach jedem Schliessen waere Draengeln.
 function GC.Onboarding:NoteLaterPressed()
     local data = self:GetData()
     if (data.laterHintShownAt or 0) > 0 then

@@ -4762,6 +4762,44 @@ assert(addon.Onboarding:GetSteps()[1].done == true,
 assert(addon.UI.welcomeFrame.skipButton:IsShown() == false,
     "Der erledigte Schritt bietet weiter das Ueberspringen an")
 
+-- Dual-Spec und "flexibel einsetzbar" direkt im Assistenten (Owner-Wunsch):
+-- Klick auf die Knoepfe, dann bestaetigen - dieselbe echte Aktion wie auf
+-- der Profilseite. Der Knopf der gewaehlten Primaer-Spec ist in der
+-- Dual-Reihe gesperrt.
+wizard_profilePage.specButtons[2].scripts.OnClick(wizard_profilePage.specButtons[2])
+assert(wizard_profilePage.secondaryButtons[2]:IsEnabled() == false,
+    "Die Primaer-Spec laesst sich zugleich als Dual-Spec waehlen")
+assert(wizard_profilePage.secondaryButtons[1]:IsEnabled() == true,
+    "Auch andere Specs sind in der Dual-Reihe gesperrt")
+wizard_profilePage.secondaryButtons[1].scripts.OnClick(wizard_profilePage.secondaryButtons[1])
+wizard_profilePage.flexCheck:SetChecked(true)
+wizard_profilePage.flexCheck.scripts.OnClick(wizard_profilePage.flexCheck)
+wizard_profilePage.confirm.scripts.OnClick(wizard_profilePage.confirm)
+assert(wizard_profile.raidSpecKey == "HUNTER:2",
+    "Die geklickte Primaer-Spec wurde nicht uebernommen")
+assert(wizard_profile.secondarySpecKey == "HUNTER:1",
+    "Die Dual-Spec aus dem Assistenten fehlt am Profil")
+assert(wizard_profile.flex == true,
+    "Flexibel einsetzbar aus dem Assistenten fehlt am Profil")
+
+-- Die Primaer-Spec auf die bisherige Dual-Spec zu stellen, waehlt die
+-- Dual-Spec ab, statt einen Konflikt zu speichern - dieselbe Regel wie auf
+-- der Profilseite.
+wizard_profilePage.specButtons[1].scripts.OnClick(wizard_profilePage.specButtons[1])
+wizard_profilePage.confirm.scripts.OnClick(wizard_profilePage.confirm)
+assert(wizard_profile.raidSpecKey == "HUNTER:1" and wizard_profile.secondarySpecKey == nil,
+    "Gleiche Primaer- und Dual-Spec wurden gespeichert")
+
+-- "Keiner" nimmt die Dual-Spec wieder heraus.
+wizard_profilePage.secondaryButtons[2].scripts.OnClick(wizard_profilePage.secondaryButtons[2])
+wizard_profilePage.confirm.scripts.OnClick(wizard_profilePage.confirm)
+assert(wizard_profile.secondarySpecKey == "HUNTER:2",
+    "Die neu gewaehlte Dual-Spec fehlt am Profil")
+wizard_profilePage.noSecondaryButton.scripts.OnClick(wizard_profilePage.noSecondaryButton)
+wizard_profilePage.confirm.scripts.OnClick(wizard_profilePage.confirm)
+assert(wizard_profile.secondarySpecKey == nil,
+    "Der Knopf Keiner nimmt die Dual-Spec nicht heraus")
+
 -- Je Beruf eine Zeile: Rezeptberufe bekommen den sicheren Oeffnen-Knopf,
 -- Sammelberufe nicht - dort gibt es kein Fenster zum Oeffnen.
 wizard_profile.professions = { { name = "Verzauberkunst" }, { name = "Kürschnerei" } }
@@ -4825,13 +4863,28 @@ wizard_welcomePage.later.scripts.OnClick(wizard_welcomePage.later)
 assert(addon.UI.wizardLaterHint:IsShown() == false,
     "Der Hinweis nach Spaeter erscheint bei jedem Schliessen erneut")
 
+-- Das × geht denselben Weg wie "Spaeter": Beim ersten vorzeitigen Schliessen
+-- erscheint der Hinweis, egal ueber welchen der beiden Knoepfe.
+wizard_data.laterHintShownAt = 0
+addon.UI:ShowWelcome()
+addon.UI.welcomeFrame.closeButton.scripts.OnClick(addon.UI.welcomeFrame.closeButton)
+assert(addon.UI.welcomeFrame:IsShown() == false,
+    "Das x schliesst den Assistenten nicht")
+assert(addon.UI.wizardLaterHint:IsShown() == true,
+    "Der Hinweis nach dem ersten x fehlt")
+addon.UI.wizardLaterHint:Hide()
+
 -- Die Tour: sechs Zeilen, Warcraft Logs bewusst nicht darunter - wer frisch
--- installiert, hat nur das Addon.
+-- installiert, hat nur das Addon. (Der Feldname heisst "pages" - eine
+-- fruehere Umbenennung im Testblock hatte ihn versehentlich mit erwischt,
+-- und die Pruefung verglich gegen nil.)
 assert(#addon.Onboarding.TOUR == 6, "Die Funktionstour hat nicht sechs Zeilen")
 for _, entry in ipairs(addon.Onboarding.TOUR) do
     assert(type(entry.icon) == "string" and entry.icon ~= "",
         "Eine Tourzeile hat kein Symbol")
-    assert(tostring(entry.wizard_pages):find("Warcraft Logs", 1, true) == nil,
+    assert(type(entry.pages) == "string" and entry.pages ~= "",
+        "Eine Tourzeile hat keine Seitenzeile")
+    assert(entry.pages:find("Warcraft Logs", 1, true) == nil,
         "Warcraft Logs steht wieder in der Funktionstour")
 end
 

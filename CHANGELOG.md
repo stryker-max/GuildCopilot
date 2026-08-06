@@ -38,6 +38,19 @@ Installer und Addon werden getrennt gezählt.
   „Einrichtung“). Der Abschnittsname steht an jeder Tourzeile, und keine
   Zeile wird mehr abgeschnitten — die REKRUTIERUNG-Zeile war zu lang und
   endete im Spiel als „Postfa…“; ein Test misst jetzt alle Tourzeilen nach.
+  Auch das × zeigt beim ersten vorzeitigen Schließen den „Bis später!“-Hinweis
+  — derselbe einmalige Merker wie bei „Später“. Unten rechts steht in kleiner
+  Schrift der Autor: Nexarius - Thunderstrike.
+- **Dual-Spec und „flexibel einsetzbar“ direkt im Assistenten.** Die
+  Profilseite des Assistenten bietet jetzt auch die Dual-Spec-Wahl (samt
+  „Keiner“) und den Flex-Haken an — beides gehört zum Raidprofil, und der
+  Platz war da. Main/Twink und die Abmeldung bleiben bewusst der Profilseite
+  vorbehalten.
+- **Der grüne Haken ist nicht mehr verpixelt.** Schräge Striche der selbst
+  gezeichneten Symbole waren eine Reihe überlappender Quadrate — ab etwa
+  20 px Kantenlänge sichtbar getreppt, am deutlichsten am Haken neben
+  „Bestätigen“. Sie werden jetzt als eine glatt gedrehte Fläche gezeichnet
+  (`SetVertexOffset`); die Quadratreihe bleibt als Rückfall.
 
 **Behoben**
 

@@ -386,11 +386,48 @@ local function CreateMark(parent, size)
         return piece
     end
 
-    -- Ein schraeger Strich als Reihe ueberlappender Quadrate: Eine gedrehte
-    -- Flaeche gibt die Oberflaeche nicht her. Der Abstand ist die halbe
-    -- Strichstaerke - weiter auseinander zerfaellt die Linie sichtbar in
-    -- Punkte, enger kostet nur Flaechen ohne Gewinn.
+    -- Ein schraeger Strich, bevorzugt als EINE gedrehte Flaeche: Der Client
+    -- kann die vier Eckpunkte einer Flaeche einzeln versetzen
+    -- (SetVertexOffset), und vier versetzte Ecken sind ein glatter Balken in
+    -- beliebiger Richtung. Die fruehere Reihe ueberlappender Quadrate - dem
+    -- Irrtum geschuldet, eine gedrehte Flaeche gebe die Oberflaeche nicht
+    -- her - war ab etwa 20 px Kantenlaenge sichtbar getreppt; genau so wurde
+    -- der Haken neben "Bestätigen" gemeldet ("verpixelt"). Sie bleibt als
+    -- Rueckfall fuer Clients ohne SetVertexOffset.
     function mark:AddStroke(fromX, fromY, toX, toY, thickness)
+        local piece = self:CreateTexture(nil, "OVERLAY")
+        if piece.SetVertexOffset then
+            local size = self.size
+            local dx = (toX - fromX) * size
+            local dy = (fromY - toY) * size
+            local length = math.sqrt(dx * dx + dy * dy)
+            local ux, uy = dx / length, dy / length
+            local half = thickness * size * 0.5
+            -- Halbe Strichstaerke ueber beide Enden hinaus (eckige Kappen):
+            -- So stossen zwei Striche im Knick ohne Kerbe aneinander, und
+            -- der Umriss bleibt derselbe wie bei der alten Quadratreihe.
+            local x1 = fromX * size - ux * half
+            local y1 = -fromY * size - uy * half
+            local x2 = toX * size + ux * half
+            local y2 = -toY * size + uy * half
+            local nx, ny = -uy * half, ux * half
+            piece:SetSize(1, 1)
+            piece:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
+            -- Versaetze sind je Ecke relativ zu ihrer Ausgangslage; die
+            -- Ausgangsecken des 1x1-Quads liegen bei (0,0), (0,-1), (1,0)
+            -- und (1,-1). Reihenfolge: oben links, unten links, oben
+            -- rechts, unten rechts.
+            piece:SetVertexOffset(1, x1 + nx, y1 + ny)
+            piece:SetVertexOffset(2, x1 - nx, y1 - ny + 1)
+            piece:SetVertexOffset(3, x2 + nx - 1, y2 + ny)
+            piece:SetVertexOffset(4, x2 - nx - 1, y2 - ny + 1)
+            self.pieces[#self.pieces + 1] = piece
+            return
+        end
+        -- Rueckfall: Reihe ueberlappender Quadrate. Der Abstand ist die
+        -- halbe Strichstaerke - weiter auseinander zerfaellt die Linie
+        -- sichtbar in Punkte, enger kostet nur Flaechen ohne Gewinn.
+        piece:Hide()
         local steps = math.max(1, math.ceil(
             math.max(math.abs(toX - fromX), math.abs(toY - fromY)) / (thickness * 0.5)))
         for step = 0, steps do
@@ -2354,19 +2391,28 @@ local function BuildWizardWelcomePage(frame)
     start.label:SetFontObject("GameFontNormalLarge")
     page.start = start
 
-    -- "Spaeter" schliesst; beim ersten Mal je Charakter folgt der Hinweis,
-    -- wie man die Einrichtung wieder aufruft (Owner-Wunsch). Nur beim ersten:
-    -- Wer den Hinweis gelesen hat, weiss es, und ein Fenster nach jedem
-    -- Schliessen waere Draengeln.
+    -- "Spaeter" schliesst wie das × oben rechts - beide gehen durch
+    -- HideWelcomeWithHint, damit der einmalige Hinweis nicht davon abhaengt,
+    -- welchen der beiden Knoepfe jemand erwischt.
     local later = CreateButton(page, "Später", 96, 24, function()
-        GC.UI:HideWelcome()
-        if GC.Onboarding:NoteLaterPressed() then
-            GC.UI:ShowWizardLaterHint()
-        end
+        GC.UI:HideWelcomeWithHint()
     end)
     later:SetPoint("BOTTOM", page, "BOTTOM", 0, 16)
     later.label:SetFontObject("GameFontNormalSmall")
     page.later = later
+end
+
+-- Vorzeitiges Schliessen, egal ob ueber das × oder "Spaeter": zuklappen und
+-- beim ersten Mal je Charakter den Weg zurueck erklaeren. Ein gemeinsamer
+-- Weg fuer beide Knoepfe - die Frage "wie komme ich zurueck?" stellt sich
+-- nur einmal, nicht einmal je Knopf. "Fertig" und "Guild Copilot öffnen"
+-- gehen bewusst NICHT hierdurch: Wer durch ist, verabschiedet sich nicht
+-- auf spaeter.
+function GC.UI:HideWelcomeWithHint()
+    self:HideWelcome()
+    if GC.Onboarding:NoteLaterPressed() then
+        self:ShowWizardLaterHint()
+    end
 end
 
 -- Das Hinweisfenster nach dem ersten "Spaeter": ein Satz, ein Knopf. Es
@@ -2462,10 +2508,12 @@ local function BuildWizardTourPage(frame)
 end
 
 -- Seite 3: das Raidprofil. Die erkannte Spec ist vorgewaehlt, ein Klick
--- bestaetigt - mehr verlangt der Schritt nicht. Die Feinheiten (Dual-Spec,
--- Main/Twink, Abmeldung) bleiben bewusst draussen: Sie haben auf der
--- Profilseite ihre Karte, und ein Assistent, der alles fragt, ist ein
--- Formular.
+-- bestaetigt. Dual-Spec und "flexibel einsetzbar" stehen mit auf der Seite
+-- (Owner-Wunsch - der erste Wurf verwies dafuer auf die Profilseite, aber
+-- beides gehoert zum Raidprofil und der Platz ist da). Main/Twink und die
+-- Abmeldung bleiben draussen: Ein frischer Charakter ist erst einmal so
+-- angelegt, wie die Vorgabe ihn annimmt, und ein Assistent, der alles
+-- fragt, ist ein Formular.
 local function BuildWizardProfilePage(frame)
     local page = CreateWizardPage(frame, "STEP_PROFILE")
     CreateWizardStepHeader(page, "Schritt 1 von 3", "Raidprofil bestätigen",
@@ -2473,31 +2521,70 @@ local function BuildWizardProfilePage(frame)
             .. " Die Spec liest Guild Copilot aus deinen Talenten – bestätigen genügt.")
 
     page.detected = CreateLabel(page, "", { width = 508, height = 16 })
-    page.detected:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -110)
+    page.detected:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -104)
 
+    local primaryLabel = CreateLabel(page, "Primär-Spec", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        height = 14,
+    })
+    primaryLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -128)
     page.specButtons = {}
     for index = 1, 3 do
         local button = CreateButton(page, "", 106, 32, function(selfButton)
             frame.wizardSpecKey = selfButton.specKey
+            -- Dieselbe Regel wie auf der Profilseite: Die Dual-Spec darf
+            -- nicht die Primaer-Spec sein; wer beide gleich stellt, waehlt
+            -- die Dual-Spec ab.
+            if frame.wizardSecondaryKey == selfButton.specKey then
+                frame.wizardSecondaryKey = nil
+            end
             GC.UI:RefreshWizard()
         end)
-        button:SetPoint("TOPLEFT", page, "TOPLEFT", 26 + ((index - 1) * 113), -136)
+        button:SetPoint("TOPLEFT", page, "TOPLEFT", 26 + ((index - 1) * 113), -146)
         page.specButtons[index] = button
     end
+
+    local secondaryLabel = CreateLabel(page, "Dual-Spec (optional)", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        height = 14,
+    })
+    secondaryLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -192)
+    page.noSecondaryButton = CreateButton(page, "Keiner", 78, 32, function()
+        frame.wizardSecondaryKey = nil
+        GC.UI:RefreshWizard()
+    end)
+    page.noSecondaryButton:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -210)
+    page.secondaryButtons = {}
+    for index = 1, 3 do
+        local button = CreateButton(page, "", 106, 32, function(selfButton)
+            frame.wizardSecondaryKey = selfButton.specKey
+            GC.UI:RefreshWizard()
+        end)
+        button:SetPoint("LEFT", page.noSecondaryButton, "RIGHT", 7 + ((index - 1) * 113), 0)
+        page.secondaryButtons[index] = button
+    end
+
+    page.flexCheck = CreateToggle(page, "Flexibel einsetzbar", function(enabled)
+        frame.wizardFlex = enabled == true
+        GC.UI:RefreshWizard()
+    end)
+    page.flexCheck:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -256)
 
     page.confirm = CreateButton(page, "Profil bestätigen", 190, 36, function()
         local profile = GC.Profile:Get()
         GC.Profile:Confirm(frame.wizardSpecKey or profile.raidSpecKey or profile.detectedSpecKey,
-            profile.secondarySpecKey, profile.mainStatus, profile.flex)
+            frame.wizardSecondaryKey, profile.mainStatus, frame.wizardFlex == true)
         GC.UI:RefreshWizard()
     end, "PRIMARY")
-    page.confirm:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -188)
+    page.confirm:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -300)
 
     page.status = CreateLabel(page, "", { width = 508, height = 32, vertical = "TOP" })
-    page.status:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -238)
+    page.status:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -348)
 
     local hint = CreateLabel(page,
-        "Dual-Spec, Main oder Twink und deine Abmeldung stellst du später im Abschnitt COPILOT auf der Seite „Profil“ ein.",
+        "Main oder Twink und deine Abmeldung stellst du später im Abschnitt COPILOT auf der Seite „Profil“ ein.",
         { muted = true, font = "GameFontNormalSmall", width = 508, height = 28, vertical = "TOP" })
     hint:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 26, 10)
 end
@@ -2634,11 +2721,26 @@ function GC.UI:CreateWelcomeFrame()
 
     -- Ein × und die Escape-Taste auf jeder Seite, sonst waere das Fenster
     -- eine Falle. Beides schliesst folgenlos - die Checkliste auf der
-    -- Profilseite traegt denselben Stand weiter.
+    -- Profilseite traegt denselben Stand weiter. Das × geht denselben Weg
+    -- wie "Spaeter" (Owner-Wunsch): Wer vorzeitig schliesst, bekommt beim
+    -- ersten Mal den Hinweis, wie er zurueckkommt - egal ueber welchen Knopf.
     local close = CreateButton(frame, "×", 24, 24, function()
-        GC.UI:HideWelcome()
+        GC.UI:HideWelcomeWithHint()
     end)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
+    frame.closeButton = close
+
+    -- Unten rechts in kleiner Schrift der Autor (Owner-Wunsch). Unter den
+    -- Knoepfen der Navigationsleiste, damit er auf keiner Seite etwas
+    -- verdeckt.
+    local credit = CreateLabel(frame, "Nexarius - Thunderstrike", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        align = "RIGHT",
+        width = 220,
+        height = 12,
+    })
+    credit:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 4)
 
     -- Die Navigationsleiste unten. "Ueberspringen" erscheint nur auf einer
     -- Schrittseite mit offenem Schritt und heisst dasselbe wie in der
@@ -2729,6 +2831,26 @@ function GC.UI:RefreshWizardProfile()
             button:SetActive(spec.key == selectedKey)
         end
     end
+
+    -- Die Dual-Spec-Reihe: Der Knopf der Primaer-Spec ist gesperrt statt
+    -- versteckt - eine Luecke saehe nach einem Fehler aus, ein gesperrter
+    -- Knopf erklaert sich selbst.
+    for index, button in ipairs(page.secondaryButtons) do
+        local spec = classInfo.specs[index]
+        button:SetShown(spec ~= nil)
+        if spec then
+            button.specKey = spec.key
+            button:SetText(spec.name)
+            button:SetActive(spec.key == frame.wizardSecondaryKey)
+            if spec.key == selectedKey then
+                button:Disable()
+            else
+                button:Enable()
+            end
+        end
+    end
+    page.noSecondaryButton:SetActive(frame.wizardSecondaryKey == nil)
+    SetToggle(page.flexCheck, frame.wizardFlex == true)
 
     local detected = GC.SpecByKey[profile.detectedSpecKey or ""]
     if detected then
@@ -2869,8 +2991,13 @@ function GC.UI:ShowWelcome()
     self:CreateWelcomeFrame()
     -- Jedes Oeffnen beginnt vorn und ohne alte Klickauswahl: Die Tour ist
     -- kurz, und mitten in einer vergessenen Sitzung aufzuwachen waere
-    -- verwirrender als zwei bekannte Seiten erneut zu sehen.
+    -- verwirrender als zwei bekannte Seiten erneut zu sehen. Dual-Spec und
+    -- Flex starten auf dem gespeicherten Stand des Profils - der Assistent
+    -- soll ihn ergaenzen, nicht stillschweigend zuruecksetzen.
+    local profile = GC.Profile:Get()
     self.welcomeFrame.wizardSpecKey = nil
+    self.welcomeFrame.wizardSecondaryKey = profile.secondarySpecKey
+    self.welcomeFrame.wizardFlex = profile.flex == true
     GC.Onboarding:StartWizard()
     self.welcomeFrame:Show()
     self:ShowWizardPage()
