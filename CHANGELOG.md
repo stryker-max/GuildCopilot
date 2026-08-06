@@ -51,6 +51,21 @@ Installer und Addon werden getrennt gezählt.
   20 px Kantenlänge sichtbar getreppt, am deutlichsten am Haken neben
   „Bestätigen“. Sie werden jetzt als eine glatt gedrehte Fläche gezeichnet
   (`SetVertexOffset`); die Quadratreihe bleibt als Rückfall.
+- **Der Klick auf den Beruf öffnet jetzt wirklich das Berufsfenster.** Zwei
+  Ursachen: Der sichere Knopf war nur auf das Loslassen der Maustaste
+  registriert, die moderne Engine feuert geschützte Aktionen aber je nach
+  Client-Einstellung beim Drücken — jetzt sind beide Flanken registriert.
+  Und die ganze Berufszeile (Symbol + Name) ist der Knopf, nicht nur
+  „Fenster öffnen“ — sie bleibt auch nach dem Einlesen klickbar.
+- **Der Abschluss meldet sich wie ein neuer Gildenauftrag.** Wer „Fertig“
+  drückt, hört den Stufenaufstieg und sieht den Banner „Guild Copilot is
+  ready for takeoff“.
+- **Die Berufsspalte der Gildenübersicht nennt nur noch Namen.** Die
+  Fertigkeitspunkte standen nur an automatisch erfassten Berufen — von Hand
+  eingetragene haben keine —, und eine Spalte mit mal Zahl, mal keiner sah
+  nach einem Fehler aus.
+- Die Autorenzeile hat Abstand zum „Weiter“-Knopf bekommen; die
+  Navigationsleiste sitzt dafür ein Stück höher.
 
 **Behoben**
 

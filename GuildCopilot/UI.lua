@@ -1430,16 +1430,17 @@ function GC.UI:Toggle()
     end
 end
 
+-- Nur die Berufsnamen, ohne Fertigkeitspunkte. Die Zahl stand nur an
+-- automatisch erfassten Berufen - von Hand eingetragene haben keine -, und
+-- eine Spalte, in der dieselbe Angabe mal mit und mal ohne Zahl steht, sieht
+-- nach einem Fehler aus (Owner-Entscheidung: weglassen). Wer die Punkte
+-- braucht, findet sie an der eigenen Berufskarte im Profil.
 local function ProfessionSummary(profile)
     local labels = {}
     for slot = 1, 2 do
         local profession = profile and profile.professions and profile.professions[slot]
         if profession and profession.name then
-            local label = profession.name
-            if (tonumber(profession.skillLevel) or 0) > 0 then
-                label = label .. " " .. profession.skillLevel
-            end
-            labels[#labels + 1] = label
+            labels[#labels + 1] = profession.name
         end
     end
     return #labels > 0 and table.concat(labels, " / ") or "–"
@@ -2305,14 +2306,19 @@ end
 -- oeffnet sich nur ueber das Wirken des Berufszaubers, und das verlangt
 -- Blizzard als Hardware-Klick auf einen sicheren Knopf. Der Knopf hier sieht
 -- aus wie CreateButton, ist aber ein SecureActionButton; welcher Zauber
--- anliegt, setzt RefreshWizard ausserhalb des Kampfes als Attribut. Nur
--- LeftButtonUp: Der Zauber SCHALTET das Fenster um - doppelt gefeuert waere
--- es auf und sofort wieder zu.
+-- anliegt, setzt RefreshWizard ausserhalb des Kampfes als Attribut.
+--
+-- Registriert werden BEIDE Klickflanken. Der Anniversary-Client sitzt auf
+-- der modernen Engine, und die fuehrt die geschuetzte Aktion je nach
+-- Einstellung (ActionButtonUseKeyDown) beim Druecken ODER beim Loslassen
+-- aus - genau einmal je Klick, nie doppelt. Ein Knopf, der nur LeftButtonUp
+-- kennt, tut bei der verbreiteten Vorgabe "beim Druecken" schlicht nichts;
+-- genau so wurde es gemeldet ("oeffnet nicht mein Berufsfenster").
 local function CreateWizardSpellButton(parent, width, height)
     local button = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
     button:SetSize(width, height)
     if button.RegisterForClicks then
-        button:RegisterForClicks("LeftButtonUp")
+        button:RegisterForClicks("AnyDown", "AnyUp")
     end
     button:SetAttribute("type", "spell")
     button.background = button:CreateTexture(nil, "BACKGROUND")
@@ -2600,9 +2606,31 @@ local function BuildWizardProfessionsPage(frame)
 
     page.rows = {}
     for index = 1, 2 do
-        local row = CreateFrame("Frame", nil, page)
+        -- Die GANZE Zeile ist ein sicherer Knopf, nicht nur "Fenster
+        -- oeffnen": Im Spiel wurde auf Symbol und Namen geklickt und nichts
+        -- passierte - was wie ein Eintrag aussieht, muss sich auch so
+        -- verhalten. Und sie bleibt auch nach dem Einlesen klickbar; das
+        -- Fenster zu oeffnen ist ja weiter erlaubt, nur der Aufforderungs-
+        -- Knopf daneben verschwindet dann.
+        local row = CreateFrame("Button", nil, page, "SecureActionButtonTemplate")
         row:SetSize(508, 44)
         row:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -116 - ((index - 1) * 54))
+        if row.RegisterForClicks then
+            row:RegisterForClicks("AnyDown", "AnyUp")
+        end
+        row:SetAttribute("type", "spell")
+        row.hover = row:CreateTexture(nil, "BACKGROUND")
+        row.hover:SetAllPoints()
+        SetTextureColor(row.hover, THEME.cardHover)
+        row.hover:Hide()
+        row:SetScript("OnEnter", function(selfRow)
+            if selfRow.windowSpell then
+                selfRow.hover:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function(selfRow)
+            selfRow.hover:Hide()
+        end)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(30, 30)
         row.icon:SetPoint("LEFT", row, "LEFT", 0, 0)
@@ -2745,6 +2773,8 @@ function GC.UI:CreateWelcomeFrame()
     -- Die Navigationsleiste unten. "Ueberspringen" erscheint nur auf einer
     -- Schrittseite mit offenem Schritt und heisst dasselbe wie in der
     -- Checkliste: nicht draengeln - die echte Aktion gewinnt trotzdem.
+    -- Die Leiste sitzt nicht ganz unten: Der Streifen darunter gehoert der
+    -- Autorenzeile, und ohne den Abstand klebte der Name am Weiter-Knopf.
     frame.pageLabel = CreateLabel(frame, "", {
         muted = true,
         font = "GameFontNormalSmall",
@@ -2752,30 +2782,32 @@ function GC.UI:CreateWelcomeFrame()
         width = 120,
         height = 16,
     })
-    frame.pageLabel:SetPoint("BOTTOM", frame, "BOTTOM", 0, 26)
+    frame.pageLabel:SetPoint("BOTTOM", frame, "BOTTOM", 0, 35)
 
     frame.backButton = CreateButton(frame, "Zurück", 96, 30, function()
         GC.Onboarding:WizardGo(-1)
         GC.UI:ShowWizardPage()
     end)
-    frame.backButton:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 18)
+    frame.backButton:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 26)
 
     frame.nextButton = CreateButton(frame, "Weiter", 116, 34, function()
         local _, index = GC.Onboarding:GetWizardPage()
         if index >= GC.Onboarding:GetWizardPageCount() then
-            -- Der Abschluss klingt nach Stufenaufstieg (Owner-Wunsch) -
-            -- unabhaengig vom eingestellten Bestaetigungston, denn das hier
-            -- ist keine Bestaetigung, sondern ein "geschafft".
+            -- Der Abschluss klingt nach Stufenaufstieg und meldet sich wie
+            -- ein neuer Gildenauftrag (Owner-Wunsch) - unabhaengig vom
+            -- eingestellten Bestaetigungston, denn das hier ist keine
+            -- Bestaetigung, sondern ein "geschafft".
             if GC.Chat and GC.Chat.PlaySuccessSound then
                 GC.Chat:PlaySuccessSound("LEVEL_UP")
             end
+            GC.UI:ShowOrderBanner("Guild Copilot is ready for takeoff")
             GC.UI:HideWelcome()
         else
             GC.Onboarding:WizardGo(1)
             GC.UI:ShowWizardPage()
         end
     end, "PRIMARY")
-    frame.nextButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 16)
+    frame.nextButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 26)
 
     frame.skipButton = CreateButton(frame, "Überspringen", 120, 30, function()
         GC.Onboarding:SkipWizardStep()
@@ -2903,11 +2935,20 @@ function GC.UI:RefreshWizardProfessions()
             row.name:SetText(name)
             local windowSpell = GC.ProfessionWindowSpells[name] or name
             local isScanned = scanned[name:lower()] == true or scanned[windowSpell:lower()] == true
+            -- Der Fensterzauber haengt an Zeile UND Knopf; beim Sammelberuf
+            -- an keinem von beiden, dort gibt es kein Fenster. Im Kampf
+            -- sperrt WoW das Umstellen sicherer Attribute; dann bleibt der
+            -- letzte Zauber stehen, statt einen Fehler zu werfen.
+            row.windowSpell = not GC.RecipelessProfessions[name] and windowSpell or nil
+            if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
+                row:SetAttribute("spell", row.windowSpell)
+                row.open:SetAttribute("spell", row.windowSpell)
+            end
             if isScanned then
-                row.status:SetText("Rezepte eingelesen")
+                row.status:SetText("Rezepte eingelesen – ein Klick öffnet das Fenster erneut")
                 SetTextColor(row.status, THEME.success)
                 row.open:Hide()
-            elseif GC.RecipelessProfessions[name] then
+            elseif not row.windowSpell then
                 row.status:SetText("Sammelberuf ohne Rezepte – nichts einzulesen")
                 SetTextColor(row.status, THEME.muted)
                 row.open:Hide()
@@ -2916,12 +2957,6 @@ function GC.UI:RefreshWizardProfessions()
                 SetTextColor(row.status, THEME.muted)
                 row.open.label:SetText(name == windowSpell
                     and "Fenster öffnen" or (windowSpell .. " öffnen"))
-                -- Im Kampf sperrt WoW das Umstellen sicherer Attribute; der
-                -- Knopf behaelt dann seinen letzten Zauber, statt einen
-                -- Fehler zu werfen.
-                if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
-                    row.open:SetAttribute("spell", windowSpell)
-                end
                 row.open:Show()
             end
         end

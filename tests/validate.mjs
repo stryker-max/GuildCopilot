@@ -395,6 +395,12 @@ const requiredImplementations = [
   ["Fertig klingt nach Stufenaufstieg", /PlaySuccessSound\("LEVEL_UP"\)/],
   ["Autorenzeile unten rechts im Assistenten", /Nexarius - Thunderstrike/],
   ["Dual-Spec und Flex im Assistenten", /frame\.wizardSecondaryKey/],
+  // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
+  // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
+  // "der Knopf tut nichts".
+  ["sichere Klicks auf beiden Flanken", /RegisterForClicks\("AnyDown", "AnyUp"\)/],
+  ["die ganze Berufszeile öffnet das Fenster", /row:SetAttribute\("spell", row\.windowSpell\)/],
+  ["Abschlussbanner beim Fertigstellen", /Guild Copilot is ready for takeoff/],
   ["Berufe aus den Classic-Fähigkeitszeilen", /local function ReadSkillLineProfessions/],
   ["Herkunft der Berufsangabe", /function GC\.Profile:GetProfessionSource/],
   ["Marker am Minimap-Symbol", /function GC\.UI:RefreshMinimapMarker/],
@@ -504,6 +510,22 @@ if (allSource.includes("RefreshOverview")) {
 const uiSource = fs.readFileSync(path.join(root, "UI.lua"), "utf8");
 if (uiSource.includes("gearAutoSelfToggle") || uiSource.includes("Eigene Ausrüstung selbst prüfen")) {
   throw new Error("Der feste Ausrüstungs-Hintergrundabgleich ist noch abschaltbar.");
+}
+
+// Die Berufsspalte der Gildenübersicht nennt nur Namen. Die Fertigkeitspunkte
+// standen nur an automatisch erfassten Berufen - von Hand eingetragene haben
+// keine -, und eine Spalte mit mal Zahl, mal keiner sieht nach einem Fehler
+// aus (Owner-Entscheidung: weglassen).
+const professionSummaryStart = uiSource.indexOf("local function ProfessionSummary");
+const professionSummary = uiSource.slice(
+  professionSummaryStart,
+  uiSource.indexOf("local function LastOnlineLabel")
+);
+if (professionSummaryStart < 0 || professionSummary.length === 0) {
+  throw new Error("Die Berufsspalte der Übersicht (ProfessionSummary) fehlt.");
+}
+if (/skillLevel/.test(professionSummary)) {
+  throw new Error("Die Berufsspalte der Übersicht zeigt wieder Fertigkeitspunkte.");
 }
 const settingsPosition = uiSource.indexOf('{ key = "SETTINGS"');
 const statisticsPosition = uiSource.indexOf('{ key = "STATISTICS"');

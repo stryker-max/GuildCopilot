@@ -4813,6 +4813,12 @@ assert(wizard_professionRows[1].open:IsShown() == true,
     "Der Rezeptberuf hat keinen Oeffnen-Knopf")
 assert(wizard_professionRows[2].open:IsShown() == false,
     "Der Sammelberuf bekam einen Oeffnen-Knopf, obwohl es kein Fenster gibt")
+-- Die ganze Zeile traegt den Fensterzauber, nicht nur der Knopf - im Spiel
+-- wurde auf Symbol und Namen geklickt. Der Sammelberuf traegt keinen.
+assert(wizard_professionRows[1].windowSpell == "Verzauberkunst",
+    "Die Berufszeile traegt nicht den Zauber ihres Fensters")
+assert(wizard_professionRows[2].windowSpell == nil,
+    "Die Sammelberufszeile traegt einen Fensterzauber")
 
 -- Reine Sammler koennen den Rezeptschritt nie erfuellen - er gilt deshalb
 -- als erledigt, statt auf ewig offen zu stehen.
@@ -4827,6 +4833,8 @@ wizard_profile.workshop = { professions = { schmelzen = { name = "Schmelzen" } }
 addon.UI:ShowWizardPage()
 assert(wizard_professionRows[1].open:IsShown() == false,
     "Der eingelesene Bergbau bietet weiter das Oeffnen an")
+assert(wizard_professionRows[1].windowSpell == "Schmelzen",
+    "Die Bergbau-Zeile oeffnet nicht das Schmelzen-Fenster")
 
 -- Ohne Berufe: keine Zeilen, stattdessen die Leermeldung.
 wizard_profile.professions = {}
@@ -4835,6 +4843,18 @@ assert(wizard_professionRows[1]:IsShown() == false,
     "Ohne Berufe steht eine leere Berufszeile im Assistenten")
 assert(addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.empty:IsShown() == true,
     "Die Leermeldung fuer Charaktere ohne Berufe fehlt")
+
+-- "Fertig" schliesst mit Klang UND Banner (Owner-Wunsch): Der Abschluss
+-- meldet sich wie ein neuer Gildenauftrag.
+addon.UI:ShowWelcome()
+addon.Onboarding:WizardGo(99)
+addon.UI:ShowWizardPage()
+addon.UI.welcomeFrame.nextButton.scripts.OnClick(addon.UI.welcomeFrame.nextButton)
+assert(addon.UI.welcomeFrame:IsShown() == false,
+    "Fertig schliesst den Assistenten nicht")
+assert(addon.UI.orderBanner ~= nil
+    and tostring(addon.UI.orderBanner.lines[1]:GetText()):find("ready for takeoff", 1, true) ~= nil,
+    "Der Abschlussbanner fehlt oder traegt den falschen Text")
 
 -- Abbrechen ist jederzeit folgenlos: Das x schliesst, die Merker bleiben
 -- unangetastet, und die Checkliste zeigt denselben Stand weiter.
