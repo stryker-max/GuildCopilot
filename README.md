@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.99
+# Guild Copilot 0.9.100
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -55,7 +55,7 @@ Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten la
 
 **Dein Profil.** Primär-Spec, optionaler Dual-Spec, Main oder Twink, „flexibel einsetzbar“ — der Talentbaum wird erkannt, bestätigen musst du selbst. Änderst du etwas, gilt es als unbestätigt, bis du erneut bestätigst; in der Gilde steht solange der letzte bestätigte Stand. Dazu die eigene **Abmeldung** von/bis mit optionalem Grund — das Datum wählst du über das Kalendersymbol im Feld, tippen geht weiterhin und nimmt auch `15.08.2026` an.
 
-**Erste Schritte.** Beim ersten Login je Charakter erscheint ein Willkommensfenster mit einem einzigen Knopf. Danach führt eine Checkliste oben im Profil durch Raidprofil, Rezepte und Ausrüstung. Keinen „Weiter“-Knopf — die echte Aktion schiebt die Liste weiter, jeder Schritt ist überspringbar, und ein Punkt am Minimap-Symbol erinnert an den Rest.
+**Erste Schritte.** Beim ersten Login je Charakter öffnet sich ein Einrichtungsassistent: eine kurze Funktionstour entlang der Seitenleiste (was kann das Addon, und wo finde ich es), dann die drei Schritte — Raidprofil mit erkannter Spec per Klick bestätigen, Berufsfenster direkt aus dem Assistenten öffnen (die Rezepte liest Guild Copilot dabei selbst), die Ausrüstungsprüfung läuft ohnehin automatisch. Jederzeit abbrechbar über ×, Escape oder „Später“, jeder Schritt einzeln überspringbar. Wer den Assistenten zuklappt, verliert nichts: Dieselben Schritte stehen als Checkliste oben im Profil, die echte Aktion schiebt sie weiter, und ein Punkt am Minimap-Symbol erinnert an den Rest. Der Knopf **Einrichtung** im Fensterkopf und `/gcp welcome` holen den Assistenten jederzeit zurück.
 
 **Mitgliederpflege** (ranggeschützt). Aktive Abmeldungen und nach Inaktivität sortierte Prüfvorschläge. Jeder Vorschlag lässt sich als **Ausnahme**, **zurückgestellt** oder **erledigt** ablegen — gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten. Unsichere Main/Twink-Fälle werden als „Prüfen“ gekennzeichnet, nicht als Entfernungsvorschlag.
 
@@ -134,7 +134,7 @@ Alle sollten dieselbe Version fahren. Sie steht im Fenstertitel, Abweichungen we
 
 **Von Hand:** den Ordner `GuildCopilot` nach `World of Warcraft/_anniversary_/Interface/AddOns/` kopieren. Danach muss `GuildCopilot.toc` direkt in `AddOns/GuildCopilot/` liegen — ein doppelt verschachtelter Ordner ist der häufigste Installationsfehler.
 
-Danach WoW neu starten, **Guild Copilot** aktivieren und `/gcp` eingeben. Das Willkommensfenster führt durch den Rest.
+Danach WoW neu starten, **Guild Copilot** aktivieren und `/gcp` eingeben. Der Einrichtungsassistent führt durch den Rest.
 
 ## Der Installer
 
@@ -146,7 +146,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.99.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.100.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -186,7 +186,7 @@ Die Nutzung bleibt an die jeweiligen Realm-, Kanal- und Verhaltensregeln gebunde
 |---|---|
 | `/gcp` | öffnet und schließt Guild Copilot (`/guildcopilot` tut dasselbe) |
 | `/gcp help` | zeigt alle Befehle im Chat |
-| `/gcp welcome` | zeigt das Willkommensfenster mit der Einrichtung |
+| `/gcp welcome` | öffnet den Einrichtungsassistenten mit der Funktionstour |
 | `/gcp recruite` | blendet den Werbebalken ein oder aus (`/gcp werbung` bleibt gültig) |
 | `/gcp ver` | fragt die Addon-Versionen in Gilde oder Gruppe ab |
 | `/gcp phase` | zeigt die Content-Phase der Gilde; `/gcp phase T5` stellt sie um |

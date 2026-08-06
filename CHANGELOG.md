@@ -7,6 +7,38 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.100 – Addon
+
+**Neu**
+
+- **Ein Einrichtungsassistent ersetzt das alte Willkommensfenster.** Beim
+  ersten Login je Charakter öffnet sich ein mehrseitiges Fenster: das Logo,
+  eine kurze Funktionstour entlang der Seitenleiste — was kann Guild Copilot,
+  und wo finde ich es —, dann die drei Einrichtungsschritte als je eigene
+  Seite, zum Schluss die Fundorte für später (Minimap-Symbol, `/gcp`, der
+  Knopf „Einrichtung“ im Fensterkopf).
+- **Der Assistent nimmt die Schritte ab, soweit WoW das erlaubt.** Die aus den
+  Talenten erkannte Spec ist vorgewählt, ein Klick bestätigt sie. Die
+  Berufsfenster öffnet ein Knopf direkt aus dem Assistenten — die Rezepte
+  liest Guild Copilot dabei von selbst, und die Zeile springt auf Grün,
+  während das Fenster noch offen ist. Die Ausrüstungsprüfung stößt der
+  Assistent selbst an und zeigt ihr Ergebnis.
+- **Jederzeit abbrechbar, nichts geht verloren.** ×, Escape und „Später“
+  schließen folgenlos, jeder Schritt hat sein „Überspringen“. Die Checkliste
+  oben im Profil zeigt denselben Stand weiter — beide fragen dieselben Daten
+  und können sich nicht widersprechen. Der Knopf „Einrichtung“ und
+  `/gcp welcome` öffnen den Assistenten jederzeit erneut.
+
+**Behoben**
+
+- **Reine Sammler hingen für immer im Rezeptschritt.** Kräuterkunde und
+  Kürschnerei haben kein Rezeptfenster; der Schritt „Rezepte einlesen“ war für
+  Charaktere mit zwei Sammelberufen unerfüllbar und stand auf ewig offen. Er
+  gilt dort jetzt als erledigt („Keine Berufe mit Rezepten“).
+- **Bergbau heißt am Fenster „Schmelzen“.** Der Assistent ordnet den Scan des
+  Schmelzen-Fensters dem Beruf zu und beschriftet den Öffnen-Knopf
+  entsprechend.
+
 ## 0.9.99 – Addon
 
 **Behoben**

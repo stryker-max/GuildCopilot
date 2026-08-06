@@ -38,7 +38,7 @@ local THEME = {
 local SLASH_COMMANDS = {
     { command = "/gcp", description = "öffnet und schließt Guild Copilot" },
     { command = "/gcp ver", description = "prüft, wer in Gruppe oder Gilde das Addon hat und in welcher Version" },
-    { command = "/gcp welcome", description = "zeigt das Willkommensfenster mit der Einrichtung" },
+    { command = "/gcp welcome", description = "öffnet den Einrichtungsassistenten mit der Funktionstour" },
     { command = "/gcp recruite", description = "blendet den Werbebalken ein oder aus" },
     { command = "/gcp debug", description = "misst die Laufzeit; ein zweiter Aufruf zeigt das Ergebnis" },
     { command = "/gcp help", description = "zeigt diese Liste im Chat" },
@@ -1216,18 +1216,16 @@ function GC.UI:CreateMainFrame()
     close:SetPoint("RIGHT", header, "RIGHT", -13, 0)
     close.label:SetFontObject("GameFontNormalLarge")
 
-    -- Die Checkliste "Erste Schritte" laesst sich jederzeit wieder aufrufen -
-    -- auch nach "Nicht mehr anzeigen" und auch, wenn schon alles erledigt ist.
-    -- Ein eigener Navigationspunkt kam dafuer nicht in Frage: Die Seitenleiste
-    -- hat keine Bildlaufleiste und ist voll.
+    -- Die Einrichtung laesst sich jederzeit wieder aufrufen - auch nach
+    -- "Nicht mehr anzeigen" und auch, wenn schon alles erledigt ist. Der
+    -- Knopf oeffnet den Assistenten mit der Funktionstour und holt zugleich
+    -- die Checkliste im Profil zurueck (Reopen). Ein eigener Navigationspunkt
+    -- kam dafuer nicht in Frage: Die Seitenleiste hat keine Bildlaufleiste
+    -- und ist voll.
     local setup = CreateButton(header, "Einrichtung", 110, 26, function()
         GC.Onboarding:Reopen()
-        GC.UI:ShowPage("ROSTER")
-        local page = GC.UI.pages.ROSTER
-        if page and page.profileScroll then
-            page.profileScroll:SetVerticalScroll(0)
-            page.profileScroll:UpdateModernThumb()
-        end
+        GC.UI:RefreshOnboarding()
+        GC.UI:ShowWelcome()
     end)
     setup:SetPoint("RIGHT", close, "LEFT", -8, 0)
     setup:SetScript("OnEnter", function(selfButton)
@@ -1237,7 +1235,8 @@ function GC.UI:CreateMainFrame()
         end
         GameTooltip:SetOwner(selfButton, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Erste Schritte")
-        GameTooltip:AddLine("Zeigt die Einrichtungs-Checkliste im Profil wieder an.", 1, 1, 1, true)
+        GameTooltip:AddLine("Öffnet den Einrichtungsassistenten mit der Funktionstour"
+            .. " und holt die Checkliste im Profil zurück.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     setup:SetScript("OnLeave", function(selfButton)
@@ -2249,20 +2248,319 @@ function GC.UI:RefreshSettings()
     page.settingsScroll:UpdateModernThumb()
 end
 
--- === Willkommensfenster ====================================================
+-- === Einrichtungsassistent =================================================
 --
--- Beim ersten Login eines Charakters: das Schriftlogo und genau ein Knopf.
--- Kein Text, keine zweite Wahl - was zu tun ist, steht danach als Checkliste
--- auf der Profilseite, und die ist der eigentliche Inhalt. Ein Fenster, das
--- schon hier alles erklaert, wird ueberblaettert.
+-- Aus dem Willkommensfenster ist ein mehrseitiger Assistent geworden
+-- (Owner-Wunsch): das Schriftlogo, eine Funktionstour und die drei Schritte
+-- der Checkliste als je eigene Seite, zum Schluss die Fundorte fuer spaeter.
+-- Die Seitenfolge und die Tour-Inhalte liegen in Onboarding.lua; hier steht
+-- nur, wie jede Seite aussieht.
+--
+-- Der Assistent nimmt ab, was WoW abnehmen laesst: Die erkannte Spec ist
+-- vorgewaehlt und ein Klick bestaetigt sie, die Berufsfenster oeffnen
+-- sichere Knoepfe direkt aus dem Assistenten, die Ausruestungspruefung
+-- stoesst er selbst an. Und er laesst sich jederzeit verlassen - x, Escape,
+-- "Spaeter" oder "Ueberspringen" -, ohne dass etwas verloren geht: Die
+-- Checkliste auf der Profilseite zeigt denselben Stand, denn beide fragen
+-- dieselben Daten.
+
+-- Der eine Handgriff, den kein Addon abnehmen darf: Ein Berufsfenster
+-- oeffnet sich nur ueber das Wirken des Berufszaubers, und das verlangt
+-- Blizzard als Hardware-Klick auf einen sicheren Knopf. Der Knopf hier sieht
+-- aus wie CreateButton, ist aber ein SecureActionButton; welcher Zauber
+-- anliegt, setzt RefreshWizard ausserhalb des Kampfes als Attribut. Nur
+-- LeftButtonUp: Der Zauber SCHALTET das Fenster um - doppelt gefeuert waere
+-- es auf und sofort wieder zu.
+local function CreateWizardSpellButton(parent, width, height)
+    local button = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
+    button:SetSize(width, height)
+    if button.RegisterForClicks then
+        button:RegisterForClicks("LeftButtonUp")
+    end
+    button:SetAttribute("type", "spell")
+    button.background = button:CreateTexture(nil, "BACKGROUND")
+    button.background:SetAllPoints()
+    button.border = button:CreateTexture(nil, "BORDER")
+    button.border:SetPoint("TOPLEFT", -1, 1)
+    button.border:SetPoint("BOTTOMRIGHT", 1, -1)
+    button.border:SetColorTexture(THEME.border[1], THEME.border[2], THEME.border[3], 1)
+    button.background:SetDrawLayer("BORDER", 1)
+    SetTextureColor(button.background, THEME.accentDark)
+    button.label = CreateLabel(button, "", { align = "CENTER", height = height })
+    button.label:SetAllPoints()
+    button:SetScript("OnEnter", function(selfButton)
+        SetTextureColor(selfButton.background, THEME.accent)
+    end)
+    button:SetScript("OnLeave", function(selfButton)
+        SetTextureColor(selfButton.background, THEME.accentDark)
+    end)
+    return button
+end
+
+-- Jede Seite ist ein eigener Rahmen ueber der Navigationsleiste; sichtbar
+-- ist immer genau einer.
+local function CreateWizardPage(frame, key)
+    local page = CreateFrame("Frame", nil, frame)
+    page:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    page:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 58)
+    page:Hide()
+    frame.wizardPages[key] = page
+    return page
+end
+
+-- Kopf einer Schrittseite: Zaehler in der Akzentfarbe, Titel, ein
+-- erklaerender Satz. Der Zaehler zaehlt die SCHRITTE (1 von 3), nicht die
+-- Seiten - die Tour ist kein Schritt, und "Seite 3 von 6" stuende schon
+-- unten in der Navigationsleiste.
+local function CreateWizardStepHeader(page, counter, title, description)
+    local chip = CreateLabel(page, counter, {
+        color = THEME.accent,
+        font = "GameFontNormalSmall",
+        height = 14,
+    })
+    chip:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -22)
+    local heading = CreateLabel(page, title, { title = true })
+    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -40)
+    local help = CreateLabel(page, description, {
+        muted = true,
+        width = 508,
+        height = 32,
+        vertical = "TOP",
+    })
+    help:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -70)
+end
+
+-- Seite 1: das Schriftlogo und genau ein grosser Knopf, wie das alte
+-- Willkommensfenster. Wer hier schon alles erklaert bekommt, ueberblaettert
+-- es - die Tour kommt deshalb erst als eigene Seite danach.
+local function BuildWizardWelcomePage(frame)
+    local page = CreateWizardPage(frame, "WELCOME")
+
+    local wordmark = page:CreateTexture(nil, "ARTWORK")
+    wordmark:SetSize(280, 280)
+    wordmark:SetPoint("TOP", page, "TOP", 0, -12)
+    wordmark:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotWordmark")
+
+    local tagline = CreateLabel(page,
+        "Dein Gildenassistent für Rekrutierung, Roster, Berufe und Raidauswertung.",
+        { muted = true, align = "CENTER", width = 440, height = 34, vertical = "TOP" })
+    tagline:SetPoint("TOP", page, "TOP", 0, -294)
+
+    local start = CreateButton(page, "Los geht's", 240, 42, function()
+        GC.Onboarding:WizardGo(1)
+        GC.UI:ShowWizardPage()
+    end, "PRIMARY")
+    start:SetPoint("BOTTOM", page, "BOTTOM", 0, 48)
+    start.label:SetFontObject("GameFontNormalLarge")
+
+    -- "Spaeter" schliesst nur; /gcp welcome und der Kopfzeilen-Knopf
+    -- "Einrichtung" fuehren jederzeit hierher zurueck.
+    local later = CreateButton(page, "Später", 96, 24, function()
+        GC.UI:HideWelcome()
+    end)
+    later:SetPoint("BOTTOM", page, "BOTTOM", 0, 16)
+    later.label:SetFontObject("GameFontNormalSmall")
+end
+
+-- Seite 2: die Funktionstour. Ein Eintrag je Abschnitt der Seitenleiste, in
+-- deren Reihenfolge - das WAS steht im Text, das WO ergibt sich daraus, dass
+-- die Liste die Seitenleiste selbst ist.
+local function BuildWizardTourPage(frame)
+    local page = CreateWizardPage(frame, "TOUR")
+
+    local heading = CreateLabel(page, "Was Guild Copilot kann", { title = true })
+    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -22)
+    local help = CreateLabel(page,
+        "Alles liegt in einem Fenster; die Seitenleiste links gliedert es in fünf Abschnitte – von oben nach unten:",
+        { muted = true, width = 508, height = 30, vertical = "TOP" })
+    help:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -50)
+
+    local y = -88
+    for _, entry in ipairs(GC.Onboarding.TOUR) do
+        local section = CreateLabel(page, entry.section, {
+            color = THEME.accent,
+            font = "GameFontNormalSmall",
+            width = 118,
+            height = 14,
+        })
+        section:SetPoint("TOPLEFT", page, "TOPLEFT", 26, y)
+        local pagesLabel = CreateLabel(page, entry.pages, {
+            font = "GameFontNormalSmall",
+            width = 384,
+            height = 14,
+        })
+        pagesLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 150, y)
+        local text = CreateLabel(page, entry.text, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 384,
+            height = 28,
+            vertical = "TOP",
+        })
+        text:SetPoint("TOPLEFT", page, "TOPLEFT", 150, y - 17)
+        y = y - 62
+    end
+end
+
+-- Seite 3: das Raidprofil. Die erkannte Spec ist vorgewaehlt, ein Klick
+-- bestaetigt - mehr verlangt der Schritt nicht. Die Feinheiten (Dual-Spec,
+-- Main/Twink, Abmeldung) bleiben bewusst draussen: Sie haben auf der
+-- Profilseite ihre Karte, und ein Assistent, der alles fragt, ist ein
+-- Formular.
+local function BuildWizardProfilePage(frame)
+    local page = CreateWizardPage(frame, "STEP_PROFILE")
+    CreateWizardStepHeader(page, "Schritt 1 von 3", "Raidprofil bestätigen",
+        "Damit Raidleitung und Rekrutierung wissen, was sie an dir haben."
+            .. " Die Spec liest Guild Copilot aus deinen Talenten – bestätigen genügt.")
+
+    page.detected = CreateLabel(page, "", { width = 508, height = 16 })
+    page.detected:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -110)
+
+    page.specButtons = {}
+    for index = 1, 3 do
+        local button = CreateButton(page, "", 106, 32, function(selfButton)
+            frame.wizardSpecKey = selfButton.specKey
+            GC.UI:RefreshWizard()
+        end)
+        button:SetPoint("TOPLEFT", page, "TOPLEFT", 26 + ((index - 1) * 113), -136)
+        page.specButtons[index] = button
+    end
+
+    page.confirm = CreateButton(page, "Profil bestätigen", 190, 36, function()
+        local profile = GC.Profile:Get()
+        GC.Profile:Confirm(frame.wizardSpecKey or profile.raidSpecKey or profile.detectedSpecKey,
+            profile.secondarySpecKey, profile.mainStatus, profile.flex)
+        GC.UI:RefreshWizard()
+    end, "PRIMARY")
+    page.confirm:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -188)
+
+    page.status = CreateLabel(page, "", { width = 508, height = 32, vertical = "TOP" })
+    page.status:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -238)
+
+    local hint = CreateLabel(page,
+        "Dual-Spec, Main oder Twink und deine Abmeldung stellst du später im Abschnitt COPILOT auf der Seite „Profil“ ein.",
+        { muted = true, font = "GameFontNormalSmall", width = 508, height = 28, vertical = "TOP" })
+    hint:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 26, 10)
+end
+
+-- Seite 4: die Rezepte. Je erlerntem Beruf eine Zeile mit Symbol, Stand und
+-- dem sicheren Oeffnen-Knopf; eingelesen wird beim Oeffnen von selbst
+-- (Workshop.lua lauscht auf TRADE_SKILL_SHOW und CRAFT_SHOW).
+local function BuildWizardProfessionsPage(frame)
+    local page = CreateWizardPage(frame, "STEP_PROFESSIONS")
+    CreateWizardStepHeader(page, "Schritt 2 von 3", "Rezepte einlesen",
+        "WoW gibt Rezepte nur heraus, solange das Berufsfenster offen ist."
+            .. " Der Knopf öffnet es direkt – alles Weitere liest Guild Copilot von selbst.")
+
+    page.rows = {}
+    for index = 1, 2 do
+        local row = CreateFrame("Frame", nil, page)
+        row:SetSize(508, 44)
+        row:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -116 - ((index - 1) * 54))
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(30, 30)
+        row.icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.name = CreateLabel(row, "", { width = 240, height = 16 })
+        row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -4)
+        row.status = CreateLabel(row, "", {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = 300,
+            height = 14,
+        })
+        row.status:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -22)
+        row.open = CreateWizardSpellButton(row, 140, 30)
+        row.open:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        row:Hide()
+        page.rows[index] = row
+    end
+
+    page.empty = CreateLabel(page,
+        "Dieser Charakter hat keine Berufe mit Rezepten – hier gibt es nichts zu tun.",
+        { muted = true, width = 508, height = 18 })
+    page.empty:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -122)
+    page.empty:Hide()
+
+    local hint = CreateLabel(page,
+        "Danach weiß die Gildenwerkstatt, was du herstellen kannst – zu finden im Abschnitt GILDE.",
+        { muted = true, font = "GameFontNormalSmall", width = 508, height = 28, vertical = "TOP" })
+    hint:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 26, 10)
+end
+
+-- Seite 5: die Ausruestung. Der einzige Schritt ohne Handgriff - die
+-- Pruefung laeuft von selbst, und wer die Seite erreicht, bekommt hier ihr
+-- Ergebnis statt einer Aufgabe.
+local function BuildWizardGearPage(frame)
+    local page = CreateWizardPage(frame, "STEP_GEAR")
+    CreateWizardStepHeader(page, "Schritt 3 von 3", "Ausrüstung prüfen",
+        "Hier musst du nichts tun: Guild Copilot prüft deine angelegten Gegenstände"
+            .. " selbst auf fehlende Verzauberungen und leere Sockel.")
+
+    page.findings = CreateLabel(page, "", { width = 508, height = 96, vertical = "TOP" })
+    page.findings:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -112)
+
+    page.status = CreateLabel(page, "", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        width = 508,
+        height = 28,
+        vertical = "TOP",
+    })
+    page.status:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -216)
+
+    local hint = CreateLabel(page,
+        "Die Prüfung aller Raider und den gildenweiten Regelsatz findest du im Abschnitt RAID auf der Seite „Ausrüstung“.",
+        { muted = true, font = "GameFontNormalSmall", width = 508, height = 28, vertical = "TOP" })
+    hint:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 26, 10)
+end
+
+-- Seite 6: die Fundorte fuer spaeter. Der Assistent verabschiedet sich mit
+-- den drei Wegen zurueck ins Addon - mehr muss niemand behalten.
+local function BuildWizardDonePage(frame)
+    local page = CreateWizardPage(frame, "DONE")
+
+    local heading = CreateLabel(page, "Gut zu wissen", { title = true })
+    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -22)
+    page.status = CreateLabel(page, "", { width = 508, height = 30, vertical = "TOP" })
+    page.status:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -52)
+
+    local lines = {
+        "Das Minimap-Symbol öffnet Guild Copilot. Ein Punkt daran heißt: Hier wartet etwas auf dich.",
+        "/gcp öffnet und schließt das Fenster, /gcp help zeigt alle Befehle im Chat.",
+        "Der Knopf „Einrichtung“ im Fensterkopf bringt dich jederzeit zu diesem Assistenten zurück.",
+    }
+    for index, text in ipairs(lines) do
+        local dot = page:CreateTexture(nil, "ARTWORK")
+        dot:SetSize(8, 8)
+        dot:SetTexture(WHITE_TEXTURE)
+        SetTextureColor(dot, THEME.accent)
+        dot:SetPoint("TOPLEFT", page, "TOPLEFT", 28, -104 - ((index - 1) * 50))
+        local label = CreateLabel(page, text, { width = 462, height = 34, vertical = "TOP" })
+        label:SetPoint("TOPLEFT", page, "TOPLEFT", 48, -100 - ((index - 1) * 50))
+    end
+
+    local open = CreateButton(page, "Guild Copilot öffnen", 220, 40, function()
+        GC.UI:HideWelcome()
+        GC.UI:CreateMainFrame()
+        GC.UI.frame:Show()
+        GC.UI:ShowPage("ROSTER")
+        local roster = GC.UI.pages.ROSTER
+        if roster and roster.profileScroll then
+            roster.profileScroll:SetVerticalScroll(0)
+            roster.profileScroll:UpdateModernThumb()
+        end
+    end, "PRIMARY")
+    open:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 26, 12)
+end
+
 function GC.UI:CreateWelcomeFrame()
     if self.welcomeFrame then
         return self.welcomeFrame
     end
 
     local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotWelcomeFrame")
-    frame:SetSize(420, 380)
-    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+    frame:SetSize(560, 500)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -2273,40 +2571,244 @@ function GC.UI:CreateWelcomeFrame()
     frame:SetToplevel(true)
     frame:Hide()
     table.insert(UISpecialFrames, "GuildCopilotWelcomeFrame")
+    frame.wizardPages = {}
 
-    local wordmark = frame:CreateTexture(nil, "ARTWORK")
-    wordmark:SetSize(300, 300)
-    wordmark:SetPoint("TOP", frame, "TOP", 0, -8)
-    wordmark:SetTexture("Interface\\AddOns\\GuildCopilot\\Media\\GuildCopilotWordmark")
-
-    local start = CreateButton(frame, "Einrichtung starten", 240, 42, function()
-        GC.UI:HideWelcome()
-        GC.UI:CreateMainFrame()
-        GC.UI.frame:Show()
-        GC.UI:ShowPage("ROSTER")
-        local page = GC.UI.pages.ROSTER
-        if page and page.profileScroll then
-            page.profileScroll:SetVerticalScroll(0)
-            page.profileScroll:UpdateModernThumb()
-        end
-    end, "PRIMARY")
-    start:SetPoint("BOTTOM", frame, "BOTTOM", 0, 28)
-    start.label:SetFontObject("GameFontNormalLarge")
-
-    -- Ein × und die Escape-Taste, sonst waere das Fenster eine Falle. Es ist
-    -- bewusst unscheinbar: Der eine Knopf soll der Weg sein, nicht dieser.
+    -- Ein × und die Escape-Taste auf jeder Seite, sonst waere das Fenster
+    -- eine Falle. Beides schliesst folgenlos - die Checkliste auf der
+    -- Profilseite traegt denselben Stand weiter.
     local close = CreateButton(frame, "×", 24, 24, function()
         GC.UI:HideWelcome()
     end)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
 
+    -- Die Navigationsleiste unten. "Ueberspringen" erscheint nur auf einer
+    -- Schrittseite mit offenem Schritt und heisst dasselbe wie in der
+    -- Checkliste: nicht draengeln - die echte Aktion gewinnt trotzdem.
+    frame.pageLabel = CreateLabel(frame, "", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        align = "CENTER",
+        width = 120,
+        height = 16,
+    })
+    frame.pageLabel:SetPoint("BOTTOM", frame, "BOTTOM", 0, 26)
+
+    frame.backButton = CreateButton(frame, "Zurück", 96, 30, function()
+        GC.Onboarding:WizardGo(-1)
+        GC.UI:ShowWizardPage()
+    end)
+    frame.backButton:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 18)
+
+    frame.nextButton = CreateButton(frame, "Weiter", 116, 34, function()
+        local _, index = GC.Onboarding:GetWizardPage()
+        if index >= GC.Onboarding:GetWizardPageCount() then
+            GC.UI:HideWelcome()
+        else
+            GC.Onboarding:WizardGo(1)
+            GC.UI:ShowWizardPage()
+        end
+    end, "PRIMARY")
+    frame.nextButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 16)
+
+    frame.skipButton = CreateButton(frame, "Überspringen", 120, 30, function()
+        GC.Onboarding:SkipWizardStep()
+        GC.UI:ShowWizardPage()
+        GC.UI:RefreshOnboarding()
+    end)
+    frame.skipButton:SetPoint("RIGHT", frame.nextButton, "LEFT", -10, 0)
+
+    BuildWizardWelcomePage(frame)
+    BuildWizardTourPage(frame)
+    BuildWizardProfilePage(frame)
+    BuildWizardProfessionsPage(frame)
+    BuildWizardGearPage(frame)
+    BuildWizardDonePage(frame)
+
     self.welcomeFrame = frame
     return frame
 end
 
+-- Blendet die aktuelle Seite ein und frischt sie auf. Beim Erreichen der
+-- Ausruestungsseite wird die Selbstpruefung angestossen, falls noch kein
+-- Ergebnis vorliegt - der Schritt verspricht "hier musst du nichts tun",
+-- also darf er nicht auf den naechsten Login warten.
+function GC.UI:ShowWizardPage()
+    local frame = self:CreateWelcomeFrame()
+    local definition = GC.Onboarding:GetWizardPage()
+    for key, child in pairs(frame.wizardPages) do
+        child:SetShown(key == definition.key)
+    end
+    if definition.key == "STEP_GEAR" and GC.GearAudit
+        and not GC.GearAudit:GetAudit(GC:GetPlayerFullName()) then
+        GC.GearAudit:AuditSelf(true)
+    end
+    self:RefreshWizard()
+end
+
+function GC.UI:RefreshWizardProfile()
+    local frame = self.welcomeFrame
+    local page = frame.wizardPages.STEP_PROFILE
+    local profile = GC.Profile:Get()
+    local classInfo = GC.Classes[profile.classFile or ""] or { specs = {} }
+    local done, detail = GC.Onboarding:GetStepState("PROFILE")
+
+    -- Vorauswahl: was im Assistenten geklickt wurde, sonst die gespeicherte
+    -- Wahl, sonst die erkannte Spec - dieselbe Rangfolge wie beim Bestaetigen.
+    local selectedKey = frame.wizardSpecKey or profile.raidSpecKey or profile.detectedSpecKey
+    for index, button in ipairs(page.specButtons) do
+        local spec = classInfo.specs[index]
+        button:SetShown(spec ~= nil)
+        if spec then
+            button.specKey = spec.key
+            button:SetText(spec.name)
+            button:SetActive(spec.key == selectedKey)
+        end
+    end
+
+    local detected = GC.SpecByKey[profile.detectedSpecKey or ""]
+    if detected then
+        page.detected:SetText("Aus deinen Talenten erkannt: " .. detected.name .. ".")
+    else
+        page.detected:SetText("Keine Talente erkannt – wähle deine Spec von Hand.")
+    end
+
+    if done then
+        page.status:SetText(detail or "Bestätigt.")
+        SetTextColor(page.status, THEME.success)
+        page.confirm:SetText("Erneut bestätigen")
+    else
+        local confirmation = GC.Profile:GetLastConfirmation()
+        if confirmation and not confirmation.ok then
+            page.status:SetText(confirmation.message or "")
+            SetTextColor(page.status, THEME.warning)
+        else
+            page.status:SetText("Ein Klick genügt – ändern kannst du alles jederzeit.")
+            SetTextColor(page.status, THEME.muted)
+        end
+        page.confirm:SetText("Profil bestätigen")
+    end
+end
+
+function GC.UI:RefreshWizardProfessions()
+    local frame = self.welcomeFrame
+    local page = frame.wizardPages.STEP_PROFESSIONS
+    local profile = GC.Profile:Get()
+
+    -- Was schon eingelesen ist, nach Kleinschreibung: Der Scan speichert den
+    -- Namen des Fensters, und der weicht bei Bergbau ("Schmelzen") vom
+    -- Berufsnamen ab - deshalb wird gegen beide verglichen.
+    local scanned = {}
+    for _, profession in pairs((profile.workshop or {}).professions or {}) do
+        local name = GC.Util.Trim(profession and profession.name or "")
+        if name ~= "" then
+            scanned[name:lower()] = true
+        end
+    end
+
+    local count = 0
+    for slot = 1, 2 do
+        local name = GC.Util.Trim((profile.professions[slot] or {}).name or "")
+        if name ~= "" and count < #page.rows then
+            count = count + 1
+            local row = page.rows[count]
+            row:Show()
+            row.icon:SetTexture(GC.ProfessionIcons[name] or GC.ProfessionIcons[""])
+            row.name:SetText(name)
+            local windowSpell = GC.ProfessionWindowSpells[name] or name
+            local isScanned = scanned[name:lower()] == true or scanned[windowSpell:lower()] == true
+            if isScanned then
+                row.status:SetText("Rezepte eingelesen")
+                SetTextColor(row.status, THEME.success)
+                row.open:Hide()
+            elseif GC.RecipelessProfessions[name] then
+                row.status:SetText("Sammelberuf ohne Rezepte – nichts einzulesen")
+                SetTextColor(row.status, THEME.muted)
+                row.open:Hide()
+            else
+                row.status:SetText("Noch nicht eingelesen")
+                SetTextColor(row.status, THEME.muted)
+                row.open.label:SetText(name == windowSpell
+                    and "Fenster öffnen" or (windowSpell .. " öffnen"))
+                -- Im Kampf sperrt WoW das Umstellen sicherer Attribute; der
+                -- Knopf behaelt dann seinen letzten Zauber, statt einen
+                -- Fehler zu werfen.
+                if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
+                    row.open:SetAttribute("spell", windowSpell)
+                end
+                row.open:Show()
+            end
+        end
+    end
+    for index = count + 1, #page.rows do
+        page.rows[index]:Hide()
+    end
+    page.empty:SetShown(count == 0)
+end
+
+function GC.UI:RefreshWizardGear()
+    local frame = self.welcomeFrame
+    local page = frame.wizardPages.STEP_GEAR
+    local audit = GC.GearAudit and GC.GearAudit:GetAudit(GC:GetPlayerFullName())
+    if audit then
+        page.findings:SetText(self:FormatGearFindings(audit, 4))
+        page.status:SetText("Geprüft wird von allein weiter – bei jedem Login und nach jedem Ausrüstungswechsel.")
+    else
+        page.findings:SetText("|cff91a3b8Die Prüfung läuft gerade im Hintergrund – das Ergebnis erscheint hier.|r")
+        page.status:SetText("")
+    end
+end
+
+function GC.UI:RefreshWizardDone()
+    local page = self.welcomeFrame.wizardPages.DONE
+    if GC.Onboarding:IsFinished() then
+        page.status:SetText("Dieser Charakter ist eingerichtet.")
+        SetTextColor(page.status, THEME.success)
+    else
+        page.status:SetText("Offene Schritte warten in der Checkliste oben auf der Profilseite – ganz ohne Eile.")
+        SetTextColor(page.status, THEME.muted)
+    end
+end
+
+-- Frischt Navigationsleiste und aktuelle Seite auf. Wird auch von den
+-- Datenereignissen gerufen (Bestaetigung, Rezeptscan, Pruefergebnis) und
+-- kehrt bei geschlossenem Fenster sofort um.
+function GC.UI:RefreshWizard()
+    local frame = self.welcomeFrame
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local definition, index = GC.Onboarding:GetWizardPage()
+    local count = GC.Onboarding:GetWizardPageCount()
+    local welcome = definition.key == "WELCOME"
+    frame.pageLabel:SetText("Seite " .. index .. " von " .. count)
+    frame.pageLabel:SetShown(not welcome)
+    frame.backButton:SetShown(not welcome)
+    frame.nextButton:SetShown(not welcome)
+    frame.nextButton:SetText(index >= count and "Fertig" or "Weiter")
+    local stepOpen = definition.step ~= nil
+        and not GC.Onboarding:GetStepState(definition.step)
+    frame.skipButton:SetShown(stepOpen)
+
+    if definition.key == "STEP_PROFILE" then
+        self:RefreshWizardProfile()
+    elseif definition.key == "STEP_PROFESSIONS" then
+        self:RefreshWizardProfessions()
+    elseif definition.key == "STEP_GEAR" then
+        self:RefreshWizardGear()
+    elseif definition.key == "DONE" then
+        self:RefreshWizardDone()
+    end
+end
+
 function GC.UI:ShowWelcome()
     self:CreateWelcomeFrame()
+    -- Jedes Oeffnen beginnt vorn und ohne alte Klickauswahl: Die Tour ist
+    -- kurz, und mitten in einer vergessenen Sitzung aufzuwachen waere
+    -- verwirrender als zwei bekannte Seiten erneut zu sehen.
+    self.welcomeFrame.wizardSpecKey = nil
+    GC.Onboarding:StartWizard()
     self.welcomeFrame:Show()
+    self:ShowWizardPage()
 end
 
 function GC.UI:HideWelcome()
@@ -2314,6 +2816,23 @@ function GC.UI:HideWelcome()
         self.welcomeFrame:Hide()
     end
 end
+
+-- Der Assistent zeigt lebenden Zustand: Bestaetigung, eingelesene Rezepte
+-- und das Pruefergebnis kommen ueber dieselben Ereignisse herein wie ueberall
+-- sonst - so springt eine Zeile auf Gruen, waehrend das Berufsfenster noch
+-- offen ist, und niemand fragt sich, ob der Klick gewirkt hat.
+GC:RegisterCallback("PROFILE_UPDATED", GC.UI, function(self)
+    self:RefreshWizard()
+end)
+GC:RegisterCallback("PROFILE_CONFIRMATION_CHANGED", GC.UI, function(self)
+    self:RefreshWizard()
+end)
+GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
+    self:RefreshWizard()
+end)
+GC:RegisterCallback("GEAR_AUDIT_UPDATED", GC.UI, function(self)
+    self:RefreshWizard()
+end)
 
 -- Zu welcher Karte ein Klick auf eine Checklistenzeile rollt. Alle drei
 -- Schritte liegen auf dieser Seite, es ist also ein Rollen und kein
@@ -2346,10 +2865,12 @@ function GC.UI:ScrollRosterToCard(cardKey)
     page.profileScroll:UpdateModernThumb()
 end
 
--- Die Checkliste "Erste Schritte". Kein Wizard-Fenster: Die drei Schritte
--- stehen auf genau dieser Seite, die Karte zeigt nur, was davon noch offen
--- ist. Einen "Weiter"-Knopf gibt es deshalb nicht - die echte Aktion schiebt
--- die Liste weiter.
+-- Die Checkliste "Erste Schritte": der stille Spiegel des Assistenten. Die
+-- drei Schritte stehen auf genau dieser Seite, die Karte zeigt nur, was
+-- davon noch offen ist - und faengt jeden auf, der den Assistenten
+-- zugeklappt hat. Einen "Weiter"-Knopf gibt es deshalb nicht: Die echte
+-- Aktion schiebt die Liste weiter, und beide Ansichten fragen dieselben
+-- Daten (GetStepState), koennen sich also nie widersprechen.
 --
 -- Die Zustandszeichen sind Texturen und keine Schriftzeichen: Die Spielschrift
 -- kennt weder Haken noch Pfeil und zeichnet dafuer leere Kaesten (dieselbe

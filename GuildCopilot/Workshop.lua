@@ -2745,10 +2745,12 @@ function GC.Workshop:SetFavorite(recipeKey, favorite)
 end
 
 function GC.Workshop:GetMissingOwnProfessions()
-    local ignored = {
-        [NormalizeKey("Kräuterkunde")] = true,
-        [NormalizeKey("Kürschnerei")] = true,
-    }
+    -- Die Sammelberufe ohne Fenster stehen in Constants.lua; Werkstatt und
+    -- Einrichtung lesen dieselbe Liste.
+    local ignored = {}
+    for name in pairs(GC.RecipelessProfessions) do
+        ignored[NormalizeKey(name)] = true
+    end
     local known = self:GetOwnData().professions or {}
     local missing = {}
     for _, profession in ipairs(GC.Profile:Get().professions or {}) do

@@ -2,18 +2,22 @@ local _, GC = ...
 
 -- === Erste Schritte ========================================================
 --
--- Kein eigenes Wizard-Fenster, sondern eine Checkliste oben auf der
--- Profilseite: Alle drei Schritte leben dort ohnehin. Ein Fenster daneben
--- muesste dieselben Karten entweder verdoppeln oder ueberdecken - und weil die
--- echte Aktion der Uebergang sein soll, muesste es die echten Karten trotzdem
--- beobachten. Dann kann es auch gleich dorthin fuehren.
+-- Die Einrichtung hat zwei Gesichter, die denselben Zustand zeigen:
 --
--- Der Zustand wird aus den echten Daten abgeleitet und nicht in Merkern
--- gefuehrt. Ein Merker, der behauptet, was noch zu tun sei, laeuft der
--- Wirklichkeit hinterher, sobald jemand seinen Beruf auf einem anderen Weg
--- eintraegt. Nebenbei beantwortet sich damit die Frage "kontoweit oder pro
--- Charakter?" von selbst: Spec, Berufe und Ausruestung gelten pro Charakter,
--- also sieht ein frischer Twink die Liste und ein fertiger Charakter nicht.
+--   * der ASSISTENT (Owner-Wunsch seit 0.9.100): ein mehrseitiges Fenster,
+--     das beim ersten Login aufgeht, das Addon einmal kurz vorstellt und die
+--     drei Schritte direkt abnimmt, soweit WoW das erlaubt. Er ist der
+--     gefuehrte Weg - und jederzeit abbrechbar, ohne dass etwas verloren geht.
+--   * die CHECKLISTE oben auf der Profilseite: der stille Spiegel derselben
+--     Schritte. Sie faengt jeden auf, der den Assistenten zuklappt, und
+--     verschwindet von selbst, sobald alles erledigt ist.
+--
+-- Beide leiten den Zustand aus den echten Daten ab und fuehren keine Merker.
+-- Ein Merker, der behauptet, was noch zu tun sei, laeuft der Wirklichkeit
+-- hinterher, sobald jemand seinen Beruf auf einem anderen Weg eintraegt.
+-- Nebenbei beantwortet sich damit die Frage "kontoweit oder pro Charakter?"
+-- von selbst: Spec, Berufe und Ausruestung gelten pro Charakter, also sieht
+-- ein frischer Twink die Liste und ein fertiger Charakter nicht.
 --
 -- Gespeichert wird nur, was sich aus den Daten nicht ablesen laesst:
 -- Uebersprungenes, Ausgeblendetes und die beiden einmaligen Ereignisse. Es
@@ -72,13 +76,17 @@ local function ScannedProfessionNames()
     return names
 end
 
--- Hat der Charakter ueberhaupt einen Beruf? Wer keinen hat, kann auch keinen
--- einlesen - der Schritt gilt dann als erledigt statt auf ewig offen zu stehen.
-local function HasAnyProfession()
+-- Hat der Charakter einen Beruf, aus dem sich ueberhaupt Rezepte lesen
+-- lassen? Wer keinen hat, kann auch keinen einlesen - der Schritt gilt dann
+-- als erledigt statt auf ewig offen zu stehen. Reine Sammler zaehlen dazu:
+-- Kraeuterkunde und Kuerschnerei haben kein Rezeptfenster, ihr Schritt war
+-- also genauso unerfuellbar wie ohne Beruf.
+local function HasAnyScannableProfession()
     local profile = GC.Profile:Get()
     for slot = 1, 2 do
         local profession = profile.professions and profile.professions[slot]
-        if profession and GC.Util.Trim(profession.name or "") ~= "" then
+        local name = GC.Util.Trim(profession and profession.name or "")
+        if name ~= "" and not GC.RecipelessProfessions[name] then
             return true
         end
     end
@@ -102,8 +110,8 @@ function GC.Onboarding:GetStepState(stepKey)
         if #names > 0 then
             return true, table.concat(names, ", ") .. " eingelesen"
         end
-        if not HasAnyProfession() then
-            return true, "Keine Berufe erlernt – hier gibt es nichts einzulesen"
+        if not HasAnyScannableProfession() then
+            return true, "Keine Berufe mit Rezepten – hier gibt es nichts einzulesen"
         end
         return false, nil
     elseif stepKey == "GEAR" then
@@ -264,6 +272,101 @@ end
 
 function GC.Onboarding:NoteWindowClosed()
     self.completionVisible = nil
+end
+
+-- === Der Assistent =========================================================
+--
+-- Sechs Seiten, ein roter Faden: erst das Logo, dann einmal kurz "was kann
+-- das Addon und wo finde ich es", dann die drei Schritte der Checkliste als
+-- je eigene Seite, zum Schluss die Fundorte fuer spaeter. Die Schrittseiten
+-- fragen denselben GetStepState wie die Checkliste - der Assistent hat keinen
+-- eigenen Begriff von "erledigt" und kann darum nie etwas anderes behaupten
+-- als sie.
+--
+-- Die Seitennummer ist reiner Sitzungszustand und wird nicht gespeichert:
+-- Wer den Assistenten schliesst und wieder oeffnet, faengt vorn an - die
+-- Tour ist kurz genug, und mitten in einer alten Sitzung aufzuwachen waere
+-- verwirrender als zwei bekannte Seiten erneut zu sehen.
+local WIZARD_PAGES = {
+    { key = "WELCOME" },
+    { key = "TOUR" },
+    { key = "STEP_PROFILE", step = "PROFILE" },
+    { key = "STEP_PROFESSIONS", step = "PROFESSIONS" },
+    { key = "STEP_GEAR", step = "GEAR" },
+    { key = "DONE" },
+}
+
+-- Die Funktionstour, ein Eintrag je Abschnitt der Seitenleiste - in genau
+-- deren Reihenfolge, denn das WO ist die halbe Antwort: Wer die Tour gelesen
+-- hat, hat die Seitenleiste schon einmal von oben nach unten gesehen.
+-- tests/validate.mjs prueft, dass kein Abschnitt der Seitenleiste hier fehlt.
+GC.Onboarding.TOUR = {
+    {
+        section = "COPILOT",
+        pages = "Profil · Übersicht",
+        text = "Dein Raidprofil, deine Berufe und deine Abmeldung – und die Übersicht,"
+            .. " was alle in der Gilde gemeldet haben.",
+    },
+    {
+        section = "REKRUTIERUNG",
+        pages = "Gildenprofil · Vorschläge · Klassen & Specs · Werbung · Postfach",
+        text = "Der ganze Werbeweg in einem Durchlauf: Gildenprofil pflegen, sehen"
+            .. " welche Specs fehlen, Werbung posten und Antworten im Postfach beantworten.",
+    },
+    {
+        section = "GILDE",
+        pages = "Mitgliederpflege · Gildenwerkstatt",
+        text = "Wer lange offline ist – und wer in der Gilde welches Rezept kann,"
+            .. " samt Aufträgen mit Materialstand aus Taschen, Bank und Gildenbank.",
+    },
+    {
+        section = "RAID",
+        pages = "Warcraft Logs · Raidauswertung · Ausrüstung",
+        text = "Raidabende mitschreiben oder importieren, Consumables und Tode"
+            .. " auswerten, Verzauberungen und Sockel der Raider prüfen.",
+    },
+    {
+        section = "SYSTEM",
+        pages = "Einstellungen",
+        text = "Töne, Rangfreigaben, Trigger-Wörter und das Minimap-Symbol.",
+    },
+}
+
+function GC.Onboarding:GetWizardPages()
+    return WIZARD_PAGES
+end
+
+function GC.Onboarding:GetWizardPageCount()
+    return #WIZARD_PAGES
+end
+
+function GC.Onboarding:GetWizardPage()
+    local index = math.max(1, math.min(self.wizardIndex or 1, #WIZARD_PAGES))
+    return WIZARD_PAGES[index], index
+end
+
+function GC.Onboarding:StartWizard()
+    self.wizardIndex = 1
+    return self:GetWizardPage()
+end
+
+-- Blaettert um eine Seite vor oder zurueck und bleibt an den Raendern stehen.
+function GC.Onboarding:WizardGo(delta)
+    local _, index = self:GetWizardPage()
+    self.wizardIndex = math.max(1, math.min(index + (tonumber(delta) or 1), #WIZARD_PAGES))
+    return self:GetWizardPage()
+end
+
+-- "Ueberspringen" auf einer Schrittseite heisst dasselbe wie in der
+-- Checkliste: nicht draengeln, aber wahrnehmen, falls die echte Aktion
+-- spaeter doch passiert. Ein bereits erledigter Schritt wird nicht
+-- rueckwirkend als uebersprungen gefuehrt - da gaebe es nichts zu ueberspringen.
+function GC.Onboarding:SkipWizardStep()
+    local page = self:GetWizardPage()
+    if page.step and not self:GetStepState(page.step) then
+        self:SetStepSkipped(page.step, true)
+    end
+    return self:WizardGo(1)
 end
 
 -- Beim ersten Login eines Charakters ohne bestaetigtes Profil oeffnet sich

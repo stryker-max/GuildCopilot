@@ -298,6 +298,41 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.100 – Der Einrichtungsassistent
+
+Gewünscht vom Owner: ein Onboarding-Wizard, der dem Spieler die Einrichtung abnimmt und das Addon einmal kurz und prägnant vorstellt — was kann es, und wo finde ich was. Jederzeit abbrechbar oder überspringbar, nicht aufdringlich.
+
+### Warum jetzt doch ein Wizard-Fenster
+
+Die Checkliste „Erste Schritte" war die bewusste Entscheidung *gegen* ein Wizard-Fenster: Die drei Schritte leben auf der Profilseite, also führt die Liste dorthin, statt die Karten zu verdoppeln. An dieser Begründung hat sich nichts geändert — aber sie beantwortet nur die halbe Aufgabe. Eine Checkliste kann sagen, was noch zu tun ist; sie kann nicht erklären, was das Addon alles kann und wo es liegt. Wer zum ersten Mal einloggt, sieht dreizehn Navigationspunkte und eine Liste mit drei Zeilen — das WAS und das WO bleiben ihm verborgen, bis er alles einmal angeklickt hat.
+
+Der Assistent ergänzt die Checkliste deshalb, statt sie zu ersetzen. Beide sind Gesichter desselben Zustands: Die Schrittseiten des Assistenten fragen denselben `GetStepState` wie die Checklistenzeilen, sein „Überspringen" setzt denselben Merker, sein Bestätigen ruft dieselbe echte Aktion. Der Assistent hat keinen eigenen Begriff von „erledigt" und kann darum nie etwas anderes behaupten als die Checkliste. Wer ihn zuklappt — ×, Escape, „Später" —, verliert nichts: Die Checkliste trägt denselben Stand weiter, und der Punkt am Minimap-Symbol erinnert an den Rest.
+
+### Sechs Seiten
+
+1. **Logo.** Wie das alte Willkommensfenster: Schriftlogo, ein großer Knopf. Wer hier schon alles erklärt bekommt, überblättert es.
+2. **Funktionstour.** Ein Eintrag je Abschnitt der Seitenleiste, in deren Reihenfolge — das WAS steht im Text, das WO ergibt sich daraus, dass die Liste die Seitenleiste selbst ist. Die Inhalte stehen als Tabelle in `Onboarding.lua`; `tests/validate.mjs` prüft in beide Richtungen, dass Tour und Seitenleiste dieselben Abschnitte nennen.
+3. **Raidprofil.** Die aus den Talenten erkannte Spec ist vorgewählt, ein Klick bestätigt. Die Feinheiten (Dual-Spec, Main/Twink, Abmeldung) bleiben bewusst draußen — sie haben auf der Profilseite ihre Karte, und ein Assistent, der alles fragt, ist ein Formular.
+4. **Rezepte.** Je erlerntem Beruf eine Zeile mit Stand und einem Öffnen-Knopf. Das ist der eine Handgriff, den kein Addon abnehmen darf: Ein Berufsfenster öffnet nur das Wirken des Berufszaubers, und das verlangt Blizzard als Hardware-Klick auf einen sicheren Knopf (`SecureActionButtonTemplate`). Alles danach läuft von selbst — `Workshop.lua` lauscht ohnehin auf `TRADE_SKILL_SHOW`/`CRAFT_SHOW`, und die Zeile springt über `WORKSHOP_UPDATED` auf Grün, während das Fenster noch offen ist.
+5. **Ausrüstung.** Der einzige Schritt ohne Handgriff. Liegt noch kein Ergebnis vor, stößt die Seite die Selbstprüfung an, statt auf den nächsten Login zu warten — sie verspricht „hier musst du nichts tun", also darf sie nicht heimlich doch warten.
+6. **Fundorte.** Minimap-Symbol, `/gcp`, der Knopf „Einrichtung" im Fensterkopf. Der Knopf öffnet jetzt den Assistenten (und holt per `Reopen` zugleich die Checkliste zurück); `/gcp welcome` tut dasselbe.
+
+Die Seitennummer ist reiner Sitzungszustand. Gespeichert wird weiterhin nur, was sich aus den Daten nicht ablesen lässt — der Assistent hat keine neuen Merker dazubekommen.
+
+### Zwei Funde am Rande
+
+- **Reine Sammler hingen für immer im Rezeptschritt.** Kräuterkunde und Kürschnerei haben kein Rezeptfenster; „Rezepte einlesen" war für einen Charakter mit zwei Sammelberufen unerfüllbar und stand auf ewig offen. Die Liste der fensterlosen Berufe stand dafür längst in `Workshop.lua` — sie ist nach `Constants.lua` gewandert (`GC.RecipelessProfessions`), Werkstatt und Einrichtung lesen jetzt dieselbe. Aufgefallen ist das beim Bau der Berufszeilen: Welche Zeile bekommt einen Öffnen-Knopf, und was verspricht der Schritt dem, der keinen bekommen kann?
+- **Bergbau heißt am Fenster „Schmelzen".** Der Scan speichert den Fensternamen; die Berufszeile muss ihn dem Beruf zuordnen, sonst bliebe sie trotz eingelesener Rezepte offen. Der Öffnen-Knopf wirkt dort auch den Zauber „Schmelzen", nicht „Bergbau" (`GC.ProfessionWindowSpells`).
+
+### Geändert
+
+- `Onboarding.lua`: Seitenmodell (`WIZARD_PAGES`, `GetWizardPage`, `WizardGo`, `SkipWizardStep`, `StartWizard`) und die Tour-Tabelle (`GC.Onboarding.TOUR`); `HasAnyScannableProfession` ersetzt `HasAnyProfession`;
+- `UI.lua`: das Willkommensfenster ist der Assistent geworden (gleicher Rahmenname, `ShowWelcome`/`HideWelcome` unverändert); sechs Seitenbauer, `ShowWizardPage`, `RefreshWizard` samt Unterfunktionen je Schrittseite; der sichere Berufsknopf; der Kopfzeilen-Knopf „Einrichtung" und `/gcp welcome` führen zum Assistenten;
+- `Constants.lua`: `GC.RecipelessProfessions` und `GC.ProfessionWindowSpells`;
+- `Workshop.lua`: `GetMissingOwnProfessions` liest die Sammlerliste aus Constants;
+- `tests/smoke.lua`: ein eigener Block — Seitenfolge, Blättern an den Rändern, Überspringen setzt den Checklistenmerker (und ein erledigter Schritt wird nicht rückwirkend übersprungen), der Bestätigen-Knopf ruft die echte Aktion, Berufszeilen mit und ohne Öffnen-Knopf, reine Sammler, Bergbau/Schmelzen, folgenloses Schließen;
+- `tests/validate.mjs`: der Abgleich Tour ↔ Seitenleiste in beide Richtungen und die neuen Pflicht-Implementierungen.
+
 ## 0.9.99 – Der Unterschied zwischen „passiert" und „erfahren"
 
 Gemeldet als Alltagsärgernis: Bei jedem Login und jedem `/reload` spielte Guild Copilot Töne und schrieb Meldungen für Gildenaufträge, die längst abgeschlossen waren. Gewünscht war das Offensichtliche — Klang nur dann, wenn *jetzt gerade* etwas passiert.

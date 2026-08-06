@@ -4658,6 +4658,162 @@ profile.workshop = savedWorkshop
 guildData.gearAudits = savedAudits
 end
 
+-- === Einrichtungsassistent: Seitenmodell, Abnahme und Abbruch ==============
+--
+-- Der Assistent ist ein zweites Gesicht derselben Checkliste: Seine
+-- Schrittseiten fragen GetStepState, sein Ueberspringen setzt denselben
+-- Merker, sein Bestaetigen ruft dieselbe echte Aktion. Getestet wird deshalb
+-- beides zusammen - dass das Seitenmodell traegt und dass keine Seite einen
+-- eigenen Begriff von "erledigt" erfindet.
+do
+local profile = addon.Profile:Get()
+local guildData = addon.DB:GetGuild()
+local savedConfirmed = profile.confirmed
+local savedProfessions = profile.professions
+local savedWorkshop = profile.workshop
+local savedAudits = guildData.gearAudits
+local savedAuto = profile.professionAuto
+local data = addon.Onboarding:GetData()
+
+profile.confirmed = false
+profile.professionAuto = false
+profile.professions = { { name = "Verzauberkunst" } }
+profile.workshop = { professions = {} }
+guildData.gearAudits = {}
+data.skipped = {}
+data.dismissedAt = 0
+addon.Onboarding.hiddenForSession = nil
+addon.Onboarding.completionVisible = nil
+
+-- Sechs Seiten: vorn das Logo, hinten die Fundorte, dazwischen die Tour und
+-- die drei Schritte in der Reihenfolge der Checkliste.
+local pages = addon.Onboarding:GetWizardPages()
+assert(#pages == addon.Onboarding:GetWizardPageCount(),
+    "Seitenliste und Seitenzahl widersprechen sich")
+assert(pages[1].key == "WELCOME" and pages[2].key == "TOUR"
+    and pages[#pages].key == "DONE",
+    "Die Seitenfolge des Assistenten stimmt nicht")
+local stepKeys = {}
+for _, page in ipairs(pages) do
+    if page.step then
+        stepKeys[#stepKeys + 1] = page.step
+    end
+end
+assert(#stepKeys == 3 and stepKeys[1] == "PROFILE"
+    and stepKeys[2] == "PROFESSIONS" and stepKeys[3] == "GEAR",
+    "Die Schrittseiten decken nicht die drei Checklistenschritte ab")
+
+-- Blaettern bleibt an den Raendern stehen, statt aus dem Assistenten zu fallen.
+addon.Onboarding:StartWizard()
+local page, pageIndex = addon.Onboarding:GetWizardPage()
+assert(page.key == "WELCOME" and pageIndex == 1, "Der Assistent beginnt nicht vorn")
+addon.Onboarding:WizardGo(-1)
+page, pageIndex = addon.Onboarding:GetWizardPage()
+assert(pageIndex == 1, "Zurueck auf der ersten Seite faellt aus dem Assistenten")
+addon.Onboarding:WizardGo(99)
+page = addon.Onboarding:GetWizardPage()
+assert(page.key == "DONE", "Vorblaettern ueber das Ende laeuft ins Leere")
+
+-- Jedes Oeffnen beginnt vorn, und sichtbar ist genau die aktuelle Seite.
+addon.UI:ShowWelcome()
+assert(addon.UI.welcomeFrame:IsShown() == true, "ShowWelcome zeigt den Assistenten nicht")
+page = addon.Onboarding:GetWizardPage()
+assert(page.key == "WELCOME", "Ein erneutes Oeffnen setzt den Assistenten nicht an den Anfang")
+assert(addon.UI.welcomeFrame.wizardPages.WELCOME:IsShown() == true,
+    "Die Logoseite ist beim Oeffnen nicht sichtbar")
+assert(addon.UI.welcomeFrame.wizardPages.TOUR:IsShown() == false,
+    "Zwei Assistentenseiten sind gleichzeitig sichtbar")
+
+-- Auf einer offenen Schrittseite steht "Ueberspringen"; es setzt denselben
+-- Merker wie die Checkliste und blaettert weiter.
+addon.Onboarding:WizardGo(1)
+addon.Onboarding:WizardGo(1)
+addon.UI:ShowWizardPage()
+assert(addon.Onboarding:GetWizardPage().key == "STEP_PROFILE",
+    "Zwei Schritte vor dem Logo liegt nicht das Raidprofil")
+assert(addon.UI.welcomeFrame.skipButton:IsShown() == true,
+    "Der offene Schritt bietet kein Ueberspringen an")
+addon.Onboarding:SkipWizardStep()
+assert(addon.Onboarding:GetSteps()[1].skipped == true,
+    "Das Ueberspringen im Assistenten erreicht die Checkliste nicht")
+assert(addon.Onboarding:GetWizardPage().key == "STEP_PROFESSIONS",
+    "Ueberspringen blaettert nicht weiter")
+
+-- Ein erledigter Schritt wird nicht rueckwirkend als uebersprungen gefuehrt.
+profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
+addon.Onboarding:SkipWizardStep()
+assert(data.skipped.PROFESSIONS == nil,
+    "Ein erledigter Schritt wurde als uebersprungen vermerkt")
+
+-- Der Bestaetigen-Knopf der Profilseite ruft die echte Aktion - danach ist
+-- der Schritt in Assistent UND Checkliste erledigt.
+data.skipped = {}
+addon.UI:ShowWelcome()
+addon.Onboarding:WizardGo(1)
+addon.Onboarding:WizardGo(1)
+addon.UI:ShowWizardPage()
+local profilePage = addon.UI.welcomeFrame.wizardPages.STEP_PROFILE
+profilePage.confirm.scripts.OnClick(profilePage.confirm)
+assert(addon.Onboarding:GetSteps()[1].done == true,
+    "Der Bestaetigen-Knopf des Assistenten bestaetigt das Profil nicht")
+assert(addon.UI.welcomeFrame.skipButton:IsShown() == false,
+    "Der erledigte Schritt bietet weiter das Ueberspringen an")
+
+-- Je Beruf eine Zeile: Rezeptberufe bekommen den sicheren Oeffnen-Knopf,
+-- Sammelberufe nicht - dort gibt es kein Fenster zum Oeffnen.
+profile.professions = { { name = "Verzauberkunst" }, { name = "Kürschnerei" } }
+profile.workshop = { professions = {} }
+addon.Onboarding:WizardGo(1)
+addon.UI:ShowWizardPage()
+local professionRows = addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.rows
+assert(professionRows[1]:IsShown() == true and professionRows[2]:IsShown() == true,
+    "Die Berufszeilen des Assistenten fehlen")
+assert(professionRows[1].open:IsShown() == true,
+    "Der Rezeptberuf hat keinen Oeffnen-Knopf")
+assert(professionRows[2].open:IsShown() == false,
+    "Der Sammelberuf bekam einen Oeffnen-Knopf, obwohl es kein Fenster gibt")
+
+-- Reine Sammler koennen den Rezeptschritt nie erfuellen - er gilt deshalb
+-- als erledigt, statt auf ewig offen zu stehen.
+profile.professions = { { name = "Kürschnerei" }, { name = "Kräuterkunde" } }
+assert(addon.Onboarding:GetSteps()[2].done == true,
+    "Der reine Sammler haengt fuer immer im Rezeptschritt")
+
+-- Bergbau: Das Fenster heisst "Schmelzen", und der Scan speichert diesen
+-- Namen. Die Zeile muss ihn dem Beruf zuordnen, sonst bliebe sie ewig offen.
+profile.professions = { { name = "Bergbau" } }
+profile.workshop = { professions = { schmelzen = { name = "Schmelzen" } } }
+addon.UI:ShowWizardPage()
+assert(professionRows[1].open:IsShown() == false,
+    "Der eingelesene Bergbau bietet weiter das Oeffnen an")
+
+-- Ohne Berufe: keine Zeilen, stattdessen die Leermeldung.
+profile.professions = {}
+addon.UI:ShowWizardPage()
+assert(professionRows[1]:IsShown() == false,
+    "Ohne Berufe steht eine leere Berufszeile im Assistenten")
+assert(addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.empty:IsShown() == true,
+    "Die Leermeldung fuer Charaktere ohne Berufe fehlt")
+
+-- Abbrechen ist jederzeit folgenlos: Das x schliesst, die Merker bleiben
+-- unangetastet, und die Checkliste zeigt denselben Stand weiter.
+local skippedBefore = data.skipped.PROFILE
+addon.UI:HideWelcome()
+assert(addon.UI.welcomeFrame:IsShown() == false,
+    "Der Assistent laesst sich nicht schliessen")
+assert(data.skipped.PROFILE == skippedBefore,
+    "Das Schliessen des Assistenten veraendert die Checklistenmerker")
+
+-- Aufraeumen wie im Block darueber: erst die Merker, dann der echte Zustand.
+data.skipped = {}
+addon.Onboarding:Dismiss()
+profile.confirmed = savedConfirmed
+profile.professionAuto = savedAuto
+profile.professions = savedProfessions
+profile.workshop = savedWorkshop
+guildData.gearAudits = savedAudits
+end
+
 -- === Gildenaufträge =========================================================
 -- Konzept: docs/KONZEPT-werkstatt-gildenauftraege.md. Getestet wird der Kern:
 -- Katalogbindung, Twink-Regel, Doppelannahme, Rechteprüfung, Materialmodell C

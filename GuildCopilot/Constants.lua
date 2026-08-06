@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.99",
+    VERSION = "0.9.100",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -112,6 +112,23 @@ GC.ProfessionIcons = {
     ["Verzauberkunst"] = "Interface\\Icons\\Trade_Engraving",
     ["Kochkunst"] = "Interface\\Icons\\INV_Misc_Food_15",
     ["Erste Hilfe"] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+}
+
+-- Sammelberufe ohne Rezeptfenster: Dort gibt es nichts einzulesen, und die
+-- Einrichtung darf sie nicht anmahnen - ein Schritt, der nie erfuellbar ist,
+-- stuende sonst auf ewig offen. Die Liste steht hier und nicht doppelt in
+-- Werkstatt und Einrichtung; zwei Listen liefen auseinander (Lektion aus
+-- 0.9.47, dort waren es die Chatbefehle).
+GC.RecipelessProfessions = {
+    ["Kräuterkunde"] = true,
+    ["Kürschnerei"] = true,
+}
+
+-- Der Zauber, der das Berufsfenster oeffnet - fuer die sicheren Knoepfe des
+-- Einrichtungsassistenten. Fast immer traegt er den Namen des Berufs selbst;
+-- Bergbau faellt heraus, dort heisst das Fenster "Schmelzen".
+GC.ProfessionWindowSpells = {
+    ["Bergbau"] = "Schmelzen",
 }
 
 GC.SuccessSoundOptions = {

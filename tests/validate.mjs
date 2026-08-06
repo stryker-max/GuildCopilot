@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.99",
+  "## Version: 0.9.100",
 ];
 
 for (const entry of requiredMetadata) {
@@ -369,14 +369,26 @@ const requiredImplementations = [
   ["Boss überlebt den Wipe in der Auswertung", /segment\.bossName or segment\.lastNPCDeath/],
   ["Ausnahmen für Farmgear und Widerstandssets", /function GC\.GearAudit:CycleSlotException/],
   ["Content-Phase der Gilde", /function GC\.GearAudit:GetContentPhase/],
-  ["Checkliste statt Wizard-Fenster", /function GC\.UI:BuildOnboardingCard/],
+  ["Checkliste als stiller Spiegel des Assistenten", /function GC\.UI:BuildOnboardingCard/],
   ["abgeleiteter Zustand der Einrichtung", /function GC\.Onboarding:GetStepState/],
   ["jeder Schritt einzeln überspringbar", /function GC\.Onboarding:SetStepSkipped/],
   ["Einrichtung jederzeit erneut aufrufbar", /function GC\.Onboarding:Reopen/],
   ["einmaliges Auto-Öffnen je Charakter", /function GC\.Onboarding:ShouldAutoOpen/],
   ["Karten wandern mit der Checkliste", /function GC\.UI:LayoutRosterPage/],
   ["erneute Bestätigung nach Profiländerung", /local function ProfileSelectionChanged/],
-  ["Willkommensfenster beim ersten Login", /function GC\.UI:CreateWelcomeFrame/],
+  ["Einrichtungsassistent beim ersten Login", /function GC\.UI:CreateWelcomeFrame/],
+  // Der Assistent (0.9.100): Seitenmodell in Onboarding.lua, Darstellung in
+  // UI.lua. Die Schrittseiten fragen GetStepState - er darf nie einen eigenen
+  // Begriff von "erledigt" bekommen.
+  ["Seitenmodell des Assistenten", /local WIZARD_PAGES = \{/],
+  ["Blättern bleibt an den Rändern stehen", /function GC\.Onboarding:WizardGo/],
+  ["Überspringen auch im Assistenten", /function GC\.Onboarding:SkipWizardStep/],
+  ["Funktionstour als Tabelle", /GC\.Onboarding\.TOUR = \{/],
+  ["Assistent zeigt genau eine Seite", /function GC\.UI:ShowWizardPage/],
+  ["Assistent zeigt lebenden Zustand", /function GC\.UI:RefreshWizard/],
+  ["sicherer Knopf öffnet das Berufsfenster", /SecureActionButtonTemplate/],
+  ["Sammelberufe ohne Rezeptfenster zentral", /GC\.RecipelessProfessions = \{/],
+  ["Bergbau öffnet Schmelzen", /GC\.ProfessionWindowSpells = \{/],
   ["Berufe aus den Classic-Fähigkeitszeilen", /local function ReadSkillLineProfessions/],
   ["Herkunft der Berufsangabe", /function GC\.Profile:GetProfessionSource/],
   ["Marker am Minimap-Symbol", /function GC\.UI:RefreshMinimapMarker/],
@@ -816,6 +828,33 @@ if (navHeight > sidebarHeight) {
     `Die Seitenleiste ist zu klein: ${tabCount} Navigationspunkte brauchen ${navHeight} px, ` +
       `verfuegbar sind ${sidebarHeight} px.`
   );
+}
+
+// Die Funktionstour des Assistenten spiegelt die Seitenleiste. Fehlt dort ein
+// Abschnitt, stellt der Assistent ein Addon vor, das es so nicht gibt - und
+// nennt die Tour einen Abschnitt, den die Seitenleiste nicht kennt, führt sie
+// die Leute an eine Stelle, die sie nie finden werden. Beide Richtungen sind
+// deshalb Fehler.
+const onboardingSource = fs.readFileSync(path.join(root, "Onboarding.lua"), "utf8");
+const tourBlock = onboardingSource.slice(
+  onboardingSource.indexOf("GC.Onboarding.TOUR = {"),
+  onboardingSource.indexOf("function GC.Onboarding:GetWizardPages")
+);
+const tourSections = [...tourBlock.matchAll(/section = "([A-ZÄÖÜ]+)"/g)].map((m) => m[1]);
+for (const section of sections) {
+  if (!tourSections.includes(section)) {
+    throw new Error(`Die Funktionstour des Assistenten übergeht den Abschnitt ${section}.`);
+  }
+}
+for (const section of tourSections) {
+  if (!sections.has(section)) {
+    throw new Error(
+      `Die Funktionstour nennt den Abschnitt ${section}, den die Seitenleiste nicht kennt.`
+    );
+  }
+}
+if (new Set(tourSections).size !== tourSections.length) {
+  throw new Error("Die Funktionstour nennt einen Abschnitt doppelt.");
 }
 
 // Das Auftragsboard hat drei Abschnitte untereinander in einer Ansicht ohne
