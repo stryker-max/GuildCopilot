@@ -298,6 +298,35 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.101 – Automatisch wiederholen: Werbung auf Tastendruck
+
+Gewünscht vom Owner nach einem Blick auf die CurseForge-Addons AutoFlood („Flooder") und MessageQueue: Kann der Werbebalken das auch — Werbung wiederholen, ohne dass jemand jedes Mal klickt?
+
+### Was die beiden Addons vormachen
+
+Seit Patch 8.2.5 (Classic 1.13.3) erlaubt WoW `SendChatMessage` in öffentliche Kanäle nur noch im unmittelbaren Kontext einer echten Eingabe (Hardware-Event); ein Timer darf nie selbst posten, genau dagegen richtet sich die Sperre. MessageQueue (GPLv3, LenweSaralonde) arbeitet damit statt dagegen: Nachrichten warten in einer Warteschlange, ein unsichtbarer Vollbildrahmen fängt die nächste Eingabe ab und sendet in deren Kontext. AutoFlood (Public Domain, derselbe Autor) setzt darauf den Timer — alle N Sekunden eine Zeile in einen Kanal.
+
+Übernommen ist das Prinzip, nicht der Code: MessageQueue steht unter GPLv3, dieses Repository unter MIT, und gebraucht werden ohnehin nur wenige Zeilen. Zwei Dinge sind bewusst anders:
+
+- **Nur Tastatur, keine Maus.** MessageQueues mausempfindlicher Vollbildrahmen schluckt genau den Klick, der das Posten auslöst — die im eigenen README dokumentierte Schwäche. Ein Rahmen mit `EnableKeyboard` und `SetPropagateKeyboardInput(true)` reicht Tasten dagegen ungestört durch, und beim Spielen fällt ständig ein Tastendruck an, schon das W beim Laufen. `SetPropagateKeyboardInput` ist für Addons im Kampf gesperrt und wird deshalb genau einmal beim Laden gesetzt, nie danach. Fehlt eine der Tastaturmethoden, bleibt die Automatik dauerhaft aus: Ein Lauscher, der Tasten nicht durchreichen kann, würde die Steuerung schlucken.
+- **Keine Nachrichten-Warteschlange, ein Merker.** Eingereiht wird nichts. Der Auffrisch-Takt des Werbebalkens schärft den Lauscher genau dann, wenn jetzt auch ein Klick posten würde (bestätigter Text, beigetretener Kanal, kein Cooldown), und der Tastendruck ruft dasselbe `StartSearch` wie der Knopf. Das prüft alles erneut und setzt `lastPosts` erst beim echten Versand — die Automatik kann nie einen veralteten Text posten, und der Cooldown zählt ab dem Moment, in dem die Nachricht wirklich rausging. AutoFloods Pixel-Trigger (ein externes AutoHotkey-Skript erzeugt Tastendrücke, sobald ein Signalpixel die Farbe wechselt) ist ausdrücklich nicht übernommen: Das wäre Eingabe-Automation außerhalb des Spiels.
+
+### Sichtbar statt heimlich
+
+Die Automatik läuft nur, solange der Werbebalken eingeblendet ist. Der Balken ist die Anzeige: Seine Statuszeile sagt in jedem Zustand, was als Nächstes passiert („der nächste Tastendruck postet", „nächster Post in 87s", „wartet auf einen bestätigten Text") und sechs Sekunden lang, was gerade passiert ist. Balken zu heißt Automatik entschärft; der Schalter bleibt gesetzt und greift beim nächsten Öffnen wieder. Nach einem /reload ist immer erst einmal entschärft — der Zustand lebt nur im Rahmen selbst und wird nicht gespeichert.
+
+Der Schalter steht an beiden Orten, die ihn brauchen — im Balken selbst und auf der Seite „Werbung posten" neben dem Werbebalken-Knopf. Beide schreiben denselben Wert, und ein gemeinsamer Tooltip erklärt die Regeln, damit die beiden Orte nie Verschiedenes behaupten. Einschalten auf der Postseite blendet den Balken ein, sonst wäre der Schalter wirkungslos. Welche Taste gedrückt wird, liest Guild Copilot nicht; der Rahmen erfährt nur, dass gedrückt wurde.
+
+Der Grundsatz „keine automatische Werbung" unter „Datenschutz und Fairness" ist damit präzisiert, nicht aufgegeben: Gepostet wird weiterhin nie ohne echte Eingabe und nie ohne ausdrücklich gesetzten Schalter — neu ist nur, dass die Eingabe nicht mehr der Klick auf genau diesen Knopf sein muss. Einladung und Entfernung von Mitgliedern bleiben ohne jede Automatik.
+
+### Geändert
+
+- `Chat.lua`: der Tastatur-Lauscher `GuildCopilotAutoPostFrame` samt `IsAutoPostSupported`, `IsAutoPostArmed`, `SetAutoPostArmed` und `RunAutoPost`;
+- `Database.lua`: `settings.postBar.autoRepeat` (Vorgabe: aus);
+- `UI.lua`: Schalter in Balken und Postseite, gemeinsamer Tooltip (`AttachAutoRepeatTooltip`), die Automatik-Statuszeile, Schärfen im Auffrisch-Takt (`RefreshPostBar`), Entschärfen beim Schließen (`SetPostBarShown`), `SetAutoRepeat`; der Balken ist 26 Pixel höher;
+- `tests/smoke.lua`: ein eigener Block — Einschalten blendet den Balken ein, der Tastendruck bedient alle bereiten Kanäle und setzt den Cooldown ab Versand, Cooldown, unbestätigter Text und geschlossener Balken entschärfen, Ausschalten räumt auf; die Gegenprobe gegen den Stand ohne Automatik schlägt fehl;
+- `README.md`, `CHANGELOG.md`: die Funktion ist erklärt.
+
 ## 0.9.100 – Der Einrichtungsassistent
 
 Gewünscht vom Owner: ein Onboarding-Wizard, der dem Spieler die Einrichtung abnimmt und das Addon einmal kurz und prägnant vorstellt — was kann es, und wo finde ich was. Jederzeit abbrechbar oder überspringbar, nicht aufdringlich.
@@ -1659,7 +1688,7 @@ Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgeset
 - nur Daten erfassen, die WoW-API, Combat Log oder ausdrücklich konfigurierte externe Quellen liefern;
 - Herkunft jeder Statistik anzeigen: **Live**, **Addon-Profil**, **Inspect** oder **Warcraft Logs**;
 - keine heimliche Chat-, Tastatur-, Speicher- oder Prozesseingabe;
-- keine automatische Werbung, Einladung oder Entfernung von Mitgliedern;
+- Werbung nie ohne echte Eingabe und nie ohne ausdrücklich gesetzten Schalter: Auch die Automatik des Werbebalkens (0.9.101) postet nur im Kontext eines Tastendrucks und nur bei sichtbarem Balken; Einladung und Entfernung von Mitgliedern geschehen nie automatisch;
 - zeitlich begrenzte Aufbewahrung und gezielte Löschfunktionen;
 - keine Charakterbewertung ohne sichtbare Einzelkriterien;
 - Officersichten und sensible Notizen nicht über ungeschützte Gildenkanäle synchronisieren.

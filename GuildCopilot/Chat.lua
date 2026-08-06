@@ -494,6 +494,78 @@ function GC.Chat:StartSearch(text)
     return true, "Gepostet in: " .. table.concat(posted, ", ")
 end
 
+-- === Automatische Wiederholung =============================================
+--
+-- WoW erlaubt Kanalnachrichten aus Addon-Code nur im unmittelbaren Kontext
+-- einer echten Eingabe; ein Timer darf nie selbst posten. Der Umweg, den auch
+-- MessageQueue und AutoFlood gehen: Ist die Automatik bereit, lauscht ein
+-- unsichtbarer Rahmen auf den naechsten Tastendruck und postet in dessen
+-- Kontext. Bewusst nur Tastatur, keine Maus - ein mausempfindlicher
+-- Vollbildrahmen wuerde genau den Klick schlucken, der das Posten ausloest,
+-- die dokumentierte Schwaeche von MessageQueue. Die Taste wird durchgereicht
+-- und nicht gelesen; der Rahmen erfaehrt nur, DASS gedrueckt wurde.
+--
+-- SetPropagateKeyboardInput ist fuer Addons im Kampf gesperrt und wird
+-- deshalb genau einmal beim Laden gesetzt, nie wieder. Fehlt eine der beiden
+-- Tastaturmethoden, bleibt der Rahmen dauerhaft aus: Ein Lauscher, der
+-- Tasten nicht durchreichen kann, wuerde die Steuerung schlucken.
+local autoPostFrame = CreateFrame("Frame", "GuildCopilotAutoPostFrame")
+autoPostFrame:SetFrameStrata("TOOLTIP")
+autoPostFrame:SetPoint("TOPLEFT")
+autoPostFrame:SetSize(1, 1)
+autoPostFrame:Hide()
+local autoPostSupported = autoPostFrame.EnableKeyboard ~= nil
+    and autoPostFrame.SetPropagateKeyboardInput ~= nil
+if autoPostSupported then
+    autoPostFrame:EnableKeyboard(true)
+    autoPostFrame:SetPropagateKeyboardInput(true)
+    autoPostFrame:SetScript("OnKeyDown", function()
+        GC.Chat:RunAutoPost()
+    end)
+end
+
+function GC.Chat:IsAutoPostSupported()
+    return autoPostSupported
+end
+
+function GC.Chat:IsAutoPostArmed()
+    return autoPostFrame:IsShown() == true
+end
+
+-- Scharf heisst: Der naechste Tastendruck postet. Entschaerft wird beim
+-- Treffer sofort; neu geschaerft wird ueber den Auffrisch-Takt des
+-- Werbebalkens, sobald Text, Kanal und Cooldown wieder bereit sind. Der
+-- Zustand lebt nur im Rahmen selbst und ueberlebt kein /reload - nach dem
+-- Laden ist die Automatik immer erst einmal entschaerft.
+function GC.Chat:SetAutoPostArmed(armed)
+    if not autoPostSupported then
+        return
+    end
+    autoPostFrame:SetShown(armed == true)
+end
+
+-- Laeuft im Kontext des Tastendrucks - nur hier darf in Kanaele gesendet
+-- werden. StartSearch prueft alles erneut (bestaetigter Text, Cooldowns,
+-- beigetretene Kanaele) und setzt lastPosts erst beim echten Versand; die
+-- Automatik kann dadurch nie einen veralteten Zustand posten, und der
+-- Cooldown zaehlt ab dem Moment, in dem die Nachricht wirklich rausging.
+function GC.Chat:RunAutoPost()
+    if not self:IsAutoPostArmed() then
+        return
+    end
+    self:SetAutoPostArmed(false)
+    if GC.DB:GetSettings().postBar.autoRepeat ~= true then
+        return
+    end
+    local recruitment = GC.DB:GetGuild().recruitment
+    local success, message = self:StartSearch(recruitment.confirmedText or "")
+    self.lastAutoPost = {
+        at = GC.Util.Now(),
+        success = success == true,
+        message = tostring(message or ""),
+    }
+end
+
 -- Die Klasse steckt in der bereits erfassten GUID des Absenders; es braucht
 -- also keine zusaetzliche Abfrage. Direkt nach dem Login ist der Namens-Cache
 -- des Clients aber noch kalt, deshalb ist der Aufruf idempotent und wird beim

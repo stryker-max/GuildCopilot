@@ -37,6 +37,10 @@ local DEFAULTS = {
             hidden = true,
             x = 0,
             y = -220,
+            -- Automatisches Wiederholen der Werbung. Nur ausdruecklich
+            -- eingeschaltet, und gepostet wird ausschliesslich im Kontext
+            -- eines echten Tastendrucks - nie von einem Timer.
+            autoRepeat = false,
         },
         -- Kompakt-Tracker der Gildenauftraege (Owner-Entscheidung: Stufe 1).
         -- Er zeigt sich nur, wenn es "du bist dran"-Auftraege gibt; hidden

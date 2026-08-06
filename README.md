@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.100
+# Guild Copilot 0.9.101
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -37,6 +37,8 @@ Der Ablauf geht von oben nach unten: Gildenprofil ausfüllen, Vorschläge ansehe
 **Posten.** Ein Klick auf **Suche starten** bedient alle ausgewählten Kanäle auf einmal. Vorher muss der Text ausdrücklich bestätigt werden, und jeder Kanal hat 120 Sekunden lokalen Cooldown.
 
 **Werbebalken.** Ein kleines, frei verschiebbares Fenster nur fürs Posten — bestätigter Text, Zahl der bereiten Kanäle, Cooldown als Countdown im Knopf. Damit muss für Werbung nicht das ganze Addonfenster offen bleiben. Ein- und ausblenden mit `/gcp recruite`.
+
+**Automatisch wiederholen.** Auf Wunsch wiederholt der Werbebalken die Werbung von selbst: Läuft der Kanal-Cooldown ab, geht der bestätigte Text mit deinem nächsten Tastendruck raus — gleich welche Taste, auch beim Laufen. Den Umweg verlangt WoW: Kanalnachrichten aus Addons sind nur im Moment einer echten Eingabe erlaubt, ein Timer darf nie selbst posten. Die Automatik läuft nur, solange der Balken eingeblendet ist, die Statuszeile sagt jederzeit, was als Nächstes passiert, und Bestätigungspflicht wie Cooldowns gelten unverändert. Welche Taste du drückst, liest Guild Copilot nicht.
 
 ## Postfach
 
@@ -146,7 +148,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.100.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.101.
 
 ### Warum Windows beim Herunterladen warnt
 

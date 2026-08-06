@@ -6582,6 +6582,32 @@ function GC.UI:RefreshRecruitment()
     end
 end
 
+-- Beide Automatik-Schalter (Postseite und Werbebalken) erklaeren sich im
+-- Tooltip. Die Regeln stehen nur hier, damit die beiden Orte nie
+-- Verschiedenes behaupten.
+local function AttachAutoRepeatTooltip(toggle)
+    toggle:HookScript("OnEnter", function(self)
+        if not AnchorRowTooltip(self) then
+            return
+        end
+        GameTooltip:SetText("Automatisch wiederholen")
+        GameTooltip:AddLine("Wiederholt die bestätigte Werbung von selbst,"
+            .. " solange der Werbebalken eingeblendet ist.", 1, 1, 1, true)
+        GameTooltip:AddLine("WoW verlangt für jede Kanalnachricht eine echte Eingabe."
+            .. " Sobald ein Kanal-Cooldown abläuft, geht der Text deshalb mit deinem"
+            .. " nächsten Tastendruck raus – gleich welche Taste, auch beim Laufen.", 0.31, 0.79, 1, true)
+        GameTooltip:AddLine("Bestätigungspflicht und Cooldowns gelten unverändert."
+            .. " Balken geschlossen = Automatik pausiert."
+            .. " Welche Taste du drückst, liest Guild Copilot nicht.", 1, 0.72, 0.25, true)
+        GameTooltip:Show()
+    end)
+    toggle:HookScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+end
+
 function GC.UI:BuildPostPage()
     local page = self.pages.POST
     CreatePageTitle(page, "Werbung posten", "Text prüfen, bestätigen und anschließend mit einem echten Klick in die ausgewählten Kanäle senden.")
@@ -6676,6 +6702,23 @@ function GC.UI:BuildPostPage()
     end)
     page.postBarToggle:SetPoint("LEFT", page.searchButton, "RIGHT", 12, 0)
 
+    -- Der Automatik-Schalter steht neben dem Werbebalken-Knopf, zu dem er
+    -- gehoert; derselbe Schalter sitzt auch im Balken selbst. Die Rueckmeldung
+    -- darunter erklaert beim Umschalten, was ab jetzt passiert.
+    page.autoRepeatToggle = CreateToggle(page, "Automatisch wiederholen", function(enabled)
+        GC.UI:SetAutoRepeat(enabled)
+        if enabled then
+            page.postResult:SetText("Automatik an: Der Werbebalken bleibt offen; sobald ein Kanal bereit ist,"
+                .. " geht der bestätigte Text mit dem nächsten Tastendruck raus.")
+            SetTextColor(page.postResult, THEME.success)
+        else
+            page.postResult:SetText("Automatik aus: Gepostet wird nur noch per Klick.")
+            SetTextColor(page.postResult, THEME.muted)
+        end
+    end)
+    page.autoRepeatToggle:SetPoint("LEFT", page.postBarToggle, "RIGHT", 16, 0)
+    AttachAutoRepeatTooltip(page.autoRepeatToggle)
+
     page.postResult = CreateLabel(page, "", { width = 776 })
     page.postResult:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 4)
 
@@ -6727,6 +6770,9 @@ function GC.UI:RefreshPost()
         local visible = GC.DB:GetSettings().postBar.hidden == false
         page.postBarToggle:SetActive(visible)
         page.postBarToggle:SetText(visible and "Balken aus" or "Werbebalken")
+    end
+    if page.autoRepeatToggle then
+        SetToggle(page.autoRepeatToggle, GC.DB:GetSettings().postBar.autoRepeat == true)
     end
     local recruitment = GC.DB:GetGuild().recruitment
     if not recruitment.adText or recruitment.adText == "" then
@@ -9015,9 +9061,10 @@ end
 -- === Werbebalken ===========================================================
 --
 -- Kleines, verschiebbares Fenster nur fuer das Posten: bestaetigter Text,
--- Countdown je Kanal und ein Knopf. Gesendet wird ausschliesslich durch einen
--- echten Klick - der Countdown schaltet den Knopf nur frei, er loest nie
--- selbst aus.
+-- Countdown je Kanal und ein Knopf. Gesendet wird ausschliesslich im Kontext
+-- einer echten Eingabe - per Klick auf den Knopf oder, mit eingeschalteter
+-- Automatik, beim naechsten Tastendruck. Ein Countdown loest nie selbst aus,
+-- er schaltet nur frei beziehungsweise schaerft den Tastatur-Lauscher.
 
 function GC.UI:CreatePostBar()
     if self.postBar then
@@ -9026,9 +9073,9 @@ function GC.UI:CreatePostBar()
 
     local bar = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotPostBar")
     -- Hoch genug fuer den vollstaendigen Werbetext: 255 Bytes brauchen bei
-    -- 306 Pixel Breite bis zu fuenf Zeilen. Darunter Statuszeile und Knopf,
-    -- die sich frueher ueberlappt haben.
-    bar:SetSize(330, 162)
+    -- 306 Pixel Breite bis zu fuenf Zeilen. Darunter Statuszeile,
+    -- Automatik-Schalter und Knopf, die sich nicht ueberlappen duerfen.
+    bar:SetSize(330, 188)
     local settings = GC.DB:GetSettings().postBar
     bar:SetPoint("CENTER", UIParent, "CENTER", tonumber(settings.x) or 0, tonumber(settings.y) or -220)
     bar:SetClampedToScreen(true)
@@ -9061,6 +9108,12 @@ function GC.UI:CreatePostBar()
     bar.status = CreateLabel(bar, "", { font = "GameFontNormalSmall", width = 306, height = 14 })
     bar.status:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -102)
 
+    bar.autoToggle = CreateToggle(bar, "Automatisch wiederholen", function(enabled)
+        GC.UI:SetAutoRepeat(enabled)
+    end)
+    bar.autoToggle:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -120)
+    AttachAutoRepeatTooltip(bar.autoToggle)
+
     bar.sendButton = CreateButton(bar, "Suche starten", 306, 26, function()
         local recruitment = GC.DB:GetGuild().recruitment
         local success, message = GC.Chat:StartSearch(recruitment.confirmedText or "")
@@ -9090,12 +9143,37 @@ function GC.UI:SetPostBarShown(shown)
     self.postBar:SetShown(shown == true)
     if shown then
         self:RefreshPostBar()
+    else
+        -- Balken zu = Automatik entschaerft. Der Schalter bleibt gesetzt und
+        -- greift wieder, sobald der Balken das naechste Mal offen ist - der
+        -- Balken ist die sichtbare Anzeige, ohne ihn laeuft nichts unsichtbar
+        -- im Hintergrund weiter.
+        GC.Chat:SetAutoPostArmed(false)
     end
     self:RefreshPost()
 end
 
 function GC.UI:TogglePostBar()
     self:SetPostBarShown(GC.DB:GetSettings().postBar.hidden ~= false)
+end
+
+-- Ein Schalter, zwei Orte: Postseite und Werbebalken schreiben denselben
+-- Wert. Einschalten blendet den Balken ein, denn die Automatik lebt nur in
+-- ihm; Ausschalten entschaerft sofort und raeumt die letzte
+-- Automatik-Rueckmeldung weg.
+function GC.UI:SetAutoRepeat(enabled)
+    enabled = enabled == true
+    GC.DB:GetSettings().postBar.autoRepeat = enabled
+    if enabled then
+        if GC.DB:GetSettings().postBar.hidden ~= false then
+            self:SetPostBarShown(true)
+        end
+    else
+        GC.Chat:SetAutoPostArmed(false)
+        GC.Chat.lastAutoPost = nil
+    end
+    self:RefreshPostBar()
+    self:RefreshPost()
 end
 
 function GC.UI:RefreshPostBar()
@@ -9137,7 +9215,39 @@ function GC.UI:RefreshPostBar()
     else
         bar.sendButton:SetText("Suche starten")
     end
-    if bar.status:GetText() == "" or waiting > 0 or ready > 0 then
+
+    -- Die Automatik ist genau dann scharf, wenn jetzt auch ein Klick posten
+    -- wuerde. Das wird in jedem Takt neu entschieden: Ein abgewaehlter Kanal,
+    -- ein geaenderter, nicht neu bestaetigter Text oder der Cooldown
+    -- entschaerfen von selbst - der Tastendruck prueft danach ohnehin alles
+    -- noch einmal.
+    local automatik = GC.DB:GetSettings().postBar.autoRepeat == true
+        and GC.Chat:IsAutoPostSupported()
+    GC.Chat:SetAutoPostArmed(automatik and canSend)
+    if bar.autoToggle then
+        SetToggle(bar.autoToggle, GC.DB:GetSettings().postBar.autoRepeat == true)
+    end
+
+    -- Die Statuszeile gehoert der Automatik, solange sie an ist: Was gerade
+    -- passiert ist (sechs Sekunden lang), was als Naechstes passiert, oder
+    -- woran es haengt. Ohne Automatik bleibt die bisherige Kanalzaehlung.
+    local recent = GC.Chat.lastAutoPost
+    if automatik and recent and (GC.Util.Now() - (recent.at or 0)) < 6 then
+        bar.status:SetText("Automatik: " .. recent.message)
+        SetTextColor(bar.status, recent.success and THEME.success or THEME.warning)
+    elseif automatik and canSend then
+        bar.status:SetText("Automatik: der nächste Tastendruck postet (" .. ready .. " bereit).")
+        SetTextColor(bar.status, THEME.success)
+    elseif automatik and confirmed == "" then
+        bar.status:SetText("Automatik wartet auf einen bestätigten Text.")
+        SetTextColor(bar.status, THEME.warning)
+    elseif automatik and longest > 0 then
+        bar.status:SetText("Automatik: nächster Post in " .. math.ceil(longest) .. "s.")
+        SetTextColor(bar.status, THEME.muted)
+    elseif automatik then
+        bar.status:SetText("Automatik: kein ausgewählter Kanal beigetreten.")
+        SetTextColor(bar.status, THEME.warning)
+    elseif bar.status:GetText() == "" or waiting > 0 or ready > 0 then
         bar.status:SetText(ready .. " Kanäle bereit"
             .. (waiting > 0 and ("  •  " .. waiting .. " im Cooldown") or ""))
         SetTextColor(bar.status, ready > 0 and THEME.muted or THEME.warning)

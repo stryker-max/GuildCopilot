@@ -7,6 +7,20 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.101 – Addon
+
+**Neu**
+
+- **Der Werbebalken kann die Werbung automatisch wiederholen.** Ein Schalter
+  im Balken und auf der Seite „Werbung posten“: Läuft der Kanal-Cooldown ab,
+  geht der bestätigte Text mit dem nächsten Tastendruck raus — gleich welche
+  Taste, auch beim Laufen. Den Umweg verlangt WoW: Kanalnachrichten aus
+  Addons sind nur im Moment einer echten Eingabe erlaubt, ein Timer darf nie
+  selbst posten. Die Automatik läuft nur, solange der Balken eingeblendet
+  ist, und seine Statuszeile sagt jederzeit, was als Nächstes passiert.
+  Bestätigungspflicht und Cooldowns gelten unverändert; welche Taste gedrückt
+  wird, liest Guild Copilot nicht.
+
 ## 0.9.100 – Addon
 
 **Neu**

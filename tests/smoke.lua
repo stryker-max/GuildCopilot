@@ -1222,6 +1222,84 @@ assert(addon.DB:GetSettings().postBar.hidden == true, "Der ausgeblendete Zustand
 addon.DB:GetGuild().recruitment.confirmedText = advertisement
 addon.DB:GetGuild().lastPosts = {}
 
+-- === Automatische Wiederholung =============================================
+-- Die Automatik postet nie selbst: Sie schaerft nur den Tastatur-Lauscher,
+-- und erst dessen Tastendruck-Kontext sendet - WoWs Hardware-Event-Regel.
+-- Der do-Block gibt die Locals danach wieder frei: Der Haupt-Chunk von Lua
+-- 5.1 kennt hoechstens 200 gleichzeitig aktive lokale Variablen.
+do
+local autoFrame = _G["GuildCopilotAutoPostFrame"]
+assert(autoFrame ~= nil, "Der Lauscher-Rahmen der Automatik fehlt")
+assert(autoFrame.shown ~= true, "Der Lauscher ist scharf, obwohl die Automatik aus ist")
+assert(addon.DB:GetSettings().postBar.autoRepeat == false,
+    "Die Automatik ist ungefragt eingeschaltet")
+
+-- Einschalten ueber die Postseite blendet den Balken ein: Die Automatik lebt
+-- nur im sichtbaren Balken, nichts laeuft unsichtbar im Hintergrund.
+addon.UI:SetAutoRepeat(true)
+assert(addon.DB:GetSettings().postBar.autoRepeat == true, "Der Automatik-Schalter wurde nicht gespeichert")
+assert(addon.DB:GetSettings().postBar.hidden == false,
+    "Einschalten der Automatik blendet den Werbebalken nicht ein")
+assert(autoFrame.shown == true, "Text bestaetigt, Kanaele bereit - aber der Lauscher ist nicht scharf")
+assert(postBar.status.value:find("Tastendruck", 1, true),
+    "Der Balken erklaert nicht, dass der naechste Tastendruck postet")
+
+-- Der Tastendruck postet in alle bereiten Kanaele, setzt den Cooldown ab dem
+-- echten Versand und entschaerft sich selbst.
+local autoSentBefore = #sentChat
+autoFrame.scripts.OnKeyDown()
+assert(#sentChat == autoSentBefore + 4, "Der Tastendruck hat nicht alle bereiten Kanaele bedient")
+assert(autoFrame.shown ~= true, "Nach dem Post blieb der Lauscher scharf")
+assert(addon.DB:GetGuild().lastPosts.RECRUITMENT == currentTime,
+    "Der Cooldown zaehlt nicht ab dem echten Versand")
+
+-- Waehrend des Cooldowns wird nicht neu gescharft, die Statuszeile erklaert
+-- den Stand, und ein weiterer Tastendruck darf nichts senden.
+addon.UI:RefreshPostBar()
+assert(autoFrame.shown ~= true, "Im Cooldown ist der Lauscher scharf")
+assert(postBar.status.value:find("Automatik", 1, true), "Die Statuszeile nennt die Automatik nicht")
+local cooldownSentBefore = #sentChat
+autoFrame.scripts.OnKeyDown()
+assert(#sentChat == cooldownSentBefore, "Ein entschaerfter Lauscher hat trotzdem gepostet")
+
+-- Laeuft der Cooldown ab, schaerft der naechste Auffrisch-Takt von selbst neu.
+currentTime = currentTime + 121
+addon.UI:RefreshPostBar()
+assert(autoFrame.shown == true, "Nach Ablauf des Cooldowns wird nicht neu gescharft")
+
+-- Ein nicht mehr bestaetigter Text entschaerft; der Tastendruck sendet nichts.
+addon.DB:GetGuild().recruitment.confirmedText = ""
+addon.UI:RefreshPostBar()
+assert(autoFrame.shown ~= true, "Ohne bestaetigten Text bleibt der Lauscher scharf")
+local unconfirmedAutoBefore = #sentChat
+autoFrame.scripts.OnKeyDown()
+assert(#sentChat == unconfirmedAutoBefore, "Ohne bestaetigten Text hat die Automatik gepostet")
+
+-- Balken schliessen entschaerft ebenfalls; der Schalter bleibt gesetzt und
+-- greift beim naechsten Oeffnen wieder.
+addon.DB:GetGuild().recruitment.confirmedText = advertisement
+addon.UI:RefreshPostBar()
+assert(autoFrame.shown == true, "Mit bestaetigtem Text wird nicht neu gescharft")
+addon.UI:SetPostBarShown(false)
+assert(autoFrame.shown ~= true, "Der geschlossene Balken laesst den Lauscher scharf")
+assert(addon.DB:GetSettings().postBar.autoRepeat == true,
+    "Das Schliessen des Balkens hat den Schalter zurueckgesetzt")
+addon.UI:SetPostBarShown(true)
+assert(autoFrame.shown == true, "Nach dem Wiederoeffnen bleibt die Automatik entschaerft")
+
+-- Ausschalten entschaerft sofort und raeumt auf.
+addon.UI:SetAutoRepeat(false)
+assert(addon.DB:GetSettings().postBar.autoRepeat == false, "Der Automatik-Schalter liess sich nicht ausschalten")
+assert(autoFrame.shown ~= true, "Die ausgeschaltete Automatik laesst den Lauscher scharf")
+local disabledSentBefore = #sentChat
+autoFrame.scripts.OnKeyDown()
+assert(#sentChat == disabledSentBefore, "Die ausgeschaltete Automatik hat gepostet")
+end
+
+addon.UI:SetPostBarShown(false)
+addon.DB:GetGuild().recruitment.confirmedText = advertisement
+addon.DB:GetGuild().lastPosts = {}
+
 addon.DB:GetGuild().inbox = {
     { name = "Alt-Realm", messages = "beschädigt", lastSeenAt = 200 },
     {
