@@ -2427,22 +2427,22 @@ local function BuildWizardTourPage(frame)
     help:SetPoint("TOP", page, "TOP", 0, -52)
 
     local y = -96
-    local previousSection
     for _, entry in ipairs(GC.Onboarding.TOUR) do
         local icon = page:CreateTexture(nil, "ARTWORK")
         icon:SetSize(26, 26)
         icon:SetPoint("TOPLEFT", page, "TOPLEFT", 30, y - 2)
         icon:SetTexture(entry.icon)
-        if entry.section ~= previousSection then
-            previousSection = entry.section
-            local section = CreateLabel(page, entry.section, {
-                color = THEME.accent,
-                font = "GameFontNormalSmall",
-                width = 96,
-                height = 14,
-            })
-            section:SetPoint("TOPLEFT", page, "TOPLEFT", 68, y)
-        end
+        -- Der Abschnittsname steht an JEDER Zeile, auch wenn er sich
+        -- wiederholt (GILDE zweimal). Der erste Wurf liess ihn bei
+        -- Wiederholungen weg, wie die Seitenleiste - dort traegt aber die
+        -- Einrueckung die Gruppe, hier sah die Zeile schlicht unfertig aus.
+        local section = CreateLabel(page, entry.section, {
+            color = THEME.accent,
+            font = "GameFontNormalSmall",
+            width = 96,
+            height = 14,
+        })
+        section:SetPoint("TOPLEFT", page, "TOPLEFT", 68, y)
         local pagesLabel = CreateLabel(page, entry.pages, {
             font = "GameFontNormalSmall",
             width = 364,

@@ -315,10 +315,13 @@ GC.Onboarding.TOUR = {
         text = "Dein Raidprofil, deine Berufe und deine Abmeldung – und was"
             .. " die ganze Gilde gemeldet hat.",
     },
+    -- Die Seitenzeile ist eine Ueberschrift, keine Aufzaehlung aller fuenf
+    -- Seiten: In voller Laenge passte sie nicht in die Zeile und wurde
+    -- abgeschnitten ("Postfa..."). Was fehlt, sagt der Text darunter.
     {
         section = "REKRUTIERUNG",
         icon = "Interface\\Icons\\INV_Letter_15",
-        pages = "Gildenprofil · Vorschläge · Klassen & Specs · Werbung · Postfach",
+        pages = "Gildenprofil · Vorschläge · Werbung · Postfach",
         text = "Gildenprofil pflegen, fehlende Specs sehen, Werbung posten und"
             .. " Antworten im Postfach beantworten.",
     },

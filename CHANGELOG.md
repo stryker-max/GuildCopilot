@@ -35,7 +35,9 @@ Installer und Addon werden getrennt gezählt.
   wer frisch installiert, hat nur das Addon. „Fertig“ klingt nach
   Stufenaufstieg, und das erste „Später“ zeigt einmalig ein kleines
   Hinweisfenster mit dem Weg zurück (`/gcp welcome` oder der Knopf
-  „Einrichtung“).
+  „Einrichtung“). Der Abschnittsname steht an jeder Tourzeile, und keine
+  Zeile wird mehr abgeschnitten — die REKRUTIERUNG-Zeile war zu lang und
+  endete im Spiel als „Postfa…“; ein Test misst jetzt alle Tourzeilen nach.
 
 **Behoben**
 

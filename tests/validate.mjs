@@ -869,6 +869,32 @@ if (tourIcons !== tourSections.length) {
 if (tourBlock.includes("Warcraft Logs")) {
   throw new Error("Warcraft Logs steht wieder in der Funktionstour.");
 }
+// Die Tourzeilen haben feste Breiten (364 px, kleine Schrift). Eine zu lange
+// Seitenzeile wird im Spiel stumm abgeschnitten - genau so stand dort
+// „Postfa…" (64 Zeichen in einer Zeile, in die etwa 56 passen). Ein zu langer
+// Beschreibungstext verlöre seine dritte Zeile genauso stumm.
+for (const match of tourBlock.matchAll(/pages = "([^"]+)"/g)) {
+  if (match[1].length > 56) {
+    throw new Error(
+      `Eine Tour-Seitenzeile ist zu lang (${match[1].length} Zeichen) und würde ` +
+        `abgeschnitten: ${match[1]}`
+    );
+  }
+}
+const tourTexts = [...tourBlock.matchAll(/text = ("[^"]*"(?:\s*\.\.\s*"[^"]*")*)/g)].map(
+  (entry) => [...entry[1].matchAll(/"([^"]*)"/g)].map((part) => part[1]).join("")
+);
+if (tourTexts.length !== tourSections.length) {
+  throw new Error("Nicht jede Tourzeile hat eine Beschreibung.");
+}
+for (const text of tourTexts) {
+  if (text.length > 120) {
+    throw new Error(
+      `Eine Tour-Beschreibung ist zu lang (${text.length} Zeichen) für zwei Zeilen: ` +
+        `${text.slice(0, 48)}…`
+    );
+  }
+}
 
 // Das Auftragsboard hat drei Abschnitte untereinander in einer Ansicht ohne
 // Bildlaufleiste. Seit die eigenen Auftraege eine dritte Zeile fuer den
