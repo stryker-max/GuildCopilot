@@ -1413,6 +1413,67 @@ Der Werkstattabgleich skalierte nicht: jeder Hersteller schickte und speicherte 
 - Warcraft-Logs-Profile und der jeweils neueste Cache bekannter Addon-Profile bilden einen automatisch ermittelten Rekrutierungs-Datensatz; ein neuer Client wählt das vollständigste Angebot eines Online-Mitglieds und erhält dadurch dieselbe Grundlage für Copilot-Vorschläge;
 - vollständige WCL-Kampfauswertungen werden dabei bewusst nicht über den Gildenkanal verteilt.
 
+## 0.9.97 – Tragfähigkeit in großen Gilden
+
+Anlass war eine vollständige Durchsicht vor der Veröffentlichung, verbunden mit einer Frage, die sich nicht aus dem Code beantworten lässt: Läuft das Addon in einer Gilde mit 500 Mitgliedern und 250 gleichzeitig Online noch? Dafür wurde ein Prüfstand gebaut, der das Addon außerhalb von WoW mit genau dieser Größe lädt und ausführt. Die Antwort war nein, und die Ursache war keine der Logik, sondern durchgängig die der Menge.
+
+**Der Kern: Fan-out N**
+
+Auf jede Anfrage im Gildenkanal antwortete bis 0.9.96 *jeder* Client einzeln. Bei fünfzehn Leuten fällt das nicht auf; bei 250 ist es das Ende des Kanals. Gemessen an einem einzigen fremden Login:
+
+| Anfrage | vorher | nachher |
+| --- | ---: | ---: |
+| `GQ` Gildenprofil | 5.500 | 66 |
+| `W\|Q` Werkstatt, moderner Fragender | 16.500 | 250 |
+| `O\|Q` Auftragsabgleich | 45.000 | 240 |
+| Login-Push der Aufträge | 30.000 | 150 |
+| `RQ` Auswertung anfordern | 10.000 | 384 |
+| `B\|BQ` Gildenbank | 250 | 3 |
+
+Blizzards Addon-Kanal stellt größenordnungsmäßig zehn Pakete je Sekunde und Absender zu und verwirft den Rest lautlos. Es kam also nicht an, was gesendet wurde – und der Fortschrittsbalken meldete zu Recht dauerhaft „unvollständig".
+
+Gelöst wird das mit zwei Verfahren, die beide schon je einmal im Addon standen und jetzt allen Anfragetypen offenstehen:
+
+- **Wahl** (`GC.Sync:IsElectedResponder`): Nur eine Handvoll Clients antwortet. Wer dazugehört, rechnet jeder für sich aus – ohne eine einzige Zusatznachricht. Grundlage ist eine Streuzahl aus Anfragendem und Kandidat; sie ist auf jedem Client dieselbe, verteilt die Last aber bei jedem Anfragenden neu. Die erste Fassung tat das nicht: Über 200 Anfragen kamen nur neun verschiedene Clients zum Zug, einer davon 82-mal. Der Grund steckt in djb2 selbst – bei ähnlich langen Namen verschiebt der Anfragende alle Streuzahlen um denselben Faktor und ändert die Reihenfolge nicht. Mit zwei Runden sind es 235 verschiedene Clients.
+- **Stille** (`NotePeerAnswer`/`PeerAnsweredSince`): Wer die Antwort eines anderen sieht, schweigt. Das greift nur bei Antworten über den Gildenkanal.
+
+**Die Voraussetzung, an der die erste Fassung scheiterte**
+
+Beide Verfahren ersetzen viele gleiche Antworten durch wenige. Sie setzen deshalb voraus, dass die Antwort bei jedem Antwortenden *dieselbe* ist. Für geteilte Gildendaten – Gildenprofil, Gildenbank, Aufträge – stimmt das. Für die Werkstatt nicht: Dort meldet jeder die Berufe seines eigenen Accounts. Die Wahl ließ von 250 Antworten drei übrig, und der Fragende erfuhr die Berufe von drei Spielern statt der ganzen Gilde; die Stille nahm ihm davon noch zwei. Wo jeder etwas Eigenes beiträgt, hilft nur Streuung in der Zeit: Alle antworten, verteilt über 30 Sekunden (Manifest) beziehungsweise 120 Sekunden (Vollversand an einen Altclient). Die Voraussetzung steht jetzt ausdrücklich im Kopf von `Sync.lua`.
+
+Ein verwandter Fall sind die Raidauswertungen: Dort hängt die Antwort daran, ob dieser Client den Abend überhaupt gespeichert hat. Diese Prüfung gehört vor die Wahl – sonst verbraucht ein Client ohne Daten einen der wenigen Plätze und schweigt. Weil die Wahl zudem nur kennt, wer online ist, und nicht, wer Daten hält, bekommt sie hier eine großzügige Platzzahl: Mit drei Plätzen bekamen bei 16 % Halterquote 70 % der Anfragen nie eine Antwort, und weil die Streuzahl rein rechnerisch ist, immer dieselben Anfragenden.
+
+**Der teure Pfad: `GC.DB:GetGuild`**
+
+`MergeDefaults` fährt den kompletten Vorgabenbaum rekursiv ab. Beim ersten Mal ist das genau richtig, danach reine Arbeit ohne Ergebnis – aber der Aufruf steht in den heißesten Schleifen. Ein einziger Durchlauf von `ReapplyEnchantRules` rief ihn 17.168-mal auf: 307 ms, und `ReceiveGuildProfileChunk` stieß gleich drei Durchläufe an. Speicherte ein Offizier das Gildenprofil, stand das Spiel bei jedem Mitglied 932 ms still; ein einzelnes Rangkästchen genügte dafür. Mit gemerktem Ergebnis und einem statt drei Durchläufen sind es 61 ms.
+
+**Wiedereintritt in die Sendewarteschlange**
+
+ChatThrottleLib löst ihren Rückruf bei freiem Kanal synchron aus – noch innerhalb von `SendAddonMessage`, also bevor `PumpBulk` sein Paket aus der Warteschlange genommen hat. Führte dieser Rückruf zurück in `SendBulk` – und das tun der bestätigte Flüstertransfer und die Werkstatt –, lief `PumpBulk` ein zweites Mal an und griff auf dasselbe Paket zu. Nachgestellt: Das erste Paket ging zweimal raus, das im Rückruf eingereihte gar nicht, und `bulkOutstanding` blieb stehen und wurde nach zwei Minuten als Verlust verbucht. Das ist der Grund für „Abgleich unvollständig" ohne tatsächlichen Verlust. ChatThrottleLib ist über DBM, Details! und WeakAuras praktisch in jeder Raidgilde geladen; ohne sie tritt der Fall nicht auf, weshalb er im Test ohne Bibliothek unsichtbar blieb.
+
+**Aufnahmegrenzen und Verdrängung**
+
+Werkstatt und Ausrüstungsabgleich nahmen 20 beziehungsweise 40 Übertragungen gleichzeitig an. Von 60 gleichzeitigen Absendern wurden 20 angenommen und 40 stumm verworfen, ohne Wiederholung und ohne Meldung. Die Grenzen liegen jetzt bei 64 und 128, und beim Überlauf weicht die älteste angefangene Übertragung statt der neuen – ein frisches Paket ist immer wertvoller als eines, das seit Minuten nicht weitergekommen ist.
+
+Bei den Raidauswertungen war die Grenze nicht zu eng, sondern falsch aufgeteilt: Seit jeder Teilnehmer seine Fassung als eigene Quelle abliefert, füllten 40 Antworten eines Abends alle 24 Plätze – sechs gespeicherte Raidabende waren danach gelöscht. Fremde Fassungen haben jetzt ein eigenes Kontingent und verdrängen keine eigene Auswertung mehr. Umgekehrt gilt aber auch: Ist die Ablage mit eigenen Quellen voll, darf die allgemeine Verdrängung nicht die eben eingefügte Fremdfassung greifen – sonst wird jede eintreffende Fassung eingefügt und im selben Durchlauf wieder entfernt, und die Reparatur lückenhafter Mitschnitte fällt dauerhaft und lautlos aus.
+
+**Gespeicherte Daten**
+
+Der Bestand lag bei 4,3 MB, davon 2,25 MB allein Ausrüstungsprüfungen – WoW liest die Datei bei jedem Login und schreibt sie bei jedem Ausloggen und `/reload`. Gespeichert werden jetzt nur noch die Messwerte; Beschriftung, Bewertung, Begründung und Verzauberungsname entstehen beim Lesen neu. Eine Ausnahme bleibt: Ein Verzauberungsname, der sich mangels Gegenstands- und Verzauberungs-ID nicht wiederherstellen lässt, wird behalten – sonst stünde er nach dem Speichern für immer nicht mehr da.
+
+**Stille Ausfälle**
+
+- Setzte ein anderes Addon `SetGuildRosterShowOffline(false)`, schrumpfte das Roster stumm auf die Online-Liste. Alles, was über `IsGuildMember` geht, war betroffen: Gildenprofil-Pakete der Offliner wurden verworfen, die Mitgliederpflege sah sie nicht mehr, und das Aufräumen der Werkstatt hielt sie für ausgetreten und löschte ihre Rezepte. Erkannt wird das jetzt an der Ausbeute; eine erkennbar gefilterte Liste ersetzt den vorherigen Stand nicht.
+- Die WHISPER-Sperre deckte `RD` nicht ab – Raidauswertungen ließen sich von Gildenfremden einschleusen und verdrängten zusammen mit der Verdrängung oben die Abendhistorie.
+- `GC.Perf:Measure` reichte die Rückgabe der gemessenen Funktion nur bei *ausgeschalteter* Messung durch. `/gcp debug` änderte damit das Programmverhalten, statt es zu beobachten.
+- Fünf Merklisten wuchsen unbegrenzt, `Prune` lief nur beim Login, und `remoteProfiles` wie `addonUsers` führten jeden Spieler unter zwei Schlüsseln.
+
+**Was bewusst offen bleibt**
+
+Der Vollversand an einen Client, der `workshop4` nicht meldet, bleibt bei 16.500 Paketen – jetzt über zwei Minuten verteilt statt auf einen Schlag. Ihn zu beschneiden hieße, genau diesem Client die halbe Gilde vorzuenthalten. Seit 0.9.96 meldet jeder Client `workshop4`; der Fall betrifft nur ältere Installationen.
+
+Nachrichtenformate und Schemaversion 7 bleiben unverändert; ein 0.9.96-Client versteht jedes Paket weiterhin.
+
 ## Offene Punkte (Stand 0.9.45)
 
 Der bisher ausgerollte Funktionsumfang der nummerierten Meilensteine ist umgesetzt. Offen bleiben Datenpflege, Erprobung im Spiel und diese klar getrennten nächsten Ausbaustufen:

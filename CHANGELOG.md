@@ -7,6 +7,71 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.97 – Addon
+
+Diese Fassung ändert an dem, was das Addon kann, nichts. Sie ändert, ob es das
+in einer großen Gilde noch kann: Bei 500 Mitgliedern und 250 gleichzeitig
+online lief 0.9.96 nachweislich nicht mehr stabil.
+
+**Behoben – der Kanal**
+
+- **Auf jede gildenweite Anfrage antwortete jeder Client einzeln.** Ein
+  einziger Login löste dadurch gemessene 107.250 Pakete in der Gilde aus, für
+  Inhalte, die bei allen dieselben sind. Blizzards Addon-Kanal stellt davon
+  einen Bruchteil zu und verwirft den Rest lautlos – deshalb blieben
+  Werkstattdaten unvollständig, fehlten Aufträge, und der Fortschrittsbalken
+  meldete zu Recht dauerhaft „unvollständig". Jetzt beantwortet eine kleine,
+  bei jedem Fragenden andere Auswahl die Anfrage: 777 Pakete statt 107.250.
+- **Werkstatt und Gildenbank antworten weiterhin vollzählig**, nur zeitlich
+  verteilt. Dort trägt jeder die Berufe seines eigenen Accounts bei, und die
+  kann kein anderer für ihn melden.
+- **Ein Paket ging doppelt raus, ein anderes gar nicht.** Bei geladener
+  ChatThrottleLib – über DBM, Details! oder WeakAuras praktisch überall –
+  konnte die Sendewarteschlange sich selbst überholen. Der Fortschrittszähler
+  blieb danach stehen und buchte nach zwei Minuten einen Verlust, den es nie
+  gegeben hatte.
+- **Nach einem Warcraft-Logs-Import forderten alle gleichzeitig an.** Der
+  Importeur bekam 250 vollständige Datensatz-Abrufe auf einmal. Jetzt fragt
+  eine Handvoll; der Rest bekommt den Stand über den nächsten Abgleich.
+
+**Behoben – die Bildrate**
+
+- **Speicherte ein Offizier das Gildenprofil, stand das Spiel bei allen fast
+  eine Sekunde still** (gemessen 932 ms bei 500 Mitgliedern). Ein einzelnes
+  Rangkästchen genügte dafür. Jetzt sind es 61 ms.
+- **Bei offener Werkstatt brach die Bildrate während eines Abgleichs ein.**
+  Der Rezeptkatalog wurde je eintreffendem Rezept neu aufgebaut.
+- **Die Mitgliederpflege und die Ausrüstungsseite** brauchen ein Vielfaches
+  weniger Rechenzeit; die Spielerliste der Ausrüstungsprüfung legt nicht mehr
+  einen Rahmen je geprüftem Spieler an.
+
+**Behoben – verlorene Daten**
+
+- **Bei vielen gleichzeitigen Absendern wurde der Großteil stumm verworfen.**
+  Werkstatt und Ausrüstungsabgleich nahmen 20 bzw. 40 Übertragungen
+  gleichzeitig an, bei 250 Online kamen deutlich mehr. Jetzt 64 bzw. 128, und
+  beim Überlauf weicht die älteste angefangene statt der neuen.
+- **Ein Raidabend löschte die Abendhistorie.** Weil jeder Teilnehmer seine
+  Fassung als eigene Quelle ablegt, füllten 40 Antworten eines Abends alle 24
+  Plätze – sechs gespeicherte Raidabende waren danach weg. Fremde Fassungen
+  haben jetzt ein eigenes Kontingent.
+- **Die Ausrüstungsprüfungen sind der größte Posten der gespeicherten Daten.**
+  Sie speichern nur noch Messwerte; Beschriftung und Bewertung entstehen beim
+  Anzeigen neu.
+
+**Behoben – stille Ausfälle**
+
+- **Setzte ein anderes Addon die Gildenliste auf „nur Online",** schrumpfte das
+  Roster stumm mit. Offline-Mitglieder galten dann als ausgetreten: Ihre
+  Profilpakete wurden verworfen, die Mitgliederpflege sah sie nicht mehr, und
+  ihre Rezepte wurden gelöscht.
+- **„Auswertung anfordern" blieb für manche dauerhaft ohne Antwort** – und zwar
+  immer für dieselben.
+- **Raidauswertungen ließen sich von außerhalb der Gilde einschleusen.**
+- Der Gildenbank-Abgleich brachte den Client zum Schweigen, der den *neueren*
+  Stand hielt.
+- `/gcp debug` veränderte das Verhalten, statt es nur zu messen.
+
 ## 0.9.96 – Addon
 
 **Behoben**
