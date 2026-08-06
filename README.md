@@ -67,6 +67,10 @@ Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten la
 
 **Materialbestand am Rezept.** Je Reagenz steht Bedarf, dein eigener Bestand (Taschen, Bank und Twinks) und der Gildenbankbestand mit Ampelfarbe: grün hast du selbst, gelb reicht erst mit der Gildenbank, rot fehlt auch dann. Darunter steht, was konkret fehlt.
 
+**Wartezeiten.** Umwandlungen, Spezialtuche und Sphären lassen sich nicht beliebig oft herstellen. Wer ein Rezept kann, kann es deshalb noch lange nicht heute — und genau das steht jetzt am Hersteller: „frühestens 21:40“. Abgelesen wird die laufende Sperre beim Öffnen des Berufsfensters, also dort, wo der Client sie überhaupt nennt; sie wandert wie alles andere über den Addon-Kanal in die Gilde. Auch im Wunsch-Hersteller-Feld beim Auftragserstellen steht sie, damit die Bestellung nicht bei dem landet, der heute nicht mehr kann.
+
+Die Angabe ist eine **Mindestangabe**, und das steht auch so da: Hat der Hersteller nach dem letzten Berufsfenster erneut hergestellt, ist er später frei — früher nie. Umgekehrt behauptet Guild Copilot nie, jemand sei frei: Das Spiel meldet für ein freies Rezept dasselbe wie für eines ganz ohne Wartezeit, und was sich nicht unterscheiden lässt, wird auch nicht behauptet.
+
 Die **Gildenbank** wird beim Besuch am Bankfach je Tab eingelesen und gildenweit geteilt. Da die Sichtbarkeit eines Tabs am Rang hängt, gilt alles pro Tab — ein eingeschränkter Blick löscht nie fremde Tabs. Deine eigenen Taschen- und Bankbestände bleiben auf dem Account und werden nie gesendet.
 
 Wer die Gilde verlässt, verschwindet mit seinen Rezepten. Twinks von Gildenmitgliedern bleiben erhalten, weil sie nie im Gildenroster stehen.

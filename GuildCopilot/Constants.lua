@@ -79,6 +79,8 @@ GC.Capabilities = {
     "inventory1",
     -- gearexempt1: versteht ausgenommene Ausruestungsplaetze im Snapshot.
     "gearexempt1",
+    -- cooldown1: versteht Wartezeiten von Rezepten ("W|…|CD|…").
+    "cooldown1",
 }
 
 GC.ProfessionOptions = {

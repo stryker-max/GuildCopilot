@@ -127,6 +127,23 @@ local function FormatInboxTime(timestamp)
     return date("%d.%m. %H:%M", value)
 end
 
+-- Wann eine Rezeptsperre fruehestens faellt. Am selben Tag reicht die Uhrzeit;
+-- die langen Wartezeiten (Spezialtuche, vier Tage) brauchen das Datum dazu.
+--
+-- Beschriftet wird immer mit "fruehestens": Der gespeicherte Zeitpunkt ist
+-- eine Untergrenze. Hat der Hersteller seitdem erneut hergestellt, ist er
+-- spaeter frei - frueher nie.
+local function FormatCooldownReady(readyAt)
+    local value = tonumber(readyAt)
+    if not value or value <= 0 then
+        return ""
+    end
+    if date("%Y-%m-%d", value) == date("%Y-%m-%d") then
+        return "frühestens " .. date("%H:%M", value)
+    end
+    return "frühestens " .. date("%d.%m. %H:%M", value)
+end
+
 -- Die Hoehe eines umbrechenden Textes. GetStringHeight liefert je nach
 -- Zeitpunkt nur die Hoehe einer Zeile; dann klemmt der Text sichtbar ab ("..").
 -- Deshalb wird zusaetzlich aus der Zeichenzahl abgeschaetzt und das Groessere
@@ -4039,8 +4056,25 @@ function GC.UI:RefreshWorkshop()
             "",
             "|cff91a3b8Hersteller|r",
         }
+        -- Wer ein Rezept kann, kann es deshalb noch lange nicht heute:
+        -- Umwandlungen, Spezialtuche und Sphaeren haben eine Wartezeit. Sie
+        -- steht am Hersteller, weil genau dort die Entscheidung faellt, wen man
+        -- fragt.
+        local anyLocked = false
         for _, crafter in ipairs(selected.crafters) do
-            lines[#lines + 1] = "• " .. crafter
+            local readyAt = GC.Workshop:GetRecipeCooldown(selected.key, crafter)
+            if readyAt then
+                anyLocked = true
+                lines[#lines + 1] = "• " .. crafter
+                    .. "   |cffffb840" .. FormatCooldownReady(readyAt) .. "|r"
+            else
+                lines[#lines + 1] = "• " .. crafter
+            end
+        end
+        if anyLocked then
+            lines[#lines + 1] = ""
+            lines[#lines + 1] = "|cff91a3b8Sperrzeiten sind Mindestangaben aus dem"
+                .. " zuletzt geöffneten Berufsfenster.|r"
         end
         page.workshopDetails:SetText(table.concat(lines, "\n"))
         local infoHeight = math.max(15, WrappedTextHeight(
@@ -4837,13 +4871,15 @@ function GC.UI:BuildOrderCreateDialog(page)
 
     -- Die Aufklappliste: ein Zeilenvorrat, je Öffnen mit den Herstellern des
     -- Rezepts gefüllt - "(keiner)" steht immer zuoberst.
+    -- Breiter als der Knopf darüber: In die Zeile gehört neben dem Namen die
+    -- laufende Sperre, und die entscheidet hier mehr als der Name.
     dialog.crafterList = CreatePanel(dialog, THEME.input, THEME.accent)
-    dialog.crafterList:SetSize(180, 10)
+    dialog.crafterList:SetSize(250, 10)
     dialog.crafterList:SetPoint("TOPLEFT", dialog.preferredButton, "BOTTOMLEFT", 0, -2)
     dialog.crafterList:SetFrameLevel((dialog:GetFrameLevel() or 1) + 10)
     dialog.crafterList.rows = {}
     for index = 1, 9 do
-        local rowButton = CreateButton(dialog.crafterList, "", 172, 22, function()
+        local rowButton = CreateButton(dialog.crafterList, "", 242, 22, function()
             local chosen = dialog.crafterList.rows[index].crafterName or ""
             dialog.preferredValue = chosen
             dialog.preferredButton:SetText(chosen ~= ""
@@ -5123,7 +5159,17 @@ function GC.UI:ToggleOrderCrafterList(dialog)
     for index, rowButton in ipairs(list.rows) do
         local name = names[index]
         rowButton.crafterName = name
-        rowButton:SetText(name and (name ~= "" and GC.Util.PlayerShortName(name) or "(keiner)") or "")
+        local label = name and (name ~= "" and GC.Util.PlayerShortName(name) or "(keiner)") or ""
+        -- Einen gesperrten Hersteller darf man weiterhin waehlen - er ist ja
+        -- 24 Stunden reserviert und wird bis dahin oft frei. Aber man soll es
+        -- wissen, bevor man ihn waehlt, nicht danach.
+        if name and name ~= "" then
+            local readyAt = GC.Workshop:GetRecipeCooldown(dialog.recipeKey, name)
+            if readyAt then
+                label = label .. "  |cffffb840" .. FormatCooldownReady(readyAt) .. "|r"
+            end
+        end
+        rowButton:SetText(label)
         rowButton:SetShown(index <= visible)
     end
     list:SetHeight(8 + (visible * 24))

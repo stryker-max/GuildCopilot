@@ -9,9 +9,31 @@ Installer und Addon werden getrennt gezählt.
 
 ## 0.9.97 – Addon
 
-Diese Fassung ändert an dem, was das Addon kann, nichts. Sie ändert, ob es das
-in einer großen Gilde noch kann: Bei 500 Mitgliedern und 250 gleichzeitig
-online lief 0.9.96 nachweislich nicht mehr stabil.
+Zwei Dinge in einer Fassung: Die Werkstatt beantwortet endlich die Frage nach
+dem *Wann*, und das Addon hält einer großen Gilde stand. Bei 500 Mitgliedern
+und 250 gleichzeitig online lief 0.9.96 nachweislich nicht mehr stabil — an
+dem, was es kann, ändert dieser zweite Teil nichts.
+
+**Neu**
+
+- **Die Werkstatt kennt Wartezeiten.** Umwandlungen, Spezialtuche und Sphären
+  haben eine Sperre, und wer ein Rezept kann, kann es deshalb noch lange nicht
+  heute. In den Rezeptdetails steht sie jetzt am Hersteller („frühestens
+  21:40“), ebenso in der Wunsch-Hersteller-Liste beim Auftragserstellen.
+  Abgelesen wird beim Öffnen des Berufsfensters — dort, wo der Client sie
+  überhaupt nennt —, geteilt wird sie über den Addon-Kanal.
+- **Gesagt wird nur, was sich belegen lässt.** Die Angabe ist ausdrücklich eine
+  Mindestangabe: Wer seitdem erneut hergestellt hat, ist später frei, nie
+  früher. Dass jemand frei *ist*, behauptet Guild Copilot dagegen nie — das
+  Spiel meldet für ein freies Rezept dasselbe wie für eines ohne jede
+  Wartezeit.
+
+**Behoben – Wartezeiten**
+
+- **Ein erneuter Berufsscan verlor gemerkte Wartezeiten.** Der Scan baut den
+  Berufsdatensatz vollständig neu auf; Angaben, die nicht aus den Rezepten
+  stammen, fielen dabei heraus. Aufgefallen ist es nur, weil eine
+  Spielfassung ohne Cooldown-Abfrage nichts hat, was sie ersetzt.
 
 **Behoben – der Kanal**
 

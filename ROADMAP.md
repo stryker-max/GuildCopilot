@@ -298,6 +298,54 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.97 – Wer es kann, kann es noch lange nicht heute
+
+Die Werkstatt beantwortet seit 0.4.0 die Frage „wer kann das?". Die Frage danach hat sie nie beantwortet, obwohl sie in TBC die eigentlich knappe ist: **wann darf er wieder?** Umwandlungen, Spezialtuche und Sphären hängen an einer Wartezeit, und der Wochenauftrag über fünfzehn Sphären — das Beispiel, mit dem die README die Auftragsvorlagen erklärt — hängt an nichts anderem.
+
+Bis hierher konnte ein Auftrag an jemanden gehen, dessen Sperre längst verbraucht war. Niemand hat das gemerkt, bis drei Tage später jemand nachfragte.
+
+### Abgelesen, wo es ohnehin passiert
+
+Der Client nennt eine Wartezeit nur, solange das Berufsfenster offen ist. Genau dort steht Guild Copilot schon: `ScanOpenProfession` läuft beim Öffnen ohnehin einmal über jede Zeile. Die Sperre kommt aus derselben Schleife, mit einem zusätzlichen Aufruf je Rezept — kein zweiter Durchlauf, kein neues Ereignis, keine zusätzliche Arbeit im laufenden Spiel.
+
+Damit hat dieser Punkt etwas, das dem Filter nach Skill-Stufe fehlt (Punkt 6 der TODO-Liste, genau daran gescheitert): **kein Datenproblem.** Es braucht keine mitgelieferte Tabelle, welche Rezepte eine Wartezeit haben. Die API meldet eine, wo es eine gibt; was das für Rezepte sind, muss das Addon nie wissen und nie pflegen.
+
+### Warum die Zahl nicht altert
+
+Jede andere Zahl der Werkstatt ist eine Momentaufnahme und wird mit der Zeit unrichtiger. Eine Restzeit nicht. Sie lässt sich in einen Zeitpunkt umrechnen, und der bleibt stehen.
+
+Die verbleibende Unschärfe hat nur **eine Richtung**: Hat der Hersteller nach dem Ablesen erneut hergestellt, ist er später frei — früher nie. Der gespeicherte Zeitpunkt ist damit eine Untergrenze, und genau so ist er überall beschriftet: „frühestens 21:40", dazu unter der Herstellerliste der Satz, dass Sperrzeiten Mindestangaben aus dem zuletzt geöffneten Berufsfenster sind.
+
+Aus derselben Überlegung folgt, was das Addon **nicht** sagt. Die API schweigt bei einem freien Rezept — und sie schweigt genauso bei einem Rezept, das überhaupt keine Wartezeit kennt. Beides ist von außen nicht zu unterscheiden. Also wird auch nichts behauptet: Es gibt „gesperrt bis", es gibt kein „frei". Dieselbe Linie wie bei den unbewerteten Verzauberungen, die nie als schlecht gelten.
+
+### Ein Nachrichtentyp, der nichts zusammensetzen muss
+
+Die Sperren wandern als eigene Operation `W|…|CD|…` durch den Gildenkanal, getrennt von den Rezeptdaten. Das hat drei Gründe, und jeder einzelne hätte gereicht:
+
+- Der Rezeptkatalog ist seit 0.9.30 **herstellerunabhängig** — jedes Rezept steht dort genau einmal. Eine Wartezeit gehört dagegen zu genau einem Charakter.
+- Der Fingerabdruck eines Berufs darf sich nicht ändern, nur weil eine Umwandlung läuft. Sonst gälte jeder Scan als geänderter Rezeptstand und zöge einen vollständigen Abgleich nach sich.
+- Sperren sind **einzelne Tatsachen**, keine Liste, die vollständig ankommen müsste. Jede Nachricht steht deshalb für sich: kein Token, keine Teilzähler, kein Zusammensetzen beim Empfänger. Was ankommt, gilt; was fehlt, kommt beim nächsten Mal.
+
+Übertragen wird die **Restzeit, nicht der Zeitpunkt**. Zwei Rechner können verschieden gehen, und ein absoluter Zeitstempel würde diesen Fehler unbesehen übernehmen — ausgerechnet bei einer Angabe, die nur als Zeitpunkt etwas wert ist. Der Empfänger rechnet mit seiner eigenen Uhr um; die Sekunden Übertragungsweg fallen bei Wartezeiten von Stunden nicht ins Gewicht.
+
+Beim Zusammenführen gewinnt der **spätere** Zeitpunkt. Beide Angaben sind Untergrenzen, und die größere ist die belastbarere — ein im Gildenkanal verspätetes Paket dreht einen frischeren Stand damit nicht zurück. Aus demselben Grund braucht es kein Löschen: Eine Sperre verschwindet, indem sie abläuft.
+
+Ältere Clients verwerfen die unbekannte Operation an der Stelle, an der sie das schon immer getan haben (`operation ~= "D" and ~= "C" and ~= "K"`). Die Schemaversion bleibt deshalb bei 7; gemeldet wird die neue Fähigkeit als `cooldown1`.
+
+### Zwischengespeichert wird der Index, nicht die Uhrzeit
+
+Der Rezept-zu-Hersteller-Index behält bewusst auch abgelaufene Einträge. Würde beim Bauen nach der Uhr gefiltert, wäre das Ergebnis eine Momentaufnahme, die im Zwischenspeicher liegen bleibt und mit jeder Minute unrichtiger wird — ein Fehler, den die Fortschrittsanzeige in 0.9.95 auf ihre Weise schon einmal gemacht hat. Gefiltert wird deshalb erst bei der Abfrage, und der Zwischenspeicher hängt nur an den Daten.
+
+### Ein Fund nebenbei
+
+`StoreProfession` baut den Berufsdatensatz bei jedem Scan vollständig neu auf. Alles, was nicht aus den Rezepten stammt, fiel dabei heraus — die frisch eingebauten Wartezeiten inbegriffen. Mit vorhandener Cooldown-Abfrage war das unsichtbar, weil sie unmittelbar danach neu geschrieben wurden. Sichtbar wurde es erst an einer Spielfassung **ohne** diese Abfrage: Dort gibt es nichts, was den Stand ersetzt, und der Scan hat ihn schlicht gelöscht.
+
+Der Unterschied, um den es dabei geht, steht jetzt im Code: `nil` heißt „nicht abgelesen" und lässt den gemerkten Stand stehen, eine leere Tabelle heißt „abgelesen, nichts gesperrt" und räumt ihn ab. Der Unterschied zwischen einer fehlenden und einer verneinenden Antwort.
+
+### Was die Tests dazu sagen
+
+Neu geprüft wird: dass der Scan eine laufende Sperre mitliest und ein Rezept ohne Sperre nicht als gesperrt merkt; dass derselbe laufende Cooldown beim zweiten Blick **keine** Änderung ist (ohne das Runden auf die Minute schickte jeder Scan ein Paket in die Gilde, nur weil Sekunden vergangen sind); dass die Rezeptkarte die Sperre als Mindestangabe ausweist; dass ein verspätetes Paket den frischeren Stand nicht zurückdreht; dass eine absurd lange Wartezeit nicht übernommen wird; dass dreizehn Sperren auf zwei eigenständige Pakete gehen; dass eine abgelaufene Sperre schweigt statt „frei" zu sagen; und dass ein Scan ohne Cooldown-Abfrage den gemerkten Stand stehen lässt.
+
 ## 0.9.96 – Was die Sperre abräumt und was sie nur behauptet
 
 0.9.95 hat die Stillstandssperre daran gehindert, wartende Pakete auszubuchen. Dabei blieben zwei Fehler stehen, die älter sind als diese ganze Reihe.
@@ -1467,6 +1515,10 @@ Der Bestand lag bei 4,3 MB, davon 2,25 MB allein Ausrüstungsprüfungen – WoW 
 - Die WHISPER-Sperre deckte `RD` nicht ab – Raidauswertungen ließen sich von Gildenfremden einschleusen und verdrängten zusammen mit der Verdrängung oben die Abendhistorie.
 - `GC.Perf:Measure` reichte die Rückgabe der gemessenen Funktion nur bei *ausgeschalteter* Messung durch. `/gcp debug` änderte damit das Programmverhalten, statt es zu beobachten.
 - Fünf Merklisten wuchsen unbegrenzt, `Prune` lief nur beim Login, und `remoteProfiles` wie `addonUsers` führten jeden Spieler unter zwei Schlüsseln.
+
+**Zusammengefuehrt mit den Wartezeiten**
+
+Die Werkstatt-Wartezeiten aus derselben Fassung sind hier eingeflossen. Eine Stelle brauchte dabei eine Anpassung: Die Antwort auf eine Werkstatt-Anfrage schickt seither auch die laufenden Sperren mit, und zwar von jedem Client. Eine Sperre gehört wie ein Beruf dem eigenen Account – kein anderer kann sie melden –, also gilt für sie dieselbe Regel wie für das Manifest: Es antworten alle, aber zeitlich gestreut statt gleichzeitig.
 
 **Was bewusst offen bleibt**
 
