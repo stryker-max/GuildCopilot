@@ -298,6 +298,31 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.98 – Die Wartezeit, die genau dort fehlte, wo sie jeder sucht
+
+0.9.97 hat die Wartezeiten eingeführt und dabei ausgerechnet den Beruf ausgelassen, an dem sie zuerst auffallen. Gemeldet wurde es am Tag nach der Veröffentlichung, mit dem denkbar knappsten Beleg: das Berufsfenster zeigt „Verbleibende Abklingzeit: 21 Std. 20 Min." auf der Sphäre der Leere, die Rezeptkarte daneben zeigt am selben Hersteller nichts.
+
+### Verzauberkunst ist kein Berufsfenster
+
+In TBC gibt es zwei Berufsoberflächen, und Verzauberkunst hängt an der anderen. Was Alchimie oder Schneiderei über `GetNumTradeSkills` und `GetTradeSkillInfo` melden, meldet Verzauberkunst über `GetNumCrafts` und `GetCraftInfo` — eine eigene API mit eigenen Funktionsnamen, sichtbar schon am Knopf des Fensters: dort steht „Verzaubern", nicht „Herstellen".
+
+Guild Copilot weiß das seit 0.4.0 und hat dafür einen dritten Scanzweig, `ScanClassicCraftProfession`. Die Wartezeiten aus 0.9.97 wurden in die anderen beiden eingebaut — den modernen und den klassischen Berufsfenster-Zweig — und in diesen nicht. Er las keine Sperre mit und gab sein Ergebnis außerdem direkt an `StoreProfession` zurück, an `FinishScan` vorbei; dort erst werden gelesene Sperren gemerkt und in die Gilde geschickt. Beides zusammen heißt: Für einen Verzauberer war die Anzeige nicht etwa falsch, sondern unerreichbar.
+
+Bemerkenswert ist, wie leise das war. Kein Fehler, keine Meldung, kein leeres Feld — die Rezepte kamen vollständig an, der Abgleich stand auf 100 %, und die Herstellerliste sah genau so aus wie vorher. Ein nicht gebauter Zweig sieht aus wie ein Beruf ohne laufende Sperre, und beides zeigt das Addon aus gutem Grund identisch an: Es behauptet nie, jemand sei frei.
+
+### Warum der Test es nicht gefunden hat
+
+Der Regressionstest aus 0.9.97 stellt eine laufende Sperre auf der Mondstofftasche und prüft sie über den ganzen Weg bis in die Rezeptkarte. Er tut das an Schneiderei — also über `GetTradeSkillCooldown`, im Zweig, der schon funktionierte. Die Craft-API war in der Testumgebung längst vorhanden und wurde an anderer Stelle auch benutzt; die Wartezeiten hat dort niemand angefasst.
+
+Das ist der übliche Zuschnitt eines Tests nach dem Bild der Implementierung statt nach dem Bild des Problems: Geprüft wurde der Pfad, den man gerade geschrieben hatte. Der neue Test läuft deshalb über den Craft-Zweig und endet an derselben Stelle wie sein Vorbild — bei „frühestens" in der Rezeptkarte.
+
+### Geändert
+
+- `ScanClassicCraftProfession` liest die laufende Sperre über `GetCraftCooldown` mit, in derselben Schleife, die ohnehin jede Zeile anfasst — ein zusätzlicher Aufruf je Rezept, wie in den beiden anderen Zweigen;
+- er gibt sein Ergebnis über `FinishScan` zurück statt über `StoreProfession`, womit gelesene Sperren gemerkt und bei einer Änderung in die Gilde geschickt werden;
+- dieselbe Unterscheidung wie überall sonst gilt jetzt auch hier: keine Abfrage in dieser Spielfassung heißt „nicht abgelesen" und lässt den gemerkten Stand stehen, eine leere Antwort heißt „abgelesen, nichts gesperrt";
+- ein Regressionstest über den Craft-Zweig, vom Scan bis zur Rezeptkarte, samt der Prüfung, dass ein Scan ohne Cooldown-Abfrage den gemerkten Stand nicht abräumt. Er schlägt gegen 0.9.97 fehl.
+
 ## 0.9.97 – Wer es kann, kann es noch lange nicht heute
 
 Die Werkstatt beantwortet seit 0.4.0 die Frage „wer kann das?". Die Frage danach hat sie nie beantwortet, obwohl sie in TBC die eigentlich knappe ist: **wann darf er wieder?** Umwandlungen, Spezialtuche und Sphären hängen an einer Wartezeit, und der Wochenauftrag über fünfzehn Sphären — das Beispiel, mit dem die README die Auftragsvorlagen erklärt — hängt an nichts anderem.

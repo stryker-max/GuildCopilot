@@ -7601,6 +7601,48 @@ do
     addon.Workshop:ScanOpenProfession()
     assert(addon.Workshop:GetOwnData().professions.schneiderei.cooldowns.I14155 ~= nil,
         "Ein Scan ohne Cooldown-API hat den gemerkten Stand gelöscht")
+
+    -- Verzauberkunst läuft über die Craft-API und hat einen eigenen Scanzweig.
+    -- Der las bis 0.9.97 keine Wartezeiten mit, obwohl mit Sphäre der Leere und
+    -- Prismasphäre ausgerechnet dort die bekanntesten Sperren sitzen. Ohne den
+    -- Fix bleibt "cooldowns" hier nil, und die Rezeptkarte schweigt.
+    GetCraftCooldown = function(index)
+        return index == 2 and 76800 or nil
+    end
+    local craftTradeSkillLine = GetTradeSkillLine
+    GetTradeSkillLine = function()
+        return "UNKNOWN", 0, 0
+    end
+    local scannedCraftCooldown = addon.Workshop:ScanOpenProfession()
+    GetTradeSkillLine = craftTradeSkillLine
+    assert(scannedCraftCooldown == true, "Der Craft-Scan mit laufender Wartezeit schlug fehl")
+
+    local craftProfession = addon.Workshop:GetOwnData().professions.verzauberkunst
+    assert(craftProfession.cooldowns ~= nil and craftProfession.cooldowns.E27926 ~= nil,
+        "Die laufende Sperre der Craft-API wurde beim Scannen nicht mitgelesen")
+    assert(addon.Workshop:GetRecipeCooldown("E27926", ownName) ~= nil,
+        "Die eigene Craft-Sperre ist über den Index nicht abfragbar")
+
+    -- Und sie muss dort ankommen, wo man sie sucht: am Hersteller in der
+    -- Rezeptkarte.
+    addon.UI.pages.WORKSHOP.workshopProfession.value = "Verzauberkunst"
+    addon.UI.pages.WORKSHOP.workshopSearch:SetText("")
+    addon.UI.pages.WORKSHOP.selectedWorkshopRecipe = "E27926"
+    addon.UI:RefreshWorkshop()
+    assert(addon.UI.pages.WORKSHOP.workshopDetails.value:find("frühestens", 1, true) ~= nil,
+        "Die Rezeptkarte nennt die Craft-Sperre nicht: "
+            .. tostring(addon.UI.pages.WORKSHOP.workshopDetails.value))
+
+    -- Auch hier gilt: keine Abfrage in dieser Spielfassung heißt "nicht
+    -- abgelesen" und nicht "nichts gesperrt".
+    GetCraftCooldown = nil
+    GetTradeSkillLine = function()
+        return "UNKNOWN", 0, 0
+    end
+    addon.Workshop:ScanOpenProfession()
+    GetTradeSkillLine = craftTradeSkillLine
+    assert(addon.Workshop:GetOwnData().professions.verzauberkunst.cooldowns.E27926 ~= nil,
+        "Ein Craft-Scan ohne Cooldown-API hat den gemerkten Stand gelöscht")
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

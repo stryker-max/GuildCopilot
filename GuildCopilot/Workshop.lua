@@ -959,6 +959,17 @@ function GC.Workshop:ScanClassicCraftProfession()
     end
 
     local recipes = {}
+    -- Verzauberkunst laeuft in TBC ueber die Craft-API, nicht ueber die
+    -- Berufsfenster-API - und genau dort sitzen zwei der Rezepte, wegen denen
+    -- es die Wartezeiten ueberhaupt gibt: Sphaere der Leere und Prismasphaere.
+    -- Dieser Zweig las sie bis 0.9.97 nicht mit und ging an FinishScan vorbei,
+    -- wo das Merken und Senden erst passiert. Fuer einen Verzauberer war die
+    -- Anzeige damit unerreichbar, ohne dass irgendetwas fehlschlug.
+    --
+    -- Dieselbe Regel wie in den anderen beiden Zweigen: nil heisst "nicht
+    -- abgelesen" und laesst den gemerkten Stand stehen, eine leere Tabelle
+    -- heisst "abgelesen, nichts gesperrt".
+    local cooldowns = GetCraftCooldown and {} or nil
     local recipeCount = GetNumCrafts() or 0
     for recipeIndex = 1, recipeCount do
         local recipeName, _, recipeType = GetCraftInfo(recipeIndex)
@@ -990,9 +1001,16 @@ function GC.Workshop:ScanClassicCraftProfession()
                 profession = professionName,
                 reagents = reagents,
             }
+            if cooldowns then
+                local remaining = SafeAPICall(GetCraftCooldown, recipeIndex)
+                if (tonumber(remaining) or 0) > 0 then
+                    cooldowns[recipeKey] = tonumber(remaining)
+                end
+            end
         end
     end
-    return self:StoreProfession(professionName, skillLevel, maxSkillLevel, recipes, recipeCount)
+    return self:FinishScan(
+        professionName, skillLevel, maxSkillLevel, recipes, recipeCount, cooldowns)
 end
 
 function GC.Workshop:ScanOpenProfession()

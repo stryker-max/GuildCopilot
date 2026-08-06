@@ -7,6 +7,26 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.98 – Addon
+
+**Behoben**
+
+- **Verzauberkunst meldete nie eine Wartezeit.** In TBC hängt der Beruf an einer
+  eigenen Oberfläche — dort steht „Verzaubern", wo sonst „Herstellen" steht —,
+  und Guild Copilot hat dafür einen eigenen Scanzweig. Die Wartezeiten aus
+  0.9.97 wurden in die beiden anderen Zweige eingebaut und in diesen nicht.
+  Ausgerechnet Sphäre der Leere und Prismasphäre, die bekanntesten Sperren des
+  Spiels, blieben damit unsichtbar: Das Berufsfenster zeigte „Verbleibende
+  Abklingzeit: 21 Std. 20 Min.", die Rezeptkarte daneben am selben Hersteller
+  nichts.
+- Auffallen konnte das nicht von selbst. Es gab keinen Fehler und keine leere
+  Stelle — ein nicht gebauter Zweig sieht genauso aus wie ein Beruf ohne
+  laufende Sperre, und beides zeigt das Addon bewusst gleich an.
+
+Der Regressionstest aus 0.9.97 prüfte den Weg bis in die Rezeptkarte, aber an
+Schneiderei — also im Zweig, der bereits funktionierte. Der neue läuft über die
+Craft-API und schlägt gegen 0.9.97 fehl.
+
 ## 0.9.97 – Addon
 
 Zwei Dinge in einer Fassung: Die Werkstatt beantwortet endlich die Frage nach
