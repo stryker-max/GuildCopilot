@@ -28,6 +28,14 @@ Installer und Addon werden getrennt gezählt.
   oben im Profil zeigt denselben Stand weiter — beide fragen dieselben Daten
   und können sich nicht widersprechen. Der Knopf „Einrichtung“ und
   `/gcp welcome` öffnen den Assistenten jederzeit erneut.
+- **Nach dem ersten Blick im Spiel nachgeschärft.** Die Funktionstour ist auf
+  die Seitenhöhe verteilt und jede Zeile trägt das Symbol ihrer Seite. Die
+  Gildenwerkstatt hat eine eigene Zeile statt sich eine mit der
+  Mitgliederpflege zu teilen, und Warcraft Logs steht nicht mehr in der Tour —
+  wer frisch installiert, hat nur das Addon. „Fertig“ klingt nach
+  Stufenaufstieg, und das erste „Später“ zeigt einmalig ein kleines
+  Hinweisfenster mit dem Weg zurück (`/gcp welcome` oder der Knopf
+  „Einrichtung“).
 
 **Behoben**
 

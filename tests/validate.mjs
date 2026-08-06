@@ -389,6 +389,9 @@ const requiredImplementations = [
   ["sicherer Knopf öffnet das Berufsfenster", /SecureActionButtonTemplate/],
   ["Sammelberufe ohne Rezeptfenster zentral", /GC\.RecipelessProfessions = \{/],
   ["Bergbau öffnet Schmelzen", /GC\.ProfessionWindowSpells = \{/],
+  ["einmaliger Hinweis nach Später", /function GC\.Onboarding:NoteLaterPressed/],
+  ["Hinweisfenster mit dem Weg zurück", /function GC\.UI:ShowWizardLaterHint/],
+  ["Fertig klingt nach Stufenaufstieg", /PlaySuccessSound\("LEVEL_UP"\)/],
   ["Berufe aus den Classic-Fähigkeitszeilen", /local function ReadSkillLineProfessions/],
   ["Herkunft der Berufsangabe", /function GC\.Profile:GetProfessionSource/],
   ["Marker am Minimap-Symbol", /function GC\.UI:RefreshMinimapMarker/],
@@ -834,7 +837,8 @@ if (navHeight > sidebarHeight) {
 // Abschnitt, stellt der Assistent ein Addon vor, das es so nicht gibt - und
 // nennt die Tour einen Abschnitt, den die Seitenleiste nicht kennt, führt sie
 // die Leute an eine Stelle, die sie nie finden werden. Beide Richtungen sind
-// deshalb Fehler.
+// deshalb Fehler. Mehrere Zeilen je Abschnitt sind erlaubt (GILDE:
+// Mitgliederpflege und Werkstatt sind zwei verschiedene Dinge).
 const onboardingSource = fs.readFileSync(path.join(root, "Onboarding.lua"), "utf8");
 const tourBlock = onboardingSource.slice(
   onboardingSource.indexOf("GC.Onboarding.TOUR = {"),
@@ -853,8 +857,17 @@ for (const section of tourSections) {
     );
   }
 }
-if (new Set(tourSections).size !== tourSections.length) {
-  throw new Error("Die Funktionstour nennt einen Abschnitt doppelt.");
+// Jede Tourzeile trägt ein Symbol; eine Zeile ohne fiele erst im Spiel auf.
+const tourIcons = (tourBlock.match(/icon = "Interface/g) || []).length;
+if (tourIcons !== tourSections.length) {
+  throw new Error(
+    `Die Funktionstour hat ${tourSections.length} Zeilen, aber ${tourIcons} Symbole.`
+  );
+}
+// Warcraft Logs bleibt bewusst draußen: Wer frisch installiert, hat nur das
+// Addon - der Import ist kein Verkaufsargument der ersten fünf Minuten.
+if (tourBlock.includes("Warcraft Logs")) {
+  throw new Error("Warcraft Logs steht wieder in der Funktionstour.");
 }
 
 // Das Auftragsboard hat drei Abschnitte untereinander in einer Ansicht ohne

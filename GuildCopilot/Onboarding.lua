@@ -132,6 +132,7 @@ function GC.Onboarding:GetData()
         dismissedAt = 0,
         autoOpenedAt = 0,
         doneShownAt = 0,
+        laterHintShownAt = 0,
     })
     return character.onboarding
 end
@@ -296,37 +297,55 @@ local WIZARD_PAGES = {
     { key = "DONE" },
 }
 
--- Die Funktionstour, ein Eintrag je Abschnitt der Seitenleiste - in genau
--- deren Reihenfolge, denn das WO ist die halbe Antwort: Wer die Tour gelesen
--- hat, hat die Seitenleiste schon einmal von oben nach unten gesehen.
--- tests/validate.mjs prueft, dass kein Abschnitt der Seitenleiste hier fehlt.
+-- Die Funktionstour, in der Reihenfolge der Seitenleiste - das WO ist die
+-- halbe Antwort: Wer die Tour gelesen hat, hat die Seitenleiste schon einmal
+-- von oben nach unten gesehen. Ein Abschnitt darf mehrere Zeilen haben
+-- (GILDE: Mitgliederpflege und Werkstatt sind zwei verschiedene Dinge, eine
+-- gemeinsame Zeile beschrieb beide nur halb); tests/validate.mjs prueft in
+-- beide Richtungen, dass Tour und Seitenleiste dieselben Abschnitte nennen.
+--
+-- Warcraft Logs steht bewusst NICHT in der Tour (Owner-Entscheidung): Wer
+-- frisch installiert, hat nur das Addon - der Import ist ein Werkzeug fuer
+-- Fortgeschrittene und kein Verkaufsargument der ersten fuenf Minuten.
 GC.Onboarding.TOUR = {
     {
         section = "COPILOT",
+        icon = "Interface\\Icons\\INV_Misc_GroupLooking",
         pages = "Profil · Übersicht",
-        text = "Dein Raidprofil, deine Berufe und deine Abmeldung – und die Übersicht,"
-            .. " was alle in der Gilde gemeldet haben.",
+        text = "Dein Raidprofil, deine Berufe und deine Abmeldung – und was"
+            .. " die ganze Gilde gemeldet hat.",
     },
     {
         section = "REKRUTIERUNG",
+        icon = "Interface\\Icons\\INV_Letter_15",
         pages = "Gildenprofil · Vorschläge · Klassen & Specs · Werbung · Postfach",
-        text = "Der ganze Werbeweg in einem Durchlauf: Gildenprofil pflegen, sehen"
-            .. " welche Specs fehlen, Werbung posten und Antworten im Postfach beantworten.",
+        text = "Gildenprofil pflegen, fehlende Specs sehen, Werbung posten und"
+            .. " Antworten im Postfach beantworten.",
     },
     {
         section = "GILDE",
-        pages = "Mitgliederpflege · Gildenwerkstatt",
-        text = "Wer lange offline ist – und wer in der Gilde welches Rezept kann,"
-            .. " samt Aufträgen mit Materialstand aus Taschen, Bank und Gildenbank.",
+        icon = "Interface\\Icons\\INV_Misc_Note_06",
+        pages = "Mitgliederpflege",
+        text = "Abmeldungen und Inaktivität im Blick: Wer lange fehlt, wird zur"
+            .. " Prüfung vorgeschlagen – nie automatisch entfernt.",
+    },
+    {
+        section = "GILDE",
+        icon = "Interface\\Icons\\INV_Hammer_20",
+        pages = "Gildenwerkstatt",
+        text = "Wer kann welches Rezept? Mit Herstellern, Materialstand und"
+            .. " Aufträgen an eure Handwerker.",
     },
     {
         section = "RAID",
-        pages = "Warcraft Logs · Raidauswertung · Ausrüstung",
-        text = "Raidabende mitschreiben oder importieren, Consumables und Tode"
-            .. " auswerten, Verzauberungen und Sockel der Raider prüfen.",
+        icon = "Interface\\Icons\\INV_Misc_Book_11",
+        pages = "Raidauswertung · Ausrüstung",
+        text = "Raidabende mitschreiben, Consumables und Tode auswerten,"
+            .. " Verzauberungen und Sockel der Raider prüfen.",
     },
     {
         section = "SYSTEM",
+        icon = "Interface\\Icons\\INV_Gizmo_02",
         pages = "Einstellungen",
         text = "Töne, Rangfreigaben, Trigger-Wörter und das Minimap-Symbol.",
     },
@@ -355,6 +374,19 @@ function GC.Onboarding:WizardGo(delta)
     local _, index = self:GetWizardPage()
     self.wizardIndex = math.max(1, math.min(index + (tonumber(delta) or 1), #WIZARD_PAGES))
     return self:GetWizardPage()
+end
+
+-- "Spaeter" auf der Logoseite: Beim ersten Mal je Charakter folgt der
+-- Hinweis, wie man die Einrichtung wieder aufruft - und genau einmal, denn
+-- wer ihn gelesen hat, weiss es. Ein Fenster nach jedem Schliessen waere
+-- Draengeln.
+function GC.Onboarding:NoteLaterPressed()
+    local data = self:GetData()
+    if (data.laterHintShownAt or 0) > 0 then
+        return false
+    end
+    data.laterHintShownAt = GC.Util.Now()
+    return true
 end
 
 -- "Ueberspringen" auf einer Schrittseite heisst dasselbe wie in der

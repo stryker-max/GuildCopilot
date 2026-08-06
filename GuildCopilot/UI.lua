@@ -2352,53 +2352,112 @@ local function BuildWizardWelcomePage(frame)
     end, "PRIMARY")
     start:SetPoint("BOTTOM", page, "BOTTOM", 0, 48)
     start.label:SetFontObject("GameFontNormalLarge")
+    page.start = start
 
-    -- "Spaeter" schliesst nur; /gcp welcome und der Kopfzeilen-Knopf
-    -- "Einrichtung" fuehren jederzeit hierher zurueck.
+    -- "Spaeter" schliesst; beim ersten Mal je Charakter folgt der Hinweis,
+    -- wie man die Einrichtung wieder aufruft (Owner-Wunsch). Nur beim ersten:
+    -- Wer den Hinweis gelesen hat, weiss es, und ein Fenster nach jedem
+    -- Schliessen waere Draengeln.
     local later = CreateButton(page, "Später", 96, 24, function()
         GC.UI:HideWelcome()
+        if GC.Onboarding:NoteLaterPressed() then
+            GC.UI:ShowWizardLaterHint()
+        end
     end)
     later:SetPoint("BOTTOM", page, "BOTTOM", 0, 16)
     later.label:SetFontObject("GameFontNormalSmall")
+    page.later = later
 end
 
--- Seite 2: die Funktionstour. Ein Eintrag je Abschnitt der Seitenleiste, in
--- deren Reihenfolge - das WAS steht im Text, das WO ergibt sich daraus, dass
--- die Liste die Seitenleiste selbst ist.
+-- Das Hinweisfenster nach dem ersten "Spaeter": ein Satz, ein Knopf. Es
+-- beantwortet genau die eine Frage, die das Schliessen aufwirft - wie komme
+-- ich zurueck?
+function GC.UI:ShowWizardLaterHint()
+    if not self.wizardLaterHint then
+        local hint = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotLaterHintFrame")
+        hint:SetSize(400, 148)
+        hint:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+        hint:SetFrameStrata("DIALOG")
+        hint:SetToplevel(true)
+        hint:EnableMouse(true)
+        hint:Hide()
+        table.insert(UISpecialFrames, "GuildCopilotLaterHintFrame")
+
+        local title = CreateLabel(hint, "Bis später!", {
+            title = true,
+            align = "CENTER",
+            width = 360,
+            height = 20,
+        })
+        title:SetPoint("TOP", hint, "TOP", 0, -16)
+        local text = CreateLabel(hint,
+            "Du kannst die Einrichtung jederzeit neu starten: mit /gcp welcome"
+                .. " oder über den Knopf „Einrichtung“ oben im Guild-Copilot-Fenster.",
+            { muted = true, align = "CENTER", width = 360, height = 46, vertical = "TOP" })
+        text:SetPoint("TOP", hint, "TOP", 0, -44)
+
+        local ok = CreateButton(hint, "Alles klar", 140, 32, function()
+            GC.UI.wizardLaterHint:Hide()
+        end, "PRIMARY")
+        ok:SetPoint("BOTTOM", hint, "BOTTOM", 0, 14)
+        self.wizardLaterHint = hint
+    end
+    self.wizardLaterHint:Show()
+end
+
+-- Seite 2: die Funktionstour, in der Reihenfolge der Seitenleiste - das WAS
+-- steht im Text, das WO ergibt sich daraus, dass die Liste die Seitenleiste
+-- selbst ist. Kopf und Zeilen sind auf die Seitenhoehe verteilt statt oben
+-- zusammengeschoben (Owner-Wunsch nach dem ersten Blick im Spiel), und jede
+-- Zeile traegt das Symbol ihrer Seite. Der Abschnittsname steht nur an der
+-- ersten Zeile seines Abschnitts, wie in der Seitenleiste auch.
 local function BuildWizardTourPage(frame)
     local page = CreateWizardPage(frame, "TOUR")
 
-    local heading = CreateLabel(page, "Was Guild Copilot kann", { title = true })
-    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -22)
+    local heading = CreateLabel(page, "Was Guild Copilot kann", {
+        title = true,
+        align = "CENTER",
+        width = 508,
+        height = 22,
+    })
+    heading:SetPoint("TOP", page, "TOP", 0, -24)
     local help = CreateLabel(page,
-        "Alles liegt in einem Fenster; die Seitenleiste links gliedert es in fünf Abschnitte – von oben nach unten:",
-        { muted = true, width = 508, height = 30, vertical = "TOP" })
-    help:SetPoint("TOPLEFT", page, "TOPLEFT", 26, -50)
+        "Alles liegt in einem Fenster – die Seitenleiste links gliedert es von oben nach unten:",
+        { muted = true, align = "CENTER", width = 508, height = 30, vertical = "TOP" })
+    help:SetPoint("TOP", page, "TOP", 0, -52)
 
-    local y = -88
+    local y = -96
+    local previousSection
     for _, entry in ipairs(GC.Onboarding.TOUR) do
-        local section = CreateLabel(page, entry.section, {
-            color = THEME.accent,
-            font = "GameFontNormalSmall",
-            width = 118,
-            height = 14,
-        })
-        section:SetPoint("TOPLEFT", page, "TOPLEFT", 26, y)
+        local icon = page:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(26, 26)
+        icon:SetPoint("TOPLEFT", page, "TOPLEFT", 30, y - 2)
+        icon:SetTexture(entry.icon)
+        if entry.section ~= previousSection then
+            previousSection = entry.section
+            local section = CreateLabel(page, entry.section, {
+                color = THEME.accent,
+                font = "GameFontNormalSmall",
+                width = 96,
+                height = 14,
+            })
+            section:SetPoint("TOPLEFT", page, "TOPLEFT", 68, y)
+        end
         local pagesLabel = CreateLabel(page, entry.pages, {
             font = "GameFontNormalSmall",
-            width = 384,
+            width = 364,
             height = 14,
         })
-        pagesLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 150, y)
+        pagesLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 170, y)
         local text = CreateLabel(page, entry.text, {
             muted = true,
             font = "GameFontNormalSmall",
-            width = 384,
+            width = 364,
             height = 28,
             vertical = "TOP",
         })
-        text:SetPoint("TOPLEFT", page, "TOPLEFT", 150, y - 17)
-        y = y - 62
+        text:SetPoint("TOPLEFT", page, "TOPLEFT", 170, y - 17)
+        y = y - 55
     end
 end
 
@@ -2602,6 +2661,12 @@ function GC.UI:CreateWelcomeFrame()
     frame.nextButton = CreateButton(frame, "Weiter", 116, 34, function()
         local _, index = GC.Onboarding:GetWizardPage()
         if index >= GC.Onboarding:GetWizardPageCount() then
+            -- Der Abschluss klingt nach Stufenaufstieg (Owner-Wunsch) -
+            -- unabhaengig vom eingestellten Bestaetigungston, denn das hier
+            -- ist keine Bestaetigung, sondern ein "geschafft".
+            if GC.Chat and GC.Chat.PlaySuccessSound then
+                GC.Chat:PlaySuccessSound("LEVEL_UP")
+            end
             GC.UI:HideWelcome()
         else
             GC.Onboarding:WizardGo(1)

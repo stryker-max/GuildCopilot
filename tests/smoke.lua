@@ -4665,60 +4665,63 @@ end
 -- Merker, sein Bestaetigen ruft dieselbe echte Aktion. Getestet wird deshalb
 -- beides zusammen - dass das Seitenmodell traegt und dass keine Seite einen
 -- eigenen Begriff von "erledigt" erfindet.
+-- Blockvariablen sind wegen des 200-Locals-Limits global (wizard_-Praefix),
+-- wie beim Auftragsblock weiter unten.
 do
-local profile = addon.Profile:Get()
-local guildData = addon.DB:GetGuild()
-local savedConfirmed = profile.confirmed
-local savedProfessions = profile.professions
-local savedWorkshop = profile.workshop
-local savedAudits = guildData.gearAudits
-local savedAuto = profile.professionAuto
-local data = addon.Onboarding:GetData()
+wizard_profile = addon.Profile:Get()
+wizard_guildData = addon.DB:GetGuild()
+wizard_savedConfirmed = wizard_profile.confirmed
+wizard_savedProfessions = wizard_profile.professions
+wizard_savedWorkshop = wizard_profile.workshop
+wizard_savedAudits = wizard_guildData.gearAudits
+wizard_savedAuto = wizard_profile.professionAuto
+wizard_data = addon.Onboarding:GetData()
 
-profile.confirmed = false
-profile.professionAuto = false
-profile.professions = { { name = "Verzauberkunst" } }
-profile.workshop = { professions = {} }
-guildData.gearAudits = {}
-data.skipped = {}
-data.dismissedAt = 0
+wizard_profile.confirmed = false
+wizard_profile.professionAuto = false
+wizard_profile.professions = { { name = "Verzauberkunst" } }
+wizard_profile.workshop = { professions = {} }
+wizard_guildData.gearAudits = {}
+wizard_data.skipped = {}
+wizard_data.dismissedAt = 0
+wizard_data.laterHintShownAt = 0
 addon.Onboarding.hiddenForSession = nil
 addon.Onboarding.completionVisible = nil
 
 -- Sechs Seiten: vorn das Logo, hinten die Fundorte, dazwischen die Tour und
 -- die drei Schritte in der Reihenfolge der Checkliste.
-local pages = addon.Onboarding:GetWizardPages()
-assert(#pages == addon.Onboarding:GetWizardPageCount(),
+wizard_pages = addon.Onboarding:GetWizardPages()
+assert(#wizard_pages == addon.Onboarding:GetWizardPageCount(),
     "Seitenliste und Seitenzahl widersprechen sich")
-assert(pages[1].key == "WELCOME" and pages[2].key == "TOUR"
-    and pages[#pages].key == "DONE",
+assert(wizard_pages[1].key == "WELCOME" and wizard_pages[2].key == "TOUR"
+    and wizard_pages[#wizard_pages].key == "DONE",
     "Die Seitenfolge des Assistenten stimmt nicht")
-local stepKeys = {}
-for _, page in ipairs(pages) do
-    if page.step then
-        stepKeys[#stepKeys + 1] = page.step
+wizard_stepKeys = {}
+for _, wizard_page in ipairs(wizard_pages) do
+    if wizard_page.step then
+        wizard_stepKeys[#wizard_stepKeys + 1] = wizard_page.step
     end
 end
-assert(#stepKeys == 3 and stepKeys[1] == "PROFILE"
-    and stepKeys[2] == "PROFESSIONS" and stepKeys[3] == "GEAR",
+assert(#wizard_stepKeys == 3 and wizard_stepKeys[1] == "PROFILE"
+    and wizard_stepKeys[2] == "PROFESSIONS" and wizard_stepKeys[3] == "GEAR",
     "Die Schrittseiten decken nicht die drei Checklistenschritte ab")
 
 -- Blaettern bleibt an den Raendern stehen, statt aus dem Assistenten zu fallen.
 addon.Onboarding:StartWizard()
-local page, pageIndex = addon.Onboarding:GetWizardPage()
-assert(page.key == "WELCOME" and pageIndex == 1, "Der Assistent beginnt nicht vorn")
+wizard_page, wizard_pageIndex = addon.Onboarding:GetWizardPage()
+assert(wizard_page.key == "WELCOME" and wizard_pageIndex == 1, "Der Assistent beginnt nicht vorn")
 addon.Onboarding:WizardGo(-1)
-page, pageIndex = addon.Onboarding:GetWizardPage()
-assert(pageIndex == 1, "Zurueck auf der ersten Seite faellt aus dem Assistenten")
+wizard_page, wizard_pageIndex = addon.Onboarding:GetWizardPage()
+assert(wizard_pageIndex == 1, "Zurueck auf der ersten Seite faellt aus dem Assistenten")
 addon.Onboarding:WizardGo(99)
-page = addon.Onboarding:GetWizardPage()
-assert(page.key == "DONE", "Vorblaettern ueber das Ende laeuft ins Leere")
+wizard_page = addon.Onboarding:GetWizardPage()
+assert(wizard_page.key == "DONE", "Vorblaettern ueber das Ende laeuft ins Leere")
 
 -- Jedes Oeffnen beginnt vorn, und sichtbar ist genau die aktuelle Seite.
 addon.UI:ShowWelcome()
 assert(addon.UI.welcomeFrame:IsShown() == true, "ShowWelcome zeigt den Assistenten nicht")
-page = addon.Onboarding:GetWizardPage()
-assert(page.key == "WELCOME", "Ein erneutes Oeffnen setzt den Assistenten nicht an den Anfang")
+wizard_page = addon.Onboarding:GetWizardPage()
+assert(wizard_page.key == "WELCOME", "Ein erneutes Oeffnen setzt den Assistenten nicht an den Anfang")
 assert(addon.UI.welcomeFrame.wizardPages.WELCOME:IsShown() == true,
     "Die Logoseite ist beim Oeffnen nicht sichtbar")
 assert(addon.UI.welcomeFrame.wizardPages.TOUR:IsShown() == false,
@@ -4740,20 +4743,20 @@ assert(addon.Onboarding:GetWizardPage().key == "STEP_PROFESSIONS",
     "Ueberspringen blaettert nicht weiter")
 
 -- Ein erledigter Schritt wird nicht rueckwirkend als uebersprungen gefuehrt.
-profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
+wizard_profile.workshop = { professions = { schneiderei = { name = "Schneiderei" } } }
 addon.Onboarding:SkipWizardStep()
-assert(data.skipped.PROFESSIONS == nil,
+assert(wizard_data.skipped.PROFESSIONS == nil,
     "Ein erledigter Schritt wurde als uebersprungen vermerkt")
 
 -- Der Bestaetigen-Knopf der Profilseite ruft die echte Aktion - danach ist
 -- der Schritt in Assistent UND Checkliste erledigt.
-data.skipped = {}
+wizard_data.skipped = {}
 addon.UI:ShowWelcome()
 addon.Onboarding:WizardGo(1)
 addon.Onboarding:WizardGo(1)
 addon.UI:ShowWizardPage()
-local profilePage = addon.UI.welcomeFrame.wizardPages.STEP_PROFILE
-profilePage.confirm.scripts.OnClick(profilePage.confirm)
+wizard_profilePage = addon.UI.welcomeFrame.wizardPages.STEP_PROFILE
+wizard_profilePage.confirm.scripts.OnClick(wizard_profilePage.confirm)
 assert(addon.Onboarding:GetSteps()[1].done == true,
     "Der Bestaetigen-Knopf des Assistenten bestaetigt das Profil nicht")
 assert(addon.UI.welcomeFrame.skipButton:IsShown() == false,
@@ -4761,57 +4764,85 @@ assert(addon.UI.welcomeFrame.skipButton:IsShown() == false,
 
 -- Je Beruf eine Zeile: Rezeptberufe bekommen den sicheren Oeffnen-Knopf,
 -- Sammelberufe nicht - dort gibt es kein Fenster zum Oeffnen.
-profile.professions = { { name = "Verzauberkunst" }, { name = "Kürschnerei" } }
-profile.workshop = { professions = {} }
+wizard_profile.professions = { { name = "Verzauberkunst" }, { name = "Kürschnerei" } }
+wizard_profile.workshop = { professions = {} }
 addon.Onboarding:WizardGo(1)
 addon.UI:ShowWizardPage()
-local professionRows = addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.rows
-assert(professionRows[1]:IsShown() == true and professionRows[2]:IsShown() == true,
+wizard_professionRows = addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.rows
+assert(wizard_professionRows[1]:IsShown() == true and wizard_professionRows[2]:IsShown() == true,
     "Die Berufszeilen des Assistenten fehlen")
-assert(professionRows[1].open:IsShown() == true,
+assert(wizard_professionRows[1].open:IsShown() == true,
     "Der Rezeptberuf hat keinen Oeffnen-Knopf")
-assert(professionRows[2].open:IsShown() == false,
+assert(wizard_professionRows[2].open:IsShown() == false,
     "Der Sammelberuf bekam einen Oeffnen-Knopf, obwohl es kein Fenster gibt")
 
 -- Reine Sammler koennen den Rezeptschritt nie erfuellen - er gilt deshalb
 -- als erledigt, statt auf ewig offen zu stehen.
-profile.professions = { { name = "Kürschnerei" }, { name = "Kräuterkunde" } }
+wizard_profile.professions = { { name = "Kürschnerei" }, { name = "Kräuterkunde" } }
 assert(addon.Onboarding:GetSteps()[2].done == true,
     "Der reine Sammler haengt fuer immer im Rezeptschritt")
 
 -- Bergbau: Das Fenster heisst "Schmelzen", und der Scan speichert diesen
 -- Namen. Die Zeile muss ihn dem Beruf zuordnen, sonst bliebe sie ewig offen.
-profile.professions = { { name = "Bergbau" } }
-profile.workshop = { professions = { schmelzen = { name = "Schmelzen" } } }
+wizard_profile.professions = { { name = "Bergbau" } }
+wizard_profile.workshop = { professions = { schmelzen = { name = "Schmelzen" } } }
 addon.UI:ShowWizardPage()
-assert(professionRows[1].open:IsShown() == false,
+assert(wizard_professionRows[1].open:IsShown() == false,
     "Der eingelesene Bergbau bietet weiter das Oeffnen an")
 
 -- Ohne Berufe: keine Zeilen, stattdessen die Leermeldung.
-profile.professions = {}
+wizard_profile.professions = {}
 addon.UI:ShowWizardPage()
-assert(professionRows[1]:IsShown() == false,
+assert(wizard_professionRows[1]:IsShown() == false,
     "Ohne Berufe steht eine leere Berufszeile im Assistenten")
 assert(addon.UI.welcomeFrame.wizardPages.STEP_PROFESSIONS.empty:IsShown() == true,
     "Die Leermeldung fuer Charaktere ohne Berufe fehlt")
 
 -- Abbrechen ist jederzeit folgenlos: Das x schliesst, die Merker bleiben
 -- unangetastet, und die Checkliste zeigt denselben Stand weiter.
-local skippedBefore = data.skipped.PROFILE
+wizard_skippedBefore = wizard_data.skipped.PROFILE
 addon.UI:HideWelcome()
 assert(addon.UI.welcomeFrame:IsShown() == false,
     "Der Assistent laesst sich nicht schliessen")
-assert(data.skipped.PROFILE == skippedBefore,
+assert(wizard_data.skipped.PROFILE == wizard_skippedBefore,
     "Das Schliessen des Assistenten veraendert die Checklistenmerker")
 
+-- "Spaeter" schliesst und erklaert genau einmal den Weg zurueck; ab dem
+-- zweiten Mal schliesst es nur noch - der Hinweis waere sonst Draengeln.
+wizard_data.laterHintShownAt = 0
+addon.UI:ShowWelcome()
+wizard_welcomePage = addon.UI.welcomeFrame.wizardPages.WELCOME
+wizard_welcomePage.later.scripts.OnClick(wizard_welcomePage.later)
+assert(addon.UI.welcomeFrame:IsShown() == false,
+    "Spaeter schliesst den Assistenten nicht")
+assert(addon.UI.wizardLaterHint:IsShown() == true,
+    "Der Hinweis nach dem ersten Spaeter fehlt")
+assert(wizard_data.laterHintShownAt > 0,
+    "Der einmalige Spaeter-Hinweis wird nicht vermerkt")
+addon.UI.wizardLaterHint:Hide()
+addon.UI:ShowWelcome()
+wizard_welcomePage.later.scripts.OnClick(wizard_welcomePage.later)
+assert(addon.UI.wizardLaterHint:IsShown() == false,
+    "Der Hinweis nach Spaeter erscheint bei jedem Schliessen erneut")
+
+-- Die Tour: sechs Zeilen, Warcraft Logs bewusst nicht darunter - wer frisch
+-- installiert, hat nur das Addon.
+assert(#addon.Onboarding.TOUR == 6, "Die Funktionstour hat nicht sechs Zeilen")
+for _, entry in ipairs(addon.Onboarding.TOUR) do
+    assert(type(entry.icon) == "string" and entry.icon ~= "",
+        "Eine Tourzeile hat kein Symbol")
+    assert(tostring(entry.wizard_pages):find("Warcraft Logs", 1, true) == nil,
+        "Warcraft Logs steht wieder in der Funktionstour")
+end
+
 -- Aufraeumen wie im Block darueber: erst die Merker, dann der echte Zustand.
-data.skipped = {}
+wizard_data.skipped = {}
 addon.Onboarding:Dismiss()
-profile.confirmed = savedConfirmed
-profile.professionAuto = savedAuto
-profile.professions = savedProfessions
-profile.workshop = savedWorkshop
-guildData.gearAudits = savedAudits
+wizard_profile.confirmed = wizard_savedConfirmed
+wizard_profile.professionAuto = wizard_savedAuto
+wizard_profile.professions = wizard_savedProfessions
+wizard_profile.workshop = wizard_savedWorkshop
+wizard_guildData.gearAudits = wizard_savedAudits
 end
 
 -- === Gildenaufträge =========================================================

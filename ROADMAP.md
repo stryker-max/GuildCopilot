@@ -324,10 +324,20 @@ Die Seitennummer ist reiner Sitzungszustand. Gespeichert wird weiterhin nur, was
 - **Reine Sammler hingen für immer im Rezeptschritt.** Kräuterkunde und Kürschnerei haben kein Rezeptfenster; „Rezepte einlesen" war für einen Charakter mit zwei Sammelberufen unerfüllbar und stand auf ewig offen. Die Liste der fensterlosen Berufe stand dafür längst in `Workshop.lua` — sie ist nach `Constants.lua` gewandert (`GC.RecipelessProfessions`), Werkstatt und Einrichtung lesen jetzt dieselbe. Aufgefallen ist das beim Bau der Berufszeilen: Welche Zeile bekommt einen Öffnen-Knopf, und was verspricht der Schritt dem, der keinen bekommen kann?
 - **Bergbau heißt am Fenster „Schmelzen".** Der Scan speichert den Fensternamen; die Berufszeile muss ihn dem Beruf zuordnen, sonst bliebe sie trotz eingelesener Rezepte offen. Der Öffnen-Knopf wirkt dort auch den Zauber „Schmelzen", nicht „Bergbau" (`GC.ProfessionWindowSpells`).
 
+### Nachgeschärft nach dem ersten Blick im Spiel
+
+Fünf Punkte aus dem Owner-Feedback, alle an der Oberfläche des Assistenten:
+
+- **Die Tour war oben zusammengeschoben.** Kopf und Zeilen sind jetzt auf die Seitenhöhe verteilt, Überschrift und Erklärsatz zentriert, und jede Zeile trägt das Symbol ihrer Seite — dieselben Symbole wie in der Seitenleiste, denn die Tour soll das Wiedererkennen vorbereiten, nicht ein zweites Bildvokabular einführen.
+- **Die Gildenwerkstatt hat eine eigene Zeile.** Mitgliederpflege und Werkstatt sind zwei verschiedene Dinge; eine gemeinsame GILDE-Zeile beschrieb beide nur halb, und ausgerechnet die Werkstatt — das Modul mit dem größten Alltagsnutzen — ging darin unter. Der Abschnittsname steht wie in der Seitenleiste nur an der ersten Zeile seines Abschnitts; `tests/validate.mjs` erlaubt seither mehrere Tourzeilen je Abschnitt, prüft die Abdeckung aber weiter in beide Richtungen und verlangt je Zeile ein Symbol.
+- **Warcraft Logs steht nicht mehr in der Tour.** Wer frisch installiert, hat nur das Addon — der Import ist ein Werkzeug für Fortgeschrittene und kein Verkaufsargument der ersten fünf Minuten. Die Seite selbst bleibt in der Seitenleiste; nur die Tour verschweigt sie bewusst, und eine Prüfung hält das fest.
+- **„Fertig“ klingt nach Stufenaufstieg** (`PlaySuccessSound("LEVEL_UP")`) — unabhängig vom eingestellten Bestätigungston, denn das ist keine Bestätigung, sondern ein „geschafft“.
+- **Das erste „Später“ erklärt den Weg zurück.** Ein kleines Hinweisfenster nennt `/gcp welcome` und den Knopf „Einrichtung“ — genau einmal je Charakter (`NoteLaterPressed`, Merker `laterHintShownAt`), denn wer es gelesen hat, weiß es, und ein Fenster nach jedem Schließen wäre Drängeln.
+
 ### Geändert
 
-- `Onboarding.lua`: Seitenmodell (`WIZARD_PAGES`, `GetWizardPage`, `WizardGo`, `SkipWizardStep`, `StartWizard`) und die Tour-Tabelle (`GC.Onboarding.TOUR`); `HasAnyScannableProfession` ersetzt `HasAnyProfession`;
-- `UI.lua`: das Willkommensfenster ist der Assistent geworden (gleicher Rahmenname, `ShowWelcome`/`HideWelcome` unverändert); sechs Seitenbauer, `ShowWizardPage`, `RefreshWizard` samt Unterfunktionen je Schrittseite; der sichere Berufsknopf; der Kopfzeilen-Knopf „Einrichtung" und `/gcp welcome` führen zum Assistenten;
+- `Onboarding.lua`: Seitenmodell (`WIZARD_PAGES`, `GetWizardPage`, `WizardGo`, `SkipWizardStep`, `StartWizard`) und die Tour-Tabelle (`GC.Onboarding.TOUR`, mit Symbol je Zeile); `HasAnyScannableProfession` ersetzt `HasAnyProfession`; `NoteLaterPressed` für den einmaligen Später-Hinweis;
+- `UI.lua`: das Willkommensfenster ist der Assistent geworden (gleicher Rahmenname, `ShowWelcome`/`HideWelcome` unverändert); sechs Seitenbauer, `ShowWizardPage`, `RefreshWizard` samt Unterfunktionen je Schrittseite; der sichere Berufsknopf; das Hinweisfenster `ShowWizardLaterHint`; der Kopfzeilen-Knopf „Einrichtung" und `/gcp welcome` führen zum Assistenten;
 - `Constants.lua`: `GC.RecipelessProfessions` und `GC.ProfessionWindowSpells`;
 - `Workshop.lua`: `GetMissingOwnProfessions` liest die Sammlerliste aus Constants;
 - `tests/smoke.lua`: ein eigener Block — Seitenfolge, Blättern an den Rändern, Überspringen setzt den Checklistenmerker (und ein erledigter Schritt wird nicht rückwirkend übersprungen), der Bestätigen-Knopf ruft die echte Aktion, Berufszeilen mit und ohne Öffnen-Knopf, reine Sammler, Bergbau/Schmelzen, folgenloses Schließen;
