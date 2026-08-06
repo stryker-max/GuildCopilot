@@ -25,6 +25,20 @@ local TAB_REQUEST_SUPPRESS = 45
 local INCOMING_TTL = 5 * 60
 local MAX_PAYLOAD_BYTES = 180
 local MAX_TRANSFER_PARTS = 30
+-- Streuzeiten vor den eigenen Antworten und die Namen, unter denen eine fremde
+-- Antwort vermerkt wird. Beide Antworten gehen ueber den Gildenkanal und sind
+-- damit fuer alle sichtbar - wer waehrend seiner Streuzeit einen anderen
+-- liefern sieht, schweigt.
+local MANIFEST_REPLY_DELAY = 0.5
+local MANIFEST_REPLY_SPREAD = 4
+local MANIFEST_ANSWER_KIND = "GUILDBANKMANIFEST"
+local TAB_REPLY_DELAY = 0.5
+local TAB_REPLY_SPREAD = 3
+local TAB_ANSWER_PREFIX = "GUILDBANKTAB:"
+-- Die Merkliste beantworteter Bankanfragen wuchs unbegrenzt: ein Eintrag je
+-- Anfragendem, bei 500 Mitgliedern also 500 - obwohl ein Eintrag nach
+-- MIN_MANIFEST_REPLY_INTERVAL Sekunden nichts mehr bewirkt.
+local MAX_MANIFEST_REPLIES = 200
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
@@ -536,6 +550,25 @@ function GC.Inventory:SendTabRequest(tabIndexes)
     }), "GUILD")
 end
 
+-- Abgelaufene Merker fliegen raus, sobald die Liste zu gross wird - dieselbe
+-- Bauweise wie in der Werkstatt. Ein Eintrag, der aelter ist als die
+-- Drosselzeit, bewirkt ohnehin nichts mehr.
+local function PruneStamps(stamps, ttl, maximum)
+    local count = 0
+    for _ in pairs(stamps) do
+        count = count + 1
+    end
+    if count <= maximum then
+        return
+    end
+    local cutoff = GC.Util.Now() - ttl
+    for key, at in pairs(stamps) do
+        if (tonumber(at) or 0) < cutoff then
+            stamps[key] = nil
+        end
+    end
+end
+
 function GC.Inventory:ReceiveSync(fields, sender)
     if tonumber(fields[2]) ~= GC.Constants.SCHEMA_VERSION then
         return
@@ -550,13 +583,37 @@ function GC.Inventory:ReceiveSync(fields, sender)
         -- Antwort ist nur das Manifest, gedrosselt und gestreut: ein Login
         -- kostet damit hoechstens ein Paket.
         local now = GC.Util.Now()
+        -- Aufgeraeumt wird sammelnd, nach derselben Bauweise wie in der
+        -- Werkstatt: siehe MAX_MANIFEST_REPLIES.
+        PruneStamps(self.guildBankRequestReplies, MIN_MANIFEST_REPLY_INTERVAL,
+            MAX_MANIFEST_REPLIES)
         local lastReply = self.guildBankRequestReplies[senderKey]
         if lastReply and (now - lastReply) < MIN_MANIFEST_REPLY_INTERVAL then
             return
         end
+        -- Die Wahl: Bis 0.9.96 schickte JEDER sein Manifest. Ein Paket je
+        -- Antwortendem klingt harmlos, sind bei 250 Online aber 250 Pakete fuer
+        -- einen einzigen Login - der Addon-Kanal stellt rund zehn je Sekunde zu
+        -- und verwirft den Rest lautlos.
+        if GC.Sync and GC.Sync.IsElectedResponder
+            and not GC.Sync:IsElectedResponder(sender) then
+            return
+        end
         self.guildBankRequestReplies[senderKey] = now
         if C_Timer and type(C_Timer.After) == "function" then
-            C_Timer.After(0.5 + math.random() * 4, function()
+            local scheduledAt = now
+            C_Timer.After(MANIFEST_REPLY_DELAY + math.random() * MANIFEST_REPLY_SPREAD, function()
+                -- Und die Stille: Wer waehrend seiner Streuzeit ein fremdes
+                -- "BM" sieht, weiss, dass ein anderer Gewaehlter schon
+                -- geliefert hat.
+                if GC.Sync and GC.Sync.PeerAnsweredSince
+                    and GC.Sync:PeerAnsweredSince(MANIFEST_ANSWER_KIND, scheduledAt) then
+                    -- Die Drossel wird dabei ausdruecklich zurueckgenommen: Es
+                    -- wurde nichts gesendet, also darf die naechste Anfrage
+                    -- dieses Fragenden wieder beantwortet werden.
+                    GC.Inventory.guildBankRequestReplies[senderKey] = nil
+                    return
+                end
                 GC.Inventory:SendManifest()
             end)
         else
@@ -564,6 +621,13 @@ function GC.Inventory:ReceiveSync(fields, sender)
         end
         return
     elseif operation == "BM" then
+        -- Ein fremdes Manifest ist zugleich die sichtbare Antwort eines anderen
+        -- Gewaehlten. "B|" erreicht diese Stelle nur ueber den Gildenkanal
+        -- (Sync:OnMessage) und nie vom eigenen Client - der Vermerk kann also
+        -- weder eine Fluesterantwort noch die eigene Antwort meinen.
+        if GC.Sync and GC.Sync.NotePeerAnswer then
+            GC.Sync:NotePeerAnswer(MANIFEST_ANSWER_KIND)
+        end
         local tabs = self:GetGuildBank().tabs
         local stale = {}
         for record in tostring(fields[4] or ""):gmatch("[^;]+") do
@@ -589,14 +653,30 @@ function GC.Inventory:ReceiveSync(fields, sender)
         end
         return
     elseif operation == "BR" then
+        local now = GC.Util.Now()
         local requested = {}
         for indexText in tostring(fields[4] or ""):gmatch("[^,]+") do
             local tabIndex = tonumber(indexText)
-            if tabIndex then
+            -- Nur gueltige Tabnummern. Vorher wurde JEDE Zahl aus einer fremden
+            -- Anfrage als Merker abgelegt: Ein Client, der nach Tab 4711 fragte,
+            -- hinterliess einen Eintrag, der nie wieder abgefragt wurde und
+            -- damit auch nie wieder verschwand. Mit dieser Pruefung kann die
+            -- Liste hoechstens MAX_GUILD_BANK_TABS Eintraege haben und braucht
+            -- kein Aufraeumen.
+            if tabIndex and tabIndex >= 1 and tabIndex <= MAX_GUILD_BANK_TABS then
                 requested[#requested + 1] = tabIndex
                 -- Eine fremde Anfrage unterdrueckt die eigene.
-                self.suppressedTabRequests[tabIndex] = GC.Util.Now()
+                self.suppressedTabRequests[tabIndex] = now
             end
+        end
+        -- Die Wahl: Bis 0.9.96 schickte JEDER, der den Tab hatte, ihn
+        -- vollstaendig in den Gildenkanal. Bei 250 Online und sechs gefuellten
+        -- Tabs ist das ein Vielfaches dessen, was ein einziger Anfragender
+        -- braucht. Der Vermerk oben bleibt davon unberuehrt: Wer nicht
+        -- antwortet, stellt seine eigene Anfrage trotzdem zurueck.
+        if GC.Sync and GC.Sync.IsElectedResponder
+            and not GC.Sync:IsElectedResponder(sender) then
+            return
         end
         local tabs = self:GetGuildBank().tabs
         for _, tabIndex in ipairs(requested) do
@@ -604,10 +684,21 @@ function GC.Inventory:ReceiveSync(fields, sender)
             -- Nur wer selbst einen Stand hat, antwortet; wer nichts hat,
             -- schweigt, statt Leere zu verteilen.
             if type(tab) == "table" and next(tab.counts or {}) then
-                local ownDelay = 0.5 + math.random() * 3
+                local ownDelay = TAB_REPLY_DELAY + math.random() * TAB_REPLY_SPREAD
                 if C_Timer and type(C_Timer.After) == "function" then
                     local answerTab = tabIndex
+                    local scheduledAt = now
                     C_Timer.After(ownDelay, function()
+                        -- Und die Stille, je Tab: Wer waehrend seiner Streuzeit
+                        -- ein fremdes "BT" fuer genau diesen Tab sieht, laesst
+                        -- seine eigene Antwort fallen. Je Tab und nicht
+                        -- pauschal, weil eine Anfrage mehrere Tabs nennen darf
+                        -- und ein gelieferter Tab nichts ueber die anderen sagt.
+                        if GC.Sync and GC.Sync.PeerAnsweredSince
+                            and GC.Sync:PeerAnsweredSince(
+                                TAB_ANSWER_PREFIX .. tostring(answerTab), scheduledAt) then
+                            return
+                        end
                         GC.Inventory:SendTab(answerTab)
                     end)
                 else
@@ -635,6 +726,14 @@ function GC.Inventory:ReceiveSync(fields, sender)
         or #token > 40 or #tabName > 40 or #seenBy > 40
         or #fingerprint > 20 or #payload > MAX_PAYLOAD_BYTES then
         return
+    end
+
+    -- Hier liefert ein anderer bereits diesen Tab. Wer selbst noch eine Antwort
+    -- fuer ihn geplant hat, laesst sie fallen - unabhaengig davon, ob dieses
+    -- Paket gleich uebernommen oder als aelterer Stand verworfen wird: Gesendet
+    -- wurde es so oder so, und ein zweites Mal muss es niemand tun.
+    if GC.Sync and GC.Sync.NotePeerAnswer then
+        GC.Sync:NotePeerAnswer(TAB_ANSWER_PREFIX .. tostring(tabIndex))
     end
 
     local now = GC.Util.Now()

@@ -75,10 +75,47 @@ function GC.Roster:Scan()
     GC.Perf:Measure("Gildenroster einlesen", self.ScanNow, self)
 end
 
+-- === Gefilterte Rosterliste ===============================================
+--
+-- Hat ein anderes Addon SetGuildRosterShowOffline(false) gesetzt, liefert
+-- GetGuildRosterInfo nur noch die Online-Mitglieder. Der Scan stuerzt dabei
+-- nicht ab - "if name then" faengt die Luecke -, das Roster schrumpft nur
+-- stumm auf die Online-Liste. Betroffen ist damit alles, was ueber
+-- IsGuildMember geht: Die Gildenprofil-Pakete der Offliner werden verworfen,
+-- die Mitgliederpflege sieht sie nicht mehr, und
+-- Workshop:PruneDepartedCrafters haelt sie fuer ausgetreten und LOESCHT ihre
+-- Rezepte.
+--
+-- Erkannt wird das an der Ausbeute: GetNumGuildMembers() meldet die
+-- Gesamtzahl, gelesen wird aber nur ein Bruchteil davon. Unter diesem Anteil
+-- gilt die Liste als gefiltert. Ausdruecklich NICHT gemeint ist das leere
+-- Roster direkt nach dem Login - dort meldet der Client die Gesamtzahl 0, und
+-- 0 von 0 gelesenen Mitgliedern ist vollstaendig.
+local ROSTER_COMPLETE_RATIO = 0.9
+-- Nach einer gefilterten Liste wird erneut gelesen. Ein paar Sekunden alte
+-- Daten sind allemal besser als ein Roster, das die halbe Gilde fuer
+-- ausgetreten haelt.
+local ROSTER_RETRY_DELAY = 5
+-- Aber nicht endlos: Besteht ein anderes Addon dauerhaft auf seiner Ansicht,
+-- soll daraus kein ewiger Wechsel aus Anfrage und Scan werden. Der naechste
+-- GUILD_ROSTER_UPDATE bringt ohnehin einen neuen Versuch, und bis dahin bleibt
+-- der letzte vollstaendige Stand stehen.
+local ROSTER_RETRY_LIMIT = 3
+
+-- Die Ursache beheben statt nur das Symptom. Die Funktion gibt es nicht in
+-- jeder Spielfassung, deshalb ueber pcall.
+local function RequestOfflineMembers()
+    if type(SetGuildRosterShowOffline) ~= "function" then
+        return false
+    end
+    return pcall(SetGuildRosterShowOffline, true) == true
+end
+
 function GC.Roster:ScanNow()
     local members = {}
     local index = {}
     local memberCount = GetNumGuildMembers and GetNumGuildMembers() or 0
+    local readCount = 0
 
     for rosterIndex = 1, memberCount do
         local name, rank, rankIndex, level, className, zone, note, officerNote, online, status, classFile, achievementPoints, achievementRank, isMobile, canSoR, reputation, guid = GetGuildRosterInfo(rosterIndex)
@@ -108,8 +145,23 @@ function GC.Roster:ScanNow()
             end
             members[#members + 1] = member
             PutNameIndex(index, name, member)
+            readCount = readCount + 1
         end
     end
+
+    -- Gefilterte Liste: den vorherigen Stand NICHT ersetzen, die Offliner
+    -- anfordern und es gleich noch einmal versuchen.
+    if memberCount > 0 and readCount < memberCount * ROSTER_COMPLETE_RATIO then
+        local attempt = (self.incompleteScans or 0) + 1
+        self.incompleteScans = attempt
+        RequestOfflineMembers()
+        if attempt <= ROSTER_RETRY_LIMIT then
+            self:Request()
+            self:ScheduleScan(ROSTER_RETRY_DELAY)
+        end
+        return
+    end
+    self.incompleteScans = 0
 
     self.members = members
     self.membersByName = index
@@ -723,8 +775,12 @@ end
 function GC.Roster:GetGuildAbsences()
     local absences = {}
     local today = GC.Util.TodayISO()
+    -- Einmal fuer den ganzen Durchlauf und durchgereicht, genau wie in
+    -- GetSummary: Bis 0.9.96 suchte sich GetProfile den Gildendatensatz je
+    -- Mitglied selbst.
+    local guildData = GC.DB:GetGuild()
     for _, member in ipairs(self.members) do
-        local profile = self:GetProfile(member.name)
+        local profile = self:GetProfile(member.name, guildData)
         local state = profile and GC.Profile:GetAbsenceState(profile, today) or "NONE"
         if state == "ACTIVE" or state == "UPCOMING" then
             absences[#absences + 1] = {
@@ -748,13 +804,17 @@ function GC.Roster:GetGuildAbsences()
 end
 
 function GC.Roster:GetMemberCareCandidates()
-    local settings = GC.DB:GetGuild().memberCare
+    -- Den Gildendatensatz einmal holen und durchreichen, wie GetSummary es
+    -- vormacht: Bis 0.9.96 kam dieser Durchlauf allein auf 1.503 Aufrufe von
+    -- GC.DB:GetGuild(), weil GetProfile ihn sich je Mitglied selbst suchte.
+    local guildData = GC.DB:GetGuild()
+    local settings = guildData.memberCare
     local thresholdDays = tonumber(settings.inactivityDays) or 60
     local today = GC.Util.TodayISO()
     local candidates = {}
     for _, member in ipairs(self.members) do
         local offlineDays = member.lastOnlineHours and math.floor(member.lastOnlineHours / 24)
-        local profile = self:GetProfile(member.name)
+        local profile = self:GetProfile(member.name, guildData)
         local isAlt = profile and profile.mainStatus == "ALT"
         local absenceState = profile and GC.Profile:GetAbsenceState(profile, today) or "NONE"
         local rankProtected = self:IsMemberCareRankProtected(member.rankIndex)

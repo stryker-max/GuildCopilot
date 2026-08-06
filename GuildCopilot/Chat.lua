@@ -180,6 +180,24 @@ local function NormalizeChannelName(name)
     return name
 end
 
+-- Der eigene Realm aendert sich innerhalb einer Sitzung nicht, wurde aber bis
+-- 0.9.96 bei JEDEM Namensvergleich neu ueber ":match" aus dem eigenen Namen
+-- geschnitten - und verglichen wird bei jeder eingehenden Nachricht gegen
+-- jeden Postfacheintrag. Gemerkt wird nur ein belastbarer Realm: Direkt nach
+-- dem Laden gibt der Client noch keinen heraus, und ein gemerktes Nichts waere
+-- fuer den Rest der Sitzung falsch.
+local ownRealm
+local function OwnRealm()
+    if ownRealm then
+        return ownRealm
+    end
+    local realm = tostring(GC:GetPlayerFullName() or ""):match("%-(.+)$")
+    if realm and realm ~= "" then
+        ownRealm = realm
+    end
+    return ownRealm
+end
+
 -- Ein Name ohne Realm meint immer den eigenen. Erst wenn beide Namen auf
 -- dieselbe Schreibweise gebracht sind, laesst sich sagen, ob zwei Eintraege
 -- derselbe Spieler sind: "Thrall" und "Thrall-Aegwynn" sind es auf Aegwynn,
@@ -193,9 +211,9 @@ local function CanonicalLeadName(name)
     if trimmed:find("-", 1, true) then
         return GC.Util.NormalizeName(trimmed)
     end
-    local ownRealm = tostring(GC:GetPlayerFullName() or ""):match("%-(.+)$")
-    if ownRealm and ownRealm ~= "" then
-        return GC.Util.NormalizeName(trimmed .. "-" .. ownRealm)
+    local realm = OwnRealm()
+    if realm then
+        return GC.Util.NormalizeName(trimmed .. "-" .. realm)
     end
     -- Ohne bekannten eigenen Realm bleibt nur der nackte Name. Dann wird wie
     -- bisher ueber den Kurznamen verglichen.
@@ -509,14 +527,29 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
         return
     end
 
-    self:MergeDuplicateLeads()
+    -- Bis 0.9.96 lief hier zuerst MergeDuplicateLeads - ein Paarvergleich ueber
+    -- das ganze Postfach, also O(n^2), und das bei JEDER eingehenden Nachricht:
+    -- 1,11 ms bei 100 Eintraegen. Gebraucht wird davon nichts. Es kommt genau
+    -- ein Eintrag hinzu, und der kann nur mit BESTEHENDEN zusammenfallen -
+    -- genau das leistet die Suche unten in einem Durchlauf. Der vollstaendige
+    -- Abgleich ist eine Reparatur fuer Altbestaende und steht dort, wo er
+    -- hingehoert: beim Login.
     local inbox = GC.DB:GetGuild().inbox
     local normalizedSender = GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))
     local lead
-    for _, existing in ipairs(inbox) do
-        if SameLead(existing.name, existing.guid, sender, guid) then
+    local searchIndex = 1
+    while searchIndex <= #inbox do
+        local existing = inbox[searchIndex]
+        if type(existing) ~= "table" then
+            -- Kaputte Eintraege raeumte bisher der Abgleich nebenbei weg; ohne
+            -- ihn wuerde SameLead hier ueber einen Nichttabelleneintrag
+            -- stolpern.
+            table.remove(inbox, searchIndex)
+        elseif SameLead(existing.name, existing.guid, sender, guid) then
             lead = existing
             break
+        else
+            searchIndex = searchIndex + 1
         end
     end
 
@@ -529,6 +562,21 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
             source = source,
         }
         table.insert(inbox, 1, lead)
+    else
+        -- Was der Abgleich sonst nebenbei erledigte, jetzt nur fuer den einen
+        -- betroffenen Eintrag: Nachrichtenliste sicherstellen, beschaedigte
+        -- Nachrichten entfernen, fehlenden Ersterfassungszeitpunkt nachtragen.
+        if type(lead.messages) ~= "table" then
+            lead.messages = {}
+        end
+        for messageIndex = #lead.messages, 1, -1 do
+            if type(lead.messages[messageIndex]) ~= "table" then
+                table.remove(lead.messages, messageIndex)
+            end
+        end
+        if not tonumber(lead.firstSeenAt) then
+            lead.firstSeenAt = tonumber(lead.lastSeenAt) or GC.Util.Now()
+        end
     end
     lead.lastSeenAt = GC.Util.Now()
     lead.unread = true
