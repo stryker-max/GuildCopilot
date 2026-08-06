@@ -1234,10 +1234,17 @@ assert(autoFrame.shown ~= true, "Der Lauscher ist scharf, obwohl die Automatik a
 assert(addon.DB:GetSettings().postBar.autoRepeat == false,
     "Die Automatik ist ungefragt eingeschaltet")
 
--- Einschalten ueber die Postseite blendet den Balken ein: Die Automatik lebt
--- nur im sichtbaren Balken, nichts laeuft unsichtbar im Hintergrund.
-addon.UI:SetAutoRepeat(true)
+-- Einschalten ueber den echten Schalter der Postseite blendet den Balken
+-- ein: Die Automatik lebt nur im sichtbaren Balken, nichts laeuft unsichtbar
+-- im Hintergrund. Die Rueckmeldung darunter ist ein Kasten fuer genau zwei
+-- Zeilen - ohne feste Hoehe wuchs sie im Spiel von unten in die Knopfreihe.
+local postPage = addon.UI.pages.POST
+assert(postPage.postResult.height == 34, "Die Rueckmeldezeile reserviert keine zwei Zeilen")
+postPage.autoRepeatToggle:SetChecked(true)
+postPage.autoRepeatToggle.scripts.OnClick(postPage.autoRepeatToggle)
 assert(addon.DB:GetSettings().postBar.autoRepeat == true, "Der Automatik-Schalter wurde nicht gespeichert")
+assert(postPage.postResult.value:find("Tastendruck", 1, true),
+    "Die Postseite erklaert die eingeschaltete Automatik nicht")
 assert(addon.DB:GetSettings().postBar.hidden == false,
     "Einschalten der Automatik blendet den Werbebalken nicht ein")
 assert(autoFrame.shown == true, "Text bestaetigt, Kanaele bereit - aber der Lauscher ist nicht scharf")
@@ -1287,8 +1294,9 @@ assert(addon.DB:GetSettings().postBar.autoRepeat == true,
 addon.UI:SetPostBarShown(true)
 assert(autoFrame.shown == true, "Nach dem Wiederoeffnen bleibt die Automatik entschaerft")
 
--- Ausschalten entschaerft sofort und raeumt auf.
-addon.UI:SetAutoRepeat(false)
+-- Ausschalten ueber den Schalter im Balken entschaerft sofort und raeumt auf.
+postBar.autoToggle:SetChecked(false)
+postBar.autoToggle.scripts.OnClick(postBar.autoToggle)
 assert(addon.DB:GetSettings().postBar.autoRepeat == false, "Der Automatik-Schalter liess sich nicht ausschalten")
 assert(autoFrame.shown ~= true, "Die ausgeschaltete Automatik laesst den Lauscher scharf")
 local disabledSentBefore = #sentChat

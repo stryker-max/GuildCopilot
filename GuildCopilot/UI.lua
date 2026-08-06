@@ -6610,7 +6610,8 @@ end
 
 function GC.UI:BuildPostPage()
     local page = self.pages.POST
-    CreatePageTitle(page, "Werbung posten", "Text prüfen, bestätigen und anschließend mit einem echten Klick in die ausgewählten Kanäle senden.")
+    CreatePageTitle(page, "Werbung posten", "Text prüfen, bestätigen und mit einem echten Klick in die ausgewählten Kanäle senden"
+        .. " — oder die Automatik postet mit dem nächsten Tastendruck, sobald ein Kanal bereit ist.")
 
     local editorCard = CreateCard(page, "Werbetext")
     editorCard:SetSize(776, 246)
@@ -6694,8 +6695,11 @@ function GC.UI:BuildPostPage()
     -- Die Rueckmeldung stand rechts neben dem Werbebalken-Knopf und wurde
     -- uebersehen - wer ohne bestaetigten Text auf "Suche starten" klickte,
     -- bekam scheinbar keinen Hinweis. Jetzt steht sie in voller Breite direkt
-    -- unter dem Knopf, auf den man gerade geklickt hat.
-    page.searchButton:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 26)
+    -- unter dem Knopf, auf den man gerade geklickt hat. 44 statt 26, damit
+    -- darunter zwei volle Zeilen Platz haben: Ohne den Abstand schob sich die
+    -- zweizeilige Automatik-Erklaerung von ihrem unteren Anker nach oben
+    -- unter die Knopfreihe (Owner-Screenshot).
+    page.searchButton:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 44)
     page.postBarToggle = CreateButton(page, "Werbebalken", 150, 44, function()
         GC.UI:TogglePostBar()
         GC.UI:RefreshPost()
@@ -6709,7 +6713,7 @@ function GC.UI:BuildPostPage()
         GC.UI:SetAutoRepeat(enabled)
         if enabled then
             page.postResult:SetText("Automatik an: Der Werbebalken bleibt offen; sobald ein Kanal bereit ist,"
-                .. " geht der bestätigte Text mit dem nächsten Tastendruck raus.")
+                .. " postet dein nächster Tastendruck.")
             SetTextColor(page.postResult, THEME.success)
         else
             page.postResult:SetText("Automatik aus: Gepostet wird nur noch per Klick.")
@@ -6719,7 +6723,9 @@ function GC.UI:BuildPostPage()
     page.autoRepeatToggle:SetPoint("LEFT", page.postBarToggle, "RIGHT", 16, 0)
     AttachAutoRepeatTooltip(page.autoRepeatToggle)
 
-    page.postResult = CreateLabel(page, "", { width = 776 })
+    -- Feste Hoehe und vertical = TOP: Die Rueckmeldung ist ein Kasten fuer
+    -- genau zwei Zeilen und laeuft nach unten, nie in die Knoepfe darueber.
+    page.postResult = CreateLabel(page, "", { width = 776, height = 34, vertical = "TOP" })
     page.postResult:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 4)
 
     page:SetScript("OnUpdate", function(_, elapsed)
