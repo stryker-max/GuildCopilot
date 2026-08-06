@@ -139,6 +139,11 @@ function GC.WarcraftLogs:ApplySource(source)
     data.guildSlug = source.guildSlug or ""
     data.url = "https://" .. host .. "/guild/" .. source.region .. "/"
         .. source.serverSlug .. "/" .. EncodePath(data.guildSlug)
+    -- Wer an warcraftLogs schreibt, verwirft die gemerkten Kennzahlen. Die
+    -- Herkunftsangabe steckt zwar in keiner davon, aber die Regel bleibt so
+    -- ohne Ausnahme - und ein verworfener Merker kostet einen Neuaufbau, ein
+    -- vergessener liefert falsche Zahlen.
+    self:InvalidateRecruitmentSyncStats()
     GC:FireCallback("WCL_UPDATED")
     return true
 end
@@ -234,6 +239,7 @@ function GC.WarcraftLogs:SaveSource(url)
     data.region = source.region
     data.serverSlug = source.serverSlug
     data.guildSlug = source.guildSlug
+    self:InvalidateRecruitmentSyncStats()
     -- Die Quelle gilt fuer die ganze Gilde: sie liefert auch Region und Realm
     -- fuer die Profil-Links im Postfach. Deshalb wandert sie ueber das
     -- Gildenprofil zu allen Mitgliedern, damit nur einer sie pflegen muss.
@@ -571,6 +577,10 @@ function GC.WarcraftLogs:Import(text)
         if headerSeen then
             data.reportCount = reportCount
         end
+        -- Ein eigener Import ist die groesste denkbare Aenderung der
+        -- Grundlage: Die gemerkten Kennzahlen muessen weg, sonst kuendigt die
+        -- Ankuendigung weiter unten den alten Stand an.
+        self:InvalidateRecruitmentSyncStats()
     end
 
     -- Nachanalysen werden als eigene Auswertungen abgelegt und niemals mit
@@ -672,6 +682,43 @@ local RECRUITMENT_MAX_PARTS = 100
 local RECRUITMENT_INCOMING_TTL = 5 * 60
 local RECRUITMENT_DISCOVERY_WAIT = 0.9
 local RECRUITMENT_REPLY_INTERVAL = 15
+-- So lange gilt eine einmal gebaute Kennzahl des Rekrutierungs-Datensatzes.
+-- Ihr Aufbau geht ueber alle Logprofile UND alle bekannten Addon-Profile und
+-- sortiert anschliessend bis zu tausend Datensaetze: gemessen 6,90 ms bei 500
+-- Mitgliedern. Gebraucht wurde sie bei JEDEM fremden "L|R" und "L|U", also bei
+-- jedem Login in der Gilde - bei 250 Anmeldungen kurz hintereinander waren das
+-- 1,7 Sekunden reine Rechenzeit fuer eine Zahl, die sich dabei nicht aendert.
+-- Die Frist ist kurz gehalten: Die Schreibstellen in dieser Datei verwerfen den
+-- Merker ohnehin sofort, sie ueberbrueckt also nur Aenderungen aus anderen
+-- Dateien (fremde Profile). Ein veralteter Stand faellt dabei immer zu NIEDRIG
+-- aus und kostet damit hoechstens eine ueberfluessige Anfrage.
+local RECRUITMENT_STATS_TTL = 10
+-- Die Merkliste beantworteter Rekrutierungsanfragen wuchs unbegrenzt: ein
+-- Eintrag je Anfragendem, bei 500 Mitgliedern also 500 - obwohl ein Eintrag
+-- nach RECRUITMENT_REPLY_INTERVAL Sekunden nichts mehr bewirkt.
+local MAX_SYNC_REQUEST_REPLIES = 200
+-- Nach dieser Zeit ist eine offene Angebotsrunde in jedem Fall erledigt;
+-- entschieden wird sie regulaer nach RECRUITMENT_DISCOVERY_WAIT Sekunden.
+local RECRUITMENT_DISCOVERY_TTL = 60
+
+-- Abgelaufene Merker fliegen raus, sobald die Liste zu gross wird - dieselbe
+-- Bauweise wie in der Werkstatt. Ein Eintrag, der aelter ist als die
+-- Drosselzeit, bewirkt ohnehin nichts mehr.
+local function PruneStamps(stamps, ttl, maximum)
+    local count = 0
+    for _ in pairs(stamps) do
+        count = count + 1
+    end
+    if count <= maximum then
+        return
+    end
+    local cutoff = GC.Util.Now() - ttl
+    for key, at in pairs(stamps) do
+        if (tonumber(at) or 0) < cutoff then
+            stamps[key] = nil
+        end
+    end
+end
 
 local function SanitizedSyncField(value, maximumBytes)
     value = GC.Util.Trim(value):gsub("[,;|%%]", " ")
@@ -793,8 +840,26 @@ function GC.WarcraftLogs:BuildRecruitmentSyncRecords()
     }
 end
 
+-- Der gemerkte Stand ist hinfaellig, sobald sich die Grundlage aendert. Jede
+-- Schreibstelle an warcraftLogs.members oder remoteProfiles in dieser Datei
+-- ruft das auf; alles andere faengt RECRUITMENT_STATS_TTL ab.
+function GC.WarcraftLogs:InvalidateRecruitmentSyncStats()
+    self.syncStatsCache = nil
+end
+
+-- Nur die Kennzahlen, nicht die Datensaetze selbst. Wer die Datensaetze
+-- braucht, ruft BuildRecruitmentSyncRecords ohnehin direkt auf; hier zaehlt
+-- allein, dass ein Login in der Gilde nicht mehr den kompletten Aufbau
+-- ausloest. Zurueckgegeben wird die gemerkte Tabelle selbst - sie wird
+-- ausschliesslich gelesen.
 function GC.WarcraftLogs:GetRecruitmentSyncStats()
+    local cached = self.syncStatsCache
+    local now = GC.Util.Now()
+    if cached and (now - cached.at) < RECRUITMENT_STATS_TTL then
+        return cached.stats
+    end
     local _, stats = self:BuildRecruitmentSyncRecords()
+    self.syncStatsCache = { stats = stats, at = now }
     return stats
 end
 
@@ -851,10 +916,19 @@ function GC.WarcraftLogs:RequestRecruitmentData()
         return false
     end
     local stats = self:GetRecruitmentSyncStats()
-    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+    local now = GC.Util.Now()
+    -- Angebotsrunden, die niemand mehr entscheidet, fliegen hier raus. Sie
+    -- entstehen nur durch eigene Anfragen, sind also wenige - aber jede haelt
+    -- alle Angebote fest, die zu ihr eingetroffen sind.
+    for openToken, discovery in pairs(self.syncDiscoveries) do
+        if (now - (tonumber(discovery.requestedAt) or 0)) > RECRUITMENT_DISCOVERY_TTL then
+            self.syncDiscoveries[openToken] = nil
+        end
+    end
+    local token = tostring(now) .. tostring(math.random(100, 999))
     self.syncDiscoveries[token] = {
         offers = {},
-        requestedAt = GC.Util.Now(),
+        requestedAt = now,
     }
     local sent = GC.Sync:Send(table.concat({
         "L",
@@ -872,6 +946,12 @@ function GC.WarcraftLogs:RequestRecruitmentData()
         C_Timer.After(RECRUITMENT_DISCOVERY_WAIT, function()
             GC.WarcraftLogs:ChooseRecruitmentOffer(token)
         end)
+    else
+        -- Ohne Zeitgeber ruft niemand ChooseRecruitmentOffer: Der Merker blieb
+        -- dann fuer immer stehen, samt jedem Angebot, das noch eintraf. Warten
+        -- laesst sich hier nicht, also wird sofort entschieden - ohne Angebote
+        -- endet das ohne Nachricht, aber der Merker ist weg.
+        self:ChooseRecruitmentOffer(token)
     end
     return true
 end
@@ -1055,6 +1135,7 @@ function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
         -- Woher der uebernommene Stand kam, gehoert sichtbar in den Status:
         -- sonst sieht ein empfangener Datensatz wie ein eigener Import aus.
         guildData.warcraftLogs.lastSyncFrom = GC.Util.PlayerShortName(sender)
+        self:InvalidateRecruitmentSyncStats()
     end
 
     local ownKey = GC.Util.NormalizeName(GC:GetPlayerFullName())
@@ -1068,6 +1149,9 @@ function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
             if not existing or (tonumber(profile.updatedAt) or 0) >= (tonumber(existing.updatedAt) or 0) then
                 guildData.remoteProfiles[fullKey] = profile
                 guildData.remoteProfiles[shortKey] = profile
+                -- Auch die fremden Profile gehen in die Kennzahlen ein
+                -- (addonCount und revision), der Merker muss also weg.
+                self:InvalidateRecruitmentSyncStats()
             end
         end
     end
@@ -1130,6 +1214,10 @@ function GC.WarcraftLogs:ReceiveSync(fields, sender, distribution)
         end
         local senderKey = GC.Util.NormalizeName(sender)
         local now = GC.Util.Now()
+        -- Aufgeraeumt wird sammelnd, nach derselben Bauweise wie in der
+        -- Werkstatt: siehe MAX_SYNC_REQUEST_REPLIES.
+        PruneStamps(self.syncRequestReplies, RECRUITMENT_REPLY_INTERVAL,
+            MAX_SYNC_REQUEST_REPLIES)
         if senderKey == "" or (self.syncRequestReplies[senderKey]
             and (now - self.syncRequestReplies[senderKey]) < RECRUITMENT_REPLY_INTERVAL) then
             return false
@@ -1144,6 +1232,31 @@ function GC.WarcraftLogs:ReceiveSync(fields, sender, distribution)
             or not IsBetterRecruitmentDataset(score, revision, stats) then
             return false
         end
+
+        -- Hier stand der einzige verbliebene Sturm, und er lief in die
+        -- Gegenrichtung: nicht viele Antwortende auf eine Anfrage, sondern
+        -- viele ANFRAGENDE auf eine Ankuendigung.
+        --
+        -- Nach einem Warcraft-Logs-Import kuendigt der Importeur seinen neuen
+        -- Stand an ("U"). Jeder Client mit schlechterem Datensatz forderte
+        -- ihn daraufhin SOFORT per Fluestern an - bei 250 Online also 250
+        -- vollstaendige Uebertragungen des kompletten Datensatzes aus EINEM
+        -- Client, jede ueber den bestaetigten Weg mit Rueckmeldung je Teil.
+        -- Der Kanal dieses einen Spielers war damit fuer Minuten dicht, und
+        -- die Drossel half nicht: Sie gilt je Anfragendem, und 250
+        -- verschiedene Anfragende sind 250 verschiedene Drosselfenster.
+        --
+        -- Angefragt wird deshalb nur von einer gewaehlten Handvoll. Der Rest
+        -- bekommt den Stand ohne Zusatzverkehr: Wer ihn geholt hat, hat danach
+        -- selbst den besseren Datensatz und bietet ihn beim naechsten
+        -- Login-Abgleich (RequestRecruitmentData mit "R") ganz normal an. Der
+        -- Stand breitet sich damit in Wellen aus statt in einem Schlag - ein
+        -- paar Minuten spaeter, dafuer vollstaendig statt zum groessten Teil
+        -- verworfen.
+        if GC.Sync.IsElectedResponder and not GC.Sync:IsElectedResponder(sender, 4) then
+            return false
+        end
+
         local requestToken = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
         return GC.Sync:Send(table.concat({
             "L",
