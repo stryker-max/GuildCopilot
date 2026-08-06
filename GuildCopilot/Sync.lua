@@ -133,6 +133,173 @@ local function PruneIncoming(transfers)
     end
 end
 
+-- === Wer antwortet auf eine gildenweite Anfrage? ===========================
+--
+-- Das war der schwerste Konstruktionsfehler des Addons, und er war keiner der
+-- Logik, sondern der Menge: Auf jede Anfrage im Gildenkanal antwortete JEDER
+-- Client einzeln. Bei fuenfzehn Leuten faellt das nicht auf, bei 250 ist es
+-- das Ende des Kanals. Gemessen an einer Gilde mit 500 Mitgliedern, 250 davon
+-- online, loeste ein einziger Login aus:
+--
+--   GQ  Gildenprofil       22 Pakete je Antwortendem  ->  5.500 gildenweit
+--   RQ  Auswertung         40 Pakete je Antwortendem  -> 10.000 gildenweit
+--   O|Q Auftragsabgleich    3 Pakete je Auftrag       ->    750 je Auftrag
+--
+-- Blizzards Addon-Kanal stellt groessenordnungsmaessig zehn Pakete je Sekunde
+-- und Absender zu und verwirft den Rest lautlos. Es kam also nicht mehr an,
+-- was gesendet wurde - und der Fortschrittsbalken meldete zu Recht dauerhaft
+-- "unvollstaendig".
+--
+-- Zwei Verfahren loesen das, und beide stehen im Addon schon an je einer
+-- Stelle. Sie werden hier zusammengefasst, damit jeder Anfragetyp sie nutzt.
+--
+--   1. WAHL (IsElectedResponder). Nur eine Handvoll Clients antwortet
+--      ueberhaupt. Wer dazugehoert, rechnet jeder fuer sich aus - ohne eine
+--      einzige Zusatznachricht und ohne Absprache. Grundlage ist eine
+--      Streuzahl aus Anfragendem und Kandidat: Sie ist auf jedem Client
+--      dieselbe, verteilt die Last aber bei jedem Anfragenden neu, sodass
+--      nicht immer dieselben drei die Arbeit tragen.
+--
+--   2. STILLE (NotePeerAnswer/PeerAnsweredSince). Wer die Antwort eines
+--      anderen SIEHT, schweigt. Das greift nur bei Antworten ueber den
+--      Gildenkanal - eine Fluesterantwort sieht niemand sonst. Genau dieses
+--      Verfahren nutzten Workshop:KR und Inventory:BR schon; es wird jetzt
+--      allgemein verfuegbar.
+--
+-- Beides zusammen: gewaehlt wird, wer ueberhaupt antworten darf, und wer
+-- waehrend seiner Streuzeit einen anderen hoert, laesst es trotzdem bleiben.
+
+-- Wie viele Clients eine gildenweite Anfrage beantworten. Drei statt einem,
+-- damit ein Ausfall (Ladebildschirm, Verbindungsabbruch, alter Client) die
+-- Antwort nicht ganz ausfallen laesst; die Empfaengerseite verwirft Doppeltes
+-- ohnehin ueber Zeitstempel und Fingerabdruck.
+local RESPONDER_SLOTS = 3
+
+-- Bewusst dieselbe Streufunktion wie die Werkstatt-Fingerabdruecke (djb2):
+-- klein, ohne Bibliothek und auf jedem Client bitgleich. Alle Zwischenwerte
+-- bleiben unter 2^36 und damit im Bereich, in dem eine Fliesskommazahl exakt
+-- rechnet - sonst waere das Ergebnis zwar immer noch auf jedem Client
+-- dasselbe, aber die unteren Stellen waeren Zufall statt Streuung.
+local function Djb2(text)
+    local hash = 5381
+    for index = 1, #text do
+        hash = ((hash * 33) + text:byte(index)) % 2147483647
+    end
+    return hash
+end
+
+-- Die Streuzahl eines Kandidaten fuer eine bestimmte Anfrage.
+--
+-- ZWEI Runden, und das ist nicht Zierde. Mit einer Runde ueber
+-- "anfragender|kandidat" blieb die Wahl zwar bei drei Antwortenden, traf aber
+-- fast immer dieselben: Bei 200 verschiedenen Anfragenden kamen ueber alle
+-- Anfragen nur neun verschiedene Clients zum Zug, einer davon 82 mal.
+--
+-- Der Grund steckt in djb2 selbst. Die Kette h = h*33 + byte ergibt fuer eine
+-- Verkettung h(A..B) = h(A) * 33^laenge(B) + f(B). Weil alle Kandidatennamen
+-- aehnlich lang sind, ist 33^laenge(B) praktisch konstant - der Anfragende
+-- verschiebt damit ALLE Streuzahlen um denselben Faktor und aendert die
+-- REIHENFOLGE nicht. Genau die Reihenfolge ist aber das Einzige, worauf es
+-- ankommt.
+--
+-- Die zweite Runde streut das Ergebnis der ersten erneut, zusammen mit dem
+-- Anfragenden. Damit haengt die Reihenfolge tatsaechlich an beidem, und die
+-- Antwortlast wandert durch die Gilde, statt an drei Leuten haengenzubleiben.
+local function ResponderScore(requesterKey, candidateKey)
+    return Djb2(tostring(Djb2(candidateKey .. "|" .. requesterKey)) .. "|" .. requesterKey)
+end
+
+-- Wie lange die Kandidatenliste gilt. Sie aendert sich nur, wenn jemand ein-
+-- oder ausloggt; innerhalb weniger Sekunden ist sie dieselbe. Ohne diesen
+-- Merker kostete jede Wahl bei 250 Kandidaten 0,86 ms, und gewaehlt wird bei
+-- jeder eingehenden Anfrage - zur Anmeldezeit also hunderte Male.
+local RESPONDER_CACHE_SECONDS = 3
+
+-- Alle Charaktere, die als Antwortende in Frage kommen: bekannte Addon-Nutzer,
+-- die laut Roster in der Gilde und online sind. Doppelt abgelegte Eintraege
+-- (Voll- und Kurzname zeigen auf dieselbe Tabelle) zaehlen einmal.
+function GC.Sync:CollectResponderKeys()
+    local ownKey = GC.Util.PlayerKey(GC:GetPlayerFullName())
+    local now = GC.Util.Now()
+    local cached = self.responderCache
+    if cached and cached.ownKey == ownKey
+        and (now - cached.at) < RESPONDER_CACHE_SECONDS then
+        return cached.keys, ownKey
+    end
+
+    local keys = { [ownKey] = true }
+    local rosterReady = #GC.Roster.members > 0
+    if rosterReady then
+        local seen = {}
+        for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+            if type(entry) == "table" and not seen[entry] then
+                seen[entry] = true
+                local member = GC.Roster:GetMember(entry.name)
+                if member and member.online then
+                    local key = GC.Util.PlayerKey(entry.name)
+                    if key ~= "" then
+                        keys[key] = true
+                    end
+                end
+            end
+        end
+    end
+
+    -- Ein leeres Roster wird ausdruecklich NICHT gemerkt: Direkt nach dem
+    -- Login ist es regelmaessig noch leer, und drei Sekunden spaeter steht die
+    -- ganze Gilde darin. Ein gemerktes "ich bin allein" waere genau in dem
+    -- Zeitraum falsch, in dem die meisten Anfragen eintreffen.
+    if rosterReady then
+        self.responderCache = { keys = keys, ownKey = ownKey, at = now }
+    else
+        self.responderCache = nil
+    end
+    return keys, ownKey
+end
+
+-- Gehoert dieser Client zu den ausgewaehlten Antwortenden fuer diese Anfrage?
+--
+-- Gerechnet wird ohne Nachricht: Jeder Kandidat bekommt eine Streuzahl aus
+-- Anfragendem und eigenem Namen, und wer unter den <slots> kleinsten liegt,
+-- antwortet. Kennt dieser Client weniger Kandidaten als Plaetze da sind -
+-- kleine Gilde, frischer Login, leeres Roster -, antwortet er immer: Lieber
+-- eine Antwort zu viel als eine Anfrage, die ins Leere laeuft.
+function GC.Sync:IsElectedResponder(requester, slots)
+    slots = math.max(1, tonumber(slots) or RESPONDER_SLOTS)
+    local requesterKey = GC.Util.PlayerKey(requester)
+    local candidates, ownKey = self:CollectResponderKeys()
+
+    local ownScore = ResponderScore(requesterKey, ownKey)
+    local better = 0
+    for key in pairs(candidates) do
+        if key ~= ownKey then
+            local score = ResponderScore(requesterKey, key)
+            -- Gleichstand entscheidet der Name, damit die Reihenfolge auf
+            -- jedem Client dieselbe ist.
+            if score < ownScore or (score == ownScore and key < ownKey) then
+                better = better + 1
+                if better >= slots then
+                    return false
+                end
+            end
+        end
+    end
+    return true
+end
+
+-- Ein anderer hat auf eine Anfrage dieser Art geantwortet. Der Vermerk gilt
+-- je Art, nicht je Anfragendem: Eine Gildenprofil-Antwort erreicht alle und
+-- macht damit jede weitere ueberfluessig, ganz gleich wer gefragt hatte.
+function GC.Sync:NotePeerAnswer(kind)
+    self.peerAnswers = self.peerAnswers or {}
+    self.peerAnswers[kind] = GC.Util.Now()
+end
+
+function GC.Sync:PeerAnsweredSince(kind, since)
+    local at = self.peerAnswers and self.peerAnswers[kind]
+    return at ~= nil and at >= (tonumber(since) or 0)
+end
+
 local function BoolField(value)
     return value and "1" or "0"
 end
@@ -524,7 +691,12 @@ local function DispatchBulk(self, entry)
     return self:Send(entry.payload, entry.distribution, entry.target) == true, false
 end
 
-function GC.Sync:PumpBulk(elapsed)
+-- Der eigentliche Durchlauf. Er steht als lokale Funktion da, damit die
+-- Wiedereintrittssperre in GC.Sync:PumpBulk ihn genau einmal umschliessen
+-- kann - der Rumpf steigt an einem halben Dutzend Stellen vorzeitig aus, und
+-- eine Sperre, die an jedem dieser Ausgaenge von Hand zurueckgesetzt werden
+-- muss, ist genau die Sorte Fehler, die hier behoben wird.
+local function PumpBulkOnce(self, elapsed)
     elapsed = math.max(0, tonumber(elapsed) or 0)
     self.bulkAllowance = math.min(
         BULK_BURST_BYTES,
@@ -641,6 +813,52 @@ function GC.Sync:PumpBulk(elapsed)
     -- Budget-Nachbuchung beim Aufwachen.
     self.bulkIdleAt = self.bulkIdleAt or GC.Util.Now()
     bulkFrame:Hide()
+end
+
+-- Wiedereintrittssperre.
+--
+-- ChatThrottleLib loest ihren Rueckruf bei freiem Kanal SYNCHRON aus - noch
+-- innerhalb von SendAddonMessage, also mitten in DispatchBulk und damit
+-- BEVOR die Schleife oben ihr Paket aus der Warteschlange genommen hat. Fuehrt
+-- dieser Rueckruf zurueck in SendBulk - und genau das tun der bestaetigte
+-- Fluestertransfer (ReliablePartDispatched -> PumpReliable) und die Werkstatt
+-- (QueueProfessionSync im onFailure-Zweig) -, dann lief PumpBulk ein zweites
+-- Mal an und griff auf dasselbe bulkQueue[1] zu.
+--
+-- Nachgestellt hat das Folgendes ergeben:
+--   * das erste Paket ging ZWEIMAL ueber die Leitung,
+--   * das im Rueckruf eingereihte Paket ging GAR NICHT raus,
+--   * bulkOutstanding blieb auf 1 stehen und wurde nach zwei Minuten als
+--     Verlust verbucht - der Grund fuer "Abgleich unvollstaendig" ohne
+--     tatsaechlichen Verlust.
+--
+-- ChatThrottleLib ist ueber DBM, Details! und WeakAuras praktisch in jeder
+-- Raidgilde geladen; ohne sie tritt der Fall nicht auf, weshalb er im Test
+-- ohne Bibliothek unsichtbar blieb.
+--
+-- Der wiedereintretende Aufruf reiht sich jetzt nur vor und kehrt um; der
+-- aeussere Durchlauf raeumt sein Paket ordentlich ab und holt die Vormerkung
+-- danach nach.
+function GC.Sync:PumpBulk(elapsed)
+    if self.bulkPumping then
+        self.bulkPumpPending = true
+        return
+    end
+    self.bulkPumping = true
+    local ok, err = pcall(PumpBulkOnce, self, elapsed)
+    self.bulkPumping = false
+    if not ok then
+        -- Ein Fehler im Durchlauf darf die Sperre nicht dauerhaft stehen
+        -- lassen; sonst stuende die Warteschlange bis zum Neuladen still.
+        self.bulkPumpPending = false
+        error(err, 0)
+    end
+    if self.bulkPumpPending then
+        self.bulkPumpPending = false
+        -- Ohne neue Zeitgutschrift: Das Budget wurde im aeusseren Durchlauf
+        -- bereits verrechnet.
+        self:PumpBulk(0)
+    end
 end
 
 function GC.Sync:WakeProgress()
@@ -1529,19 +1747,27 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     if fields[21] ~= nil then
         guildData.memberCare.decisions = DecodeMemberCareDecisions(fields[21])
     end
+
+    -- Drei Felder aendern die Bewertungsgrundlage: die allgemeinen Regeln, die
+    -- Spec-Regeln und die Content-Phase. Jedes stiess bisher einen EIGENEN
+    -- Durchlauf von ReapplyEnchantRules an - also dreimal dieselbe vollstaendige
+    -- Neubewertung aller gespeicherten Ausruestungspruefungen, obwohl nach dem
+    -- dritten Durchlauf nur das Ergebnis des dritten zaehlt.
+    --
+    -- Bei 500 gespeicherten Pruefungen waren das gemessene 932 ms Standbild je
+    -- empfangenem Gildenprofil, und zwar bei JEDEM Mitglied - ausgeloest schon
+    -- davon, dass ein Offizier ein einzelnes Rangkaestchen umlegt. Neu bewertet
+    -- wird deshalb genau einmal, ganz am Ende.
+    local rulesChanged = false
     if fields[22] ~= nil then
         guildData.enchantRules = DecodeEnchantRules(fields[22])
-        if GC.GearAudit then
-            GC.GearAudit:ReapplyEnchantRules()
-        end
+        rulesChanged = true
     end
     -- Fehlt das Feld, sendet der Absender eine aeltere Version. Dann bleiben
     -- die eigenen Spec-Regeln stehen, statt geleert zu werden.
     if fields[23] ~= nil then
         guildData.enchantSpecRules = DecodeSpecEnchantRules(fields[23])
-        if GC.GearAudit then
-            GC.GearAudit:ReapplyEnchantRules()
-        end
+        rulesChanged = true
     end
     -- Die Warcraft-Logs-Gildenquelle. Ein leeres oder fehlendes Feld laesst die
     -- eigene Quelle stehen: wer sie noch nicht gesetzt hat, soll sie einem
@@ -1555,10 +1781,14 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
     -- aelterer Client sie nicht zurueckdreht.
     local phase = fields[25]
     if type(phase) == "string" and GC.ContentPhaseByKey[phase] then
-        guildData.profile.contentPhase = phase
-        if GC.GearAudit then
-            GC.GearAudit:ReapplyEnchantRules()
+        if guildData.profile.contentPhase ~= phase then
+            rulesChanged = true
         end
+        guildData.profile.contentPhase = phase
+    end
+    -- Der eine Durchlauf fuer alle drei Aenderungen.
+    if rulesChanged and GC.GearAudit then
+        GC.GearAudit:ReapplyEnchantRules()
     end
     -- Die Rangfreigabe fuer den Bewerberton. Fehlt das Feld, sendet ein
     -- aelterer Client; dann bleibt die eigene Freigabe stehen, statt auf
@@ -1581,7 +1811,7 @@ end
 -- eingestiegener Client die Infos auch dann, wenn gerade kein Offizier online
 -- ist. Der Zeitstempelvergleich beim Empfaenger sorgt dafuer, dass niemand
 -- einen neueren Stand mit einer alten Kopie ueberschreibt.
-function GC.Sync:ReplyToGuildProfileRequest()
+function GC.Sync:ReplyToGuildProfileRequest(requester)
     local canEdit = GC.Roster:CanEditGuildProfile()
     local hasProfile = (tonumber(GC.DB:GetGuild().profile.updatedAt) or 0) > 0
     if not canEdit and not hasProfile then
@@ -1591,12 +1821,30 @@ function GC.Sync:ReplyToGuildProfileRequest()
     if (now - (self.lastGuildProfileReplyAt or 0)) < MIN_PROFILE_REPLY_INTERVAL then
         return false
     end
+
+    -- Die Wahl: Nicht jeder schickt sein Gildenprofil. Bei 250 Online waren
+    -- das 22 Pakete mal 250 - fuer eine Nutzlast, die bei allen dieselbe ist.
+    if not self:IsElectedResponder(requester) then
+        return false
+    end
     self.lastGuildProfileReplyAt = now
     if not C_Timer or type(C_Timer.After) ~= "function" then
         self:SendGuildProfile(true)
         return true
     end
-    C_Timer.After(0.5 + math.random(), function()
+
+    -- Und die Stille: Die Streuzeit ist laenger als der erste Block einer
+    -- fremden Antwort braucht. Wer in dieser Zeit ein "G|"-Paket sieht, weiss,
+    -- dass ein anderer Gewaehlter schon liefert, und schweigt.
+    local scheduledAt = now
+    C_Timer.After(1 + math.random() * 3, function()
+        if GC.Sync:PeerAnsweredSince("GUILDPROFILE", scheduledAt) then
+            -- Ein anderer war schneller. Die Drossel wird dabei ausdruecklich
+            -- zurueckgenommen: Es wurde nichts gesendet, also darf die naechste
+            -- Anfrage wieder beantwortet werden.
+            GC.Sync.lastGuildProfileReplyAt = 0
+            return
+        end
         GC.Sync:SendGuildProfile(true)
     end)
     return true
@@ -1758,8 +2006,33 @@ end
 
 -- Frische Antworten der laufenden Sitzung, auch von Gruppenmitgliedern
 -- fremder Gilden. Der Gildenbestand (addonUsers) bleibt der Langzeitspeicher.
+-- Antworten der laufenden Sitzung. Die Liste ist rein lokal, wuchs aber
+-- unbegrenzt: in einer Gilde mit 500 Mitgliedern ueber einen Abend um 500
+-- Eintraege, die nach dem Versionspruefer niemand mehr liest. Aufgeraeumt wird
+-- gesammelt, sobald sie zu gross wird - eine Frist je Eintrag waere teurer als
+-- der Eintrag selbst.
+local MAX_VERSION_REPLIES = 400
+local VERSION_REPLY_TTL = 30 * 60
+
+local function PruneVersionReplies(replies)
+    local count = 0
+    for _ in pairs(replies) do
+        count = count + 1
+    end
+    if count <= MAX_VERSION_REPLIES then
+        return
+    end
+    local cutoff = GC.Util.Now() - VERSION_REPLY_TTL
+    for key, reply in pairs(replies) do
+        if (tonumber(reply.at) or 0) < cutoff then
+            replies[key] = nil
+        end
+    end
+end
+
 function GC.Sync:NoteVersionReply(sender, version)
     self.versionReplies = self.versionReplies or {}
+    PruneVersionReplies(self.versionReplies)
     self.versionReplies[GC.Util.NormalizeName(GC.Util.PlayerShortName(sender))] = {
         version = GC.Util.Trim(version),
         at = GC.Util.Now(),
@@ -1875,7 +2148,24 @@ function GC.Sync:ReceiveVersion(fields, sender, distribution)
         C_Timer.After(0.5 + math.random() * spread, function()
             self:ReplyWithProfile()
         end)
-        if GC.GearAudit then
+
+        -- Die Ausruestungsantwort ist der teuerste Teil des Handschlags: bis
+        -- zu zehn Bloecke, und bis 0.9.96 schickte sie JEDER. Bei 250 Online
+        -- waren das rund 750 Pakete je fremdem Login - fuer Daten, die der
+        -- Empfaenger gar nicht alle annehmen kann (er verarbeitet hoechstens
+        -- EQUIPMENT_MAX_INCOMING Uebertragungen gleichzeitig).
+        --
+        -- Geantwortet wird deshalb nur noch von einer gewaehlten Teilmenge,
+        -- hier mit deutlich mehr Plaetzen als bei den uebrigen Anfragen: Wer
+        -- neu dazukommt, soll seine Uebersicht zuegig fuellen. Weil die Wahl
+        -- am Anfragenden haengt, ist es bei jedem Login eine andere Teilmenge -
+        -- nach ein paar Logins kennt ein neuer Client trotzdem die halbe Gilde,
+        -- nur eben verteilt statt auf einen Schlag.
+        --
+        -- Der eigene Stand geht davon unabhaengig ohnehin bei jedem Login
+        -- einmal raus (AuditSelf -> QueueEquipmentSnapshot); hier wird also
+        -- nichts endgueltig verpasst, sondern nur entzerrt.
+        if GC.GearAudit and self:IsElectedResponder(sender, 10) then
             GC.GearAudit:ReplyWithEquipmentSnapshot()
         end
     end
@@ -2082,9 +2372,14 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- Direkte Datentransfers duerfen nur von Gildenmitgliedern kommen. Direkt
     -- nach dem Login ist der Roster noch leer; dann greift diese Zusatzpruefung
     -- bewusst noch nicht.
+    -- "RD" gehoert ausdruecklich dazu und fehlte: Raidauswertungen kommen per
+    -- Fluestern, und ohne diese Sperre konnte ein Gildenfremder sie
+    -- einschleusen. Weil jede empfangene Fassung als eigene Quelle abgelegt
+    -- wird und die Ablage nur MAX_STORED_SESSIONS Plaetze hat, liess sich damit
+    -- die gesamte Abendhistorie von aussen verdraengen.
     if distribution == "WHISPER" and #GC.Roster.members > 0
         and (messageType == "A" or messageType == "W" or messageType == "L"
-            or messageType == "E" or messageType == "O")
+            or messageType == "E" or messageType == "O" or messageType == "RD")
         and not GC.Roster:IsGuildMember(sender) then
         return
     end
@@ -2113,6 +2408,9 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         end
         return
     elseif message:sub(1, 2) == "G|" and distribution == "GUILD" then
+        -- Hier liefert ein anderer bereits das Gildenprofil. Wer selbst noch
+        -- eine Antwort geplant hat, laesst sie damit fallen.
+        self:NotePeerAnswer("GUILDPROFILE")
         self:ReceiveGuildProfileChunk(message, sender)
         return
     elseif message:sub(1, 2) == "E|" and (distribution == "GUILD" or distribution == "WHISPER") then
@@ -2130,7 +2428,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
         end
         return
     elseif message == ("GQ|" .. tostring(GC.Constants.SCHEMA_VERSION)) and distribution == "GUILD" then
-        self:ReplyToGuildProfileRequest()
+        self:ReplyToGuildProfileRequest(sender)
         return
     end
 

@@ -56,6 +56,9 @@ function GC.Perf:Clock()
     return nil
 end
 
+-- Lua 5.1 (WoW) kennt unpack global, spaetere Fassungen nur table.unpack.
+local unpackValues = unpack or table.unpack
+
 function GC.Perf:Measure(label, fn, ...)
     if type(fn) ~= "function" then
         return
@@ -63,11 +66,20 @@ function GC.Perf:Measure(label, fn, ...)
     if not self.enabled then
         return fn(...)
     end
+    -- Die Rueckgabe muss durchgereicht werden, und zwar VOLLSTAENDIG.
+    --
+    -- Hier stand "fn(...)" ohne return: Ausgeschaltet lieferte die Messung das
+    -- Ergebnis der gemessenen Funktion, eingeschaltet nichts. Damit aenderte
+    -- "/gcp debug" das Programmverhalten statt es nur zu beobachten - eine
+    -- Messung, die das Gemessene veraendert, ist wertlos, und der naechste
+    -- Aufrufer waere darauf hereingefallen. Die Zwischentabelle kostet eine
+    -- Belegung je Aufruf; das ist genau dann hinnehmbar, wenn ohnehin gemessen
+    -- wird, und im Regelfall (aus) wird sie nie angelegt.
     local started = self:Clock()
-    fn(...)
+    local results = { fn(...) }
     local finished = self:Clock()
     if not started or not finished then
-        return
+        return unpackValues(results)
     end
     local elapsed = finished - started
     local sample = self.samples[label]
@@ -80,6 +92,7 @@ function GC.Perf:Measure(label, fn, ...)
     if elapsed > sample.worst then
         sample.worst = elapsed
     end
+    return unpackValues(results)
 end
 
 function GC.Perf:Reset()
@@ -399,7 +412,22 @@ function GC.Util.IsDateInRange(value, rangeFrom, rangeTo)
         and value <= rangeTo
 end
 
+-- Der eigene Name aendert sich innerhalb einer Sitzung nicht. Er wurde
+-- trotzdem bei jedem Aufruf neu aus drei API-Aufrufen und einer
+-- Zeichenverkettung zusammengesetzt - und er steht in Schleifen ueber alle
+-- Gildenmitglieder (Roster:GetProfile ruft ihn zweimal je Mitglied auf, bei
+-- 500 Mitgliedern also tausendmal je Uebersicht).
+--
+-- Gemerkt wird ausdruecklich NUR ein belastbarer Name: Direkt nach dem Laden
+-- gibt der Client noch keinen heraus, und ein gemerktes "Unbekannt" waere fuer
+-- den Rest der Sitzung falsch. PLAYER_LOGIN verwirft den Merker zusaetzlich,
+-- damit der erste belastbare Stand auch wirklich der gemerkte ist.
 function GC:GetPlayerFullName()
+    local cached = self.playerFullName
+    if cached then
+        return cached
+    end
+
     -- Hier stand "local name, realm = UnitFullName and UnitFullName(...)".
     -- Lua kuerzt einen and-Ausdruck auf genau einen Wert, realm blieb deshalb
     -- immer leer und wurde jedes Mal ueber den Fallback unten neu geholt.
@@ -417,10 +445,13 @@ function GC:GetPlayerFullName()
     if not name or name == "" then
         return "Unbekannt"
     end
+
+    local fullName = name
     if realm and realm ~= "" then
-        return name .. "-" .. realm
+        fullName = name .. "-" .. realm
     end
-    return name
+    self.playerFullName = fullName
+    return fullName
 end
 
 function GC:GetGuildName()
@@ -448,6 +479,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         end
     elseif event == "PLAYER_LOGIN" then
         GC.initialized = true
+        -- Erst ab hier gibt der Client Namen und Realm belastbar heraus; ein
+        -- frueher gemerkter Stand wird deshalb verworfen.
+        GC.playerFullName = nil
         GC:FireCallback("PLAYER_LOGIN")
         GC:Print("v" .. GC.Constants.VERSION .. " geladen. Öffnen mit |cffffffff/gcp|r.")
     end

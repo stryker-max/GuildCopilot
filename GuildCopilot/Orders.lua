@@ -10,7 +10,6 @@ local _, GC = ...
 -- Charakter, der das Rezept laut Katalog beherrscht.
 
 GC.Orders = {
-    lastAnswerAt = 0,
     lastRequestAt = 0,
 }
 
@@ -30,6 +29,20 @@ local MIN_ANSWER_INTERVAL = 30
 -- createdAt + RESERVATION_SECONDS selbst.
 local RESERVATION_SECONDS = 24 * 60 * 60
 local MAX_STATS_COUNTED = 200
+
+-- Deckel fuer die beiden Massenwege. Beide verschickten bis 0.9.96 den ganzen
+-- Bestand: die Abgleichantwort 180 Fluesterpakete bei 60 Auftraegen, der
+-- Login-Push 120 Broadcasts - und das von jedem Client. Bei 250 Online waren
+-- das 45.000 bzw. 30.000 Pakete je Login, waehrend Blizzards Addon-Kanal rund
+-- zehn Pakete je Sekunde und Absender zustellt und den Rest lautlos verwirft.
+local MAX_ANSWER_ORDERS = 40
+local MAX_PUSH_ORDERS = 25
+
+-- Wie lange der Vermerk "diesem Anfragenden wurde geantwortet" aufgehoben
+-- wird. Zehn Drosselzeiten sind lange genug, dass keine Wiederholung
+-- durchrutscht, und kurz genug, dass die Tabelle nicht ueber einen Spielabend
+-- hinweg jeden Namen der Gilde sammelt.
+local ANSWERED_MEMORY = MIN_ANSWER_INTERVAL * 10
 
 -- Reihenfolge = Lebenslauf. RECEIVED gibt es nur, wenn nach dem Erhalt noch
 -- eine Erstattung offen ist (Materialmodell C mit gemeldeten Kosten).
@@ -1254,19 +1267,62 @@ function GC.Orders:RequestSync()
     return GC.Sync:Send(Join({ "O", SCHEMA(), "Q", "0" }))
 end
 
--- Beim Login zusaetzlich der Gegenweg: ALLE bekannten laufenden Auftraege als
--- Push in den Gildenkanal - nicht nur die eigenen. Jeder Client ist damit
--- Kurier: Wer einen Auftrag einmal empfangen hat, traegt ihn zu jedem
--- weiter, mit dem er online ist. So erreicht auch der Auftrag von jemandem,
--- der allein online war, die Gilde ueber Dritte. Gedeckelt durch die
--- Bestandsgrenzen, ohne Verlaufszeilen, ueber die Bulk-Warteschlange.
+-- Beim Login zusaetzlich der Gegenweg: laufende Auftraege als Push in den
+-- Gildenkanal. Jeder Client ist damit Kurier: Wer einen Auftrag einmal
+-- empfangen hat, traegt ihn zu jedem weiter, mit dem er online ist. So
+-- erreicht auch der Auftrag von jemandem, der allein online war, die Gilde
+-- ueber Dritte.
+--
+-- Die Kurierfunktion bleibt, sie darf aber nicht von allen gleichzeitig
+-- ausgehen: Bis 0.9.96 pushte JEDER Client JEDEN bekannten laufenden Auftrag,
+-- bei 60 Auftraegen 120 Pakete je Client und bei 250 Online 30.000 Broadcasts
+-- fuer einen Inhalt, den fast alle laengst hatten. Jetzt gilt:
+--
+--   * Auftraege des eigenen Accounts (erstellt oder angenommen) gehen immer
+--     raus. Fuer die ist dieser Client die Quelle - niemand sonst kann fuer
+--     ihn einspringen, und genau sie sind der Grund fuer den Push.
+--   * Fremde Auftraege nur, wenn dieser Client fuer deren AUFTRAGGEBER
+--     gewaehlt ist. Die Wahl haengt bewusst am Auftraggeber und nicht am
+--     eigenen Namen: So traegt jeden fremden Auftrag eine andere Handvoll
+--     Clients weiter, statt dass immer dieselben drei die ganze Kurierarbeit
+--     tun - und aus 250 Absendern je Auftrag werden drei.
+--   * Hoechstens MAX_PUSH_ORDERS Auftraege je Push, eigene zuerst.
+--
+-- Ohne Verlaufszeilen, ueber die Bulk-Warteschlange.
 function GC.Orders:PushOpenOrders()
     if not GC.Sync then
         return 0
     end
-    local pushed = 0
+    local ownTag = GC.Util.Trim(GC.DB:GetAccountTag())
+    local mine = {}
+    local others = {}
     for _, order in pairs(self:GetStore()) do
         if not TERMINAL[order.status] then
+            if ownTag ~= ""
+                and (order.createdByTag == ownTag or order.acceptedByTag == ownTag) then
+                mine[#mine + 1] = order
+            elseif GC.Sync:IsElectedResponder(order.createdBy or "") then
+                others[#others + 1] = order
+            end
+        end
+    end
+    -- Das Juengste zuerst: Ein gerade geaenderter Auftrag ist der, den die
+    -- anderen am ehesten noch nicht haben.
+    local function ByRecency(left, right)
+        if (left.changedAt or 0) ~= (right.changedAt or 0) then
+            return (left.changedAt or 0) > (right.changedAt or 0)
+        end
+        return tostring(left.id) < tostring(right.id)
+    end
+    table.sort(mine, ByRecency)
+    table.sort(others, ByRecency)
+
+    local pushed = 0
+    for _, list in ipairs({ mine, others }) do
+        for _, order in ipairs(list) do
+            if pushed >= MAX_PUSH_ORDERS then
+                return pushed
+            end
             GC.Sync:SendBulk(self:BuildCoreMessage(order), "GUILD")
             GC.Sync:SendBulk(self:BuildStateMessage(order, nil), "GUILD")
             pushed = pushed + 1
@@ -1287,18 +1343,46 @@ function GC.Orders:RequestRecovery()
     return GC.Sync and GC.Sync:Send(Join({ "O", SCHEMA(), "Q", "0" })) == true or false
 end
 
--- Antwort auf eine Q-Anfrage: der komplette eigene Stand ueber die
--- Bulk-Warteschlange - Kern, Zustand und Verlaufszeilen. Bewusst alles statt
--- einer Differenz: Zeitstempel verschiedener Absender sind nicht vergleichbar,
--- und Revisionen plus Verlaufs-Dedup machen Doppeltes ohnehin wirkungslos.
+-- Antwort auf eine Q-Anfrage: der Bestand ueber die Bulk-Warteschlange, Kern
+-- und Zustand. Bewusst alles statt einer Differenz: Zeitstempel verschiedener
+-- Absender sind nicht vergleichbar, und Revisionen plus Verlaufs-Dedup machen
+-- Doppeltes ohnehin wirkungslos.
+--
+-- Drei Grenzen halten die Antwort klein. Bis 0.9.96 schickte JEDER Client den
+-- KOMPLETTEN Bestand an JEDEN Anfragenden: 14 Pakete je Auftrag (Kern,
+-- Zustand, bis zu 12 Verlaufszeilen), bei 60 Auftraegen 180 Pakete je Client,
+-- bei 250 Online 45.000 Fluesterpakete je Login.
+--
+--   1. Die Wahl: Nur eine Handvoll Clients antwortet ueberhaupt. Die Nutzlast
+--      ist bei allen dieselbe, 250 Kopien davon sind keine Sicherheit.
+--   2. Keine Verlaufszeilen mehr. Sie waren 12 der 14 Pakete je Auftrag und
+--      sind fuer den Abgleich entbehrlich: Kern und Zustand tragen den
+--      Auftrag vollstaendig, der Verlauf ist reine Anzeige und faellt bei
+--      jedem weiteren Schritt ohnehin wieder an. Die Zustandsnachricht bleibt
+--      dabei OHNE Verlaufszeile - der Antwortende ist nur Kurier, und
+--      ReceiveState bindet ein gemeldetes Ereignis an den Absender; mit einer
+--      fremden Verlaufszeile wuerde das ganze Zustandspaket verworfen.
+--   3. Hoechstens MAX_ANSWER_ORDERS Auftraege, die laufenden zuerst.
+--
 -- Die Drossel gilt je Anfragendem, damit zwei kurz nacheinander einloggende
 -- Mitglieder beide ihre Antwort bekommen; der Zufallsversatz verhindert den
 -- gleichzeitigen Chor mehrerer Antwortender.
 function GC.Orders:AnswerRequest(_, requester)
     local now = GC.Util.Now()
-    self.answeredAt = self.answeredAt or {}
+    self.answeredAt = type(self.answeredAt) == "table" and self.answeredAt or {}
+    -- Sammelnd aufraeumen: Die Tabelle bekommt je Anfragendem einen Eintrag
+    -- und wuchs bisher unbegrenzt - in einer 500er-Gilde stehen dort nach ein
+    -- paar Abenden hunderte Namen, die laengst niemanden mehr drosseln.
+    for key, at in pairs(self.answeredAt) do
+        if (now - (tonumber(at) or 0)) > ANSWERED_MEMORY then
+            self.answeredAt[key] = nil
+        end
+    end
     local requesterKey = GC.Util.NormalizeName(requester)
-    if (now - (self.answeredAt[requesterKey] or 0)) < MIN_ANSWER_INTERVAL then
+    if (now - (tonumber(self.answeredAt[requesterKey]) or 0)) < MIN_ANSWER_INTERVAL then
+        return false
+    end
+    if not GC.Sync:IsElectedResponder(requester) then
         return false
     end
     local pending = {}
@@ -1308,18 +1392,27 @@ function GC.Orders:AnswerRequest(_, requester)
     if #pending == 0 then
         return false
     end
+    -- Laufende zuerst: Ein abgeschlossener Auftrag ist Archiv, ein laufender
+    -- ist der, bei dem ein fehlendes Paket jemanden stehen laesst.
+    table.sort(pending, function(left, right)
+        local leftLive = TERMINAL[left.status] and 0 or 1
+        local rightLive = TERMINAL[right.status] and 0 or 1
+        if leftLive ~= rightLive then
+            return leftLive > rightLive
+        end
+        if (left.changedAt or 0) ~= (right.changedAt or 0) then
+            return (left.changedAt or 0) > (right.changedAt or 0)
+        end
+        return tostring(left.id) < tostring(right.id)
+    end)
     self.answeredAt[requesterKey] = now
 
+    local sendCount = math.min(#pending, MAX_ANSWER_ORDERS)
     local function SendAll()
-        for _, order in ipairs(pending) do
+        for index = 1, sendCount do
+            local order = pending[index]
             GC.Sync:SendBulk(self:BuildCoreMessage(order), "WHISPER", requester)
             GC.Sync:SendBulk(self:BuildStateMessage(order, nil), "WHISPER", requester)
-            for _, entry in ipairs(order.log or {}) do
-                GC.Sync:SendBulk(Join({
-                    "O", SCHEMA(), "L", order.id,
-                    tostring(entry.at or 0), entry.by or "", entry.event or "", entry.note or "",
-                }), "WHISPER", requester)
-            end
         end
     end
     if C_Timer and type(C_Timer.After) == "function" then

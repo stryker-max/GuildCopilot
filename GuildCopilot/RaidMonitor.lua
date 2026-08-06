@@ -12,12 +12,66 @@ GC.RaidMonitor = {
 
 -- Ein Abend kann bis zu drei Quellen belegen (Live, Warcraft Logs, Logdatei);
 -- mit 12 Plätzen waren das nur vier Abende. 24 hält acht volle Abende.
-local MAX_STORED_SESSIONS = 24
+--
+-- Diese Rechnung galt, solange nur EIGENE Quellen in der Ablage lagen. Seit
+-- jeder Raidteilnehmer seine Fassung als eigene Quelle abliefert
+-- ("SYNC:<Name>"), fuellt ein einziger Abend die Ablage: Gemessen wurden 6
+-- gespeicherte alte Raidabende, danach 40 SYNC-Antworten EINES Abends - alle
+-- sechs alten Abende waren geloescht und alle 24 Plaetze mit Fassungen
+-- desselben Abends belegt.
+--
+-- Die Ablage hat deshalb zwei getrennte Kontingente: unveraendert 24 Plaetze
+-- fuer die eigenen Quellen (acht volle Abende) und MAX_SYNC_SUMMARIES
+-- zusaetzliche Plaetze fuer fremde Fassungen. Fremde Fassungen verdraengen
+-- eine eigene Auswertung nie, sie kommen obendrauf - deshalb steigt der
+-- Gesamtdeckel um genau dieses Kontingent.
+--
+-- Zwoelf fremde Fassungen, davon hoechstens sechs je Abend: Repariert wird aus
+-- Hoechstwerten, und dafuer bringt die siebte Fassung desselben Abends
+-- praktisch nichts mehr, waehrend sechs auch dann noch reichen, wenn die
+-- Haelfte davon selbst lueckenhaft ist.
+local MAX_SYNC_PER_SESSION = 6
+local MAX_SYNC_SUMMARIES = 12
+local MAX_STORED_SESSIONS = 24 + MAX_SYNC_SUMMARIES
 local MIN_SEGMENT_SECONDS = 15
 local WIPE_RATIO = 0.5
 local MAX_PAYLOAD_BYTES = 165
 local MIN_ANSWER_INTERVAL = 30
 local INCOMING_TTL = 5 * 60
+
+-- Wie viele unfertige Auswertungs-Uebertragungen gleichzeitig offenstehen
+-- duerfen. Die Tabelle hatte gar keinen Deckel und wurde bei JEDEM
+-- eintreffenden Paket komplett durchlaufen (Verfallspruefung) - ueber einen
+-- Sturm von 10.000 Paketen also quadratisch. 40 liegt weit ueber dem, was
+-- nach der Antwortwahl (siehe REPAIR_RESPONDER_SLOTS) noch zusammenkommt, und
+-- deckelt zugleich den Speicher gegen Muellpakete.
+local MAX_INCOMING_TRANSFERS = 40
+
+-- Wie viele Clients auf eine Anfrage nach Auswertungen ueberhaupt antworten.
+--
+-- Gemessen in einer Gilde mit 250 Online: Auf eine NACKTE RQ-Anfrage schickte
+-- jeder Client bis zu fuenf Auswertungen zu je acht Bloecken - 40 Pakete je
+-- Client und damit 10.000 Fluesterpakete an EINEN Anfragenden. Der Kanal
+-- stellt groessenordnungsmaessig zehn Pakete je Sekunde zu; alles darueber
+-- ging lautlos verloren.
+--
+-- Die beiden Anfragen kosten sehr unterschiedlich viel und sind deshalb
+-- unterschiedlich breit gestreut:
+--
+--   NACKT (Knopf "Auswertung anfordern", RequestSummaries) - bis zu fuenf
+--   Abende je Antwortendem, also 40 Pakete. Drei Antwortende genuegen: Das
+--   sind 120 Pakete, und faellt einer aus (Ladebildschirm, Verbindung), sind
+--   noch zwei da.
+--
+--   GEZIELT (RequestRepair) - nennt eine Sitzungskennung, also genau EINE
+--   Auswertung zu acht Paketen je Antwortendem. Sie ist die Grundlage der
+--   Reparatur und darf deshalb deutlich breiter streuen. Sie muss es sogar:
+--   Die Wahl kennt nur das Gildenroster, nicht die Teilnehmerliste des
+--   Abends. Von 250 Online waren vielleicht 40 dabei; aus 24 Gewaehlten sind
+--   das im Schnitt vier, die den Abend ueberhaupt gespeichert haben.
+--   Teuerster Fall bleiben 24 x 8 = 192 Pakete.
+local SUMMARY_RESPONDER_SLOTS = 3
+local REPAIR_RESPONDER_SLOTS = 24
 
 -- Wie lange eine unterbrochene Sitzung fortgesetzt werden darf. Danach ist sie
 -- kein laufender Abend mehr, sondern ein liegengebliebener - sie wird beim
@@ -164,6 +218,7 @@ function GC.RaidMonitor:GetParticipant(session, name, classFile)
         -- Ein neuer Teilnehmer macht gemerkte Fehltreffer ungueltig: Wer bis
         -- eben unbekannt war, koennte jetzt genau dieser Neue sein.
         session.nameLookup = nil
+        session.nameLookupMisses = nil
     end
     if classFile and not participant.classFile then
         participant.classFile = classFile
@@ -176,6 +231,18 @@ end
 -- Kampfereignisse zwei Stringfunktionen zu durchlaufen, merkt sich die Sitzung
 -- das Ergebnis je roher Schreibweise - Fehltreffer (NPCs, Fremde) als false,
 -- denn gerade sie sind der haeufigste Fall.
+--
+-- Genau diese Fehltreffer waren aber unbegrenzt: Gemessen wurden 5.025
+-- Eintraege nach 5.000 verschiedenen NPC-Namen, und ein Trashabend erzeugt
+-- Zehntausende. Die TREFFER sind harmlos - es gibt hoechstens 40 Teilnehmer,
+-- und jeder belegt eine Handvoll Schreibweisen.
+--
+-- Gedeckelt werden deshalb nur die Fehltreffer, und beim Ueberlauf werden auch
+-- nur sie geleert. Der Memo ist eine Beschleunigung, kein Zustand: Ihn zu
+-- leeren kostet nichts als eine erneute Namensnormalisierung, und die
+-- gemerkten Teilnehmer bleiben unangetastet.
+local MAX_NAME_LOOKUP_MISSES = 2000
+
 function GC.RaidMonitor:FindParticipant(session, name)
     if not session or not name then
         return nil
@@ -190,8 +257,23 @@ function GC.RaidMonitor:FindParticipant(session, name)
     local participant = session.participants[GC.Util.NormalizeName(GC.Util.PlayerShortName(name))]
     lookup = lookup or {}
     session.nameLookup = lookup
-    lookup[name] = participant or false
-    return participant
+    if participant then
+        lookup[name] = participant
+        return participant
+    end
+
+    local misses = (tonumber(session.nameLookupMisses) or 0) + 1
+    if misses > MAX_NAME_LOOKUP_MISSES then
+        for key, cached in pairs(lookup) do
+            if cached == false then
+                lookup[key] = nil
+            end
+        end
+        misses = 1
+    end
+    lookup[name] = false
+    session.nameLookupMisses = misses
+    return nil
 end
 
 function GC.RaidMonitor:SyncParticipants()
@@ -253,6 +335,47 @@ function GC.RaidMonitor:SyncParticipants()
             participant.presentSince = nil
         end
     end
+end
+
+-- === Entprellung des Anwesenheitsabgleichs =================================
+--
+-- GROUP_ROSTER_UPDATE feuert im Raid haeufig: bei jedem Bei- und Austritt,
+-- jeder Rangaenderung, jedem Verschieben zwischen den Untergruppen und jedem
+-- Verbindungsverlust. Ein Umsortieren des Raids loest es dutzendfach in
+-- Sekunden aus, und jeder Durchlauf liest bis zu 40 Raideinheiten, fragt fuer
+-- neue Teilnehmer deren Buffs ab und laeuft danach noch einmal ueber alle
+-- Teilnehmer.
+--
+-- Gesammelt wird deshalb wie beim Gildenroster (GC.Roster:ScheduleScan): Was
+-- in ROSTER_SYNC_DEBOUNCE Sekunden anfaellt, ergibt einen Durchlauf. Die
+-- Verzoegerung ist unkritisch, weil die Anwesenheit ueber presentSince
+-- gerechnet wird - es geht hoechstens diese eine Sekunde verloren.
+--
+-- Entprellt wird NUR der Ereignispfad. StartSession, ResumeSession und die
+-- Anwesenheitsrechnung brauchen den sofortigen Durchlauf und rufen
+-- SyncParticipants weiterhin direkt.
+local ROSTER_SYNC_DEBOUNCE = 1
+
+function GC.RaidMonitor:ScheduleSyncParticipants(delay)
+    delay = tonumber(delay) or ROSTER_SYNC_DEBOUNCE
+    -- Ohne C_Timer (aeltere Clients, Testumgebung) bleibt es beim sofortigen
+    -- Durchlauf: Lieber ungedrosselt als gar nicht.
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:SyncParticipants()
+        return false
+    end
+    if self.syncParticipantsPending then
+        return false
+    end
+    self.syncParticipantsPending = true
+    C_Timer.After(delay, function()
+        self.syncParticipantsPending = false
+        -- Die Sitzung kann in der Wartezeit geendet haben.
+        if self.session then
+            self:SyncParticipants()
+        end
+    end)
+    return true
 end
 
 function GC.RaidMonitor:StartSession(sessionID, startedBy, startedAt, zone)
@@ -527,6 +650,7 @@ function GC.RaidMonitor:SaveSessionForResume(at)
     self:CloseSegment(at)
     ClosePresence(session, at)
     session.nameLookup = nil
+    session.nameLookupMisses = nil
     session.savedAt = at
     self:PersistSession()
     return session
@@ -553,6 +677,7 @@ function GC.RaidMonitor:ResumeSession()
     session.participantOrder = type(session.participantOrder) == "table" and session.participantOrder or {}
     session.pulls = type(session.pulls) == "table" and session.pulls or {}
     session.nameLookup = nil
+    session.nameLookupMisses = nil
     session.startedAt = tonumber(session.startedAt) or GC.Util.Now()
     session.gaps = type(session.gaps) == "table" and session.gaps or {}
     -- Eine Sitzung ohne vermerkte Regelversion stammt aus einer Fassung vor
@@ -719,6 +844,92 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
     return summary
 end
 
+-- Reihenfolge, in der fremde Fassungen aufgegeben werden: zuerst die
+-- brauchbarste. "Brauchbar" heisst hier ausschliesslich "taugt zum
+-- Reparieren", denn dafuer sind fremde Fassungen ueberhaupt da - und
+-- CanRepairFrom verlangt beides: lueckenlos gesehen (complete) und dieselbe
+-- Zaehlregel-Version wie der eigene Mitschnitt desselben Abends. Eine Fassung,
+-- die keine der beiden Bedingungen erfuellt, wird nie eingerechnet und ist
+-- damit reine Anzeige; sie weicht zuerst.
+local function ForeignKeepOrder(left, right)
+    if left.rank ~= right.rank then
+        return left.rank > right.rank
+    end
+    if left.endedAt ~= right.endedAt then
+        return left.endedAt > right.endedAt
+    end
+    if left.size ~= right.size then
+        return left.size > right.size
+    end
+    return left.index < right.index
+end
+
+-- Kappt die fremden Fassungen ("SYNC:<Name>") auf ihr Kontingent: hoechstens
+-- MAX_SYNC_PER_SESSION je Abend und hoechstens MAX_SYNC_SUMMARIES insgesamt.
+--
+-- Eigene Quellen (LIVE, REPAIR, WCL, Datei) fasst diese Kappung nicht an. Sie
+-- ist der Grund, warum ein einziger Abend die Ablage nicht mehr fuellen kann:
+-- Vorher legte jeder Raidteilnehmer seine Fassung als eigene Quelle ab, und 40
+-- Antworten desselben Abends verdraengten sechs alte Raidabende vollstaendig.
+--
+-- Rueckgabe: ob etwas entfernt wurde.
+function GC.RaidMonitor:PruneForeignSummaries(sessions)
+    local foreign = {}
+    local ownRules = {}
+    for index = 1, #sessions do
+        local stored = sessions[index]
+        local id = tostring(stored.id or "")
+        if self:SourceKind(stored.source) == "SYNC" then
+            foreign[#foreign + 1] = {
+                index = index,
+                id = id,
+                endedAt = tonumber(stored.endedAt) or 0,
+                size = #(stored.participants or {}),
+                complete = stored.complete == true,
+                rulesVersion = tonumber(stored.rulesVersion) or 1,
+            }
+        elseif ownRules[id] == nil then
+            -- Die Zaehlregel-Version, gegen die CanRepairFrom spaeter
+            -- vergleicht, steht am eigenen Mitschnitt dieses Abends. Gibt es
+            -- ihn (noch) nicht, ist die heutige Version die beste Annahme.
+            ownRules[id] = tonumber(stored.rulesVersion) or 1
+        end
+    end
+    if #foreign == 0 then
+        return false
+    end
+
+    local currentRules = tonumber(GC.Constants.RAID_RULES_VERSION) or 1
+    for _, entry in ipairs(foreign) do
+        entry.rank = (entry.complete and 2 or 0)
+            + (entry.rulesVersion == (ownRules[entry.id] or currentRules) and 1 or 0)
+    end
+    table.sort(foreign, ForeignKeepOrder)
+
+    local perSession = {}
+    local kept = 0
+    local drop
+    for _, entry in ipairs(foreign) do
+        local used = perSession[entry.id] or 0
+        if used < MAX_SYNC_PER_SESSION and kept < MAX_SYNC_SUMMARIES then
+            perSession[entry.id] = used + 1
+            kept = kept + 1
+        else
+            drop = drop or {}
+            drop[entry.index] = true
+        end
+    end
+    if not drop then
+        return false
+    end
+    for index = #sessions, 1, -1 do
+        if drop[index] then
+            table.remove(sessions, index)
+        end
+    end
+    return true
+end
+
 function GC.RaidMonitor:StoreSummary(summary)
     if not summary or not summary.id then
         return false
@@ -751,24 +962,50 @@ function GC.RaidMonitor:StoreSummary(summary)
     table.sort(sessions, function(left, right)
         return (left.endedAt or 0) > (right.endedAt or 0)
     end)
+    -- Erst das Kontingent der fremden Fassungen, dann die allgemeine
+    -- Verdraengung. Die Reihenfolge ist der Kern der Sache: Fremde Fassungen
+    -- werden nach IHRER eigenen Grenze gekappt und koennen deshalb gar nicht
+    -- erst dazu kommen, eine eigene Auswertung aus der Ablage zu druecken.
+    self:PruneForeignSummaries(sessions)
     -- Beim Aufräumen fliegen zuerst Abende OHNE Bosskampf (in der Stadt
     -- gestartete Probe-Sitzungen). Vorher galt reine Aktualität - zwölf
     -- Orgrimmar-Minis verdrängten den frisch importierten Raidabend, und der
     -- Import meldete Erfolg, während die Auswertung sofort wieder verschwand.
     while #sessions > MAX_STORED_SESSIONS do
         local worstIndex
+        -- Ist die Ablage trotz Kontingent noch zu voll, fuellen die EIGENEN
+        -- Quellen sie. Dann weichen zuerst die fremden Fassungen - sie sind
+        -- jederzeit wieder anzufordern, ein eigener Mitschnitt nicht.
         for index = #sessions, 1, -1 do
-            local candidate = sessions[index]
-            local pulls = tonumber(candidate.pulls) or 0
-            if pulls <= 0 then
+            if self:SourceKind(sessions[index].source) == "SYNC" then
                 worstIndex = index
                 break
+            end
+        end
+        if not worstIndex then
+            for index = #sessions, 1, -1 do
+                local candidate = sessions[index]
+                local pulls = tonumber(candidate.pulls) or 0
+                if pulls <= 0 then
+                    worstIndex = index
+                    break
+                end
             end
         end
         table.remove(sessions, worstIndex or #sessions)
     end
     GC:FireCallback("RAID_SESSION_UPDATED")
-    return true
+    -- Gemeldet wird, was hinterher wirklich in der Ablage steht. Seit dem
+    -- Kontingent kann die eben eingefuegte fremde Fassung sofort wieder
+    -- aussortiert worden sein - etwa die siebte desselben Abends. Ein
+    -- "gespeichert" waere dann falsch: Der Empfangszaehler zaehlte sie als
+    -- Neuzugang und TryRepair suchte sie vergebens.
+    for index = 1, #sessions do
+        if sessions[index] == summary then
+            return true
+        end
+    end
+    return false
 end
 
 -- Löscht einen ganzen Abend mit allen Quellen (Live, Logs, Datei) aus dem
@@ -1684,16 +1921,43 @@ function GC.RaidMonitor:ReceiveSummaryChunk(message, sender)
         return false
     end
 
-    local cutoff = GC.Util.Now() - INCOMING_TTL
+    local now = GC.Util.Now()
+    local cutoff = now - INCOMING_TTL
+    local incomingCount = 0
     for key, transfer in pairs(self.incoming) do
         if (tonumber(transfer.receivedAt) or 0) < cutoff then
             self.incoming[key] = nil
+        else
+            incomingCount = incomingCount + 1
         end
     end
     local incomingKey = GC.Util.NormalizeName(sender) .. "|" .. token
     local incoming = self.incoming[incomingKey]
-    if not incoming or incoming.total ~= total then
-        incoming = { total = total, chunks = {}, receivedAt = GC.Util.Now() }
+    if incoming and incoming.total ~= total then
+        self.incoming[incomingKey] = nil
+        incomingCount = incomingCount - 1
+        incoming = nil
+    end
+    if not incoming then
+        -- Greift die Grenze, weicht die AELTESTE unfertige Uebertragung, nicht
+        -- die neue - dieselbe Regel wie in Workshop und Ausruestungspruefung.
+        -- Das neue Paket ist immer mehr wert als eines, das seit Minuten nicht
+        -- weitergekommen ist; wiederholt wird hier naemlich nichts.
+        while incomingCount >= MAX_INCOMING_TRANSFERS do
+            local oldestKey, oldestAt
+            for key, transfer in pairs(self.incoming) do
+                local receivedAt = tonumber(transfer.receivedAt) or 0
+                if not oldestAt or receivedAt < oldestAt then
+                    oldestKey, oldestAt = key, receivedAt
+                end
+            end
+            if not oldestKey then
+                break
+            end
+            self.incoming[oldestKey] = nil
+            incomingCount = incomingCount - 1
+        end
+        incoming = { total = total, chunks = {}, receivedAt = now }
         self.incoming[incomingKey] = incoming
     end
     incoming.chunks[index] = chunk
@@ -1871,6 +2135,22 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
     -- Nennt die Anfrage dagegen einen bestimmten Abend, geht auch nur der
     -- raus. Das ist der Fall der Reparatur, und dort ist alles andere
     -- unnötiger Funkverkehr.
+    --
+    -- Davor steht die Wahl: Bis 0.9.96 antwortete JEDER, der die Anfrage
+    -- hoerte, jetzt nur eine Handvoll Gewaehlter. Gerechnet wird das
+    -- lokal ueber (Anfragender, Kandidat), ohne eine einzige Zusatznachricht,
+    -- und in kleinen Gilden - weniger bekannte Kandidaten als Plaetze - bleibt
+    -- es beim bisherigen Verhalten, dass jeder antwortet. Die Begruendung der
+    -- beiden Platzzahlen steht oben bei den Konstanten.
+    --
+    -- Das zweite Verfahren (NotePeerAnswer/PeerAnsweredSince) hilft hier
+    -- nicht: Geantwortet wird geflüstert, und eine Flüsterantwort sieht kein
+    -- anderer Client - er koennte also gar nicht verstummen.
+    local slots = sessionID and REPAIR_RESPONDER_SLOTS or SUMMARY_RESPONDER_SLOTS
+    if not GC.Sync:IsElectedResponder(requester, slots) then
+        return false
+    end
+
     local candidates = {}
     for _, summary in ipairs(self:GetSummaries()) do
         if sessionID == nil or tostring(summary.id or "") == tostring(sessionID) then
@@ -1985,7 +2265,7 @@ raidEvents:SetScript("OnEvent", function(_, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         GC.RaidMonitor:OnCombatLogEvent()
     elseif event == "GROUP_ROSTER_UPDATE" then
-        GC.RaidMonitor:SyncParticipants()
+        GC.RaidMonitor:ScheduleSyncParticipants()
     elseif event == "PLAYER_REGEN_DISABLED" then
         GC.RaidMonitor:BeginSegment(GC.Util.Now())
     elseif event == "PLAYER_REGEN_ENABLED" then

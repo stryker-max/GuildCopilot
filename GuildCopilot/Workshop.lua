@@ -26,9 +26,24 @@ local MAX_PAYLOAD_BYTES = 180
 local LEGACY_MAX_PAYLOAD_BYTES = 170
 local MAX_RECORD_BYTES = 165
 local MAX_TRANSFER_PARTS = 300
-local MAX_INCOMING_TRANSFERS = 20
+-- Die Grenze schuetzt vor Speicherfrass durch Muellpakete, nicht vor der
+-- eigenen Gilde - und stand mit 20 weit unter dem, was ein Login ausloest.
+-- Gemessen: von 60 gleichzeitigen Absendern wurden 20 angenommen und 40 stumm
+-- verworfen, ohne Wiederholung und ohne Meldung.
+local MAX_INCOMING_TRANSFERS = 64
 local INCOMING_TTL = 5 * 60
 local MIN_REQUEST_REPLY_INTERVAL = 30
+-- Die Merkliste beantworteter Werkstatt-Anfragen wuchs unbegrenzt: ein Eintrag
+-- je Anfragendem, bei 500 Mitgliedern also 500 - obwohl ein Eintrag nach
+-- MIN_REQUEST_REPLY_INTERVAL Sekunden nichts mehr bewirkt.
+local MAX_REQUEST_REPLIES = 200
+-- Streuzeit vor der eigenen Manifest-Antwort auf eine Werkstatt-Anfrage, und
+-- unter welchem Namen eine fremde Antwort vermerkt ist.
+local MANIFEST_REPLY_SPREAD = 3
+local MANIFEST_ANSWER_KIND = "WORKSHOPMANIFEST"
+-- Sammelfrist fuer das Verwerfen des Katalogindex, siehe
+-- ScheduleCatalogInvalidation.
+local CATALOG_INVALIDATE_DELAY = 0.5
 local SCAN_RETRY_DELAYS = { 0.15, 0.45, 1.0, 2.0 }
 -- Fehlende Rezepte werden gesammelt und mit Streuung nachgefordert, damit bei
 -- vielen Mitgliedern nicht alle gleichzeitig dasselbe Rezept anfragen.
@@ -437,7 +452,12 @@ end
 -- ist die Item- beziehungsweise Zauber-ID, die Reagenzien haengen nicht am
 -- Spieler. Deshalb gibt es nichts abzuwaegen, wenn zwei Absender dasselbe
 -- Rezept melden.
-function GC.Workshop:StoreCatalogRecipe(recipe, professionKey, professionName)
+--
+-- "deferInvalidate" ist fuer Aufrufer gedacht, die in einer Schleife ganze
+-- Rezeptlisten einlagern: Sie stossen das Verwerfen des Katalogindex einmal am
+-- Ende an, statt je Rezept. Ohne das Kennzeichen verwirft die Funktion selbst,
+-- damit jeder andere Aufrufer wie bisher korrekt bleibt.
+function GC.Workshop:StoreCatalogRecipe(recipe, professionKey, professionName, deferInvalidate)
     if type(recipe) ~= "table" or GC.Util.Trim(recipe.key) == "" then
         return false
     end
@@ -455,7 +475,9 @@ function GC.Workshop:StoreCatalogRecipe(recipe, professionKey, professionName)
         profession = professionName or (existing and existing.profession),
         reagents = recipe.reagents or (existing and existing.reagents) or {},
     }
-    self:InvalidateCatalog()
+    if not deferInvalidate then
+        self:ScheduleCatalogInvalidation()
+    end
     return true
 end
 
@@ -510,7 +532,7 @@ function GC.Workshop:ClaimRecipes(info)
     }
     workshop.crafters[crafterKey] = crafter
     self:ClearWanted(info.crafter, info.professionKey)
-    self:InvalidateCatalog()
+    self:ScheduleCatalogInvalidation()
     return crafter
 end
 
@@ -547,12 +569,14 @@ end
 -- lokal und lebt nur in dieser Sitzung, wuchs aber mit jedem je angefragten
 -- Rezept weiter - in einer grossen Gilde ueber einen Raidabend hinweg um
 -- mehrere tausend Eintraege.
-local function PruneSuppressed(suppressed, ttl)
+-- Dieselbe Bauweise raeumt inzwischen auch die Merkliste beantworteter
+-- Werkstatt-Anfragen auf; "maximum" sagt, ab welcher Groesse es losgeht.
+local function PruneSuppressed(suppressed, ttl, maximum)
     local count = 0
     for _ in pairs(suppressed) do
         count = count + 1
     end
-    if count <= MAX_SUPPRESSED_REQUESTS then
+    if count <= (tonumber(maximum) or MAX_SUPPRESSED_REQUESTS) then
         return
     end
     local cutoff = GC.Util.Now() - ttl
@@ -1407,6 +1431,32 @@ function GC.Workshop:SendKeyManifest()
     return true
 end
 
+-- Die Stille zur Wahl: Das Manifest geht ueber den Gildenkanal und ist damit
+-- fuer alle sichtbar. Wer waehrend seiner Streuzeit ein fremdes "KM" sieht,
+-- weiss, dass ein anderer Gewaehlter schon geliefert hat, und schweigt. Das
+-- spart genau die Pakete, die bisher 250 Clients gleichzeitig in den Kanal
+-- schoben, ohne dass eine einzige Absprachenachricht noetig waere.
+function GC.Workshop:ScheduleKeyManifestReply(senderKey)
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:SendKeyManifest()
+    end
+    local scheduledAt = GC.Util.Now()
+    C_Timer.After(1 + math.random() * MANIFEST_REPLY_SPREAD, function()
+        if GC.Sync and GC.Sync.PeerAnsweredSince
+            and GC.Sync:PeerAnsweredSince(MANIFEST_ANSWER_KIND, scheduledAt) then
+            -- Ein anderer war schneller. Die Drossel wird dabei ausdruecklich
+            -- zurueckgenommen: Es wurde nichts gesendet, also darf die naechste
+            -- Anfrage dieses Fragenden wieder beantwortet werden.
+            if senderKey and senderKey ~= "" and GC.Workshop.requestReplies then
+                GC.Workshop.requestReplies[senderKey] = nil
+            end
+            return
+        end
+        GC.Workshop:SendKeyManifest()
+    end)
+    return true
+end
+
 -- Fordert die Schluesselliste eines fremden Berufs an - gestreut und nur einmal,
 -- damit nicht alle gleichzeitig dasselbe verlangen.
 function GC.Workshop:ScheduleKeyListRequest(wanted)
@@ -1607,9 +1657,21 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         local senderKey = GC.Util.PlayerKey(sender)
         local now = GC.Util.Now()
         self.requestReplies = self.requestReplies or {}
+        -- Aufgeraeumt wird sammelnd, nach derselben Bauweise wie bei den
+        -- unterdrueckten Rezeptanfragen: Ein Eintrag, der aelter ist als die
+        -- Drosselzeit, bewirkt nichts mehr.
+        PruneSuppressed(self.requestReplies, MIN_REQUEST_REPLY_INTERVAL, MAX_REQUEST_REPLIES)
         local lastReply = self.requestReplies[senderKey]
         if senderKey == ""
             or (lastReply and (now - lastReply) < MIN_REQUEST_REPLY_INTERVAL) then
+            return
+        end
+        -- Die Wahl: Bis 0.9.96 antwortete JEDER Client auf diese Anfrage. Bei
+        -- einem Fragenden ohne Manifest-Verstaendnis waren das gemessen 66
+        -- Pakete je Antwortendem - bei 250 Online 16.500 Pakete fuer einen
+        -- einzigen Login, weit jenseits dessen, was der Addon-Kanal zustellt.
+        if GC.Sync and GC.Sync.IsElectedResponder
+            and not GC.Sync:IsElectedResponder(sender) then
             return
         end
         self.requestReplies[senderKey] = now
@@ -1621,7 +1683,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- entschied das die Gilde als Ganzes - ein einziger veralteter Eintrag
         -- ließ dann jeden Abgleich zum Vollversand werden.
         if SupportsKeyListWorkshop(sender) then
-            self:SendKeyManifest()
+            self:ScheduleKeyManifestReply(senderKey)
         else
             self:QueueAllProfessions(SupportsCompactWorkshop(sender), nil, nil, true)
         end
@@ -1671,6 +1733,14 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     elseif operation == "KM" then
         -- Ein fremdes Manifest. Angefordert wird nur, was hier nachweislich
         -- fehlt oder veraltet ist; unveraenderte Berufe kosten null Pakete.
+        --
+        -- Zugleich ist es die sichtbare Antwort eines anderen Gewaehlten: Wer
+        -- gerade selbst auf seine Streuzeit wartet, laesst seine Antwort
+        -- daraufhin fallen. Nur der Gildenkanal zaehlt - eine Fluesterantwort
+        -- sieht niemand sonst und darf deshalb niemanden zum Schweigen bringen.
+        if distribution == "GUILD" and GC.Sync and GC.Sync.NotePeerAnswer then
+            GC.Sync:NotePeerAnswer(MANIFEST_ANSWER_KIND)
+        end
         local wanted = {}
         local crafters = self:GetGuildWorkshop().crafters
         for record in tostring(fields[4] or ""):gmatch("[^;]+") do
@@ -1827,8 +1897,24 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         return
     end
     if not incoming then
-        if incomingCount >= MAX_INCOMING_TRANSFERS then
-            return
+        -- Greift die Grenze doch, weicht die AELTESTE unfertige Uebertragung.
+        -- Bis 0.9.96 wurde stattdessen das NEUE Paket stumm verworfen - und mit
+        -- ihm der ganze Transfer, denn wiederholt wird hier nichts. Ein frisches
+        -- Paket ist immer mehr wert als eines, das seit Minuten nicht
+        -- weitergekommen ist.
+        while incomingCount >= MAX_INCOMING_TRANSFERS do
+            local oldestKey, oldestAt
+            for key, transfer in pairs(self.incoming) do
+                local receivedAt = tonumber(transfer.receivedAt) or 0
+                if not oldestAt or receivedAt < oldestAt then
+                    oldestKey, oldestAt = key, receivedAt
+                end
+            end
+            if not oldestKey then
+                break
+            end
+            self.incoming[oldestKey] = nil
+            incomingCount = incomingCount - 1
         end
         incoming = {
             parts = {},
@@ -1880,17 +1966,28 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- mitzunehmen. Sie werden deshalb Paket fuer Paket gelesen; ein
         -- Zusammensetzen wuerde den letzten Datensatz eines Pakets mit dem
         -- ersten des naechsten verschmelzen.
+        --
+        -- Das Verwerfen des Katalogindex haengt hier ausdruecklich am Ende und
+        -- nicht am einzelnen Rezept: Ein voller Beruf bringt bis zu 300 Pakete
+        -- mit hunderten Rezepten mit, und jedes einzelne warf bisher den Index
+        -- weg.
+        local catalogChanged = false
         for partIndex = 1, incoming.total do
             for record in tostring(incoming.parts[partIndex] or ""):gmatch("[^;]+") do
                 local recipe = operation == "C"
                     and DecodeCompactRecipeRecord(record, professionName)
                     or DecodeRecipeRecord(record, professionName)
                 if recipe then
-                    self:StoreCatalogRecipe(recipe, professionKey, professionName)
+                    if self:StoreCatalogRecipe(recipe, professionKey, professionName, true) then
+                        catalogChanged = true
+                    end
                     receivedKeys[#receivedKeys + 1] = recipe.key
                     receivedRecipeCount = receivedRecipeCount + 1
                 end
             end
+        end
+        if catalogChanged then
+            self:ScheduleCatalogInvalidation()
         end
     end
 
@@ -2064,6 +2161,32 @@ function GC.Workshop:InvalidateCatalog()
     self.catalogIndex = nil
     self.catalogByKey = nil
     self.catalogSummary = nil
+end
+
+-- Dasselbe, aber gesammelt - fuer alles, was in Schueben eintrifft.
+--
+-- Waehrend eines Abgleichs verwarf jedes eingehende Rezept und jeder
+-- uebernommene Beruf den Index einzeln: 20 eingehende Berufe waren 20
+-- Verwerfungen. Der Neuaufbau kostet gemessen 204 ms, und bei geoeffneter
+-- Werkstatt baute die Oberflaeche ihn dadurch alle 0,25 s neu auf - die
+-- Bildrate fiel auf rund 4 Bilder je Sekunde. Verworfen wird jetzt hoechstens
+-- alle CATALOG_INVALIDATE_DELAY Sekunden, nach derselben Bauweise wie bei den
+-- nachgeladenen Namen (ScheduleNameRefresh).
+function GC.Workshop:ScheduleCatalogInvalidation()
+    if self.catalogInvalidatePending then
+        return
+    end
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:InvalidateCatalog()
+        GC:FireCallback("WORKSHOP_UPDATED")
+        return
+    end
+    self.catalogInvalidatePending = true
+    C_Timer.After(CATALOG_INVALIDATE_DELAY, function()
+        GC.Workshop.catalogInvalidatePending = false
+        GC.Workshop:InvalidateCatalog()
+        GC:FireCallback("WORKSHOP_UPDATED")
+    end)
 end
 
 -- Ein einzelnes Rezept nach Schluessel. Vorher suchten die Aufrufer linear

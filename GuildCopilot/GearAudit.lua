@@ -24,7 +24,14 @@ local MAX_INSPECT_RETRIES = 2
 local INSPECT_RETRY_DELAY = 1
 local EQUIPMENT_CHUNK_BYTES = 165
 local EQUIPMENT_MAX_PARTS = 10
-local EQUIPMENT_MAX_INCOMING = 40
+-- Wie viele unfertige Ausruestungsuebertragungen gleichzeitig offen sein
+-- duerfen. 40 war zu knapp gegen 250 moegliche Absender: Gemessen wurden von
+-- 100 gleichzeitigen Absendern 40 angenommen und 60 stumm verworfen - ohne
+-- Wiederholung und ohne Meldung. Teuer ist das Warten nicht: Eine Uebertragung
+-- haelt hoechstens EQUIPMENT_MAX_PARTS Teilstuecke zu je
+-- EQUIPMENT_CHUNK_BYTES, bei 128 offenen also gut 200 KB im ungueltigsten
+-- Fall, und nach EQUIPMENT_INCOMING_TTL raeumt sie sich ohnehin selbst weg.
+local EQUIPMENT_MAX_INCOMING = 128
 local EQUIPMENT_INCOMING_TTL = 5 * 60
 local EQUIPMENT_REPLY_INTERVAL = 30
 local EQUIPMENT_SEND_INTERVAL = 0.45
@@ -1115,11 +1122,16 @@ function GC.GearAudit:ReceiveEquipmentChunk(message, sender)
 
     local now = GC.Util.Now()
     local incomingCount = 0
+    local oldestKey, oldestAt
     for key, transfer in pairs(self.equipmentIncoming) do
-        if (now - (tonumber(transfer.receivedAt) or 0)) > EQUIPMENT_INCOMING_TTL then
+        local receivedAt = tonumber(transfer.receivedAt) or 0
+        if (now - receivedAt) > EQUIPMENT_INCOMING_TTL then
             self.equipmentIncoming[key] = nil
         else
             incomingCount = incomingCount + 1
+            if not oldestAt or receivedAt < oldestAt then
+                oldestKey, oldestAt = key, receivedAt
+            end
         end
     end
 
@@ -1130,8 +1142,15 @@ function GC.GearAudit:ReceiveEquipmentChunk(message, sender)
         return false
     end
     if not incoming then
-        if incomingCount >= EQUIPMENT_MAX_INCOMING then
-            return false
+        -- Bis 0.9.96 wurde am Limit die NEUE Uebertragung abgewiesen. Das traf
+        -- immer den falschen: Wer gerade sendet, hat seinen ersten Block schon
+        -- unterwegs und wiederholt ihn nicht, waehrend im Zwischenspeicher
+        -- laengst verwaiste Reste liegen - Absender, deren restliche Bloecke
+        -- unterwegs verloren gingen oder die sich ausgeloggt haben. Weichen
+        -- muss deshalb die AELTESTE unfertige Uebertragung; ihre TTL laeuft
+        -- ohnehin als naechstes ab.
+        if incomingCount >= EQUIPMENT_MAX_INCOMING and oldestKey then
+            self.equipmentIncoming[oldestKey] = nil
         end
         incoming = {
             total = total,
@@ -1174,6 +1193,127 @@ function GC.GearAudit:ReceiveEquipmentChunk(message, sender)
     return true
 end
 
+-- === Schlanke Ablage =======================================================
+--
+-- Bis 0.9.96 wanderte jeder Slot mit allen Anzeigetexten in die
+-- SavedVariables. Bei 500 Mitgliedern mal 17 Slots waren die gearAudits mit
+-- 2,25 MB der groesste Posten der Datei - bei rund 4,3 MB Gesamtbestand also
+-- ueber die Haelfte -, und WoW liest die Datei bei jedem Login und schreibt
+-- sie bei jedem Ausloggen und /reload.
+--
+-- Fuenf Felder je Slot fallen jetzt weg, weil sie abgeleitet sind und bei
+-- jeder Anzeige ohnehin neu entstehen:
+--
+--   label       steht in GC.GearSlots
+--   verdict     liefert EvaluateEnchant aus dem aktuellen Regelsatz
+--   reason      dito - ein ganzer Satz, der laengste Posten je Slot
+--   enchantName loest ResolveEnchantNameByID auf
+--   itemLink    liefert GetInventoryItemLink fuer die eigene Ausruestung
+--               jederzeit frisch; fremde Audits hatten nie einen, weil der
+--               Abgleich nur IDs uebertraegt
+--
+-- Gespeichert bleiben nur die Messwerte: key, itemID, enchantID,
+-- emptySockets, required, exempt und unreadable. Das letzte gehoert dazu,
+-- obwohl es nach Anzeige aussieht: Ob ein Gegenstand nur noch nicht geladen
+-- war, laesst sich aus itemID allein nicht ablesen - ein lesbarer Slot hat
+-- genauso eine.
+--
+-- Nachgetragen wird beim Lesen, einmal je Audit; audit.hydrated verhindert
+-- die Wiederholung.
+
+local gearSlotsByKey
+
+local function GearSlotByKey(key)
+    if not gearSlotsByKey then
+        gearSlotsByKey = {}
+        for _, slot in ipairs(GC.GearSlots) do
+            gearSlotsByKey[slot.key] = slot
+        end
+    end
+    return gearSlotsByKey[key]
+end
+
+-- Die abgeleiteten Felder wieder abwerfen: beim Speichern, damit sie gar nicht
+-- erst in die Ablage kommen, und vor dem Ausloggen, weil ein einziger Blick
+-- auf die Ausruestungsseite alle Audits nachtraegt - und was dann noch an der
+-- Tabelle haengt, schreibt WoW in die Datei.
+local function DropDerivedFields(audit)
+    if type(audit) ~= "table" then
+        return
+    end
+    for _, entry in ipairs(audit.slots or {}) do
+        entry.label = nil
+        entry.verdict = nil
+        entry.reason = nil
+        entry.enchantName = nil
+        entry.itemLink = nil
+    end
+    audit.hydrated = nil
+end
+
+function GC.GearAudit:HydrateAudit(audit)
+    if type(audit) ~= "table" or audit.hydrated then
+        return audit
+    end
+    audit.hydrated = true
+
+    -- Den Item-Link gibt es nur fuer die eigene Ausruestung, und dort
+    -- kostenlos aus dem Inventar. Uebernommen wird er nur, wenn dort noch
+    -- derselbe Gegenstand steckt wie in der gespeicherten Pruefung - sonst
+    -- zeigte der Tooltip etwas anderes als die Zeile daneben.
+    local readOwnLink
+    if audit.source == "SELF" and type(GetInventoryItemLink) == "function"
+        and GC.Util.PlayerKey(audit.name or "") == GC.Util.PlayerKey(GC:GetPlayerFullName()) then
+        readOwnLink = function(slotID)
+            return GetInventoryItemLink("player", slotID)
+        end
+    end
+
+    for _, entry in ipairs(audit.slots or {}) do
+        local slot = GearSlotByKey(entry.key)
+        entry.label = slot and slot.label or entry.key
+
+        if readOwnLink and slot then
+            local link = readOwnLink(slot.id)
+            local parsed = link and self:ParseItemLink(link)
+            if parsed and parsed.itemID == (tonumber(entry.itemID) or -1)
+                and parsed.enchantID == (tonumber(entry.enchantID) or 0) then
+                entry.itemLink = link
+            end
+        end
+
+        local exemption = type(entry.exempt) == "string"
+            and GC.GearExemptionReasonByKey[entry.exempt]
+        if exemption then
+            entry.verdict = "EXEMPT"
+            entry.reason = exemption.label .. ": zählt nicht als Fund."
+        elseif entry.unreadable then
+            entry.verdict = "UNKNOWN"
+            entry.reason = "Gegenstandsdaten noch nicht vollständig geladen."
+        elseif (tonumber(entry.itemID) or 0) <= 0 then
+            entry.verdict = "EMPTY"
+            entry.reason = "Kein Gegenstand angelegt."
+        else
+            local name
+            if entry.itemLink then
+                name = self:ResolveEnchantName(entry.itemLink, entry.enchantID)
+            end
+            entry.enchantName = name
+                or self:ResolveEnchantNameByID(entry.itemID, entry.enchantID)
+            entry.verdict, entry.reason = self:EvaluateEnchant(
+                slot or { key = entry.key, enchantRequired = entry.required == true },
+                entry.enchantID, audit.role, entry.enchantName, audit.specKey)
+        end
+    end
+    return audit
+end
+
+function GC.GearAudit:CompactAudits()
+    for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
+        DropDerivedFields(audit)
+    end
+end
+
 function GC.GearAudit:StoreAudit(audit)
     if not audit or not audit.name or audit.name == "" then
         return false
@@ -1181,6 +1321,7 @@ function GC.GearAudit:StoreAudit(audit)
     -- Denselben Schluessel bilden wie GetAudit. Die Namen kommen hier bereits
     -- gekuerzt an, aber die beiden Seiten duerfen sich nicht darauf verlassen,
     -- dass das so bleibt.
+    DropDerivedFields(audit)
     GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(audit.name)] = audit
     GC:FireCallback("GEAR_AUDIT_UPDATED")
     return true
@@ -1197,7 +1338,7 @@ end
 function GC.GearAudit:GetAudits()
     local audits = {}
     for _, audit in pairs(GC.DB:GetGuild().gearAudits or {}) do
-        audits[#audits + 1] = audit
+        audits[#audits + 1] = self:HydrateAudit(audit)
     end
     table.sort(audits, function(left, right)
         local leftIssues = self:GetIssueCount(left)
@@ -1214,7 +1355,7 @@ function GC.GearAudit:GetAudit(name)
     if not name then
         return nil
     end
-    return GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(name)]
+    return self:HydrateAudit(GC.DB:GetGuild().gearAudits[GC.Util.PlayerKey(name)])
 end
 
 -- === Rang-Auswahl für die Prüfliste ========================================
