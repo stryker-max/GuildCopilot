@@ -319,6 +319,10 @@ Der Schalter steht an beiden Orten, die ihn brauchen — im Balken selbst und au
 
 Der Grundsatz „keine automatische Werbung" unter „Datenschutz und Fairness" ist damit präzisiert, nicht aufgegeben: Gepostet wird weiterhin nie ohne echte Eingabe und nie ohne ausdrücklich gesetzten Schalter — neu ist nur, dass die Eingabe nicht mehr der Klick auf genau diesen Knopf sein muss. Einladung und Entfernung von Mitgliedern bleiben ohne jede Automatik.
 
+### Nachgebessert nach dem ersten Blick im Spiel
+
+Die zweizeilige Einschalt-Erklärung der Postseite wuchs von ihrem unteren Anker nach oben und schob sich unter die Knopfreihe — derselbe Fehlertyp, der laut `CreateLabel`-Kommentar schon viermal unabhängig entstanden ist: Umbrechen ohne festen Kasten. Die Rückmeldung ist jetzt ein Kasten für genau zwei Zeilen (`height = 34`, `vertical = TOP`), die Knopfreihe sitzt 18 Pixel höher, und ein Test misst die Kastenhöhe nach und schaltet über den echten Schalter statt über die API. Die Seitenbeschreibung nennt seither auch die Automatik, denn „mit einem echten Klick senden" war nicht mehr die ganze Wahrheit.
+
 ### Geändert
 
 - `Chat.lua`: der Tastatur-Lauscher `GuildCopilotAutoPostFrame` samt `IsAutoPostSupported`, `IsAutoPostArmed`, `SetAutoPostArmed` und `RunAutoPost`;
