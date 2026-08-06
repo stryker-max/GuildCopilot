@@ -7450,6 +7450,17 @@ function GC.UI:RefreshStatistics()
     end
 end
 
+-- Masse der Spielerliste auf der Ausruestungsseite. Bis hierher entstand pro
+-- geprueftem Spieler eine eigene Zeile: bei 500 gespeicherten Pruefungen also
+-- 500 Rahmen samt Beschriftung und Texturen, obwohl in den 270 Pixel hohen
+-- Scrollbereich nur elf davon passen. Jetzt gibt es einen festen Vorrat wie in
+-- den uebrigen Listen der Datei (Teilnehmerliste und Verbrauchsprotokoll
+-- arbeiten mit 40 bzw. 100), und beim Scrollen werden dieselben Zeilen
+-- umgehaengt. 40 statt der noetigen elf, weil ein grosszuegiger Vorrat das
+-- Umhaengen bei den ueblichen Gildengroessen ganz erspart.
+local GEAR_PLAYER_ROW_POOL = 40
+local GEAR_PLAYER_ROW_STEP = 25
+
 local GEAR_VERDICT_STYLE = {
     OPTIMAL = { label = "Optimal", color = THEME.success },
     SOLID = { label = "Solide", color = THEME.accent },
@@ -7647,11 +7658,15 @@ function GC.UI:BuildGearPage()
         if self.gearRows[index] then
             return self.gearRows[index]
         end
-        local row = CreateButton(playerContent, "", 198, 23, function()
+        local row = CreateButton(playerContent, "", 198, 23, function(self)
             -- Die Zeile zeigt die GEFILTERTE Liste; der Klick muss dieselbe
             -- Liste lesen, sonst wählt er bei aktivem Rangfilter den
             -- falschen Spieler.
-            local audit = (page.gearAuditList or {})[index]
+            -- Seit dem festen Zeilenvorrat traegt die Zeile ihren Listenplatz
+            -- in auditIndex. Der Erzeugungsindex taugt nicht mehr dafuer: nach
+            -- dem Scrollen zeigt die erste Zeile laengst nicht mehr auf den
+            -- ersten Eintrag.
+            local audit = (page.gearAuditList or {})[self.auditIndex or 0]
             if audit then
                 GC.GearAudit.selectedName = audit.name
                 -- Beim Spielerwechsel oben anfangen, sonst haengt die Liste
@@ -7663,14 +7678,74 @@ function GC.UI:BuildGearPage()
                 GC.UI:RefreshGear()
             end
         end)
-        row:SetPoint("TOPLEFT", playerContent, "TOPLEFT", 0, -((index - 1) * 25))
+        row:SetPoint("TOPLEFT", playerContent, "TOPLEFT", 0,
+            -((index - 1) * GEAR_PLAYER_ROW_STEP))
         row.label:ClearAllPoints()
         row.label:SetPoint("LEFT", row, "LEFT", 8, 0)
         row.label:SetPoint("RIGHT", row, "RIGHT", -6, 0)
         row.label:SetJustifyH("LEFT")
+        row.auditIndex = index
         self.gearRows[index] = row
         return row
     end
+
+    -- Der Vorrat entsteht einmal beim Aufbau der Seite und waechst danach nie
+    -- mehr - egal, wie viele Pruefungen gespeichert sind.
+    for index = 1, GEAR_PLAYER_ROW_POOL do
+        page:EnsureGearPlayerRow(index)
+    end
+
+    -- Haengt den Vorrat unter das gerade sichtbare Stueck der Liste. Die Zeilen
+    -- stecken im Scrollkind, wandern also beim Scrollen mit; verschoben wird
+    -- deshalb nur ihr Platz innerhalb des Scrollkinds.
+    -- force: beim Auffrischen der Daten muss die Beschriftung in jedem Fall neu
+    -- gesetzt werden. Beim Scrollen nicht - das weiche Scrollen loest
+    -- OnVerticalScroll in jedem Bild aus, und solange dieselben Eintraege oben
+    -- stehen, gibt es nichts umzuhaengen.
+    function page:LayoutGearPlayerRows(force)
+        local audits = self.gearAuditList or {}
+        local scrolled = self.gearPlayerScroll:GetVerticalScroll() or 0
+        local first = math.floor(scrolled / GEAR_PLAYER_ROW_STEP)
+        first = math.max(0, math.min(first, #audits - GEAR_PLAYER_ROW_POOL))
+        if not force and self.gearRowFirst == first then
+            return
+        end
+        self.gearRowFirst = first
+        local selectedName = GC.GearAudit.selectedName
+        for offset = 1, GEAR_PLAYER_ROW_POOL do
+            local row = self.gearRows[offset]
+            if row then
+                local auditIndex = first + offset
+                local audit = audits[auditIndex]
+                row.auditIndex = auditIndex
+                row:SetShown(audit ~= nil)
+                if audit then
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", self.gearPlayerContent, "TOPLEFT", 0,
+                        -((auditIndex - 1) * GEAR_PLAYER_ROW_STEP))
+                    local issues = GC.GearAudit:GetIssueCount(audit)
+                    -- Grün heißt fertig, Rot heißt Arbeit (Owner-Wunsch) - so
+                    -- ist die Liste auf einen Blick lesbar.
+                    row:SetText(audit.name .. (issues > 0
+                        and ("  •  |cffff6166" .. issues
+                            .. (issues == 1 and " Fund" or " Funde") .. "|r")
+                        or "  •  |cff59e695ok|r"))
+                    row:SetActive(audit.name == selectedName)
+                end
+            end
+        end
+    end
+
+    playerScroll:HookScript("OnVerticalScroll", function()
+        page:LayoutGearPlayerRows()
+    end)
+    -- Neue Daten aendern die Gesamthoehe; WoW schiebt die Scrollposition dabei
+    -- selbst in den gueltigen Bereich zurueck. Ohne dieses Nachziehen stuenden
+    -- die Zeilen danach an der alten Stelle.
+    playerScroll:HookScript("OnScrollRangeChanged", function()
+        page:LayoutGearPlayerRows(true)
+    end)
+
     page.gearEmpty = CreateLabel(listCard, "Noch niemand geprüft.", { muted = true, width = 200, height = 40, vertical = "TOP" })
     page.gearEmpty:SetPoint("TOPLEFT", listCard, "TOPLEFT", 16, -84)
 
@@ -7903,28 +7978,16 @@ function GC.UI:RefreshGear()
         GC.GearAudit.selectedName = selectedName
     end
 
-    for index = 1, #audits do
-        page:EnsureGearPlayerRow(index)
-    end
-    page.gearPlayerContent:SetHeight(math.max(1, #audits * 25))
+    -- Die Hoehe bleibt die der GESAMTEN Liste, damit der Scrollbalken die
+    -- richtige Laenge und Position bekommt. Zeilen gibt es trotzdem nur
+    -- GEAR_PLAYER_ROW_POOL viele; LayoutGearPlayerRows haengt sie an die
+    -- Stelle, die gerade zu sehen ist.
+    page.gearPlayerContent:SetHeight(math.max(1, #audits * GEAR_PLAYER_ROW_STEP))
     -- Kein automatisches Mitscrollen mehr: Wer einen Spieler anklickt, hat
     -- ihn bereits vor Augen - der Sprung riss die Liste nur unter der Hand
     -- weg (Owner-Rückmeldung).
     page.gearPlayerScroll:UpdateModernThumb()
-
-    for index, row in ipairs(page.gearRows) do
-        local audit = audits[index]
-        row:SetShown(audit ~= nil)
-        if audit then
-            local issues = GC.GearAudit:GetIssueCount(audit)
-            -- Grün heißt fertig, Rot heißt Arbeit (Owner-Wunsch) - so ist die
-            -- Liste auf einen Blick lesbar.
-            row:SetText(audit.name .. (issues > 0
-            and ("  •  |cffff6166" .. issues .. (issues == 1 and " Fund" or " Funde") .. "|r")
-            or "  •  |cff59e695ok|r"))
-            row:SetActive(audit.name == selectedName)
-        end
-    end
+    page:LayoutGearPlayerRows(true)
 
     local selected = GC.GearAudit:GetAudit(selectedName)
     page.gearSlotEmpty:SetShown(selected == nil)
