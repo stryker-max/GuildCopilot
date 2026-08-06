@@ -7685,6 +7685,9 @@ function GC.UI:BuildGearPage()
         row.label:SetPoint("RIGHT", row, "RIGHT", -6, 0)
         row.label:SetJustifyH("LEFT")
         row.auditIndex = index
+        -- Zunaechst verborgen: Der Vorrat steht schon, bevor die erste Pruefung
+        -- vorliegt - sonst stuenden 40 leere Knoepfe in der Karte.
+        row:Hide()
         self.gearRows[index] = row
         return row
     end
