@@ -168,6 +168,32 @@ end
 --
 -- Beides zusammen: gewaehlt wird, wer ueberhaupt antworten darf, und wer
 -- waehrend seiner Streuzeit einen anderen hoert, laesst es trotzdem bleiben.
+--
+-- === WANN BEIDES ERLAUBT IST - bitte vor dem naechsten Aufruf lesen ========
+--
+-- Beide Verfahren ersetzen viele gleiche Antworten durch wenige. Sie sind
+-- deshalb an EINE Voraussetzung gebunden:
+--
+--   Die Antwort muss bei jedem Antwortenden DIESELBE sein.
+--
+-- Das gilt fuer geteilte Gildendaten - Gildenprofil, Gildenbank, Auftraege:
+-- Dort haelt jeder Client eine Kopie desselben Standes, und drei Kopien davon
+-- sind so gut wie zweihundertfuenfzig.
+--
+-- Es gilt NICHT, wo jeder Client etwas EIGENES beitraegt. Beim ersten Anlauf
+-- stand die Wahl auch vor der Werkstatt-Anfrage - und dort antwortet jeder
+-- mit den Berufen seines eigenen Accounts. Von zweihundertfuenfzig Antworten
+-- blieben drei uebrig, und der Fragende erfuhr die Berufe von drei Spielern
+-- statt von der ganzen Gilde. Dasselbe gilt fuer die Stille: Ein fremdes
+-- Manifest belegt nicht, dass die eigenen Berufe schon jemand gemeldet hat.
+--
+-- Wo jeder etwas Eigenes hat, hilft nur STREUUNG IN DER ZEIT: Alle antworten,
+-- aber verteilt ueber ein Fenster, das gross genug ist, dass der Kanal
+-- mitkommt.
+--
+-- Und wo die Antwort davon abhaengt, ob dieser Client die Daten ueberhaupt
+-- hat (Raidauswertungen), gehoert diese Pruefung VOR die Wahl - sonst
+-- verbraucht ein Client ohne Daten einen der wenigen Plaetze und schweigt.
 
 -- Wie viele Clients eine gildenweite Anfrage beantworten. Drei statt einem,
 -- damit ein Ausfall (Ladebildschirm, Verbindungsabbruch, alter Client) die
@@ -272,7 +298,12 @@ function GC.Sync:IsElectedResponder(requester, slots)
     local ownScore = ResponderScore(requesterKey, ownKey)
     local better = 0
     for key in pairs(candidates) do
-        if key ~= ownKey then
+        -- Der Anfragende zaehlt nicht mit. Er steht in der Kandidatenliste,
+        -- weil sie schlicht alle bekannten Online-Nutzer sammelt - beantworten
+        -- wird er seine eigene Anfrage aber nie. Gewann er einen der wenigen
+        -- Plaetze, blieb dieser leer: In einer kleinen Gilde fiel damit
+        -- regelmaessig ein Drittel der ohnehin knappen Antworten aus.
+        if key ~= ownKey and key ~= requesterKey then
             local score = ResponderScore(requesterKey, key)
             -- Gleichstand entscheidet der Name, damit die Reihenfolge auf
             -- jedem Client dieselbe ist.

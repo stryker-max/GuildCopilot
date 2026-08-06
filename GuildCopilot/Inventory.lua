@@ -728,13 +728,16 @@ function GC.Inventory:ReceiveSync(fields, sender)
         return
     end
 
-    -- Hier liefert ein anderer bereits diesen Tab. Wer selbst noch eine Antwort
-    -- fuer ihn geplant hat, laesst sie fallen - unabhaengig davon, ob dieses
-    -- Paket gleich uebernommen oder als aelterer Stand verworfen wird: Gesendet
-    -- wurde es so oder so, und ein zweites Mal muss es niemand tun.
-    if GC.Sync and GC.Sync.NotePeerAnswer then
-        GC.Sync:NotePeerAnswer(TAB_ANSWER_PREFIX .. tostring(tabIndex))
-    end
+    -- Der Vermerk "ein anderer liefert diesen Tab schon" steht bewusst NICHT
+    -- hier, sondern erst unten, nachdem der eingetroffene Stand sich gegen den
+    -- eigenen durchgesetzt hat.
+    --
+    -- An dieser Stelle war er falsch: Er lief vor jeder Pruefung und brachte
+    -- damit auch dann zum Schweigen, wenn das Paket gleich darauf als
+    -- VERALTET verworfen wurde. Genau der Client, der den neueren Stand haelt,
+    -- liess daraufhin seine geplante Antwort fallen - und der Anfragende
+    -- bekam den alten Stand oder gar keinen. Ein Paket, das der eigene Stand
+    -- schlaegt, ist kein Ersatz fuer die eigene Antwort.
 
     local now = GC.Util.Now()
     for key, receivedAt in pairs(self.guildBankCompleted) do
@@ -815,6 +818,14 @@ function GC.Inventory:ReceiveSync(fields, sender)
         seenBy = incoming.seenBy ~= "" and incoming.seenBy or GC.Util.PlayerShortName(sender),
         fingerprint = recomputed,
     }
+
+    -- ERST HIER der Vermerk: Dieses Paket hat sich gegen den eigenen Stand
+    -- durchgesetzt und ist vollstaendig angekommen. Nur dann ist die eigene,
+    -- noch geplante Antwort tatsaechlich ueberfluessig - siehe die Begruendung
+    -- weiter oben, wo der Vermerk frueher stand.
+    if GC.Sync and GC.Sync.NotePeerAnswer then
+        GC.Sync:NotePeerAnswer(TAB_ANSWER_PREFIX .. tostring(tabIndex))
+    end
     GC:FireCallback("INVENTORY_UPDATED")
 end
 

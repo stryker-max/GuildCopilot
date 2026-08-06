@@ -37,10 +37,13 @@ local MIN_REQUEST_REPLY_INTERVAL = 30
 -- je Anfragendem, bei 500 Mitgliedern also 500 - obwohl ein Eintrag nach
 -- MIN_REQUEST_REPLY_INTERVAL Sekunden nichts mehr bewirkt.
 local MAX_REQUEST_REPLIES = 200
--- Streuzeit vor der eigenen Manifest-Antwort auf eine Werkstatt-Anfrage, und
--- unter welchem Namen eine fremde Antwort vermerkt ist.
-local MANIFEST_REPLY_SPREAD = 3
-local MANIFEST_ANSWER_KIND = "WORKSHOPMANIFEST"
+-- Streuzeit vor der eigenen Antwort auf eine Werkstatt-Anfrage. Jeder Client
+-- traegt hier die Berufe seines EIGENEN Accounts bei, es antworten also alle -
+-- verteilt statt gleichzeitig. Das Manifest ist klein (ein bis drei Pakete)
+-- und darf eng streuen; der Vollversand an einen Altclient geht in Dutzenden
+-- Paketen raus und bekommt deshalb ein Vielfaches an Fenster.
+local MANIFEST_REPLY_SPREAD = 30
+local FULL_REPLY_SPREAD = 120
 -- Sammelfrist fuer das Verwerfen des Katalogindex, siehe
 -- ScheduleCatalogInvalidation.
 local CATALOG_INVALIDATE_DELAY = 0.5
@@ -1437,28 +1440,56 @@ function GC.Workshop:SendKeyManifest()
     return true
 end
 
--- Die Stille zur Wahl: Das Manifest geht ueber den Gildenkanal und ist damit
--- fuer alle sichtbar. Wer waehrend seiner Streuzeit ein fremdes "KM" sieht,
--- weiss, dass ein anderer Gewaehlter schon geliefert hat, und schweigt. Das
--- spart genau die Pakete, die bisher 250 Clients gleichzeitig in den Kanal
--- schoben, ohne dass eine einzige Absprachenachricht noetig waere.
-function GC.Workshop:ScheduleKeyManifestReply(senderKey)
+-- Die Antwort auf eine Werkstatt-Anfrage wird GESTREUT, nicht gewaehlt.
+--
+-- Hier stand zwischenzeitlich beides: die Wahl der Antwortenden und die
+-- Stille beim Sehen einer fremden Antwort. Beides war an dieser Stelle
+-- falsch, und zwar aus demselben Grund.
+--
+-- Ein Manifest beschreibt ausschliesslich die Berufe des EIGENEN Accounts
+-- (BuildKeyManifestMessages baut es aus GetAccountProfessions). Kein anderer
+-- Client kann es liefern. Mit der Wahl bekam der Fragende die Berufe von drei
+-- Spielern statt von der ganzen Gilde, und die Stille nahm ihm noch die
+-- uebrigen zwei: Ein fremdes "KM" belegt eben nicht, dass die eigenen Berufe
+-- schon gemeldet sind - es belegt das Gegenteil, naemlich dass gerade jemand
+-- ANDERES seine gemeldet hat.
+--
+-- Wo jeder etwas Eigenes beitraegt, hilft nur Streuung in der Zeit. Alle
+-- antworten, aber verteilt: Das Manifest ist ein bis drei Pakete, bei 250
+-- Online also hoechstens rund 750 - verteilt ueber MANIFEST_REPLY_SPREAD
+-- Sekunden gut zwei Dutzend je Sekunde gildenweit. Das ist die Groessenordnung,
+-- die der Kanal traegt, und es ist genau der Verkehr, um dessentwillen es das
+-- Manifest ueberhaupt gibt: Es ersetzt die vollen Rezeptlisten, die frueher an
+-- dieser Stelle gingen.
+function GC.Workshop:ScheduleKeyManifestReply()
     if not C_Timer or type(C_Timer.After) ~= "function" then
         return self:SendKeyManifest()
     end
-    local scheduledAt = GC.Util.Now()
     C_Timer.After(1 + math.random() * MANIFEST_REPLY_SPREAD, function()
-        if GC.Sync and GC.Sync.PeerAnsweredSince
-            and GC.Sync:PeerAnsweredSince(MANIFEST_ANSWER_KIND, scheduledAt) then
-            -- Ein anderer war schneller. Die Drossel wird dabei ausdruecklich
-            -- zurueckgenommen: Es wurde nichts gesendet, also darf die naechste
-            -- Anfrage dieses Fragenden wieder beantwortet werden.
-            if senderKey and senderKey ~= "" and GC.Workshop.requestReplies then
-                GC.Workshop.requestReplies[senderKey] = nil
-            end
-            return
-        end
         GC.Workshop:SendKeyManifest()
+    end)
+    return true
+end
+
+-- Der Vollversand an einen Client ohne Manifest-Verstaendnis. Dieselbe
+-- Begruendung wie oben, nur mit deutlich weiterem Fenster: Hier gehen je
+-- Antwortendem Dutzende Pakete raus, und alle 250 gleichzeitig loswerden zu
+-- wollen hiesse, den Kanal fuer alles andere zu schliessen. Ueber
+-- FULL_REPLY_SPREAD Sekunden verteilt bleibt der Durchsatz in der
+-- Groessenordnung, die der Kanal traegt - und der Altclient bekommt trotzdem
+-- den vollstaendigen Bestand statt eines Ausschnitts.
+--
+-- "compact" wird uebergeben statt hier ermittelt: SupportsCompactWorkshop ist
+-- eine lokale Funktion und steht weiter unten in der Datei. Ein Aufruf von
+-- hier aus waere zur Uebersetzungszeit noch kein lokaler Name gewesen und
+-- haette als Zugriff auf eine nicht vorhandene Globale geendet - also immer
+-- nil, und der Vollversand waere ohne Meldung im falschen Format rausgegangen.
+function GC.Workshop:ScheduleFullProfessionReply(compact)
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:QueueAllProfessions(compact, nil, nil, true)
+    end
+    C_Timer.After(1 + math.random() * FULL_REPLY_SPREAD, function()
+        GC.Workshop:QueueAllProfessions(compact, nil, nil, true)
     end)
     return true
 end
@@ -1676,14 +1707,6 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             or (lastReply and (now - lastReply) < MIN_REQUEST_REPLY_INTERVAL) then
             return
         end
-        -- Die Wahl: Bis 0.9.96 antwortete JEDER Client auf diese Anfrage. Bei
-        -- einem Fragenden ohne Manifest-Verstaendnis waren das gemessen 66
-        -- Pakete je Antwortendem - bei 250 Online 16.500 Pakete fuer einen
-        -- einzigen Login, weit jenseits dessen, was der Addon-Kanal zustellt.
-        if GC.Sync and GC.Sync.IsElectedResponder
-            and not GC.Sync:IsElectedResponder(sender) then
-            return
-        end
         self.requestReplies[senderKey] = now
         -- Der Abgleich läuft über den Gildenkanal, weil Addon-Flüster in
         -- manchen Umgebungen nicht ankommen. Entscheidend ist, was *dieser*
@@ -1692,10 +1715,20 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- ohne Manifest-Verständnis braucht den vollen Bestand. Früher
         -- entschied das die Gilde als Ganzes - ein einziger veralteter Eintrag
         -- ließ dann jeden Abgleich zum Vollversand werden.
+        --
+        -- Gestreut wird beides, gewaehlt wird nichts: Jeder Client traegt hier
+        -- die Berufe SEINES Accounts bei, und die kann kein anderer fuer ihn
+        -- melden. Naeheres im Kopf von ScheduleKeyManifestReply.
         if SupportsKeyListWorkshop(sender) then
-            self:ScheduleKeyManifestReply(senderKey)
+            self:ScheduleKeyManifestReply()
         else
-            self:QueueAllProfessions(SupportsCompactWorkshop(sender), nil, nil, true)
+            -- Der Vollversand an einen Altclient ist der teure Fall: gemessen
+            -- 66 Pakete je Antwortendem. Er trifft nur noch Clients, die
+            -- "workshop4" nicht melden - seit 0.9.96 gibt es die praktisch
+            -- nicht mehr -, und er wird deshalb besonders weit gestreut,
+            -- statt ihn zu beschneiden. Beschneiden hiesse hier: dem
+            -- Altclient die halbe Gilde vorenthalten.
+            self:ScheduleFullProfessionReply(SupportsCompactWorkshop(sender))
         end
         return
     elseif operation == "M" then
@@ -1744,13 +1777,11 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- Ein fremdes Manifest. Angefordert wird nur, was hier nachweislich
         -- fehlt oder veraltet ist; unveraenderte Berufe kosten null Pakete.
         --
-        -- Zugleich ist es die sichtbare Antwort eines anderen Gewaehlten: Wer
-        -- gerade selbst auf seine Streuzeit wartet, laesst seine Antwort
-        -- daraufhin fallen. Nur der Gildenkanal zaehlt - eine Fluesterantwort
-        -- sieht niemand sonst und darf deshalb niemanden zum Schweigen bringen.
-        if distribution == "GUILD" and GC.Sync and GC.Sync.NotePeerAnswer then
-            GC.Sync:NotePeerAnswer(MANIFEST_ANSWER_KIND)
-        end
+        -- Hier stand kurzzeitig ein Vermerk "ein anderer hat geantwortet", der
+        -- die eigene, noch geplante Antwort fallen liess. Das war genau
+        -- verkehrt herum gedacht: Ein fremdes Manifest traegt die Berufe eines
+        -- ANDEREN Accounts und belegt damit gerade nicht, dass die eigenen
+        -- schon gemeldet sind.
         local wanted = {}
         local crafters = self:GetGuildWorkshop().crafters
         for record in tostring(fields[4] or ""):gmatch("[^;]+") do

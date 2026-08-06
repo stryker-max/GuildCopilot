@@ -55,23 +55,33 @@ local MAX_INCOMING_TRANSFERS = 40
 -- stellt groessenordnungsmaessig zehn Pakete je Sekunde zu; alles darueber
 -- ging lautlos verloren.
 --
--- Die beiden Anfragen kosten sehr unterschiedlich viel und sind deshalb
--- unterschiedlich breit gestreut:
+-- Die Wahl kennt nur, WER online ist - nicht, wer den gefragten Abend
+-- gespeichert hat. Das ist der entscheidende Unterschied zu allen anderen
+-- Anfragen im Addon, und er kostet Plaetze.
 --
---   NACKT (Knopf "Auswertung anfordern", RequestSummaries) - bis zu fuenf
---   Abende je Antwortendem, also 40 Pakete. Drei Antwortende genuegen: Das
---   sind 120 Pakete, und faellt einer aus (Ladebildschirm, Verbindung), sind
---   noch zwei da.
+-- Mit drei Plaetzen war der Knopf "Auswertung anfordern" nachweislich kaputt:
+-- Gemessen an 250 Online, von denen 16 % ueberhaupt eine Auswertung hatten,
+-- bekamen 70 % der Anfragen NIE eine Antwort - und weil die Streuzahl rein
+-- rechnerisch ist, traf es bei jedem Knopfdruck dieselben Anfragenden. Wer
+-- einmal Pech hatte, hatte es dauerhaft.
+--
+-- Beide Anfragen bekommen deshalb dieselbe grosszuegige Platzzahl. Sie ist
+-- keine Sparmassnahme mehr, sondern nur noch eine Obergrenze gegen den Sturm:
+-- Aus 24 Gewaehlten haelt bei 16 % Halterquote im Schnitt knapp vier der
+-- Anfragende tatsaechlich fuer sich bereit, und die Wahrscheinlichkeit, dass
+-- KEINER etwas hat, liegt unter zwei Prozent.
 --
 --   GEZIELT (RequestRepair) - nennt eine Sitzungskennung, also genau EINE
---   Auswertung zu acht Paketen je Antwortendem. Sie ist die Grundlage der
---   Reparatur und darf deshalb deutlich breiter streuen. Sie muss es sogar:
---   Die Wahl kennt nur das Gildenroster, nicht die Teilnehmerliste des
---   Abends. Von 250 Online waren vielleicht 40 dabei; aus 24 Gewaehlten sind
---   das im Schnitt vier, die den Abend ueberhaupt gespeichert haben.
---   Teuerster Fall bleiben 24 x 8 = 192 Pakete.
-local SUMMARY_RESPONDER_SLOTS = 3
+--   Auswertung zu acht Paketen je Antwortendem: hoechstens 24 x 8 = 192.
+--
+--   NACKT (Knopf "Auswertung anfordern") - waere mit fuenf Abenden je
+--   Antwortendem bei 24 Plaetzen 960 Pakete. Deshalb schickt die nackte
+--   Antwort nur noch die MAX_BARE_ANSWER_SUMMARIES juengsten Abende; damit
+--   bleibt es bei 24 x 16 = 384. Wer mehr will, fragt gezielt nach einem
+--   Abend - genau dafuer ist die Kennung da.
+local SUMMARY_RESPONDER_SLOTS = 24
 local REPAIR_RESPONDER_SLOTS = 24
+local MAX_BARE_ANSWER_SUMMARIES = 2
 
 -- Wie lange eine unterbrochene Sitzung fortgesetzt werden darf. Danach ist sie
 -- kein laufender Abend mehr, sondern ein liegengebliebener - sie wird beim
@@ -973,20 +983,53 @@ function GC.RaidMonitor:StoreSummary(summary)
     -- Import meldete Erfolg, während die Auswertung sofort wieder verschwand.
     while #sessions > MAX_STORED_SESSIONS do
         local worstIndex
-        -- Ist die Ablage trotz Kontingent noch zu voll, fuellen die EIGENEN
-        -- Quellen sie. Dann weichen zuerst die fremden Fassungen - sie sind
-        -- jederzeit wieder anzufordern, ein eigener Mitschnitt nicht.
-        for index = #sessions, 1, -1 do
+
+        -- Fremde Fassungen weichen zuerst - ABER nur, solange sie ihr eigenes
+        -- Kontingent ueberschreiten.
+        --
+        -- Ohne diese Bedingung war der Zweig eine Falle: Sind die Plaetze mit
+        -- EIGENEN Quellen gefuellt (Live, Reparatur, Warcraft Logs und
+        -- Dateiimport zusammen erreichen das in einer Raidgilde nach wenigen
+        -- Wochen), dann suchte er trotzdem zuerst einen SYNC-Eintrag - und der
+        -- einzige, den es gab, war der eben eingefuegte. Jede eintreffende
+        -- Fremdfassung wurde also eingefuegt und im selben Durchlauf wieder
+        -- entfernt. StoreSummary meldete korrekt "nicht gespeichert", der
+        -- Empfang rief TryRepair daraufhin nicht mehr auf, und die Reparatur
+        -- lueckenhafter Mitschnitte fiel dauerhaft und lautlos aus, waehrend
+        -- die 24 Antwortenden weiter ihre Fassungen schickten.
+        local foreign = 0
+        for index = 1, #sessions do
             if self:SourceKind(sessions[index].source) == "SYNC" then
-                worstIndex = index
-                break
+                foreign = foreign + 1
+            end
+        end
+        if foreign > MAX_SYNC_SUMMARIES then
+            for index = #sessions, 1, -1 do
+                if self:SourceKind(sessions[index].source) == "SYNC" then
+                    worstIndex = index
+                    break
+                end
+            end
+        end
+
+        -- Sonst weicht eine EIGENE Quelle, und zwar zuerst eine ohne
+        -- Bosskampf: in der Stadt gestartete Probe-Sitzungen. Vorher galt
+        -- reine Aktualitaet - zwoelf Orgrimmar-Minis verdraengten den frisch
+        -- importierten Raidabend, und der Import meldete Erfolg, waehrend die
+        -- Auswertung sofort wieder verschwand.
+        if not worstIndex then
+            for index = #sessions, 1, -1 do
+                local candidate = sessions[index]
+                if self:SourceKind(candidate.source) ~= "SYNC"
+                    and (tonumber(candidate.pulls) or 0) <= 0 then
+                    worstIndex = index
+                    break
+                end
             end
         end
         if not worstIndex then
             for index = #sessions, 1, -1 do
-                local candidate = sessions[index]
-                local pulls = tonumber(candidate.pulls) or 0
-                if pulls <= 0 then
+                if self:SourceKind(sessions[index].source) ~= "SYNC" then
                     worstIndex = index
                     break
                 end
@@ -2146,16 +2189,25 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
     -- Das zweite Verfahren (NotePeerAnswer/PeerAnsweredSince) hilft hier
     -- nicht: Geantwortet wird geflüstert, und eine Flüsterantwort sieht kein
     -- anderer Client - er koennte also gar nicht verstummen.
-    local slots = sessionID and REPAIR_RESPONDER_SLOTS or SUMMARY_RESPONDER_SLOTS
-    if not GC.Sync:IsElectedResponder(requester, slots) then
-        return false
-    end
-
+    -- ERST der Bestand, DANN die Wahl. Die Reihenfolge ist der ganze Punkt.
+    --
+    -- Andersherum war es nachweislich kaputt: Die wenigen Plaetze wurden aus
+    -- ALLEN Online-Addon-Nutzern gezogen, nicht aus denen, die den gefragten
+    -- Abend ueberhaupt gespeichert haben. Ein Gewaehlter ohne Auswertung
+    -- verbrauchte seinen Platz und schwieg, die Nichtgewaehlten schwiegen
+    -- ohnehin - und weil die Streuzahl rein rechnerisch ist, waren es bei
+    -- jedem Knopfdruck DIESELBEN Gewaehlten. Gemessen an 250 Online, von denen
+    -- 16 % einen Abend gespeichert hatten: 70 % der Anfragen bekamen nie eine
+    -- Antwort, und zwar dauerhaft dieselben Anfragenden. Der Knopf
+    -- "Auswertung anfordern" fiel damit fuer die Betroffenen still aus.
     local candidates = {}
     for _, summary in ipairs(self:GetSummaries()) do
         if sessionID == nil or tostring(summary.id or "") == tostring(sessionID) then
             candidates[#candidates + 1] = summary
         end
+    end
+    if #candidates == 0 then
+        return false
     end
     table.sort(candidates, function(left, right)
         local leftBoss = (tonumber(left.pulls) or 0) > 0 and 1 or 0
@@ -2165,7 +2217,9 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
         end
         return (left.endedAt or 0) > (right.endedAt or 0)
     end)
-    if #candidates == 0 then
+
+    local slots = sessionID and REPAIR_RESPONDER_SLOTS or SUMMARY_RESPONDER_SLOTS
+    if not GC.Sync:IsElectedResponder(requester, slots) then
         return false
     end
     -- Gedrosselt wird je Anfragendem, nicht global.
@@ -2188,7 +2242,11 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
     end
     self.lastAnswerAt[requesterKey] = now
 
-    for index = 1, math.min(5, #candidates) do
+    -- Eine gezielte Anfrage hat ohnehin nur einen Abend gefunden. Die nackte
+    -- wird gekappt, weil bei ihr die Platzzahl hoch ist - siehe
+    -- MAX_BARE_ANSWER_SUMMARIES.
+    local limit = sessionID and #candidates or MAX_BARE_ANSWER_SUMMARIES
+    for index = 1, math.min(limit, #candidates) do
         local summary = candidates[index]
         -- Gestaffelt, damit sich die Antworten mehrerer Mitglieder nicht
         -- gegenseitig in den Kanal drängen.
