@@ -2913,14 +2913,14 @@ function GC.UI:RefreshWizardProfessions()
     local page = frame.wizardPages.STEP_PROFESSIONS
     local profile = GC.Profile:Get()
 
-    -- Was schon eingelesen ist, nach Kleinschreibung: Der Scan speichert den
-    -- Namen des Fensters, und der weicht bei Bergbau ("Schmelzen") vom
-    -- Berufsnamen ab - deshalb wird gegen beide verglichen.
+    -- Was schon eingelesen ist, nach kanonischem Schluessel: Der faengt alle
+    -- Schreibweisen desselben Berufs - den Fensternamen ("Schmelzen" fuer
+    -- Bergbau) genauso wie die englischen Namen eines englischen Clients.
     local scanned = {}
     for _, profession in pairs((profile.workshop or {}).professions or {}) do
         local name = GC.Util.Trim(profession and profession.name or "")
         if name ~= "" then
-            scanned[name:lower()] = true
+            scanned[GC.CanonicalProfessionKey(name)] = true
         end
     end
 
@@ -2933,8 +2933,19 @@ function GC.UI:RefreshWizardProfessions()
             row:Show()
             row.icon:SetTexture(GC.ProfessionIcons[name] or GC.ProfessionIcons[""])
             row.name:SetText(name)
-            local windowSpell = GC.ProfessionWindowSpells[name] or name
-            local isScanned = scanned[name:lower()] == true or scanned[windowSpell:lower()] == true
+            -- Der Fensterzauber in der Sprache, die dieser Client versteht:
+            -- CastSpellByName("Verzauberkunst") tut auf einem englischen
+            -- Client schlicht nichts. Kandidaten deutsch zuerst; genommen
+            -- wird der erste, den das Zauberbuch kennt.
+            local windowSpell
+            for _, candidate in ipairs(GC.ProfessionWindowSpellCandidates(name)) do
+                if type(GetSpellInfo) ~= "function" or GetSpellInfo(candidate) then
+                    windowSpell = candidate
+                    break
+                end
+            end
+            windowSpell = windowSpell or name
+            local isScanned = scanned[GC.CanonicalProfessionKey(name)] == true
             -- Der Fensterzauber haengt an Zeile UND Knopf; beim Sammelberuf
             -- an keinem von beiden, dort gibt es kein Fenster. Im Kampf
             -- sperrt WoW das Umstellen sicherer Attribute; dann bleibt der
@@ -4607,6 +4618,14 @@ function GC.UI:BuildWorkshopPage()
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Es fehlt noch von: " .. table.concat(waiting, ", "), 1, 0.72, 0.25, true)
         end
+        -- Die Bestandsluecken daneben: nichts Unterwegs-Befindliches, sondern
+        -- Berufe, deren Besitzer seit dem letzten gemeinsamen Login offline sind.
+        local gaps = GC.Workshop:GetCoverageGapNames(6)
+        if #gaps > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Nur bei Offline-Spielern: " .. table.concat(gaps, ", ")
+                .. " – kommt, sobald sie wieder online sind.", 1, 0.72, 0.25, true)
+        end
         if (status.lastSyncedAt or 0) > 0 and date then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Zuletzt vollständig: "
@@ -4983,6 +5002,8 @@ function GC.UI:RefreshSyncBar(force)
     end
 
     local status = GC.Sync:GetSyncStatus()
+    local coverage = status.coverage or { professions = 0, crafters = 0 }
+    local stats = GC.Sync:GetAddonUserStats()
     -- Viermal je Sekunde nachsehen ist billig, viermal je Sekunde alle
     -- Beschriftungen neu zusammensetzen nicht. Gezeichnet wird deshalb nur,
     -- wenn sich am Zustand wirklich etwas geaendert hat.
@@ -4995,6 +5016,10 @@ function GC.UI:RefreshSyncBar(force)
         status.percent,
         status.outstanding,
         status.failed,
+        status.lostWants or 0,
+        coverage.professions or 0,
+        coverage.crafters or 0,
+        stats.players or 1,
         status.waiting and "W" or "-",
         status.paused and "K" or "-",
         ageMinutes,
@@ -5029,23 +5054,55 @@ function GC.UI:RefreshSyncBar(force)
         page.syncBar:SetProgress(1, THEME.danger)
         percentText = "lückenhaft"
         percentColor = THEME.danger
-        text = "|cffff6266Abgleich unvollständig|r  •  " .. status.failed
-            .. (status.failed == 1 and " Paket kam nicht durch" or " Pakete kamen nicht durch")
+        -- Zwei verschiedene Fehlschlaege, zwei verschiedene Saetze: verlorene
+        -- Pakete und Berufe, deren angekuendigte Daten nie kamen.
+        local lostWants = tonumber(status.lostWants) or 0
+        local lostPackets = math.max(0, (tonumber(status.failed) or 0) - lostWants)
+        local parts = {}
+        if lostPackets > 0 then
+            parts[#parts + 1] = lostPackets
+                .. (lostPackets == 1 and " Paket kam nicht durch" or " Pakete kamen nicht durch")
+        end
+        if lostWants > 0 then
+            parts[#parts + 1] = lostWants == 1
+                and "ein angekündigter Beruf blieb aus (Hersteller offline?)"
+                or (lostWants .. " angekündigte Berufe blieben aus (Hersteller offline?)")
+        end
+        text = "|cffff6266Abgleich unvollständig|r  •  " .. table.concat(parts, ", ")
             .. ". „Daten anfragen“ holt den Stand erneut."
         color = THEME.danger
     elseif status.state == "SYNCED" then
-        page.syncBar:SetProgress(1, THEME.success)
-        percentText = "100 %"
-        percentColor = THEME.success
-        if (status.peerSeenAt or 0) > 0 then
-            text = "|cff59e695Vollständig synchronisiert|r  •  Stand: "
-                .. AgeLabel(status.lastSyncedAt) .. "."
-        else
+        -- "Vollstaendig" ist eine Aussage ueber die GILDE, nicht ueber die
+        -- eigene Warteschlange. Sie steht deshalb nur da, wenn es (a) ueberhaupt
+        -- einen Vergleichspartner gab und (b) keine bekannte Bestandsluecke
+        -- offen ist - sonst hiess "Vollstaendig synchronisiert" nur "mir ist
+        -- nichts aufgefallen", und das ist keine Auskunft.
+        local others = math.max(0, (stats.players or 1) - 1)
+        if (status.peerSeenAt or 0) == 0 or others == 0 then
             -- Belegt ist nur die halbe Aussage, also steht auch nur die halbe da.
+            page.syncBar:SetProgress(1, THEME.muted)
+            percentText = "100 %"
+            percentColor = THEME.muted
             text = "|cff8b98a5Nichts offen|r  •  bisher hat sich kein anderer"
                 .. " Guild-Copilot-Nutzer gemeldet – verglichen wurde also mit niemandem."
-            percentColor = THEME.muted
-            page.syncBar:SetProgress(1, THEME.muted)
+        elseif (coverage.professions or 0) > 0 then
+            page.syncBar:SetProgress(1, THEME.warning)
+            percentText = "lückenhaft"
+            percentColor = THEME.warning
+            local names = GC.Workshop:GetCoverageGapNames(4)
+            local crafterText = coverage.crafters == 1
+                and "einem Hersteller" or (coverage.crafters .. " Herstellern")
+            text = "|cffffb84dNichts offen, aber unvollständig|r  •  Rezepte von "
+                .. crafterText .. " fehlen noch (" .. table.concat(names, ", ")
+                .. ((coverage.crafters or 0) > #names and ", …" or "")
+                .. ") – sie kommen, sobald deren Besitzer wieder online sind."
+        else
+            page.syncBar:SetProgress(1, THEME.success)
+            percentText = "100 %"
+            percentColor = THEME.success
+            text = "|cff59e695Vollständig synchronisiert|r  •  abgeglichen mit "
+                .. (others == 1 and "einem weiteren Nutzer" or (others .. " weiteren Nutzern"))
+                .. "  •  Stand: " .. AgeLabel(status.lastSyncedAt) .. "."
         end
         color = THEME.success
     else
@@ -8915,8 +8972,17 @@ function GC.UI:RefreshSyncBadge()
         badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote .. ", "
             .. differing .. " mit anderer Version|r")
     elseif status.state == "SYNCED" then
-        badge:SetText("|cff59e695• " .. players .. " Nutzer" .. characterNote
-            .. ", Daten vollständig|r")
+        -- "Daten vollstaendig" nur, wenn keine Bestandsluecke bekannt ist:
+        -- Sonst stand genau diese Zeile gruen ueber einem Drittel des Katalogs,
+        -- waehrend die Rezepte der Offline-Spieler schlicht fehlten.
+        local coverage = status.coverage
+        if coverage and (coverage.professions or 0) > 0 then
+            badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote
+                .. ", Bestand lückenhaft|r")
+        else
+            badge:SetText("|cff59e695• " .. players .. " Nutzer" .. characterNote
+                .. ", Daten vollständig|r")
+        end
     else
         badge:SetText("|cff8b98a5• " .. players .. " Nutzer" .. characterNote
             .. ", gleiche Version|r")
@@ -10858,6 +10924,10 @@ end)
 GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
     -- Ein eingelesener Beruf erledigt den zweiten Schritt der Checkliste, und
     -- die steht auf der Profilseite.
+    -- Auch die Kopfzeile haengt inzwischen an der Werkstatt: Ein
+    -- Bestandsmanifest kann "Daten vollstaendig" in "Bestand lückenhaft"
+    -- drehen. Sie wandert ueber denselben Sammel-Takt wie die Seiten.
+    self.headerStale = true
     self:Invalidate("WORKSHOP", "ROSTER")
     self:RefreshMinimapMarker()
 end)

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.101",
+  "## Version: 0.9.102",
 ];
 
 for (const entry of requiredMetadata) {
@@ -286,7 +286,11 @@ const requiredImplementations = [
   ["Gildenbank-Manifest zuerst", /BuildManifestMessage[\s\S]*BuildTabMessages/],
   ["Ampel für Reagenzien", /GetReagentStatus/],
   ["gildenweiter Rekrutierungs-Datensatz", /BuildRecruitmentSyncMessages/],
-  ["TBC-Schreibweise Alchimie", /value == "alchemie"/],
+  // Seit 0.9.102 steckt die Zuordnung Alchemie->Alchimie in der Alias-Tabelle
+  // der Berufsdefinitionen, zusammen mit den englischen Namen.
+  ["TBC-Schreibweise Alchimie", /aliases = \{ "Alchemie" \}/],
+  ["kanonische Berufsschlüssel", /GC\.ProfessionKeyByAlias/],
+  ["englische Berufsnamen", /english = "Enchanting"/],
   ["Schutz des eigenen Editor-Rangs", /OWN_RANK/],
   ["Einmalige Editor-Lockout-Reparatur", /CanUseEditorRecovery/],
   ["Blizzard-Offiziersprüfung für Lockout-Reparatur", /HasBlizzardOfficerAuthority/],
@@ -388,7 +392,10 @@ const requiredImplementations = [
   ["Assistent zeigt lebenden Zustand", /function GC\.UI:RefreshWizard/],
   ["sicherer Knopf öffnet das Berufsfenster", /SecureActionButtonTemplate/],
   ["Sammelberufe ohne Rezeptfenster zentral", /GC\.RecipelessProfessions = \{/],
-  ["Bergbau öffnet Schmelzen", /GC\.ProfessionWindowSpells = \{/],
+  // Der Fensterzauber steht seit 0.9.102 je Sprache in den
+  // Berufsdefinitionen; der Assistent nimmt den ersten, den der Client kennt.
+  ["Bergbau öffnet Schmelzen", /window = "Schmelzen", windowEnglish = "Smelting"/],
+  ["Fensterzauber in der Clientsprache", /GC\.ProfessionWindowSpellCandidates/],
   ["einmaliger Hinweis nach Später", /function GC\.Onboarding:NoteLaterPressed/],
   ["Hinweisfenster mit dem Weg zurück", /function GC\.UI:ShowWizardLaterHint/],
   ["× und Später teilen sich den Schließweg", /function GC\.UI:HideWelcomeWithHint/],

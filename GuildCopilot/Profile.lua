@@ -34,10 +34,20 @@ end
 -- Welche Faehigkeit ein Hauptberuf ist. Sekundaeres wie Kochkunst, Erste Hilfe
 -- und Angeln gehoert ausdruecklich nicht dazu - im Profil stehen die beiden
 -- Hauptberufe. "Alchemie" ist die aeltere Schreibweise derselben Sache.
+--
+-- Die Faehigkeitszeilen kommen in der Sprache des Clients: Ein englischer
+-- Client meldet "Enchanting", und ohne den englischen Namen in dieser Tabelle
+-- fand die Erkennung dort schlicht keinen Beruf. Im Profil steht in beiden
+-- Faellen der deutsche Name - das Addon ist deutschsprachig, und Dropdown wie
+-- Synchronisierung erwarten ihn so.
 local PROFESSION_BY_NAME = {}
 for _, professionName in ipairs(GC.ProfessionOptions) do
     if professionName ~= "" then
         PROFESSION_BY_NAME[GC.Util.NormalizeName(professionName)] = professionName
+        local english = GC.ProfessionEnglishName(professionName)
+        if english then
+            PROFESSION_BY_NAME[GC.Util.NormalizeName(english)] = professionName
+        end
     end
 end
 PROFESSION_BY_NAME[GC.Util.NormalizeName("Alchemie")] = "Alchimie"

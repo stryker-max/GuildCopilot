@@ -7,6 +7,46 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.102 – Addon
+
+**Neu**
+
+- **Die Werkstatt weiß jetzt, was ihr fehlt.** Auf „Daten anfragen“ melden
+  einige Antwortende zusätzlich, welche Hersteller es in der Gilde überhaupt
+  gibt – als reines Inhaltsverzeichnis, die Rezeptdaten selbst kommen weiter
+  nur vom Besitzer. Wer selten mit anderen gleichzeitig online ist, sieht
+  damit erstmals: „Rezepte von 18 Herstellern fehlen noch – sie kommen, sobald
+  deren Besitzer online sind“, statt eines grünen Balkens über einem Drittel
+  des Katalogs.
+- **„Vollständig synchronisiert“ steht nur noch da, wenn es belegt ist.**
+  Die Zeile nennt jetzt ihre Reichweite („abgeglichen mit 24 weiteren
+  Nutzern“). Ist eine Bestandslücke bekannt, sagt Balken wie Kopfzeile
+  „Bestand lückenhaft“ – nichts offen und vollständig sind zwei verschiedene
+  Aussagen.
+- **Englische Clients werden voll unterstützt.** Berufe werden unabhängig von
+  der Spielsprache verschlüsselt: „Enchanting“ und „Verzauberkunst“ sind
+  derselbe Beruf, angezeigt wird der deutsche Name. Vorhandene Bestände
+  wandern beim ersten Laden automatisch zusammen.
+
+**Behoben**
+
+- **Ein angekündigter Beruf, dessen Daten ausblieben, verschwand lautlos.**
+  Loggte der Hersteller aus, bevor seine Rezepte ankamen, sprang der Balken
+  nach zwei Minuten auf „Vollständig synchronisiert • Stand: gerade eben“.
+  Jetzt endet der Zyklus als „Abgleich unvollständig“ mit Begründung
+  („Hersteller offline?“), und die Lücke bleibt sichtbar, bis die Daten
+  wirklich da sind.
+- **Der Katalog zählte Berufe englischer Clients doppelt** – 16 „Berufe“, wo
+  TBC höchstens 12 kennt – und der Berufsfilter fand deren Rezepte nicht.
+- **Mit englischem Client blieb „Deine Berufe fehlen noch“ für immer stehen**,
+  obwohl das Berufsfenster längst geöffnet war: Das Profil sprach deutsch, der
+  Scan legte englisch ab. Auch die automatische Berufserkennung aus den
+  Fähigkeitszeilen erkannte englische Namen nicht, und der Knopf des
+  Einrichtungsassistenten konnte das Fenster nicht öffnen (der deutsche
+  Zaubername sagt einem englischen Client nichts).
+- **Bergbau galt trotz geöffnetem Schmelzen-Fenster als „nicht eingelesen“** –
+  der Fenstername zählt jetzt als der Beruf, zu dem er gehört.
+
 ## 0.9.101 – Addon
 
 **Neu**

@@ -1075,6 +1075,14 @@ function GC.Sync:GetSyncStatus()
     if GC.Workshop and GC.Workshop.GetPendingWantCount then
         missing = GC.Workshop:GetPendingWantCount()
     end
+    -- Angekuendigte Berufe, deren Daten im Zeitfenster nicht kamen. Sie zaehlen
+    -- wie verlorene Pakete in die Fehlbilanz: Ein Zyklus, in dem ein Beruf
+    -- ausblieb, war nicht vollstaendig - bis 0.9.101 verschwand der Eintrag
+    -- lautlos, und ueber dem Loch stand "Vollstaendig synchronisiert".
+    local lostWants = 0
+    if GC.Workshop and GC.Workshop.GetLostWantCount then
+        lostWants = GC.Workshop:GetLostWantCount()
+    end
     local outstanding = outbound + inbound + missing
 
     if outstanding ~= status.outstanding then
@@ -1084,17 +1092,32 @@ function GC.Sync:GetSyncStatus()
     status.inbound = inbound
     status.missing = missing
     status.outstanding = outstanding
-    status.failed = (tonumber(self.progressFailed) or 0) + lostInbound
+    status.lostWants = lostWants
+    status.failed = (tonumber(self.progressFailed) or 0) + lostInbound + lostWants
     -- Belegbar ist nur "nichts offen". Ob der eigene Stand dem der Gilde
     -- entspricht, weiss dieser Client erst, wenn sich ueberhaupt jemand
     -- gemeldet hat - vorher gibt es nichts, womit er sich vergleichen koennte.
     status.peerSeenAt = tonumber(self.lastPeerAt) or 0
+    -- Die zweite Haelfte der Ehrlichkeit: Berufe, die es in der Gilde
+    -- nachweislich gibt, deren Daten aber nie hier ankamen, weil ihr Besitzer
+    -- nicht gleichzeitig online war. Sie sind keine offene Arbeit - anfordern
+    -- laesst sich nichts -, aber "vollstaendig" darf die Anzeige mit ihnen
+    -- nicht mehr sagen.
+    if GC.Workshop and GC.Workshop.GetCoverageGapSummary then
+        status.coverage = GC.Workshop:GetCoverageGapSummary()
+    end
 
     if outstanding > 0 then
         if status.state ~= "RUNNING" then
             status.startedAt = now
-            -- Ein neuer Zyklus faengt mit einer leeren Fehlerbilanz an.
+            -- Ein neuer Zyklus faengt mit einer leeren Fehlerbilanz an - auch
+            -- bei den ausgebliebenen Berufen: Was jetzt neu angekuendigt wird,
+            -- bekommt seine eigene Frist.
             self.progressFailed = 0
+            if GC.Workshop and GC.Workshop.ResetLostWants then
+                GC.Workshop:ResetLostWants()
+            end
+            status.lostWants = 0
             status.failed = lostInbound
             -- ... und bei null. Ohne dieses Zuruecksetzen bliebe der Balken
             -- auf den 100 % des vorigen Durchlaufs stehen, weil er innerhalb

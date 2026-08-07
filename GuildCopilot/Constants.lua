@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.101",
+    VERSION = "0.9.102",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -81,6 +81,10 @@ GC.Capabilities = {
     "gearexempt1",
     -- cooldown1: versteht Wartezeiten von Rezepten ("W|…|CD|…").
     "cooldown1",
+    -- workshop5: versteht Bestandsmanifeste Dritter ("W|…|CM|…") - das Wissen,
+    -- welche Hersteller es in der Gilde gibt, auch wenn deren Besitzer gerade
+    -- offline sind. Nur wer das meldet, bekommt auf "Q" ein solches Manifest.
+    "workshop5",
 }
 
 GC.ProfessionOptions = {
@@ -96,6 +100,103 @@ GC.ProfessionOptions = {
     "Schneiderei",
     "Verzauberkunst",
 }
+
+-- === Berufe in beiden Client-Sprachen ======================================
+--
+-- Ein englischer Client nennt denselben Beruf "Enchanting", ein deutscher
+-- "Verzauberkunst". Bis 0.9.101 war der lokalisierte Name zugleich der
+-- Speicher- und Vergleichsschluessel - dieselbe Verzauberkunst stand damit
+-- doppelt im Katalog (16 "Berufe" statt 11), und wer mit englischem Client
+-- spielte, bekam auf ewig "Berufsfenster einmal öffnen" angemahnt, weil sein
+-- Profil den deutschen Namen trug und sein Scan den englischen Schluessel
+-- ablegte.
+--
+-- Der KANONISCHE Schluessel ist die gefaltete deutsche Schreibweise - nicht aus
+-- Vorliebe, sondern weil aller vorhandene Bestand (SavedVariables, laufende
+-- Clients) bereits so verschluesselt ist: Deutsche Daten brauchen damit keine
+-- Wanderung, nur englische werden zugeordnet.
+--
+-- "window" ist der Zauber, der das Berufsfenster oeffnet, wo er vom
+-- Berufsnamen abweicht (Bergbau öffnet "Schmelzen"). Er zaehlt zugleich als
+-- Alias: Der Scan liest den FENSTERnamen, gespeichert wird der Beruf.
+GC.ProfessionDefinitions = {
+    { key = "alchimie", name = "Alchimie", english = "Alchemy", aliases = { "Alchemie" } },
+    { key = "bergbau", name = "Bergbau", english = "Mining",
+        window = "Schmelzen", windowEnglish = "Smelting" },
+    { key = "erstehilfe", name = "Erste Hilfe", english = "First Aid" },
+    { key = "ingenieurskunst", name = "Ingenieurskunst", english = "Engineering" },
+    { key = "juwelenschleifen", name = "Juwelenschleifen", english = "Jewelcrafting" },
+    { key = "kochkunst", name = "Kochkunst", english = "Cooking" },
+    { key = "krauterkunde", name = "Kräuterkunde", english = "Herbalism" },
+    { key = "kurschnerei", name = "Kürschnerei", english = "Skinning" },
+    { key = "lederverarbeitung", name = "Lederverarbeitung", english = "Leatherworking" },
+    { key = "schmiedekunst", name = "Schmiedekunst", english = "Blacksmithing" },
+    { key = "schneiderei", name = "Schneiderei", english = "Tailoring" },
+    { key = "verzauberkunst", name = "Verzauberkunst", english = "Enchanting" },
+    { key = "angeln", name = "Angeln", english = "Fishing" },
+    { key = "gifte", name = "Gifte", english = "Poisons" },
+    { key = "tierausbildung", name = "Tierausbildung", english = "Beast Training" },
+}
+
+-- Dieselbe Faltung wie NormalizeKey in der Werkstatt: Beide MUESSEN gleich
+-- falten, sonst zeigen Alias-Tabelle und Speicherschluessel aneinander vorbei.
+local function FoldProfessionName(value)
+    value = tostring(value or ""):match("^%s*(.-)%s*$") or ""
+    value = value:lower()
+    value = value:gsub("ä", "a"):gsub("ö", "o"):gsub("ü", "u"):gsub("ß", "ss")
+    return (value:gsub("[^%w]", ""))
+end
+
+GC.ProfessionByKey = {}
+GC.ProfessionKeyByAlias = {}
+for _, definition in ipairs(GC.ProfessionDefinitions) do
+    GC.ProfessionByKey[definition.key] = definition
+    GC.ProfessionKeyByAlias[FoldProfessionName(definition.name)] = definition.key
+    GC.ProfessionKeyByAlias[FoldProfessionName(definition.english)] = definition.key
+    if definition.window then
+        GC.ProfessionKeyByAlias[FoldProfessionName(definition.window)] = definition.key
+    end
+    if definition.windowEnglish then
+        GC.ProfessionKeyByAlias[FoldProfessionName(definition.windowEnglish)] = definition.key
+    end
+    for _, alias in ipairs(definition.aliases or {}) do
+        GC.ProfessionKeyByAlias[FoldProfessionName(alias)] = definition.key
+    end
+end
+
+-- Beliebige Schreibweise -> kanonischer Schluessel. Unbekanntes faellt auf die
+-- eigene Faltung zurueck und verhaelt sich damit wie bisher.
+function GC.CanonicalProfessionKey(name)
+    local folded = FoldProfessionName(name)
+    return GC.ProfessionKeyByAlias[folded] or folded
+end
+
+-- Beliebige Schreibweise -> deutscher Anzeigename, oder nil fuer Unbekanntes.
+-- Das Addon ist deutschsprachig; auch Daten englischer Clients erscheinen
+-- deshalb unter dem deutschen Namen.
+function GC.CanonicalProfessionName(name)
+    local definition = GC.ProfessionByKey[GC.CanonicalProfessionKey(name)]
+    return definition and definition.name or nil
+end
+
+function GC.ProfessionEnglishName(name)
+    local definition = GC.ProfessionByKey[GC.CanonicalProfessionKey(name)]
+    return definition and definition.english or nil
+end
+
+-- Kandidaten fuer den Fensterzauber, deutsch zuerst. Der Aufrufer nimmt den
+-- ersten, den der Client tatsaechlich kennt - auf einem englischen Client ist
+-- das der zweite, denn CastSpellByName versteht nur die Clientsprache.
+function GC.ProfessionWindowSpellCandidates(name)
+    local definition = GC.ProfessionByKey[GC.CanonicalProfessionKey(name)]
+    if not definition then
+        return { tostring(name or "") }
+    end
+    return {
+        definition.window or definition.name,
+        definition.windowEnglish or definition.english,
+    }
+end
 
 GC.ProfessionIcons = {
     [""] = "Interface\\Icons\\INV_Misc_Book_09",
@@ -124,12 +225,9 @@ GC.RecipelessProfessions = {
     ["Kürschnerei"] = true,
 }
 
--- Der Zauber, der das Berufsfenster oeffnet - fuer die sicheren Knoepfe des
--- Einrichtungsassistenten. Fast immer traegt er den Namen des Berufs selbst;
--- Bergbau faellt heraus, dort heisst das Fenster "Schmelzen".
-GC.ProfessionWindowSpells = {
-    ["Bergbau"] = "Schmelzen",
-}
+-- Der Zauber, der das Berufsfenster oeffnet, steht bei den
+-- ProfessionDefinitions oben ("window"/"windowEnglish"); die Knoepfe des
+-- Einrichtungsassistenten holen ihn ueber ProfessionWindowSpellCandidates.
 
 GC.SuccessSoundOptions = {
     { key = "READY_CHECK", name = "Bereitschaftscheck", soundID = 8960 },

@@ -55,9 +55,22 @@ local MISSING_REQUEST_SUPPRESS = 60
 local MAX_KEYS_PER_REQUEST = 40
 local DEPARTED_PRUNE_INTERVAL = 60
 -- So lange gilt ein aus dem Manifest gemeldeter Beruf als "kommt noch". Danach
--- ist er nicht mehr unterwegs, sondern ausgeblieben - und der Balken sagt das
--- statt ewig weiterzulaufen.
-local WANT_TTL = 120
+-- ist er nicht mehr unterwegs, sondern ausgeblieben - er wandert in die
+-- Fehlbilanz des Zyklus (GetLostWantCount) und in die Bestandsluecken, statt
+-- lautlos zu verschwinden. Weil ein Ablauf jetzt sichtbar "unvollstaendig"
+-- meldet, ist die Frist grosszuegiger als die alten 120 s: Manifestantwort
+-- (bis 31 s Streuung), Schluessellisten-Anfrage und die Antwort durch einen
+-- vollen Sendepuffer brauchen zusammen schon mal laenger.
+local WANT_TTL = 180
+-- Wie viele gewaehlte Antwortende ein Bestandsmanifest ("CM") schicken: das
+-- Wissen, welche Hersteller es in der Gilde gibt, auch wenn deren Besitzer
+-- offline sind. Mehr als einer, weil jeder nur nennen kann, was er selbst
+-- schon empfangen hat; drei zusammen decken einen Neuling zuverlaessig ein.
+local COVERAGE_RESPONDER_SLOTS = 3
+-- Obergrenze der gemerkten Bestandsluecken. 35 aktive Charaktere mit je zwei,
+-- drei Berufen sind gut hundert Eintraege; die Grenze schuetzt nur gegen
+-- Muellfluten, nicht gegen normalen Betrieb.
+local MAX_COVERAGE_GAPS = 400
 -- Die Merkliste unterdrueckter Rezeptanfragen wuchs bisher unbegrenzt: ein
 -- Eintrag je Rezept, in einer grossen Gilde ueber Stunden mehrere tausend.
 -- Sie wird deshalb aufgeraeumt, sobald sie zu gross wird.
@@ -201,14 +214,13 @@ local function NormalizeKey(value)
     value = GC.Util.Trim(value):lower()
     value = value:gsub("ä", "a"):gsub("ö", "o"):gsub("ü", "u"):gsub("ß", "ss")
     value = value:gsub("[^%w]", "")
-    -- Der deutsche TBC-Client nennt den Beruf "Alchimie", waehrend in
-    -- Alltagssprache und alten Guild-Copilot-Versionen "Alchemie" steht.
-    -- Beide Schreibweisen muessen denselben Filter- und Speicherschluessel
-    -- ergeben.
-    if value == "alchemie" then
-        return "alchimie"
-    end
-    return value
+    -- Verschiedene Schreibweisen desselben Berufs muessen denselben Filter-
+    -- und Speicherschluessel ergeben: die Alltagsform "Alchemie" neben dem
+    -- Clientnamen "Alchimie", vor allem aber die englischen Namen - ein
+    -- englischer Client scannt "Enchanting", und ohne diese Zuordnung stand
+    -- dieselbe Verzauberkunst doppelt im Katalog. Die Tabelle steht in
+    -- Constants.lua bei den ProfessionDefinitions.
+    return GC.ProfessionKeyByAlias[value] or value
 end
 
 local function ItemIDFromLink(link)
@@ -409,25 +421,50 @@ local function ResolveRecipeName(recipeKey, fallback)
     return fallback or tostring(recipeKey or "Unbekanntes Rezept")
 end
 
+-- Fuehrt die Berufe eines eigenen Werkstatt-Datensatzes einmalig auf die
+-- kanonischen Schluessel zusammen. Frueher stand hier nur der Sonderfall
+-- Alchemie/Alchimie; mit den englischen Clients kam dieselbe Lage fuer jeden
+-- Beruf dazu ("enchanting" neben "verzauberkunst"). Liegen beide Schreibweisen
+-- vor, werden die Rezepte vereinigt - beide sind eigene Scans, keiner luegt.
+local function CanonicalizeOwnProfessions(workshop)
+    if workshop.professionKeysCanonical then
+        return
+    end
+    workshop.professionKeysCanonical = true
+    local professions = workshop.professions or {}
+    -- Erst sammeln, dann umhaengen: Waehrend eines pairs-Durchlaufs einen
+    -- NEUEN Schluessel zu setzen ist in Lua nicht definiert.
+    local moves = {}
+    for key, profession in pairs(professions) do
+        local canonical = NormalizeKey(key)
+        if canonical ~= key and type(profession) == "table" then
+            moves[#moves + 1] = { from = key, to = canonical, profession = profession }
+        end
+    end
+    for _, move in ipairs(moves) do
+        local target = professions[move.to]
+        if not target then
+            move.profession.key = move.to
+            move.profession.name = GC.CanonicalProfessionName(move.profession.name)
+                or move.profession.name
+            professions[move.to] = move.profession
+        elseif target ~= move.profession then
+            target.recipes = target.recipes or {}
+            for recipeKey, recipe in pairs(move.profession.recipes or {}) do
+                target.recipes[recipeKey] = target.recipes[recipeKey] or recipe
+            end
+            target.fingerprint = RecipeFingerprint(target)
+            target.fingerprintHash = FingerprintHash(target.fingerprint)
+        end
+        professions[move.from] = nil
+    end
+end
+
 function GC.Workshop:GetOwnData()
     local profile = GC.Profile:Get()
     profile.workshop = profile.workshop or { professions = {} }
     profile.workshop.professions = profile.workshop.professions or {}
-    local professions = profile.workshop.professions
-    local legacyAlchemy = professions.alchemie
-    local clientAlchemy = professions.alchimie
-    if legacyAlchemy and not clientAlchemy then
-        legacyAlchemy.key = "alchimie"
-        professions.alchimie = legacyAlchemy
-        professions.alchemie = nil
-    elseif legacyAlchemy and clientAlchemy and legacyAlchemy ~= clientAlchemy then
-        for recipeKey, recipe in pairs(legacyAlchemy.recipes or {}) do
-            clientAlchemy.recipes[recipeKey] = clientAlchemy.recipes[recipeKey] or recipe
-        end
-        clientAlchemy.fingerprint = RecipeFingerprint(clientAlchemy)
-        clientAlchemy.fingerprintHash = FingerprintHash(clientAlchemy.fingerprint)
-        professions.alchemie = nil
-    end
+    CanonicalizeOwnProfessions(profile.workshop)
     return profile.workshop
 end
 
@@ -509,6 +546,53 @@ function GC.Workshop:GetGuildWorkshop()
             workshop.crafters[move.from] = nil
         end
     end
+
+    -- Von englischen Clients gemeldete Berufe standen bis 0.9.101 unter ihrem
+    -- englischen Schluessel ("enchanting") NEBEN dem deutschen Bestand
+    -- ("verzauberkunst") - im Katalogkopf zaehlte dieselbe Gilde dadurch 16
+    -- Berufe statt 11. Beide Schreibweisen werden einmalig zusammengefuehrt;
+    -- bei doppelten Staenden desselben Herstellers gewinnt der nach derselben
+    -- Regel, nach der auch Manifeste und Uebernahme entscheiden.
+    if not workshop.professionKeysCanonical then
+        workshop.professionKeysCanonical = true
+        for _, crafter in pairs(workshop.crafters) do
+            local professions = type(crafter) == "table" and crafter.professions
+            if professions then
+                local moves = {}
+                for key, profession in pairs(professions) do
+                    local canonical = NormalizeKey(key)
+                    if canonical ~= key and type(profession) == "table" then
+                        moves[#moves + 1] = { from = key, to = canonical, profession = profession }
+                    end
+                end
+                for _, move in ipairs(moves) do
+                    local known = professions[move.to]
+                    if not known or ProfessionWins(move.profession.updatedAt,
+                        move.profession.fingerprintHash, known.updatedAt, known.fingerprintHash) then
+                        move.profession.key = move.to
+                        move.profession.name = GC.CanonicalProfessionName(move.profession.name)
+                            or move.profession.name
+                        professions[move.to] = move.profession
+                    end
+                    professions[move.from] = nil
+                end
+            end
+        end
+        for _, entry in pairs(workshop.catalog) do
+            if type(entry) == "table" then
+                if entry.professionKey then
+                    entry.professionKey = NormalizeKey(entry.professionKey)
+                end
+                entry.profession = GC.CanonicalProfessionName(entry.profession)
+                    or entry.profession
+            end
+        end
+    end
+
+    -- Bekannte Bestandsluecken: Berufe, die es in der Gilde nachweislich gibt,
+    -- deren Daten dieser Client aber noch nie empfangen hat (Naeheres bei
+    -- NoteCoverageGap).
+    workshop.coverageGaps = workshop.coverageGaps or {}
     return workshop
 end
 
@@ -555,6 +639,11 @@ function GC.Workshop:ClaimRecipes(info)
     if crafterKey == "" or GC.Util.Trim(info.professionKey) == "" then
         return nil
     end
+    -- Zweite Verteidigungslinie neben dem Empfangspfad: Was hier ankommt,
+    -- landet kanonisch im Herstellerindex, gleich woher es kam.
+    info.professionKey = NormalizeKey(info.professionKey)
+    info.professionName = GC.CanonicalProfessionName(info.professionName)
+        or info.professionName
     local workshop = self:GetGuildWorkshop()
     local crafter = workshop.crafters[crafterKey] or { professions = {} }
     crafter.name = info.crafter
@@ -581,6 +670,7 @@ function GC.Workshop:ClaimRecipes(info)
     if known and not ProfessionWins(incomingAt, info.fingerprintHash,
         known.updatedAt, known.fingerprintHash) then
         workshop.crafters[crafterKey] = crafter
+        self:ClearCoverageGapIfCovered(info.crafter, info.professionKey)
         return crafter
     end
 
@@ -597,6 +687,7 @@ function GC.Workshop:ClaimRecipes(info)
     }
     workshop.crafters[crafterKey] = crafter
     self:ClearWanted(info.crafter, info.professionKey)
+    self:ClearCoverageGapIfCovered(info.crafter, info.professionKey)
     self:ScheduleCatalogInvalidation()
     return crafter
 end
@@ -767,6 +858,11 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
         return false
     end
 
+    -- Gespeichert und angezeigt wird der deutsche Name, gleich in welcher
+    -- Sprache der Client das Fenster beschriftet: Das Addon ist deutschsprachig,
+    -- und nur mit einem gemeinsamen Namen zaehlt "Enchanting" nicht als
+    -- eigener Beruf neben "Verzauberkunst".
+    professionName = GC.CanonicalProfessionName(professionName) or professionName
     local professionKey = NormalizeKey(professionName)
     local workshop = self:GetOwnData()
     local previous = workshop.professions[professionKey]
@@ -1310,6 +1406,9 @@ function GC.Workshop:GetAccountProfessions()
         local workshop = type(character) == "table" and character.workshop
         if workshop and workshop.professions
             and GC.Util.PlayerKey(characterName) ~= ownKey then
+            -- Auch die Twinks koennen mit einem englischen Client eingelesen
+            -- worden sein; ihre Schluessel wandern beim ersten Lesen mit.
+            CanonicalizeOwnProfessions(workshop)
             for _, profession in pairs(workshop.professions) do
                 entries[#entries + 1] = { crafter = characterName, profession = profession }
             end
@@ -1426,8 +1525,10 @@ function GC.Workshop:RequestGuildData()
     -- Eine neue Anfrage startet einen frischen Abgleichzyklus. Ein alter
     -- Fehlschlag-Zaehler aus einem frueheren Zyklus darf den Statushinweis nicht
     -- dauerhaft blockieren, sonst bleibt "Uebertragung unvollstaendig" stehen,
-    -- obwohl der neue Durchlauf laeuft.
+    -- obwohl der neue Durchlauf laeuft. Dasselbe gilt fuer die ausgebliebenen
+    -- Berufe: Der neue Durchlauf fragt sie erneut an.
     self.syncStats.failed = 0
+    self:ResetLostWants()
     GC:FireCallback("WORKSHOP_UPDATED")
     return true, "Anfrage gesendet. Rezeptlisten werden ohne künstliche Wartezeit übertragen."
 end
@@ -1695,6 +1796,11 @@ function GC.Workshop:NoteWanted(entries)
                 crafter = entry.crafter,
                 professionKey = entry.professionKey,
                 at = now,
+                -- Herkunft des angekuendigten Stands: Bleibt die Antwort aus,
+                -- wird daraus die Bestandsluecke (siehe GetPendingWantCount).
+                updatedAt = entry.updatedAt,
+                fingerprintHash = entry.fingerprintHash,
+                reportedBy = entry.reportedBy,
             }
         end
     end
@@ -1704,10 +1810,12 @@ function GC.Workshop:NoteWanted(entries)
 end
 
 function GC.Workshop:ClearWanted(crafter, professionKey)
-    if not self.pendingWants then
-        return
+    if self.pendingWants then
+        self.pendingWants[WantKey(crafter, professionKey)] = nil
     end
-    self.pendingWants[WantKey(crafter, professionKey)] = nil
+    if self.lostWants then
+        self.lostWants[WantKey(crafter, professionKey)] = nil
+    end
 end
 
 function GC.Workshop:GetPendingWantCount()
@@ -1716,11 +1824,43 @@ function GC.Workshop:GetPendingWantCount()
     for key, want in pairs(self.pendingWants or {}) do
         if (now - (tonumber(want.at) or 0)) > WANT_TTL then
             self.pendingWants[key] = nil
+            -- Ausgeblieben ist nicht erledigt. Bis 0.9.101 verschwand ein
+            -- abgelaufener Eintrag lautlos: Der Zaehler fiel auf null, der
+            -- Zyklus endete ohne Fehler, und ueber dem lueckenhaften Bestand
+            -- stand "Vollstaendig synchronisiert - Stand: gerade eben". Jetzt
+            -- wandert er in die Fehlbilanz des Zyklus (der Status wird
+            -- "unvollstaendig") UND in die dauerhaften Bestandsluecken - dort
+            -- bleibt er sichtbar, bis die Daten wirklich eintreffen.
+            self.lostWants = self.lostWants or {}
+            self.lostWants[key] = want
+            self:NoteCoverageGap({
+                crafter = want.crafter,
+                professionKey = want.professionKey,
+                updatedAt = want.updatedAt,
+                fingerprintHash = want.fingerprintHash,
+                reportedBy = want.reportedBy,
+            })
         else
             count = count + 1
         end
     end
     return count
+end
+
+-- Berufe, deren angekuendigte Daten im laufenden Zyklus ausgeblieben sind.
+-- Sie zaehlen als Fehlschlag wie ein verlorenes Paket; GetSyncStatus rechnet
+-- sie in die Fehlbilanz ein. Ein neuer Zyklus beginnt mit leerer Liste
+-- (ResetLostWants), trifft der Beruf spaeter doch ein, raeumt ClearWanted auf.
+function GC.Workshop:GetLostWantCount()
+    local count = 0
+    for _ in pairs(self.lostWants or {}) do
+        count = count + 1
+    end
+    return count
+end
+
+function GC.Workshop:ResetLostWants()
+    self.lostWants = nil
 end
 
 -- Welche Berufe genau noch fehlen - fuer den Tooltip des Balkens.
@@ -1737,6 +1877,237 @@ function GC.Workshop:GetPendingWantNames(maximum)
         table.remove(names)
     end
     return names
+end
+
+-- Zerlegt Manifestdatensaetze in Pakete, die in den Chatrahmen passen. Ein
+-- Zerleger fuer beide Manifeste ("KM" und "CM"): Die Datensaetze sind gleich
+-- gebaut, nur die Operation unterscheidet sich.
+local function ChunkManifestRecords(records, operation)
+    local header = BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, operation, "" })
+    local payloadLimit = math.min(MAX_PAYLOAD_BYTES,
+        GC.Constants.MAX_CHAT_BYTES - #header)
+    local messages = {}
+    local current = ""
+    for _, record in ipairs(records) do
+        local candidate = current == "" and record or (current .. ";" .. record)
+        if #candidate > payloadLimit and current ~= "" then
+            messages[#messages + 1] = BuildMessage({
+                "W", GC.Constants.SCHEMA_VERSION, operation, current,
+            })
+            current = record
+        else
+            current = candidate
+        end
+    end
+    if current ~= "" then
+        messages[#messages + 1] = BuildMessage({
+            "W", GC.Constants.SCHEMA_VERSION, operation, current,
+        })
+    end
+    return messages
+end
+
+-- === Bestandsluecken ========================================================
+--
+-- Rezepte wandern nur vom besitzenden Account zu dem, der gerade zuhoert -
+-- niemand leitet Daten Dritter weiter. Wer selten mit anderen gleichzeitig
+-- online ist, dem fehlt deshalb der halbe Katalog, OHNE dass irgendetwas
+-- "offen" waere: Sein Client hat nie erfahren, was es alles gibt. Genau daran
+-- scheiterte die Statuszeile - sie meldete "Vollstaendig synchronisiert" ueber
+-- einem Drittel des Bestands.
+--
+-- Die Bestandsluecke ist die fehlende Haelfte dieses Wissens: ein Beruf, den
+-- es in der Gilde nachweislich gibt (per Manifest des Besitzers oder per
+-- Bestandsmanifest eines Dritten), dessen Daten hier aber nie angekommen sind.
+-- Sie zaehlt NICHT als offene Arbeit - anfordern liesse sich ja nichts, der
+-- Besitzer ist offline -, sondern haelt die Statuszeile ehrlich: "Nichts
+-- offen" und "vollstaendig" sind zwei verschiedene Aussagen. Sie lebt in den
+-- SavedVariables und uebersteht den Relog; erledigt ist sie erst, wenn die
+-- Daten wirklich da sind (ClaimRecipes), der Hersteller die Gilde verlaesst
+-- (PruneDepartedCrafters) oder der Eintrag veraltet.
+
+local function CoverageGapKey(crafter, professionKey)
+    return GC.Util.PlayerKey(crafter) .. "|" .. tostring(professionKey or "")
+end
+
+-- Alle Charaktere dieses Accounts. Ueber die eigenen Berufe weiss der Client
+-- selbst am besten Bescheid; als Bestandsluecke taugen sie nie.
+local function OwnCharacterKeys()
+    local keys = {}
+    for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
+        local characterName = (type(character) == "table" and character.fullName) or characterKey
+        keys[GC.Util.PlayerKey(characterName)] = true
+    end
+    keys[GC.Util.PlayerKey(GC:GetPlayerFullName())] = true
+    return keys
+end
+
+function GC.Workshop:NoteCoverageGap(entry)
+    local crafter = GC.Util.Trim(entry and entry.crafter)
+    local professionKey = NormalizeKey(entry and entry.professionKey)
+    if crafter == "" or professionKey == "" then
+        return false
+    end
+    local crafterKey = GC.Util.PlayerKey(crafter)
+    if OwnCharacterKeys()[crafterKey] then
+        return false
+    end
+
+    local workshop = self:GetGuildWorkshop()
+    local known = workshop.crafters[crafterKey]
+    local knownProfession = known and known.professions and known.professions[professionKey]
+    local gapKey = CoverageGapKey(crafter, professionKey)
+    -- Deckt der eigene Bestand den gemeldeten Stand bereits, gibt es keine
+    -- Luecke - auch eine alte faellt dann weg.
+    if knownProfession and not ProfessionWins(entry.updatedAt, entry.fingerprintHash,
+        knownProfession.updatedAt, knownProfession.fingerprintHash) then
+        workshop.coverageGaps[gapKey] = nil
+        return false
+    end
+
+    local count = 0
+    for _ in pairs(workshop.coverageGaps) do
+        count = count + 1
+    end
+    if count >= MAX_COVERAGE_GAPS and not workshop.coverageGaps[gapKey] then
+        return false
+    end
+    workshop.coverageGaps[gapKey] = {
+        crafter = crafter,
+        professionKey = professionKey,
+        updatedAt = tonumber(entry.updatedAt) or 0,
+        fingerprintHash = tostring(entry.fingerprintHash or ""),
+        reportedBy = GC.Util.Trim(entry.reportedBy),
+        at = GC.Util.Now(),
+    }
+    return true
+end
+
+-- Raeumt eine Luecke, sobald der eigene Bestand sie deckt. Aufgerufen aus
+-- ClaimRecipes - auch dann, wenn der eintreffende Stand aelter war als der
+-- vorhandene: Entscheidend ist, was jetzt im Index steht, nicht was zuletzt
+-- ankam.
+function GC.Workshop:ClearCoverageGapIfCovered(crafter, professionKey)
+    professionKey = NormalizeKey(professionKey)
+    local workshop = self:GetGuildWorkshop()
+    local gapKey = CoverageGapKey(crafter, professionKey)
+    local gap = workshop.coverageGaps[gapKey]
+    if not gap then
+        return
+    end
+    local known = workshop.crafters[GC.Util.PlayerKey(crafter)]
+    local knownProfession = known and known.professions and known.professions[professionKey]
+    if knownProfession and not ProfessionWins(gap.updatedAt, gap.fingerprintHash,
+        knownProfession.updatedAt, knownProfession.fingerprintHash) then
+        workshop.coverageGaps[gapKey] = nil
+    end
+end
+
+-- Wie viele Berufe und Hersteller nachweislich fehlen. Veraltete Eintraege
+-- verfallen hier, mit derselben Frist wie die Addon-Nutzerliste: Wen dreissig
+-- Tage niemand mehr gemeldet hat, den fuehrt auch die Luecke nicht weiter.
+function GC.Workshop:GetCoverageGapSummary()
+    -- GetSyncStatus fragt hier bei jedem Takt nach - als einziger seiner
+    -- Zaehler liegt dieser in den SavedVariables. Vor deren Initialisierung
+    -- gibt es schlicht keine Luecken statt eines Fehlers.
+    if not (GC.DB and GC.DB.data) then
+        return { professions = 0, crafters = 0 }
+    end
+    local workshop = self:GetGuildWorkshop()
+    local now = GC.Util.Now()
+    local professions = 0
+    local crafters = {}
+    local crafterCount = 0
+    for gapKey, gap in pairs(workshop.coverageGaps) do
+        if (now - (tonumber(gap.at) or 0)) > GC.Constants.ADDON_USER_TTL then
+            workshop.coverageGaps[gapKey] = nil
+        else
+            professions = professions + 1
+            local crafterKey = GC.Util.PlayerKey(gap.crafter)
+            if not crafters[crafterKey] then
+                crafters[crafterKey] = true
+                crafterCount = crafterCount + 1
+            end
+        end
+    end
+    return { professions = professions, crafters = crafterCount }
+end
+
+-- Welche Hersteller genau - fuer die Statuszeile.
+function GC.Workshop:GetCoverageGapNames(maximum)
+    local names = {}
+    local seen = {}
+    for _, gap in pairs(self:GetGuildWorkshop().coverageGaps) do
+        local shortName = GC.Util.PlayerShortName(gap.crafter)
+        if not seen[shortName] then
+            seen[shortName] = true
+            names[#names + 1] = shortName
+        end
+    end
+    table.sort(names)
+    while #names > (tonumber(maximum) or 6) do
+        table.remove(names)
+    end
+    return names
+end
+
+-- Das Bestandsmanifest ("CM"): dieselben Datensaetze wie das eigene Manifest,
+-- nur ueber FREMDE Hersteller - das Wissen, was es in der Gilde gibt, nicht
+-- die Rezeptdaten selbst. Die bleiben beim Besitzer; ein Empfaenger merkt sich
+-- nur die Luecke und holt die Daten, sobald der Besitzer wieder online ist.
+-- Eigene Charaktere fehlen absichtlich: Die meldet jeder selbst per "KM",
+-- und nur der Besitzer kennt ihren aktuellen Stand.
+function GC.Workshop:BuildCoverageManifestMessages()
+    local records = {}
+    local ownKeys = OwnCharacterKeys()
+    for crafterKey, crafter in pairs(self:GetGuildWorkshop().crafters) do
+        if not ownKeys[crafterKey] and type(crafter) == "table" then
+            for professionKey, profession in pairs(crafter.professions or {}) do
+                records[#records + 1] = table.concat({
+                    (GC.Util.Trim(crafter.name or crafterKey):gsub(",", "")),
+                    professionKey,
+                    tostring(tonumber(profession.updatedAt) or 0),
+                    tostring(RecipeKeyCount(profession)),
+                    tostring(tonumber(profession.fingerprintHash) or 0),
+                }, ",")
+            end
+        end
+    end
+    if #records == 0 then
+        return {}
+    end
+    table.sort(records)
+    return ChunkManifestRecords(records, "CM")
+end
+
+function GC.Workshop:SendCoverageManifest()
+    if not GC.Sync or not IsInGuild or not IsInGuild() then
+        return false
+    end
+    local messages = self:BuildCoverageManifestMessages()
+    if #messages == 0 then
+        return false
+    end
+    for _, message in ipairs(messages) do
+        if #message <= GC.Constants.MAX_CHAT_BYTES then
+            GC.Sync:SendBulk(message, "GUILD")
+        end
+    end
+    return true
+end
+
+-- Gestreut wie die Manifestantwort daneben und aus demselben Grund; gewaehlt
+-- wird trotzdem (anders als beim "KM"): Ein Bestandsmanifest beschreibt
+-- fremde Staende, und die kennen viele Clients gleichermassen - es muss also
+-- nicht jeder schicken.
+function GC.Workshop:ScheduleCoverageReply()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:SendCoverageManifest()
+    end
+    C_Timer.After(1 + math.random() * MANIFEST_REPLY_SPREAD, function()
+        GC.Workshop:SendCoverageManifest()
+    end)
+    return true
 end
 
 -- Manifest fuer den Gildenkanal: je Beruf des Accounts nur Hersteller,
@@ -1760,29 +2131,7 @@ function GC.Workshop:BuildKeyManifestMessages()
         return {}
     end
     table.sort(records)
-
-    local header = BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "KM", "" })
-    local payloadLimit = math.min(MAX_PAYLOAD_BYTES,
-        GC.Constants.MAX_CHAT_BYTES - #header)
-    local messages = {}
-    local current = ""
-    for _, record in ipairs(records) do
-        local candidate = current == "" and record or (current .. ";" .. record)
-        if #candidate > payloadLimit and current ~= "" then
-            messages[#messages + 1] = BuildMessage({
-                "W", GC.Constants.SCHEMA_VERSION, "KM", current,
-            })
-            current = record
-        else
-            current = candidate
-        end
-    end
-    if current ~= "" then
-        messages[#messages + 1] = BuildMessage({
-            "W", GC.Constants.SCHEMA_VERSION, "KM", current,
-        })
-    end
-    return messages
+    return ChunkManifestRecords(records, "KM")
 end
 
 function GC.Workshop:SendKeyManifest()
@@ -1915,7 +2264,9 @@ function GC.Workshop:SendKeyListRequest(wanted)
                 order[#order + 1] = entry.crafter
             end
             local list = byCrafter[entry.crafter]
-            list[#list + 1] = entry.professionKey
+            -- Angefragt wird mit dem Schluessel, den der Angesprochene selbst
+            -- gemeldet hat - nur den versteht auch ein Altclient sicher.
+            list[#list + 1] = entry.requestKey or entry.professionKey
         end
     end
     if #order == 0 then
@@ -2066,6 +2417,12 @@ local function SupportsReliableWorkshop(sender)
     return ("," .. capabilities .. ","):find(",workshop3,", 1, true) ~= nil
 end
 
+local function SupportsCoverageWorkshop(sender)
+    local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
+    local capabilities = user and tostring(user.capabilities or "") or ""
+    return ("," .. capabilities .. ","):find(",workshop5,", 1, true) ~= nil
+end
+
 function GC.Workshop:ReceiveSync(fields, sender, distribution)
     local operation = fields[3]
     if operation == "Q" then
@@ -2113,6 +2470,15 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         -- eine Sperre gehoert dem eigenen Account, kein anderer kann sie
         -- melden. Es antworten also alle - nur nicht alle gleichzeitig.
         self:ScheduleCooldownReply()
+        -- Das Bestandsmanifest dagegen schicken nur Gewaehlte: Fremde Staende
+        -- kennen viele Clients gleichermassen, drei Antworten decken den
+        -- Fragenden ein. Nur fuer Clients, die "CM" auch verstehen - ein
+        -- Altclient wirft die Pakete stumm weg, und umsonst gesendet ist
+        -- trotzdem gesendet.
+        if SupportsCoverageWorkshop(sender) and GC.Sync and GC.Sync.IsElectedResponder
+            and GC.Sync:IsElectedResponder(sender, COVERAGE_RESPONDER_SLOTS) then
+            self:ScheduleCoverageReply()
+        end
         return
     elseif operation == "M" then
         local senderKey = GC.Util.PlayerKey(sender)
@@ -2126,7 +2492,12 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
                 record:match("^([^,]+),(%d+),(%d+),(%d+)$")
             local updatedAt = tonumber(updatedText)
             local recipeCount = tonumber(countText)
-            local known = crafter and crafter.professions and crafter.professions[professionKey]
+            -- Verglichen wird kanonisch (der eigene Bestand liegt so vor),
+            -- angefordert aber mit dem Schluessel DES ABSENDERS: Ein Altclient
+            -- mit englischer Spielsprache findet "verzauberkunst" in seinen
+            -- Daten nicht - seinen eigenen Schluessel versteht er immer.
+            local known = crafter and crafter.professions
+                and crafter.professions[NormalizeKey(professionKey)]
             -- Dieselbe gemeinsame Regel wie oben: angefordert wird nur, was
             -- die Uebernahme spaeter auch annimmt.
             if professionKey and #professionKey <= 80 and updatedAt and recipeCount
@@ -2175,8 +2546,11 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             if crafter and professionKey and updatedAt and recipeCount
                 and #crafter <= 60 and #professionKey <= 80 and #fingerprint <= 20 then
                 local known = crafters[GC.Util.PlayerKey(crafter)]
+                -- Verglichen und vorgemerkt wird kanonisch; die Nachfrage beim
+                -- Absender traegt dessen eigenen Schluessel (requestKey), denn
+                -- ein Altclient englischer Spielsprache kennt nur den.
                 local knownProfession = known and known.professions
-                    and known.professions[professionKey]
+                    and known.professions[NormalizeKey(professionKey)]
                 -- Angefordert wird nur, was die Uebernahme spaeter auch
                 -- annimmt. Vorher stand hier eine reine Ungleichheitspruefung:
                 -- Sie meldete auch nachweislich AELTERE Staende als "fehlt",
@@ -2188,7 +2562,16 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
                     or ProfessionWins(updatedAt, fingerprint,
                         knownProfession.updatedAt, knownProfession.fingerprintHash)
                 if stale then
-                    wanted[#wanted + 1] = { crafter = crafter, professionKey = professionKey }
+                    wanted[#wanted + 1] = {
+                        crafter = crafter,
+                        professionKey = NormalizeKey(professionKey),
+                        requestKey = professionKey,
+                        -- Fuer die Bestandsluecke, falls die Antwort ausbleibt:
+                        -- welcher Stand angekuendigt war und von wem.
+                        updatedAt = updatedAt,
+                        fingerprintHash = fingerprint,
+                        reportedBy = sender,
+                    }
                 end
             end
         end
@@ -2198,6 +2581,35 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             -- sie schon gestellt hat.
             self:NoteWanted(wanted)
             self:ScheduleKeyListRequest(wanted)
+        end
+        return
+    elseif operation == "CM" then
+        -- Ein Bestandsmanifest: Wissen aus zweiter Hand darueber, welche
+        -- Hersteller es in der Gilde gibt. Es loest KEINE Anforderung aus -
+        -- die Daten kann nur der Besitzer liefern, und der ist gerade nicht
+        -- da, sonst haette sein eigenes Manifest laengst gegriffen. Gemerkt
+        -- wird nur die Luecke; sie haelt die Statuszeile ehrlich und raeumt
+        -- sich weg, sobald die Daten wirklich eintreffen.
+        local changed = false
+        for record in tostring(fields[4] or ""):gmatch("[^;]+") do
+            local crafter, professionKey, updatedText, countText, fingerprint =
+                record:match("^([^,]+),([^,]+),(%d+),(%d+),(%d+)$")
+            local updatedAt = tonumber(updatedText)
+            if crafter and professionKey and updatedAt and tonumber(countText)
+                and #crafter <= 60 and #professionKey <= 80 and #fingerprint <= 20 then
+                if self:NoteCoverageGap({
+                    crafter = crafter,
+                    professionKey = professionKey,
+                    updatedAt = updatedAt,
+                    fingerprintHash = fingerprint,
+                    reportedBy = sender,
+                }) then
+                    changed = true
+                end
+            end
+        end
+        if changed then
+            GC:FireCallback("WORKSHOP_UPDATED")
         end
         return
     elseif operation == "KR" then
@@ -2287,6 +2699,13 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         or professionKey == "" or professionName == "" then
         return
     end
+
+    -- Ein Altclient mit englischer Spielsprache schickt "enchanting" als
+    -- Schluessel und "Enchanting" als Namen. Abgelegt wird kanonisch, sonst
+    -- entsteht derselbe Beruf doppelt. Neue Clients senden bereits kanonisch;
+    -- fuer sie aendert sich hier nichts.
+    professionKey = NormalizeKey(professionKey)
+    professionName = GC.CanonicalProfessionName(professionName) or professionName
 
     local senderKey = GC.Util.PlayerKey(sender)
     if senderKey == "" then
@@ -2516,6 +2935,7 @@ function GC.Workshop:GetCatalogIndex()
         local characterName = (type(character) == "table" and character.fullName) or characterKey
         if workshop and workshop.professions
             and GC.Util.PlayerKey(characterName) ~= ownKey then
+            CanonicalizeOwnProfessions(workshop)
             AddCrafterToCatalog(catalog, characterName, workshop.professions)
         end
     end
@@ -2698,6 +3118,18 @@ function GC.Workshop:PruneDepartedCrafters()
         end
     end
 
+    -- Bestandsluecken Ausgetretener: Wer nicht mehr in der Gilde ist, fehlt
+    -- auch nicht mehr. Dieselbe Bleiberegel wie bei den Herstellern, mit dem
+    -- Melder als drittem Buergen - er hat den Eintrag schliesslich verbuergt.
+    for gapKey, gap in pairs(workshop.coverageGaps or {}) do
+        local keep = ownKeys[GC.Util.PlayerKey(gap.crafter)]
+            or GC.Roster:IsGuildMember(gap.crafter)
+            or (GC.Util.Trim(gap.reportedBy) ~= "" and GC.Roster:IsGuildMember(gap.reportedBy))
+        if not keep then
+            workshop.coverageGaps[gapKey] = nil
+        end
+    end
+
     -- Rezepte, die niemand mehr kann, muellen den Katalog nicht zu.
     if removed > 0 then
         local stillClaimed = {}
@@ -2775,14 +3207,12 @@ function GC.Workshop:GetSummary()
     local crafters = {}
     local professions = {}
     for _, entry in ipairs(entries) do
-        -- Berufe nach normalisiertem Schluessel zaehlen, nicht nach dem
-        -- Namens-String: Sonst zaehlen die Alt-Schreibweise "Alchemie" neben
-        -- "Alchimie" und der "Unbekannt"-Platzhalter als eigene Berufe -
-        -- die Karte zeigte 13 Berufe, wo TBC hoechstens 12 kennt.
+        -- Berufe nach kanonischem Schluessel zaehlen, nicht nach dem
+        -- Namens-String: Sonst zaehlen die Alt-Schreibweise "Alchemie", die
+        -- englischen Namen englischer Clients und der "Unbekannt"-Platzhalter
+        -- als eigene Berufe - die Karte zeigte 16 Berufe, wo TBC hoechstens
+        -- 12 kennt. Die Zusammenfuehrung steckt inzwischen in NormalizeKey.
         local professionKey = NormalizeKey(entry.profession)
-        if professionKey == NormalizeKey("Alchemie") then
-            professionKey = NormalizeKey("Alchimie")
-        end
         if professionKey ~= "" and professionKey ~= NormalizeKey("Unbekannt") then
             professions[professionKey] = true
         end

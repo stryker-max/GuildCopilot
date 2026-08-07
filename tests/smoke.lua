@@ -6671,6 +6671,7 @@ do
     sync_savedFailed = addon.Sync.progressFailed
     sync_savedStatus = addon.Sync.syncStatus
     sync_savedWants = addon.Workshop.pendingWants
+    sync_savedLostWants = addon.Workshop.lostWants
 
     -- Aus frueheren Testbloecken liegen angefangene Uebertragungen herum; sie
     -- gelten inzwischen als verloren und wuerden den Zustand faerben.
@@ -6696,6 +6697,9 @@ do
     addon.Sync.serialPending = 0
     addon.Sync.progressFailed = 0
     addon.Workshop.pendingWants = {}
+    -- Auch die ausgebliebenen Berufe gehoeren zur sauberen Ausgangslage: Aus
+    -- den Zeitspruengen frueherer Bloecke liegen dort abgelaufene Eintraege.
+    addon.Workshop.lostWants = nil
 
     sync_idle = addon.Sync:GetSyncStatus()
     assert(sync_idle.state == "IDLE",
@@ -6762,6 +6766,7 @@ do
     addon.Sync.progressFailed = sync_savedFailed
     addon.Sync.syncStatus = sync_savedStatus
     addon.Workshop.pendingWants = sync_savedWants
+    addon.Workshop.lostWants = sync_savedLostWants
     for index, transfers in ipairs(sync_incoming) do
         for key, value in pairs(sync_savedIncoming[index]) do
             transfers[key] = value
@@ -8044,6 +8049,288 @@ do
     GetTradeSkillLine = craftTradeSkillLine
     assert(addon.Workshop:GetOwnData().professions.verzauberkunst.cooldowns.E27926 ~= nil,
         "Ein Craft-Scan ohne Cooldown-API hat den gemerkten Stand gelöscht")
+end
+
+-- === Englischer Client: ein Beruf, ein Schlüssel ============================
+--
+-- Ein englischer Client scannt "Enchanting" und meldete den Beruf bis 0.9.101
+-- unter eigenem Schlüssel: Dieselbe Verzauberkunst stand doppelt im Katalog
+-- (16 "Berufe" statt 11), und die Eigenberuf-Erkennung fand sie nie, weil das
+-- Profil deutsch spricht und der Scan englisch ablegte.
+do
+    assert(addon.CanonicalProfessionKey("Enchanting") == "verzauberkunst",
+        "Der englische Berufsname ergibt keinen kanonischen Schlüssel")
+    assert(addon.CanonicalProfessionKey("Smelting") == "bergbau",
+        "Der englische Fenstername des Bergbaus wird nicht zugeordnet")
+    assert(addon.CanonicalProfessionKey("Schmelzen") == "bergbau",
+        "Der deutsche Fenstername des Bergbaus wird nicht zugeordnet")
+    assert(addon.CanonicalProfessionKey("Alchemie") == "alchimie",
+        "Die Alltagsschreibweise Alchemie wird nicht mehr zugeordnet")
+    assert(addon.CanonicalProfessionKey("Kein Beruf") == "keinberuf",
+        "Unbekanntes fällt nicht mehr auf die eigene Faltung zurück")
+    assert(addon.CanonicalProfessionName("Enchanting") == "Verzauberkunst",
+        "Der englische Name wird nicht zum deutschen Anzeigenamen")
+    eng_candidates = addon.ProfessionWindowSpellCandidates("Bergbau")
+    assert(eng_candidates[1] == "Schmelzen" and eng_candidates[2] == "Smelting",
+        "Die Fensterzauber-Kandidaten für Bergbau stimmen nicht")
+
+    -- Ein englischer Scan landet unter dem kanonischen Schlüssel und trägt den
+    -- deutschen Anzeigenamen.
+    eng_recipes = {
+        I99001 = { key = "I99001", name = "Enchant Boots - Test", itemID = 99001,
+            profession = "Enchanting", reagents = {} },
+    }
+    assert(addon.Workshop:StoreProfession("Enchanting", 375, 375, eng_recipes, 1),
+        "Der englische Scan wurde nicht gespeichert")
+    eng_stored = addon.Workshop:GetOwnProfession("Verzauberkunst")
+    assert(eng_stored ~= nil, "Der englische Scan ist unter Verzauberkunst nicht auffindbar")
+    assert(eng_stored.name == "Verzauberkunst",
+        "Der englische Scan trägt nicht den deutschen Anzeigenamen: " .. tostring(eng_stored.name))
+    assert(addon.Workshop:GetOwnProfession("Enchanting") == eng_stored,
+        "Die englische Schreibweise findet den gespeicherten Beruf nicht")
+end
+
+-- === Wanderung: englische Schlüssel im Altbestand ===========================
+do
+    -- Eigene Berufe: der englische Altstand wandert zum kanonischen Schlüssel,
+    -- die Rezepte beider Schreibweisen bleiben zusammen erhalten.
+    mig_own = addon.Workshop:GetOwnData()
+    mig_own.professions.enchanting = {
+        key = "enchanting", name = "Enchanting", skillLevel = 300, maxSkillLevel = 375,
+        updatedAt = addon.Util.Now(),
+        recipes = { I99002 = { key = "I99002", name = "Enchant Test", itemID = 99002,
+            profession = "Enchanting", reagents = {} } },
+    }
+    mig_own.professionKeysCanonical = nil
+    mig_merged = addon.Workshop:GetOwnData().professions
+    assert(mig_merged.enchanting == nil, "Der englische Schlüssel steht noch im eigenen Bestand")
+    assert(mig_merged.verzauberkunst.recipes.I99002 ~= nil,
+        "Die Rezepte des englischen Altstands gingen bei der Wanderung verloren")
+
+    -- Herstellerindex: derselbe fremde Hersteller unter beiden Schreibweisen -
+    -- es bleibt der neuere Stand, unter dem kanonischen Schlüssel und mit
+    -- deutschem Namen.
+    mig_workshop = addon.Workshop:GetGuildWorkshop()
+    mig_workshop.crafters.mixi = {
+        name = "Mixi",
+        professions = {
+            enchanting = { key = "enchanting", name = "Enchanting",
+                updatedAt = 2000, fingerprintHash = "77", recipeKeys = { E555 = true } },
+            verzauberkunst = { key = "verzauberkunst", name = "Verzauberkunst",
+                updatedAt = 1500, fingerprintHash = "11", recipeKeys = { E444 = true } },
+        },
+    }
+    mig_workshop.professionKeysCanonical = nil
+    mig_workshop = addon.Workshop:GetGuildWorkshop()
+    mig_crafter = mig_workshop.crafters.mixi
+    assert(mig_crafter.professions.enchanting == nil,
+        "Der englische Schlüssel steht noch im Herstellerindex")
+    assert(mig_crafter.professions.verzauberkunst.recipeKeys.E555 == true,
+        "Die Wanderung hat nicht den neueren Stand behalten")
+    assert(mig_crafter.professions.verzauberkunst.name == "Verzauberkunst",
+        "Der gewanderte Beruf trägt nicht den deutschen Namen")
+    mig_workshop.crafters.mixi = nil
+
+    -- Empfangsweg: Ein Altclient schickt englische Schlüssel - abgelegt wird
+    -- kanonisch, nicht doppelt.
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "K", "mig-token", "1", "1",
+          "enchanting", "Enchanting", "E27960", tostring(addon.Util.Now()), "123", "Fernwirt" },
+        "Fernwirt-Realm", "GUILD")
+    mig_received = addon.Workshop:GetGuildWorkshop().crafters.fernwirt
+    assert(mig_received ~= nil and mig_received.professions.verzauberkunst ~= nil,
+        "Ein englisch verschlüsseltes Paket landet nicht unter dem kanonischen Schlüssel")
+    assert(mig_received.professions.enchanting == nil,
+        "Ein englisch verschlüsseltes Paket legt weiterhin einen zweiten Beruf an")
+    assert(mig_received.professions.verzauberkunst.name == "Verzauberkunst",
+        "Der empfangene Beruf trägt nicht den deutschen Anzeigenamen")
+    addon.Workshop:GetGuildWorkshop().crafters.fernwirt = nil
+end
+
+-- === Ausgeblieben ist nicht erledigt, und Lücken bleiben sichtbar ===========
+--
+-- Der Kern der Brooklee-Beobachtung vom 07.08.2026: Ein Client mit einem
+-- Drittel des Katalogs zeigte "Vollständig synchronisiert". Zwei Ursachen,
+-- beide hier abgedeckt: (1) Ein angekündigter Beruf, dessen Daten ausblieben,
+-- verschwand nach Fristablauf lautlos aus der Rechnung. (2) Von nie
+-- getroffenen Spielern wusste der Client schlicht nichts - jetzt sagt es ihm
+-- das Bestandsmanifest ("CM") der gewählten Antwortenden.
+do
+    -- Saubere Ausgangslage nach dem Muster des Fortschrittsblocks: Zähler,
+    -- Transfers und Vormerkungen früherer Blöcke dürfen nicht hineinfärben.
+    cov_savedBulk = addon.Sync.bulkOutstanding
+    cov_savedSerial = addon.Sync.serialPending
+    cov_savedFailed = addon.Sync.progressFailed
+    cov_savedStatus = addon.Sync.syncStatus
+    cov_savedWants = addon.Workshop.pendingWants
+    cov_savedLost = addon.Workshop.lostWants
+    cov_savedActive = addon.Sync.reliableActive
+    cov_savedQueue = addon.Sync.reliableQueue
+    cov_savedPeer = addon.Sync.lastPeerAt
+    cov_incomingLists = {
+        addon.Sync.guildProfileIncoming,
+        addon.Workshop.incoming,
+        addon.Inventory.guildBankIncoming,
+        addon.GearAudit.equipmentIncoming,
+        addon.WarcraftLogs.syncIncoming,
+        addon.RaidMonitor.incoming,
+    }
+    cov_savedIncoming = {}
+    for index, transfers in ipairs(cov_incomingLists) do
+        cov_savedIncoming[index] = {}
+        for key, value in pairs(transfers) do
+            cov_savedIncoming[index][key] = value
+            transfers[key] = nil
+        end
+    end
+    cov_workshop = addon.Workshop:GetGuildWorkshop()
+    cov_savedGaps = {}
+    for key, value in pairs(cov_workshop.coverageGaps) do
+        cov_savedGaps[key] = value
+        cov_workshop.coverageGaps[key] = nil
+    end
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Sync.reliableActive = nil
+    addon.Sync.reliableQueue = {}
+    addon.Workshop.pendingWants = nil
+    addon.Workshop.lostWants = nil
+
+    -- (1) Der angekündigte Beruf läuft ab: Der Zyklus endet "unvollständig",
+    -- und es bleibt eine Bestandslücke stehen.
+    addon.Workshop:NoteWanted({ {
+        crafter = "Abwesend-Realm", professionKey = "schneiderei",
+        updatedAt = addon.Util.Now(), fingerprintHash = "42",
+        reportedBy = "Abwesend-Realm",
+    } })
+    assert(addon.Sync:GetSyncStatus().state == "RUNNING",
+        "Der angekündigte Beruf startet keinen Abgleichzyklus")
+    currentTime = currentTime + 200
+    cov_expired = addon.Sync:GetSyncStatus()
+    assert(cov_expired.state == "INCOMPLETE",
+        "Der ausgebliebene Beruf endet nicht als unvollständiger Abgleich: " .. cov_expired.state)
+    assert((cov_expired.lostWants or 0) == 1, "Der ausgebliebene Beruf fehlt in der Fehlbilanz")
+    assert(cov_expired.coverage and cov_expired.coverage.professions == 1,
+        "Der ausgebliebene Beruf hinterlässt keine Bestandslücke")
+
+    -- Kommt der Beruf später doch an, räumt sich beides weg.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Abwesend-Realm", professionKey = "schneiderei",
+        professionName = "Schneiderei", recipeKeys = { "I99003" },
+        updatedAt = addon.Util.Now(), fingerprintHash = "42",
+    })
+    cov_healed = addon.Sync:GetSyncStatus()
+    assert((cov_healed.lostWants or 0) == 0, "Die Fehlbilanz vergisst den nachgelieferten Beruf nicht")
+    assert(cov_healed.coverage.professions == 0, "Die Bestandslücke überlebt die gelieferten Daten")
+    assert(cov_healed.state ~= "INCOMPLETE", "Der nachgelieferte Beruf heilt den Status nicht")
+
+    -- (2) Ein Bestandsmanifest über einen nie getroffenen Spieler: Es entsteht
+    -- eine Lücke, aber KEINE offene Arbeit - anfordern ließe sich nichts.
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "CM",
+          "Fernab,juwelenschleifen,5000,12,777" },
+        "Melder-Realm", "GUILD")
+    cov_summary = addon.Workshop:GetCoverageGapSummary()
+    assert(cov_summary.professions == 1 and cov_summary.crafters == 1,
+        "Das Bestandsmanifest hinterlässt keine Lücke")
+    assert(addon.Sync:GetSyncStatus().state ~= "RUNNING",
+        "Eine Bestandslücke zählt fälschlich als offene Arbeit")
+
+    -- Eigene Charaktere gehören nie in die Lücken: Über die weiß dieser
+    -- Client selbst am besten Bescheid.
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "CM",
+          "Tester-Realm,schneiderei,9999,5,888" },
+        "Melder-Realm", "GUILD")
+    assert(addon.Workshop:GetCoverageGapSummary().professions == 1,
+        "Der eigene Charakter steht als Bestandslücke da")
+
+    -- Das eigene Bestandsmanifest nennt fremde Hersteller, nie die eigenen.
+    cov_workshop.crafters.fremdling = {
+        name = "Fremdling",
+        professions = { schmiedekunst = { key = "schmiedekunst", name = "Schmiedekunst",
+            updatedAt = 4200, fingerprintHash = "99", recipeKeys = { I1 = true } } },
+    }
+    cov_manifest = table.concat(addon.Workshop:BuildCoverageManifestMessages(), "\n")
+    assert(cov_manifest:find("Fremdling,schmiedekunst,4200,1,99", 1, true) ~= nil,
+        "Das Bestandsmanifest nennt den fremden Hersteller nicht")
+    assert(cov_manifest:find("Tester", 1, true) == nil,
+        "Das Bestandsmanifest meldet eigene Charaktere")
+    cov_workshop.crafters.fremdling = nil
+
+    -- Treffen die Daten des Offline-Spielers irgendwann ein, ist die Lücke zu.
+    addon.Workshop:ClaimRecipes({
+        crafter = "Fernab", professionKey = "juwelenschleifen",
+        professionName = "Juwelenschleifen", recipeKeys = { "I99004" },
+        updatedAt = 6000, fingerprintHash = "778",
+    })
+    assert(addon.Workshop:GetCoverageGapSummary().professions == 0,
+        "Die Bestandslücke überlebt die nachgelieferten Daten")
+
+    -- (3) Die Statuszeile: Mit bekannter Lücke keine Vollaussage mehr, ohne
+    -- Lücke die Vollaussage samt Reichweite.
+    cov_guildData = addon.DB:GetGuild()
+    cov_savedUsers = cov_guildData.addonUsers
+    cov_guildData.addonUsers = {
+        heiler = { name = "Heiler-Realm", seenAt = addon.Util.Now(),
+            schemaVersion = addon.Constants.SCHEMA_VERSION },
+    }
+    addon.Sync.lastPeerAt = addon.Util.Now()
+    addon.Sync.syncStatus = nil
+    addon.Sync:NoteBulkQueued()
+    addon.Sync:GetSyncStatus()
+    addon.Sync:NoteBulkFinished(true)
+    addon.Workshop:NoteCoverageGap({
+        crafter = "Fernweh", professionKey = "gifte",
+        updatedAt = 4711, fingerprintHash = "1", reportedBy = "Heiler-Realm",
+    })
+    addon.UI:RefreshSyncBar(true)
+    cov_statusText = addon.UI.pages.WORKSHOP.workshopStatus.value
+    assert(cov_statusText:find("Vollständig synchronisiert", 1, true) == nil,
+        "Die Statuszeile behauptet Vollständigkeit trotz bekannter Lücke: " .. cov_statusText)
+    assert(cov_statusText:find("unvollständig", 1, true) ~= nil,
+        "Die Statuszeile benennt die Bestandslücke nicht: " .. cov_statusText)
+    addon.UI:RefreshSyncBadge()
+    assert(addon.UI.syncBadge.label.value:find("Bestand lückenhaft", 1, true) ~= nil,
+        "Die Kopfzeile meldet trotz Lücke: " .. tostring(addon.UI.syncBadge.label.value))
+
+    addon.Workshop:GetGuildWorkshop().coverageGaps = {}
+    addon.UI:RefreshSyncBar(true)
+    cov_statusText = addon.UI.pages.WORKSHOP.workshopStatus.value
+    assert(cov_statusText:find("Vollständig synchronisiert", 1, true) ~= nil
+            and cov_statusText:find("abgeglichen mit", 1, true) ~= nil,
+        "Ohne Lücke fehlt die Vollaussage samt Reichweite: " .. cov_statusText)
+    addon.UI:RefreshSyncBadge()
+    assert(addon.UI.syncBadge.label.value:find("Daten vollständig", 1, true) ~= nil,
+        "Die Kopfzeile findet nicht zur Vollaussage zurück: " .. tostring(addon.UI.syncBadge.label.value))
+
+    -- Aufräumen: Bestände und Zähler zurück auf den Stand vor dem Block.
+    cov_guildData.addonUsers = cov_savedUsers
+    cov_workshop.crafters.abwesend = nil
+    cov_workshop.crafters.fernab = nil
+    cov_workshop = addon.Workshop:GetGuildWorkshop()
+    for key in pairs(cov_workshop.coverageGaps) do
+        cov_workshop.coverageGaps[key] = nil
+    end
+    for key, value in pairs(cov_savedGaps) do
+        cov_workshop.coverageGaps[key] = value
+    end
+    for index, transfers in ipairs(cov_incomingLists) do
+        for key, value in pairs(cov_savedIncoming[index]) do
+            transfers[key] = value
+        end
+    end
+    addon.Sync.bulkOutstanding = cov_savedBulk
+    addon.Sync.serialPending = cov_savedSerial
+    addon.Sync.progressFailed = cov_savedFailed
+    addon.Sync.syncStatus = cov_savedStatus
+    addon.Sync.reliableActive = cov_savedActive
+    addon.Sync.reliableQueue = cov_savedQueue
+    addon.Sync.lastPeerAt = cov_savedPeer
+    addon.Workshop.pendingWants = cov_savedWants
+    addon.Workshop.lostWants = cov_savedLost
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
