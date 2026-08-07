@@ -4436,16 +4436,20 @@ function GC.UI:BuildWorkshopPage()
     page.workshopFavorites.label:SetPoint("RIGHT", page.workshopFavorites, "RIGHT", -8, 0)
     page.workshopFavorites.label:SetJustifyH("LEFT")
 
-    -- Der Erfolg steht ab 0.9.86 im Balken darunter; hier bleibt nur die
-    -- Meldung für den Fall, dass gar nicht gefragt werden konnte. Eine
-    -- Erfolgsmeldung in die Statuszeile zu schreiben hieße, sie eine
-    -- Viertelsekunde später vom Balken überschreiben zu lassen.
+    -- Der Erfolg stand ab 0.9.86 "im Balken darunter" - nur sprang der erst
+    -- an, wenn die erste Antwort eintraf, und die kommt mit bis zu 31 s
+    -- Streuung. Eine halbe Minute lang passierte sichtbar NICHTS, und genau
+    -- das wurde als "der Knopf tut nichts" gemeldet. Die Quittung lebt jetzt
+    -- im Balken selbst (RefreshSyncBar zeigt sie, bis echte Antworten oder
+    -- die Zeit sie abloesen), und der Knopf zaehlt sie herunter.
     page.workshopRequest = CreateButton(searchCard, "Daten anfragen", 176, 34, function()
         local success, message = GC.Workshop:RequestGuildData()
-        if not success then
+        if success then
+            GC.UI.pages.WORKSHOP.workshopRequestAckAt = GC.Util.Now()
+        else
             GC:Print("|cffff5555" .. tostring(message) .. "|r")
         end
-        GC.UI:RefreshSyncBar()
+        GC.UI:RefreshSyncBar(true)
     end, "PRIMARY")
     page.workshopRequest:SetPoint("TOPRIGHT", searchCard, "TOPRIGHT", -14, -14)
 
@@ -4623,8 +4627,9 @@ function GC.UI:BuildWorkshopPage()
         local gaps = GC.Workshop:GetCoverageGapNames(6)
         if #gaps > 0 then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Nur bei Offline-Spielern: " .. table.concat(gaps, ", ")
-                .. " – kommt, sobald sie wieder online sind.", 1, 0.72, 0.25, true)
+            GameTooltip:AddLine("Es fehlen noch: " .. table.concat(gaps, ", ")
+                .. " – ein Bote liefert sie, sobald jemand online ist, der sie hat.",
+                1, 0.72, 0.25, true)
         end
         if (status.lastSyncedAt or 0) > 0 and date then
             GameTooltip:AddLine(" ")
@@ -4995,6 +5000,12 @@ end
 -- steht nebeneinander statt sich gegenseitig zu verdrängen - vorher gewann der
 -- Paketzähler, und der Hinweis "Verzauberkunst noch nicht eingelesen" war genau
 -- dann unsichtbar, wenn er gebraucht wurde.
+-- So lange traegt der Balken nach einem Klick auf "Daten anfragen" die
+-- Quittung, falls bis dahin keine echte Antwort eintrifft. Deckungsgleich mit
+-- der Streuung der Manifestantworten: Danach ist entweder etwas da, oder es
+-- gibt gerade niemanden, der antwortet.
+local REQUEST_ACK_SECONDS = 32
+
 function GC.UI:RefreshSyncBar(force)
     local page = self.pages.WORKSHOP
     if not page or not page.syncBar then
@@ -5004,6 +5015,16 @@ function GC.UI:RefreshSyncBar(force)
     local status = GC.Sync:GetSyncStatus()
     local coverage = status.coverage or { professions = 0, crafters = 0 }
     local stats = GC.Sync:GetAddonUserStats()
+    -- Die Quittung des Anfrage-Knopfs laeuft hier ab, nicht im Knopf: Der
+    -- Balken tickt ohnehin, solange die Seite sichtbar ist.
+    local ackRemaining = 0
+    if page.workshopRequestAckAt then
+        ackRemaining = math.max(0,
+            REQUEST_ACK_SECONDS - (GC.Util.Now() - page.workshopRequestAckAt))
+        if ackRemaining == 0 then
+            page.workshopRequestAckAt = nil
+        end
+    end
     -- Viermal je Sekunde nachsehen ist billig, viermal je Sekunde alle
     -- Beschriftungen neu zusammensetzen nicht. Gezeichnet wird deshalb nur,
     -- wenn sich am Zustand wirklich etwas geaendert hat.
@@ -5020,6 +5041,7 @@ function GC.UI:RefreshSyncBar(force)
         coverage.professions or 0,
         coverage.crafters or 0,
         stats.players or 1,
+        math.ceil(ackRemaining),
         status.waiting and "W" or "-",
         status.paused and "K" or "-",
         ageMinutes,
@@ -5095,7 +5117,7 @@ function GC.UI:RefreshSyncBar(force)
             text = "|cffffb84dNichts offen, aber unvollständig|r  •  Rezepte von "
                 .. crafterText .. " fehlen noch (" .. table.concat(names, ", ")
                 .. ((coverage.crafters or 0) > #names and ", …" or "")
-                .. ") – sie kommen, sobald deren Besitzer wieder online sind."
+                .. ") – ein Bote liefert sie, sobald jemand online ist, der sie hat."
         else
             page.syncBar:SetProgress(1, THEME.success)
             percentText = "100 %"
@@ -5111,6 +5133,28 @@ function GC.UI:RefreshSyncBar(force)
         percentColor = THEME.muted
         text = "Noch kein Abgleich gelaufen  •  „Daten anfragen“ holt den Stand der Gilde."
         color = THEME.muted
+    end
+
+    -- Die Quittung des Anfrage-Knopfs. Sie ueberdeckt jeden RUHENDEN Zustand:
+    -- Auch "unvollstaendig" soll nach dem Klick sichtbar quittieren, sonst
+    -- sieht der Klick wirkungslos aus. Nur echter Fortschritt (RUNNING) ist
+    -- die bessere Auskunft und bleibt stehen.
+    if ackRemaining > 0 and status.state ~= "RUNNING" then
+        page.syncBar:SetProgress(1, THEME.accent)
+        percentText = "angefragt"
+        percentColor = THEME.accent
+        text = "|cff2ed9e6Anfrage gesendet|r  •  die Antworten treffen gestreut ein"
+            .. " – der Balken springt an, sobald die erste da ist."
+        color = THEME.accent
+    end
+    if page.workshopRequest then
+        if ackRemaining > 0 then
+            page.workshopRequest:Disable()
+            page.workshopRequest:SetText("Angefragt … " .. math.ceil(ackRemaining) .. " s")
+        else
+            page.workshopRequest:Enable()
+            page.workshopRequest:SetText("Daten anfragen")
+        end
     end
 
     -- Der eigene Beitrag hängt hinten an: Wer seine Berufe nie geöffnet hat,

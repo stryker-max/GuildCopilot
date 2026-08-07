@@ -64,13 +64,20 @@ local DEPARTED_PRUNE_INTERVAL = 60
 local WANT_TTL = 180
 -- Wie viele gewaehlte Antwortende ein Bestandsmanifest ("CM") schicken: das
 -- Wissen, welche Hersteller es in der Gilde gibt, auch wenn deren Besitzer
--- offline sind. Mehr als einer, weil jeder nur nennen kann, was er selbst
--- schon empfangen hat; drei zusammen decken einen Neuling zuverlaessig ein.
-local COVERAGE_RESPONDER_SLOTS = 3
+-- offline sind. Owner-Grundsatz fuer alles Neue hier: Bei 250 Online in einer
+-- 500er-Gilde antworten auf eine Frage ein, zwei Gewaehlte - nie der ganze
+-- Raum durcheinander. Zwei statt einem, weil jeder nur nennen kann, was er
+-- selbst schon empfangen hat.
+local COVERAGE_RESPONDER_SLOTS = 2
 -- Obergrenze der gemerkten Bestandsluecken. 35 aktive Charaktere mit je zwei,
 -- drei Berufen sind gut hundert Eintraege; die Grenze schuetzt nur gegen
 -- Muellfluten, nicht gegen normalen Betrieb.
 local MAX_COVERAGE_GAPS = 400
+-- Wie viele gewaehlte Boten eine Rezeptnachforderung ("N") aus ihrem Katalog
+-- beantworten, wenn der Hersteller selbst nicht antwortet. Zwei statt drei:
+-- Die Antwort ist ein voller Datentransfer, und dank der Doppelantwort-
+-- Daempfung (PeerAnsweredSince) bleibt es meist bei einem.
+local RELAY_DETAIL_SLOTS = 2
 -- Die Merkliste unterdrueckter Rezeptanfragen wuchs bisher unbegrenzt: ein
 -- Eintrag je Rezept, in einer grossen Gilde ueber Stunden mehrere tausend.
 -- Sie wird deshalb aufgeraeumt, sobald sie zu gross wird.
@@ -1295,7 +1302,10 @@ function GC.Workshop:BuildKeyListMessages(profession, crafterName)
         GC.Constants.MAX_CHAT_BYTES - #header
     )
 
-    local payload = EncodeRecipeKeys(SortedKeys(profession.recipes))
+    -- Eigene Berufe fuehren volle Rezepte, der Herstellerindex nur die
+    -- Schluesselmenge - fuer die Liste ist beides dasselbe. So kann auch ein
+    -- Bote antworten, der die Daten eines Dritten nur aus dem Index kennt.
+    local payload = EncodeRecipeKeys(SortedKeys(profession.recipeKeys or profession.recipes))
     -- Wie beim Gildenprofil wird stumpf nach Bytes geschnitten; gelesen wird
     -- erst die wieder zusammengesetzte Nutzlast.
     local chunks = {}
@@ -1516,9 +1526,19 @@ function GC.Workshop:RequestGuildData()
     if not IsInGuild or not IsInGuild() then
         return false, "Du bist in keiner Gilde."
     end
+    -- Jede Anfrage loest gildenweit gestreute Antworten aus - bei 250 Online
+    -- sind das schnell hunderte Pakete. Doppelklicks und Slash-Wiederholungen
+    -- innerhalb der Antwortstreuung bringen nichts Neues und bleiben deshalb
+    -- hier haengen; die Antwortenden drosseln denselben Frager zusaetzlich
+    -- selbst (requestReplies).
+    local now = GC.Util.Now()
+    if (now - (tonumber(self.lastGuildRequestAt) or 0)) < MANIFEST_REPLY_SPREAD then
+        return false, "Die Anfrage läuft schon – Antworten treffen gestreut ein."
+    end
     if not GC.Sync or not GC.Sync:Send(BuildMessage({ "W", GC.Constants.SCHEMA_VERSION, "Q", "3" })) then
         return false, "Werkstatt-Anfrage konnte nicht gesendet werden."
     end
+    self.lastGuildRequestAt = now
     self.syncStats.receivedProfessions = 0
     self.syncStats.receivedRecipes = 0
     self.syncStats.lastSender = ""
@@ -2110,6 +2130,85 @@ function GC.Workshop:ScheduleCoverageReply()
     return true
 end
 
+-- === Botendienst fuer Rezeptdetails ========================================
+--
+-- Rezeptdetails (Name, Reagenzien) haengen am Rezept, nicht am Spieler - sie
+-- stehen im Katalog jedes Clients, der sie je empfangen hat. Eine
+-- Nachforderung ("N") kann deshalb auch ein Dritter beantworten, wenn der
+-- Besitzer offline ist. Der Transfer traegt dabei den Stand DES BESITZERS
+-- (craftedBy, updatedAt, Fingerabdruck aus dem Herstellerindex), nie eigene
+-- Zeitstempel: Die Uebernahme beim Empfaenger entscheidet damit nach
+-- derselben Regel wie immer, und ein Bote kann einen neueren Stand nie
+-- zurueckdrehen.
+
+-- Geplant wird nur, wenn der Besitzer nicht selbst antworten kann: Ist er als
+-- Addon-Nutzer online, hielte der Bote nur dagegen.
+function GC.Workshop:ScheduleRelayedRecipeAnswer(crafterName, recipeKeys)
+    local member = GC.Roster and GC.Roster.GetMember and GC.Roster:GetMember(crafterName)
+    if member and member.online and GC.Sync and GC.Sync.GetAddonUser
+        and GC.Sync:GetAddonUser(crafterName) then
+        return false
+    end
+    local scheduledAt = GC.Util.Now()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return self:SendRelayedRecipeAnswer(crafterName, recipeKeys, scheduledAt)
+    end
+    C_Timer.After(1 + math.random() * MANIFEST_REPLY_SPREAD, function()
+        GC.Workshop:SendRelayedRecipeAnswer(crafterName, recipeKeys, scheduledAt)
+    end)
+    return true
+end
+
+function GC.Workshop:SendRelayedRecipeAnswer(crafterName, recipeKeys, scheduledAt)
+    local crafterKey = GC.Util.PlayerKey(crafterName)
+    local crafterEntry = self:GetGuildWorkshop().crafters[crafterKey]
+    if not crafterEntry or type(crafterEntry.professions) ~= "table" then
+        return false
+    end
+    -- Nach Beruf gruppiert: Der Transferumschlag traegt den Stand des
+    -- Besitzers, und der haengt am Beruf. Geliefert wird nur, was der Katalog
+    -- vollstaendig hat UND was der Hersteller laut Index wirklich kann.
+    local groups = {}
+    for _, recipeKey in ipairs(recipeKeys or {}) do
+        local entry = self:GetCatalogEntry(recipeKey)
+        if entry and #(entry.reagents or {}) > 0 then
+            local professionKey = NormalizeKey(entry.professionKey or entry.profession)
+            local profession = crafterEntry.professions[professionKey]
+            if profession and (profession.recipeKeys or {})[recipeKey] then
+                local group = groups[professionKey]
+                if not group then
+                    group = { profession = profession, recipes = {}, filter = {} }
+                    groups[professionKey] = group
+                end
+                group.recipes[recipeKey] = entry
+                group.filter[recipeKey] = true
+            end
+        end
+    end
+    local queued = false
+    for professionKey, group in pairs(groups) do
+        -- Hat inzwischen ein anderer geliefert - der zweite gewaehlte Bote
+        -- oder doch der Besitzer -, schweigt dieser hier.
+        if not (GC.Sync and GC.Sync.PeerAnsweredSince
+            and GC.Sync:PeerAnsweredSince("WDETAIL|" .. crafterKey .. "|" .. professionKey,
+                scheduledAt)) then
+            self:QueueProfessionSync({
+                key = professionKey,
+                name = group.profession.name,
+                updatedAt = group.profession.updatedAt,
+                -- Ein alter Indexeintrag ohne Fingerabdruck bekommt "0": Der
+                -- verliert beim Empfaenger jeden Gleichstand, die
+                -- Katalogdetails kommen trotzdem an - genau richtig fuer
+                -- eine Nachlieferung.
+                fingerprintHash = group.profession.fingerprintHash or "0",
+                recipes = group.recipes,
+            }, true, nil, nil, crafterEntry.name or crafterName, group.filter)
+            queued = true
+        end
+    end
+    return queued
+end
+
 -- Manifest fuer den Gildenkanal: je Beruf des Accounts nur Hersteller,
 -- Zeitstempel, Anzahl und Fingerabdruck. Wer nichts Neues hat, kostet damit ein
 -- Paket pro Login statt einer vollen Schluesselliste.
@@ -2252,18 +2351,23 @@ function GC.Workshop:SendKeyListRequest(wanted)
     end
     self.suppressedKeyRequests = self.suppressedKeyRequests or {}
     local now = GC.Util.Now()
-    local byCrafter = {}
+    -- Gruppiert je Hersteller UND Boten: Eine Anfrage an den Besitzer traegt
+    -- kein sechstes Feld, eine an einen Boten dessen Namen - beides fuer
+    -- denselben Hersteller zu mischen ergaebe zwei halbe Nachrichten.
+    local groups = {}
     local order = {}
     for _, entry in ipairs(wanted or {}) do
         local suppressKey = GC.Util.PlayerKey(entry.crafter) .. "|" .. entry.professionKey
         local suppressedAt = self.suppressedKeyRequests[suppressKey]
         if not suppressedAt or (now - suppressedAt) > MISSING_REQUEST_SUPPRESS then
             self.suppressedKeyRequests[suppressKey] = now
-            if not byCrafter[entry.crafter] then
-                byCrafter[entry.crafter] = {}
-                order[#order + 1] = entry.crafter
+            local relayTarget = GC.Util.Trim(entry.relayTarget)
+            local groupKey = entry.crafter .. "\031" .. relayTarget
+            if not groups[groupKey] then
+                groups[groupKey] = { crafter = entry.crafter, relayTarget = relayTarget, keys = {} }
+                order[#order + 1] = groupKey
             end
-            local list = byCrafter[entry.crafter]
+            local list = groups[groupKey].keys
             -- Angefragt wird mit dem Schluessel, den der Angesprochene selbst
             -- gemeldet hat - nur den versteht auch ein Altclient sicher.
             list[#list + 1] = entry.requestKey or entry.professionKey
@@ -2272,14 +2376,22 @@ function GC.Workshop:SendKeyListRequest(wanted)
     if #order == 0 then
         return false
     end
-    for _, crafter in ipairs(order) do
-        local message = BuildMessage({
+    for _, groupKey in ipairs(order) do
+        local group = groups[groupKey]
+        local fields = {
             "W",
             GC.Constants.SCHEMA_VERSION,
             "KR",
-            GC.Util.SafeChatText(GC.Util.Trim(crafter), 40),
-            table.concat(byCrafter[crafter], ","),
-        })
+            GC.Util.SafeChatText(GC.Util.Trim(group.crafter), 40),
+            table.concat(group.keys, ","),
+        }
+        -- Das sechste Feld adressiert einen Boten: Der Genannte antwortet aus
+        -- seinem Herstellerindex, alle anderen schweigen. Aeltere Clients
+        -- lesen das Feld nicht - sie antworten wie bisher nur als Besitzer.
+        if group.relayTarget ~= "" then
+            fields[6] = GC.Util.SafeChatText(group.relayTarget, 40)
+        end
+        local message = BuildMessage(fields)
         if #message <= GC.Constants.MAX_CHAT_BYTES then
             GC.Sync:SendBulk(message, "GUILD")
         end
@@ -2421,6 +2533,12 @@ local function SupportsCoverageWorkshop(sender)
     local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
     local capabilities = user and tostring(user.capabilities or "") or ""
     return ("," .. capabilities .. ","):find(",workshop5,", 1, true) ~= nil
+end
+
+local function SupportsRelayWorkshop(sender)
+    local user = GC.Sync and GC.Sync.GetAddonUser and GC.Sync:GetAddonUser(sender)
+    local capabilities = user and tostring(user.capabilities or "") or ""
+    return ("," .. capabilities .. ","):find(",workshop6,", 1, true) ~= nil
 end
 
 function GC.Workshop:ReceiveSync(fields, sender, distribution)
@@ -2585,12 +2703,21 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         return
     elseif operation == "CM" then
         -- Ein Bestandsmanifest: Wissen aus zweiter Hand darueber, welche
-        -- Hersteller es in der Gilde gibt. Es loest KEINE Anforderung aus -
-        -- die Daten kann nur der Besitzer liefern, und der ist gerade nicht
-        -- da, sonst haette sein eigenes Manifest laengst gegriffen. Gemerkt
-        -- wird nur die Luecke; sie haelt die Statuszeile ehrlich und raeumt
-        -- sich weg, sobald die Daten wirklich eintreffen.
+        -- Hersteller es in der Gilde gibt. Gemerkt wird die Luecke - sie haelt
+        -- die Statuszeile ehrlich und raeumt sich weg, sobald die Daten
+        -- eintreffen.
+        --
+        -- Und seit dem Botendienst wird sie auch gefuellt: Der Absender hat
+        -- die Staende nachweislich (er hat sie gerade aufgezaehlt) und ist
+        -- nachweislich online. Kann er adressierte Anfragen beantworten
+        -- (workshop6), wird die Schluesselliste direkt BEI IHM angefordert -
+        -- der Besitzer muss dafuer nicht mehr online kommen. Bei einem
+        -- aelteren Absender bleibt es beim blossen Wissen: Er liesse die
+        -- adressierte Anfrage stumm liegen, und der Zyklus endete grundlos
+        -- als "unvollstaendig".
         local changed = false
+        local wanted = {}
+        local relayCapable = SupportsRelayWorkshop(sender)
         for record in tostring(fields[4] or ""):gmatch("[^;]+") do
             local crafter, professionKey, updatedText, countText, fingerprint =
                 record:match("^([^,]+),([^,]+),(%d+),(%d+),(%d+)$")
@@ -2605,8 +2732,26 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
                     reportedBy = sender,
                 }) then
                     changed = true
+                    if relayCapable then
+                        wanted[#wanted + 1] = {
+                            crafter = crafter,
+                            professionKey = NormalizeKey(professionKey),
+                            requestKey = professionKey,
+                            updatedAt = updatedAt,
+                            fingerprintHash = fingerprint,
+                            reportedBy = sender,
+                            relayTarget = sender,
+                        }
+                    end
                 end
             end
+        end
+        if #wanted > 0 then
+            -- Dieselbe Reihenfolge wie beim Manifest des Besitzers: erst
+            -- vormerken, dann anfragen - vorgemerkt bleibt die Luecke auch,
+            -- wenn die Anfrage gerade unterdrueckt ist.
+            self:NoteWanted(wanted)
+            self:ScheduleKeyListRequest(wanted)
         end
         if changed then
             GC:FireCallback("WORKSHOP_UPDATED")
@@ -2629,10 +2774,29 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         if wantedKey == "" or not next(requested) then
             return
         end
+        local ownAnswered = false
         for _, entry in ipairs(self:GetAccountProfessions()) do
             if GC.Util.PlayerKey(entry.crafter) == wantedKey
                 and requested[entry.profession.key] then
                 self:QueueKeyList(entry.profession, entry.crafter)
+                ownAnswered = true
+            end
+        end
+        -- Der Botendienst: Nennt das sechste Feld DIESEN Client, antwortet er
+        -- aus seinem Herstellerindex - mit dem Stand und den Zeitstempeln des
+        -- Besitzers, nicht mit eigenen. Es antwortet genau der eine Genannte;
+        -- alle anderen haben oben nur ihre Unterdrueckung gesetzt. So bleibt
+        -- die Regel auch bei 250 Online gewahrt: eine Frage, ein Antworter.
+        local relayTarget = GC.Util.Trim(fields[6] or "")
+        if not ownAnswered and relayTarget ~= ""
+            and GC.Util.PlayerKey(relayTarget) == GC.Util.PlayerKey(GC:GetPlayerFullName()) then
+            local crafterEntry = self:GetGuildWorkshop().crafters[wantedKey]
+            for professionKey in pairs(requested) do
+                local profession = crafterEntry and crafterEntry.professions
+                    and crafterEntry.professions[professionKey]
+                if profession then
+                    self:QueueKeyList(profession, crafterEntry.name or wantedCrafter)
+                end
             end
         end
         return
@@ -2659,10 +2823,20 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
         for _, recipeKey in ipairs(requestedKeys) do
             filter[recipeKey] = true
         end
+        local ownAnswered = false
         for _, entry in ipairs(self:GetAccountProfessions()) do
             if GC.Util.PlayerKey(entry.crafter) == wantedKey then
                 self:QueueProfessionSync(entry.profession, true, nil, nil, entry.crafter, filter)
+                ownAnswered = true
             end
+        end
+        -- Der Botendienst: Ist der Besitzer nicht da, liefern hoechstens zwei
+        -- Gewaehlte aus ihrem Katalog - gestreut, und wer inzwischen eine
+        -- fremde Lieferung sieht, schweigt. Bei 250 Online antwortet damit in
+        -- aller Regel genau einer statt des ganzen Raums.
+        if not ownAnswered and GC.Sync and GC.Sync.IsElectedResponder
+            and GC.Sync:IsElectedResponder(sender, RELAY_DETAIL_SLOTS) then
+            self:ScheduleRelayedRecipeAnswer(wantedCrafter, requestedKeys)
         end
         return
     elseif operation == "CD" then
@@ -2716,6 +2890,13 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     if crafterKey == "" then
         crafterName = sender
         crafterKey = senderKey
+    end
+    -- Ein laufender Detailtransfer zu diesem Beruf IST die Antwort, auf die
+    -- ein geplanter Bote wartet: Er sieht den Vermerk und schweigt. Schon das
+    -- erste Teilpaket zaehlt - auf das letzte zu warten hiesse, dass der
+    -- zweite Bote mitten im Transfer des ersten lossendet.
+    if operation ~= "K" and GC.Sync and GC.Sync.NotePeerAnswer then
+        GC.Sync:NotePeerAnswer("WDETAIL|" .. crafterKey .. "|" .. professionKey)
     end
     local now = GC.Util.Now()
     local incomingCount = 0

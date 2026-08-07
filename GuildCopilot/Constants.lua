@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.102",
+    VERSION = "0.9.103",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -85,6 +85,12 @@ GC.Capabilities = {
     -- welche Hersteller es in der Gilde gibt, auch wenn deren Besitzer gerade
     -- offline sind. Nur wer das meldet, bekommt auf "Q" ein solches Manifest.
     "workshop5",
+    -- workshop6: liefert als Bote auch die DATEN Dritter - beantwortet
+    -- adressierte Schluessellisten-Anfragen (sechstes KR-Feld) aus dem eigenen
+    -- Herstellerindex und Rezeptnachforderungen aus dem eigenen Katalog. Nur
+    -- an einen Absender mit diesem Kennzeichen wird eine adressierte Anfrage
+    -- gestellt; ein aelterer Client wuerde sie stumm liegen lassen.
+    "workshop6",
 }
 
 GC.ProfessionOptions = {

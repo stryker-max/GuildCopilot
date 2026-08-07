@@ -7,6 +7,28 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.103 – Addon
+
+**Neu**
+
+- **Rezeptdaten von Offline-Spielern kommen jetzt über Boten.** Meldet ein
+  Bestandsmanifest einen Hersteller, dessen Besitzer offline ist, fragt der
+  Client die Schlüsselliste direkt beim Melder an – und Rezeptdetails liefert
+  ein Gewählter aus seinem Katalog. Die Lieferung trägt immer den Stand und
+  die Zeitstempel des Besitzers; ein Bote kann einen neueren Stand nie
+  zurückdrehen. Wer selten mit anderen gleichzeitig online ist, bekommt den
+  vollen Katalog damit von jedem, der ihn hat.
+- **Gebaut für volle Gilden:** Auf eine Frage antwortet genau der eine
+  Adressierte oder höchstens zwei Gewählte – nie alle. Wer sieht, dass ein
+  anderer schon liefert, schweigt; wer die gleiche Lücke hat, erbt die
+  Antwort aus dem Gildenkanal, statt selbst zu fragen. Auch bei 250 Spielern
+  online bleibt der Kanal ruhig.
+- **„Daten anfragen“ quittiert sichtbar.** Der Balken zeigt sofort „Anfrage
+  gesendet – die Antworten treffen gestreut ein“, der Knopf zählt herunter
+  und sperrt sich solange. Vorher passierte bis zur ersten Antwort eine
+  halbe Minute lang sichtbar nichts, und der Klick wirkte wirkungslos.
+  Doppelklicks lösen keine zweite gildenweite Antwortwelle mehr aus.
+
 ## 0.9.102 – Addon
 
 **Neu**

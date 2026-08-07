@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.102",
+  "## Version: 0.9.103",
 ];
 
 for (const entry of requiredMetadata) {
@@ -396,6 +396,14 @@ const requiredImplementations = [
   // Berufsdefinitionen; der Assistent nimmt den ersten, den der Client kennt.
   ["Bergbau öffnet Schmelzen", /window = "Schmelzen", windowEnglish = "Smelting"/],
   ["Fensterzauber in der Clientsprache", /GC\.ProfessionWindowSpellCandidates/],
+  // Der Botendienst (0.9.103): Daten Dritter kommen adressiert oder von
+  // Gewählten - nie vom ganzen Raum.
+  ["adressierte Schlüssellisten-Anfrage", /relayTarget/],
+  ["Bote liefert aus dem Herstellerindex", /profession\.recipeKeys or profession\.recipes/],
+  ["Detail-Bote aus dem Katalog", /function GC\.Workshop:SendRelayedRecipeAnswer/],
+  ["Doppelantwort-Dämpfung", /"WDETAIL\|"/],
+  ["Quittung des Anfrage-Knopfs", /workshopRequestAckAt/],
+  ["gildenweite Anfrage wird gedrosselt", /lastGuildRequestAt/],
   ["einmaliger Hinweis nach Später", /function GC\.Onboarding:NoteLaterPressed/],
   ["Hinweisfenster mit dem Weg zurück", /function GC\.UI:ShowWizardLaterHint/],
   ["× und Später teilen sich den Schließweg", /function GC\.UI:HideWelcomeWithHint/],

@@ -8333,4 +8333,174 @@ do
     addon.Workshop.lostWants = cov_savedLost
 end
 
+-- === Botendienst: Daten Dritter kommen auch ohne deren Besitzer =============
+--
+-- Der Vollausbau nach dem Owner-Grundsatz vom 07.08.2026: Auch bei 250 Online
+-- in einer 500er-Gilde antwortet auf eine Frage genau ein Benannter oder ein,
+-- zwei Gewaehlte - nie der ganze Raum. Ein adressierter Bote liefert die
+-- Schluesselliste eines Offline-Herstellers aus seinem Index, Rezeptdetails
+-- kommen aus dem Katalog eines Gewaehlten, und wer eine fremde Lieferung
+-- sieht, schweigt.
+do
+    rel_savedBulk = addon.Sync.bulkOutstanding
+    rel_savedSerial = addon.Sync.serialPending
+    rel_savedFailed = addon.Sync.progressFailed
+    rel_savedStatus = addon.Sync.syncStatus
+    rel_savedWants = addon.Workshop.pendingWants
+    rel_savedLost = addon.Workshop.lostWants
+    rel_savedSendBulk = addon.Sync.SendBulk
+    rel_savedIsInGuild = IsInGuild
+    rel_workshop = addon.Workshop:GetGuildWorkshop()
+    rel_savedGaps = {}
+    for key, value in pairs(rel_workshop.coverageGaps) do
+        rel_savedGaps[key] = value
+        rel_workshop.coverageGaps[key] = nil
+    end
+    rel_guildData = addon.DB:GetGuild()
+    rel_savedUsers = rel_guildData.addonUsers
+    addon.Sync.bulkOutstanding = 0
+    addon.Sync.serialPending = 0
+    addon.Sync.progressFailed = 0
+    addon.Sync.syncStatus = nil
+    addon.Workshop.pendingWants = nil
+    addon.Workshop.lostWants = nil
+
+    -- Aufgezeichnet statt gesendet: Jede Botenantwort landet hier.
+    rel_sent = {}
+    addon.Sync.SendBulk = function(_, message)
+        rel_sent[#rel_sent + 1] = tostring(message)
+        return true
+    end
+
+    -- Ein Offline-Hersteller, dessen Stand dieser Client aus frueheren
+    -- Abgleichen kennt: Schluessel im Index, ein Rezept mit Details im Katalog.
+    rel_workshop.crafters.fernab = {
+        name = "Fernab",
+        professions = {
+            juwelenschleifen = {
+                key = "juwelenschleifen", name = "Juwelenschleifen",
+                updatedAt = 5000, fingerprintHash = "777",
+                recipeKeys = { I99010 = true, E99011 = true },
+            },
+        },
+    }
+    rel_workshop.catalog.I99010 = {
+        key = "I99010", itemID = 99010, name = "Relay-Ring",
+        professionKey = "juwelenschleifen", profession = "Juwelenschleifen",
+        reagents = { { itemID = 1234, count = 2 } },
+    }
+    addon.Workshop:InvalidateCatalog()
+
+    -- (a) Adressierte Schluessellisten-Anfrage: Nur der Genannte antwortet,
+    -- mit dem Stand und den Zeitstempeln des Besitzers.
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "KR",
+          "Fernab", "juwelenschleifen", addon:GetPlayerFullName() },
+        "Fragend-Realm", "GUILD")
+    addon.Workshop:PumpSyncQueue()
+    rel_keyList = table.concat(rel_sent, "\n")
+    assert(rel_keyList:find("|K|", 1, true) ~= nil,
+        "Der adressierte Bote liefert keine Schlüsselliste")
+    assert(rel_keyList:find("juwelenschleifen", 1, true) ~= nil
+            and rel_keyList:find("Fernab", 1, true) ~= nil,
+        "Die Botenliste nennt Beruf oder Hersteller nicht: " .. rel_keyList)
+    assert(rel_keyList:find("|5000|777|", 1, true) ~= nil,
+        "Die Botenliste trägt nicht den Stand des Besitzers: " .. rel_keyList)
+
+    -- Nennt das sechste Feld einen anderen, bleibt dieser Client stumm.
+    rel_sent = {}
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "KR",
+          "Fernab", "juwelenschleifen", "Jemandanders-Realm" },
+        "Fragend-Realm", "GUILD")
+    addon.Workshop:PumpSyncQueue()
+    assert(#rel_sent == 0, "Ein nicht adressierter Client antwortet trotzdem als Bote")
+
+    -- (b) Ein Bestandsmanifest von einem Boten, der Anfragen versteht
+    -- (workshop6): Aus der Luecke wird eine adressierte Anfrage an ihn.
+    rel_guildData.addonUsers = {
+        bote = { name = "Bote-Realm", seenAt = addon.Util.Now(),
+            schemaVersion = addon.Constants.SCHEMA_VERSION,
+            capabilities = table.concat(addon.Capabilities, ",") },
+    }
+    rel_sent = {}
+    addon.Workshop:ReceiveSync(
+        { "W", tostring(addon.Constants.SCHEMA_VERSION), "CM",
+          "Fernher,schneiderei,7000,3,555" },
+        "Bote-Realm", "GUILD")
+    rel_request = table.concat(rel_sent, "\n")
+    assert(rel_request:find("|KR|Fernher|schneiderei|Bote%-Realm") ~= nil,
+        "Die Luecke aus dem Bestandsmanifest wird nicht beim Boten angefragt: " .. rel_request)
+    assert(addon.Workshop:GetPendingWantCount() == 1,
+        "Die Botenanfrage ist nicht als offene Arbeit vorgemerkt")
+    addon.Workshop.pendingWants = nil
+    rel_workshop.coverageGaps = {}
+
+    -- (c) Rezeptdetails aus dem Katalog: nur vollstaendige Eintraege, mit dem
+    -- Stand des Besitzers - und nur, solange kein anderer geliefert hat.
+    rel_sent = {}
+    addon.Workshop:SendRelayedRecipeAnswer("Fernab", { "I99010", "E99011" }, addon.Util.Now())
+    addon.Workshop:PumpSyncQueue()
+    rel_details = table.concat(rel_sent, "\n")
+    assert(rel_details:find("|C|", 1, true) ~= nil and rel_details:find("I99010,", 1, true) ~= nil,
+        "Der Bote liefert das vollständige Katalogrezept nicht: " .. rel_details)
+    assert(rel_details:find("1234:2", 1, true) ~= nil,
+        "Die Botenlieferung trägt die Reagenzien nicht: " .. rel_details)
+    assert(rel_details:find("E99011", 1, true) == nil,
+        "Der Bote liefert ein Rezept ohne vollständige Details")
+    assert(rel_details:find("|Fernab", 1, true) ~= nil,
+        "Die Botenlieferung nennt den Besitzer nicht: " .. rel_details)
+
+    addon.Sync:NotePeerAnswer("WDETAIL|fernab|juwelenschleifen")
+    rel_sent = {}
+    addon.Workshop:SendRelayedRecipeAnswer("Fernab", { "I99010" }, addon.Util.Now() - 1)
+    addon.Workshop:PumpSyncQueue()
+    assert(#rel_sent == 0, "Der zweite Bote liefert, obwohl schon einer geliefert hat")
+
+    -- (d) Der Anfrage-Knopf quittiert sichtbar und drosselt Doppelklicks.
+    IsInGuild = function()
+        return true
+    end
+    addon.Workshop.lastGuildRequestAt = nil
+    rel_ok, rel_message = addon.Workshop:RequestGuildData()
+    assert(rel_ok == true, "Die Werkstatt-Anfrage ließ sich nicht senden: " .. tostring(rel_message))
+    rel_ok, rel_message = addon.Workshop:RequestGuildData()
+    assert(rel_ok == false and tostring(rel_message):find("läuft schon", 1, true) ~= nil,
+        "Ein Doppelklick löst eine zweite gildenweite Anfrage aus")
+
+    rel_page = addon.UI.pages.WORKSHOP
+    rel_page.workshopRequestAckAt = addon.Util.Now()
+    addon.UI:RefreshSyncBar(true)
+    assert(rel_page.workshopStatus.value:find("Anfrage gesendet", 1, true) ~= nil,
+        "Der Balken quittiert die Anfrage nicht: " .. tostring(rel_page.workshopStatus.value))
+    assert(rel_page.workshopRequest.disabled == true,
+        "Der Knopf bleibt während der Quittung klickbar")
+    assert(tostring(rel_page.workshopRequest.label.value):find("Angefragt", 1, true) ~= nil,
+        "Der Knopf zählt die Quittung nicht herunter")
+    currentTime = currentTime + 40
+    addon.UI:RefreshSyncBar(true)
+    assert(rel_page.workshopRequest.disabled ~= true,
+        "Der Knopf bleibt nach Ablauf der Quittung gesperrt")
+    assert(rel_page.workshopRequest.label.value == "Daten anfragen",
+        "Der Knopf findet nicht zu seiner Beschriftung zurück")
+
+    -- Aufräumen.
+    rel_workshop.crafters.fernab = nil
+    rel_workshop.catalog.I99010 = nil
+    addon.Workshop:InvalidateCatalog()
+    rel_workshop.coverageGaps = {}
+    for key, value in pairs(rel_savedGaps) do
+        rel_workshop.coverageGaps[key] = value
+    end
+    rel_guildData.addonUsers = rel_savedUsers
+    addon.Sync.SendBulk = rel_savedSendBulk
+    IsInGuild = rel_savedIsInGuild
+    addon.Sync.bulkOutstanding = rel_savedBulk
+    addon.Sync.serialPending = rel_savedSerial
+    addon.Sync.progressFailed = rel_savedFailed
+    addon.Sync.syncStatus = rel_savedStatus
+    addon.Workshop.pendingWants = rel_savedWants
+    addon.Workshop.lostWants = rel_savedLost
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

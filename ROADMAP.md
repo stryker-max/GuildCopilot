@@ -298,6 +298,35 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.103 – Der Botendienst: Daten Dritter, aber nie der ganze Raum
+
+0.9.102 hatte die Lücke sichtbar gemacht und die Entscheidung offengelassen, ob sie auch aus zweiter Hand gefüllt werden soll. Der Owner hat sie noch am selben Tag getroffen: ja – Offline-Spieler werden über andere synchronisiert. Mit einer Vorgabe, die er als Grundsatz formuliert hat: Es muss auch gut gehen, wenn in einer 500er-Gilde 250 Leute online sind. Einer fragt in die Klasse, ein, zwei antworten – nicht 250, die durcheinanderreden.
+
+### Warum das die Autoritätsregel nicht bricht
+
+Die Sorge aus 0.9.102 war, dass Daten aus zweiter Hand die klare Regel „jeder meldet nur den eigenen Account“ aufweichen. Sie bleibt in dem Punkt bestehen, auf den es ankommt: Ein Bote erfindet keinen Stand, er reicht den STAND DES BESITZERS weiter – Hersteller (craftedBy), Zeitstempel und Fingerabdruck stammen unverändert aus dessen letztem Manifest. Die Übernahme beim Empfänger entscheidet damit nach derselben `ProfessionWins`-Regel wie immer, und ein Bote kann einen neueren Stand nie zurückdrehen; schlimmstenfalls liefert er einen älteren, der beim Empfänger schlicht verliert (die Katalogdetails nimmt der trotzdem mit, Reagenzien hängen nicht am Spieler). Genau dafür trägt jeder Transfer seit 0.9.26 das craftedBy-Feld – der Botendienst verallgemeinert nur, was für Twinks längst galt. Alte Clients verstehen die Lieferung deshalb ohne jede Änderung.
+
+### Drei Wege, alle mit genau einem Sprecher
+
+- **Adressierte Schlüssellisten-Anfrage.** Das KR-Paket trägt ein sechstes Feld: den Namen des Boten. Es antwortet GENAU der Genannte, aus seinem Herstellerindex (`BuildKeyListMessages` liest jetzt `recipeKeys` wie `recipes`); alle anderen setzen wie bisher nur ihre Unterdrückung. Ein alter Client liest das Feld nicht und bleibt stumm – deshalb wird nur adressiert, wer `workshop6` meldet, sonst endete der Zyklus grundlos als „unvollständig“.
+- **Die Lücke fragt sich selbst.** Ein Bestandsmanifest kommt von einem, der die Stände nachweislich hat und nachweislich online ist. Aus jeder gemerkten Lücke wird deshalb sofort eine Vormerkung samt adressierter Anfrage an den Absender – der Besitzer muss nicht mehr online kommen. Die 60-Sekunden-Unterdrückung sorgt dafür, dass von 250 Clients mit derselben Lücke nur der Schnellste fragt; die Antwort läuft über den Gildenkanal und heilt alle auf einmal.
+- **Rezeptdetails von Gewählten.** Eine Nachforderung („N“) beantworten neben dem Besitzer höchstens zwei Gewählte aus ihrem Katalog – nur Einträge mit vollständigen Reagenzien, nur Rezepte, die der Hersteller laut Index wirklich kann, und nur, wenn der Besitzer nicht selbst als Addon-Nutzer online ist. Gestreut über dasselbe Fenster wie die Manifestantworten, mit Doppelantwort-Dämpfung: Schon das erste Teilpaket einer fremden Lieferung setzt einen Vermerk (`NotePeerAnswer`, dieselbe Bauweise wie beim Gildenprofil), und wer ihn sieht, schweigt. In aller Regel liefert damit genau einer.
+
+Die Bestandsmanifest-Antwortenden selbst sind von drei auf zwei zurückgenommen – derselbe Grundsatz, und zwei reichen: In einer eingeschwungenen Gilde kennt jeder länger laufende Client den vollen Bestand.
+
+### Der Knopf, der nichts zu tun schien
+
+Aus demselben Gespräch: „Daten anfragen“ gab keine Rückmeldung. Die gab es dem Code nach – „der Erfolg steht im Balken darunter“ (0.9.86) –, nur sprang der Balken erst an, wenn die ERSTE Antwort eintraf, und die kommt mit bis zu 31 Sekunden Streuung. Eine halbe Minute sichtbares Nichts ist keine Rückmeldung. Der Balken trägt jetzt sofort die Quittung („Anfrage gesendet – die Antworten treffen gestreut ein“), der Knopf zählt sie herunter und sperrt sich solange; echter Fortschritt löst die Quittung ab, sobald er da ist. Dazu eine Drossel in `RequestGuildData` selbst: Ein Doppelklick löst keine zweite gildenweite Antwortwelle aus – die Antwortenden drosselten denselben Frager zwar schon (requestReplies), aber die Pakete gingen trotzdem raus.
+
+### Geändert
+
+- `Constants.lua`: Fähigkeit `workshop6`;
+- `Workshop.lua`: sechstes KR-Feld samt Botenantwort aus dem Herstellerindex, `BuildKeyListMessages` liest `recipeKeys` wie `recipes`, Bestandslücken aus „CM“ erzeugen Vormerkung und adressierte Anfrage (`relayTarget` bis in `SendKeyListRequest`), Detail-Boten (`ScheduleRelayedRecipeAnswer`/`SendRelayedRecipeAnswer`) mit Besitzer-Stand, Wahl und Dämpfung (`NotePeerAnswer`-Vermerk „WDETAIL“ beim Empfang), Bestandsmanifest-Antwortende von drei auf zwei, Anfrage-Drossel `lastGuildRequestAt`;
+- `UI.lua`: Quittung des Anfrage-Knopfs im Balken (`workshopRequestAckAt`, Countdown, Sperre), Lücken-Texte nennen den Boten statt „warten auf den Besitzer“;
+- `tests/smoke.lua`: adressierter Bote liefert mit Besitzer-Stand, Nicht-Adressierte schweigen, „CM“ erzeugt die adressierte Anfrage, Detail-Bote liefert nur Vollständiges und schweigt nach fremder Lieferung, Knopf quittiert, sperrt und drosselt; Gegenprobe gegen den 0.9.102-Stand schlägt fehl;
+- `tests/validate.mjs`: Muster für Botendienst, Dämpfung und Quittung;
+- `README.md`, `CHANGELOG.md`: Stand 0.9.103.
+
 ## 0.9.102 – „Vollständig synchronisiert“ war zweimal gelogen
 
 Ausgangspunkt war ein Screenshot-Vergleich des Owners vom 07.08.2026: Sein Client zeigt 1181 Rezepte von 25 Herstellern aus 16 Berufen und 25 bekannte Nutzer – Brooklees Client 767 Rezepte von 7 Herstellern aus 11 Berufen und 4 bekannte Nutzer. Beide Statuszeilen behaupteten dasselbe: „Vollständig synchronisiert • Stand: gerade eben.“ Zwei Ursachen, beide in dieser Fassung behoben – und die 16 Berufe im GRÖSSEREN Bestand waren gleich der Beleg für die dritte.
