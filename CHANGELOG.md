@@ -7,6 +7,35 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.104 – Addon
+
+**Neu**
+
+- **Fehlende Verzauberung direkt bestellen.** Auf der Ausrüstungsseite steht
+  am eigenen Charakter ein Bestellknopf, sobald ein verbesserbarer Slot eine
+  Empfehlung hat, die die Gilde herstellen kann: Der Regelsatz sagt, WAS
+  optimal wäre, die Werkstatt weiß, WER es kann – der Klick öffnet den
+  Auftragsdialog mit dem richtigen Rezept. Die Zuordnung Verzauberung → Rezept
+  ist für 27 Regelsatz-Verzauberungen einzeln per Wowhead belegt; was sich
+  nicht belegen ließ, macht schlicht keinen Vorschlag.
+- **Helfer neben dem Handelsfenster.** Beginnt ein Handel mit jemandem, mit
+  dem Gildenaufträge offen sind, zeigt ein kleines Fenster daneben, worum es
+  geht – samt demselben Aktionsknopf wie auf dem Auftragsboard („Gefertigt“,
+  „Erhalten“ …). Nichts wechselt den Status von selbst, und im Kampf bleibt
+  der Helfer weg.
+- **Flüsterbefehl „!rezept“.** Wer ihn in den Einstellungen einschaltet
+  (Vorgabe: aus – das Addon flüstert nie ungefragt), beantwortet
+  Gildenmitgliedern „!rezept mungo“ automatisch mit Materialliste und
+  Herstellern aus dem Katalog. Nur für Gildenmitglieder, gedrosselt je
+  Absender. Auch „!recipe“ und „!enchant“ funktionieren.
+- **Die Suche findet beide Sprachen.** Der Katalog-Suchtext trägt neben dem
+  übersetzten Namen jetzt auch die Schreibweise des Scanners: „boars speed“
+  und „Ebergeschwindigkeit“ treffen denselben Eintrag.
+
+Die Ideen zu Handelsfenster und Flüsterbefehl stammen aus dem Addon
+Pro Enchanters (GPLv3) – übernommen ist wie beim Werbebalken das Prinzip,
+nicht der Code.
+
 ## 0.9.103 – Addon
 
 **Neu**

@@ -677,6 +677,13 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
 end
 
 function GC.Chat:CaptureWhisper(message, sender, guid)
+    -- Werkstatt-Befehle zuerst: "!rezept <suche>" beantwortet der Katalog
+    -- (sofern eingeschaltet). Ein behandelter Befehl gehoert nie ins
+    -- Bewerber-Postfach - sonst laege jeder Rezeptfrager als Interessent da.
+    if GC.Workshop and GC.Workshop.AnswerRecipeWhisper
+        and GC.Workshop:AnswerRecipeWhisper(message, sender) then
+        return
+    end
     local settings = GC.DB:GetSettings()
     if settings.captureOnlyDuringSearch and not self:IsSessionActive() then
         return

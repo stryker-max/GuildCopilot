@@ -1729,7 +1729,7 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(2120)
+    content:SetHeight(2170)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -2119,6 +2119,27 @@ function GC.UI:BuildSettingsPage()
         height = 16,
     }):SetPoint("TOPLEFT", orderCard, "TOPLEFT", 18, -326)
 
+    -- Der Fluesterbefehl der Werkstatt ist bewusst AUS, bis ihn jemand
+    -- einschaltet: Das Addon fluestert sonst nie von selbst, und dabei soll
+    -- es ohne ausdrueckliche Entscheidung auch bleiben ("Datenschutz und
+    -- Fairness"). Die Karte haengt am Seitenende - unten anbauen verschiebt
+    -- keine der vermessenen Karten darueber.
+    local workshopCard = CreateCard(content, "Werkstatt")
+    workshopCard:SetSize(752, 110)
+    workshopCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2048)
+    page.workshopWhisperToggle = CreateToggle(workshopCard,
+        "Flüsterbefehl beantworten: „!rezept <Suche>“", function(checked)
+        GC.DB:GetSettings().workshopWhisperReply = checked
+    end)
+    page.workshopWhisperToggle:SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -52)
+    page.workshopWhisperToggle.text:SetWidth(420)
+    CreateLabel(workshopCard,
+        "Antwortet Gildenmitgliedern per Flüstern mit Materialliste und Herstellern aus dem Katalog, gedrosselt je Absender.", {
+        muted = true,
+        width = 716,
+        height = 16,
+    }):SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -84)
+
     -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
     local commandCard = CreateCard(content, "Chat-Befehle")
@@ -2244,6 +2265,7 @@ function GC.UI:RefreshSettings()
     SetToggle(page.orderBannerToggle, settings.orderBanner.enabled ~= false)
     page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
     page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
+    SetToggle(page.workshopWhisperToggle, settings.workshopWhisperReply == true)
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
@@ -6288,6 +6310,123 @@ function GC.UI:ToggleOrderTracker()
     self:RefreshOrdersBoard()
 end
 
+-- === Handelsfenster-Helfer ==================================================
+--
+-- Idee aus Pro Enchanters, umgesetzt fuers Auftragsboard: In TBC werden
+-- Verzauberungen im HANDELSFENSTER gewirkt, und auch Uebergaben laufen dort.
+-- Beginnt ein Handel mit jemandem, mit dem Auftraege offen sind, steht
+-- daneben, worum es geht - samt derselben Primaeraktion wie auf dem Board.
+-- Nichts passiert von selbst: Kein Status wechselt ohne Klick, und im Kampf
+-- erscheint der Helfer gar nicht erst.
+function GC.UI:CreateTradeBanner()
+    if self.tradeBanner then
+        return self.tradeBanner
+    end
+    local banner = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotTradeBanner")
+    banner:SetSize(344, 118)
+    banner:SetFrameStrata("MEDIUM")
+    banner:Hide()
+    banner.title = CreateLabel(banner, "Gildenaufträge",
+        { font = "GameFontNormalSmall", width = 320, height = 20 })
+    banner.title:SetPoint("TOPLEFT", banner, "TOPLEFT", 12, -7)
+    banner.rows = {}
+    for index = 1, 3 do
+        local row = CreateFrame("Frame", nil, banner)
+        row:SetSize(320, 40)
+        row:SetPoint("TOPLEFT", banner, "TOPLEFT", 12, -28 - ((index - 1) * 44))
+        row.label = CreateLabel(row, "", { width = 190, height = 40, vertical = "TOP" })
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -3)
+        row.action = CreateButton(row, "", 118, 30, function()
+            if row.run and row.orderID then
+                local ok, message = row.run(row.orderID)
+                if ok == false and message and message ~= "" then
+                    GC:Print("|cffff5555" .. tostring(message) .. "|r")
+                end
+                GC.UI:RefreshTradeBanner()
+            end
+        end)
+        row.action:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -3)
+        banner.rows[index] = row
+    end
+    self.tradeBanner = banner
+    return banner
+end
+
+function GC.UI:ShowTradeBanner()
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        return
+    end
+    -- Der Handelspartner steht in WoW an der NPC-Unit - so benennt der
+    -- Client nun einmal das Gegenueber eines Handels.
+    local partner = type(UnitName) == "function"
+        and (UnitName("NPC") or UnitName("npc")) or nil
+    if GC.Util.Trim(partner) == "" then
+        return
+    end
+    self.tradePartner = partner
+    self:RefreshTradeBanner()
+end
+
+function GC.UI:RefreshTradeBanner()
+    local partner = self.tradePartner
+    if not partner then
+        return
+    end
+    local orders = GC.Orders and GC.Orders.GetOrdersWithCounterpart
+        and GC.Orders:GetOrdersWithCounterpart(partner) or {}
+    if #orders == 0 then
+        if self.tradeBanner then
+            self.tradeBanner:Hide()
+        end
+        return
+    end
+    local banner = self:CreateTradeBanner()
+    banner.title:SetText("Gildenaufträge mit " .. GC.Util.PlayerShortName(partner))
+    local visible = 0
+    for index, row in ipairs(banner.rows) do
+        local order = orders[index]
+        if order then
+            row.label:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1)
+                .. "\n" .. ColoredOrderStatus(order))
+            local actionLabel, run = OrderPrimaryAction(order)
+            row.orderID = order.id
+            row.run = run
+            row.action:SetText(actionLabel or "")
+            row.action:SetShown(run ~= nil)
+            row:Show()
+            visible = visible + 1
+        else
+            row:Hide()
+        end
+    end
+    banner:SetHeight(34 + (visible * 44) + 4)
+    banner:ClearAllPoints()
+    if TradeFrame then
+        banner:SetPoint("TOPLEFT", TradeFrame, "TOPRIGHT", 6, -12)
+    else
+        banner:SetPoint("LEFT", UIParent, "LEFT", 340, 80)
+    end
+    banner:Show()
+end
+
+function GC.UI:HideTradeBanner()
+    self.tradePartner = nil
+    if self.tradeBanner then
+        self.tradeBanner:Hide()
+    end
+end
+
+local tradeEvents = CreateFrame("Frame")
+tradeEvents:RegisterEvent("TRADE_SHOW")
+tradeEvents:RegisterEvent("TRADE_CLOSED")
+tradeEvents:SetScript("OnEvent", function(_, event)
+    if event == "TRADE_SHOW" then
+        GC.UI:ShowTradeBanner()
+    elseif event == "TRADE_CLOSED" then
+        GC.UI:HideTradeBanner()
+    end
+end)
+
 -- === Bildschirmmeldung ======================================================
 -- Eine eigene, gut lesbare Raidwarnung für neue machbare Gildenaufträge -
 -- ohne Hintergrundkasten, mit dicker Kontur und Schatten für den Kontrast.
@@ -8702,6 +8841,35 @@ function GC.UI:BuildGearPage()
     local detailCard = CreateCard(page, "Slots")
     detailCard:SetSize(526, 358)
     detailCard:SetPoint("TOPLEFT", page, "TOPLEFT", 250, -172)
+    -- Die Bruecke zur Werkstatt (Pro-Enchanters-Gedanke, gildenfest gemacht):
+    -- Der erste verbesserbare EIGENE Slot bekommt einen Bestellknopf. Was
+    -- dahintersteckt, sagt der Tooltip; der Klick oeffnet den ueblichen
+    -- Auftragsdialog mit dem empfohlenen Rezept.
+    page.gearOrderButton = CreateButton(detailCard, "Verzauberung bestellen", 200, 26, function()
+        local target = page.gearOrderTarget
+        if target and GC.UI.OpenOrderCreateDialog then
+            GC.UI:OpenOrderCreateDialog(target.recipeKey)
+        end
+    end, "PRIMARY")
+    page.gearOrderButton:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -8)
+    page.gearOrderButton:Hide()
+    page.gearOrderButton:HookScript("OnEnter", function(button)
+        local target = page.gearOrderTarget
+        if not GameTooltip or not target then
+            return
+        end
+        GameTooltip:SetOwner(button, "ANCHOR_TOP")
+        GameTooltip:SetText("Empfehlung des Regelsatzes")
+        GameTooltip:AddLine(target.slotLabel .. ": " .. (target.ruleName or "?"), 1, 1, 1, true)
+        GameTooltip:AddLine("Können: " .. table.concat(target.crafters or {}, ", "),
+            0.57, 0.64, 0.72, true)
+        GameTooltip:Show()
+    end)
+    page.gearOrderButton:HookScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
     page.gearHeadline = CreateLabel(detailCard, "", { muted = true, width = 480, height = 18 })
     page.gearHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
     page.gearFindings = CreateLabel(detailCard, "", { width = 488, height = 52, vertical = "TOP" })
@@ -8965,6 +9133,35 @@ function GC.UI:RefreshGear()
                 .. GC.GearAudit:DescribeSpec(selected.specKey)
                 .. "|r: Optimal, Solide, Verbesserbar, keine Bewertung.")
             or "Spec unbekannt – ein Klick bewertet für alle Specs.")
+    end
+
+    -- Die Bruecke zur Werkstatt: Fuer den EIGENEN Charakter empfiehlt der
+    -- erste verbesserbare Slot, was der Regelsatz vorsieht und was die Gilde
+    -- herstellen kann. Fremde Funde bleiben ohne Knopf - bestellen kann nur
+    -- jeder fuer sich.
+    page.gearOrderTarget = nil
+    if selected and GC.Util.NormalizeName(selected.name or "")
+        == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
+        for _, entry in ipairs(slots) do
+            if entry.verdict == "MISSING" or entry.verdict == "IMPROVABLE" then
+                local orderable = GC.GearAudit:GetOrderableEnchant(entry.key, selected.specKey)
+                if orderable then
+                    page.gearOrderTarget = {
+                        recipeKey = orderable.recipeKey,
+                        ruleName = orderable.rule.name,
+                        slotLabel = entry.label,
+                        crafters = orderable.entry.crafters,
+                    }
+                    break
+                end
+            end
+        end
+    end
+    if page.gearOrderButton then
+        page.gearOrderButton:SetShown(page.gearOrderTarget ~= nil)
+        if page.gearOrderTarget then
+            page.gearOrderButton:SetText("Bestellen: " .. page.gearOrderTarget.slotLabel)
+        end
     end
     for index, row in ipairs(page.gearSlotRows) do
         local entry = slots[index]
@@ -10905,6 +11102,11 @@ GC:RegisterCallback("ORDERS_UPDATED", GC.UI, function(self)
     self:Invalidate("WORKSHOP")
     self:RefreshMinimapMarker()
     self:RefreshOrderTracker()
+    -- Ein Statuswechsel waehrend eines offenen Handels frischt den Helfer
+    -- daneben auf - auch wenn ihn der Handelspartner ausgeloest hat.
+    if self.tradePartner then
+        self:RefreshTradeBanner()
+    end
     if self.pages.WORKSHOP and self.pages.WORKSHOP.orderLogDialog then
         self:RefreshOrderLogDialog()
     end

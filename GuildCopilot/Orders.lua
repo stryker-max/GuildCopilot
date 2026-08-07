@@ -275,6 +275,37 @@ function GC.Orders:GetCounterpartCharacter(order)
     return fallback
 end
 
+-- Die Auftraege, die zwischen diesem Account und dem Handelspartner offen
+-- sind - fuer den Helfer neben dem Handelsfenster. "Offen" heisst: Einer von
+-- beiden schuldet dem anderen noch eine Handlung. OPEN faellt bewusst raus,
+-- dort gibt es noch keinen Gegenpart und nichts zu uebergeben.
+function GC.Orders:GetOrdersWithCounterpart(partnerName)
+    local results = {}
+    if GC.Util.Trim(partnerName) == "" then
+        return results
+    end
+    local ownName = GC:GetPlayerFullName()
+    local relevant = {
+        ACCEPTED = true, WORKING = true, CRAFTED = true,
+        SHIPPED = true, RECEIVED = true,
+    }
+    for _, order in pairs(self:GetStore()) do
+        if relevant[order.status] then
+            local ownCreator = self:IsCreatorCharacter(order, ownName)
+            local ownAcceptor = self:IsAcceptorCharacter(order, ownName)
+            local partnerCreator = self:IsCreatorCharacter(order, partnerName)
+            local partnerAcceptor = self:IsAcceptorCharacter(order, partnerName)
+            if (ownCreator and partnerAcceptor) or (ownAcceptor and partnerCreator) then
+                results[#results + 1] = order
+            end
+        end
+    end
+    table.sort(results, function(left, right)
+        return (tonumber(left.changedAt) or 0) > (tonumber(right.changedAt) or 0)
+    end)
+    return results
+end
+
 -- === Statistik ==============================================================
 -- Zaehlt abgeschlossene Auftraege je Hersteller und Auftraggeber. Gezaehlt
 -- wird beim Uebergang auf ABGESCHLOSSEN, je Auftrag genau einmal (die Liste

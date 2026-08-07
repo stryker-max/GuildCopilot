@@ -2209,6 +2209,87 @@ function GC.Workshop:SendRelayedRecipeAnswer(crafterName, recipeKeys, scheduledA
     return queued
 end
 
+-- === Fluesterbefehl "!rezept" ===============================================
+--
+-- Nach dem Vorbild von Pro Enchanters (dort "!enchant ..."), aber als
+-- Gildendienst statt Handelsgeschaeft: Ein Gildenmitglied fluestert
+-- "!rezept <suche>" und bekommt Materialliste und Hersteller aus dem Katalog.
+-- Selbst gebaut auf der eigenen Suche - der Katalog kann das laengst, es
+-- fehlte nur der Chat-Zugang fuer Leute ohne das Addon.
+--
+-- Drei bewusste Grenzen: Das Addon fluestert NIE von selbst, solange der
+-- Schalter aus ist (Vorgabe: aus - "keine heimliche Chateingabe" gilt auch
+-- fuer Antworten). Es antwortet nur Gildenmitgliedern - der Katalog ist
+-- Gildenwissen. Und je Absender hoechstens alle RECIPE_WHISPER_THROTTLE
+-- Sekunden, damit niemand einen Antwortautomaten melken kann.
+
+local RECIPE_WHISPER_PREFIXES = { "!rezept ", "!recipe ", "!enchant " }
+local RECIPE_WHISPER_THROTTLE = 20
+local MAX_RECIPE_WHISPER_SENDERS = 60
+
+function GC.Workshop:AnswerRecipeWhisper(message, sender)
+    message = tostring(message or "")
+    local query
+    local lowered = message:lower()
+    for _, prefix in ipairs(RECIPE_WHISPER_PREFIXES) do
+        if lowered:sub(1, #prefix) == prefix then
+            query = GC.Util.Trim(message:sub(#prefix + 1))
+            break
+        end
+    end
+    if not query then
+        return false
+    end
+
+    -- Ab hier gilt die Nachricht als behandelt: Ein Befehl gehoert nie ins
+    -- Bewerber-Postfach, auch wenn die Antwort unterbleibt.
+    if GC.DB:GetSettings().workshopWhisperReply ~= true or query == "" then
+        return true
+    end
+    if #GC.Roster.members > 0 and not GC.Roster:IsGuildMember(sender) then
+        return true
+    end
+    local senderKey = GC.Util.PlayerKey(sender)
+    local now = GC.Util.Now()
+    self.recipeWhisperReplies = self.recipeWhisperReplies or {}
+    PruneSuppressed(self.recipeWhisperReplies, RECIPE_WHISPER_THROTTLE,
+        MAX_RECIPE_WHISPER_SENDERS)
+    local last = self.recipeWhisperReplies[senderKey]
+    if senderKey == "" or (last and (now - last) < RECIPE_WHISPER_THROTTLE) then
+        return true
+    end
+    self.recipeWhisperReplies[senderKey] = now
+
+    local matches = self:GetCatalog(query)
+    local reply
+    if #matches == 0 then
+        reply = "Guild Copilot: Zu „" .. GC.Util.SafeChatText(query, 40)
+            .. "“ steht nichts im Gildenkatalog."
+    else
+        local entry = matches[1]
+        local parts = {}
+        for _, reagent in ipairs(entry.reagents or {}) do
+            parts[#parts + 1] = tostring(reagent.count or 1) .. "×"
+                .. ResolveItemName(reagent.itemID, reagent.name)
+        end
+        local crafters = {}
+        for index = 1, math.min(3, #entry.crafters) do
+            crafters[index] = entry.crafters[index]
+        end
+        if #entry.crafters > #crafters then
+            crafters[#crafters + 1] = "+" .. (#entry.crafters - #crafters) .. " weitere"
+        end
+        reply = "Guild Copilot: " .. entry.name
+            .. (#parts > 0 and (" – Mats: " .. table.concat(parts, ", ")) or "")
+            .. (#entry.crafters > 0 and (" – können: " .. table.concat(crafters, ", ")) or "")
+            .. (#matches > 1 and (" (+" .. (#matches - 1) .. " Treffer)") or "")
+    end
+    if GC.Chat and GC.Chat.SendChat then
+        GC.Chat:SendChat(GC.Util.SafeChatText(reply), "WHISPER", nil, nil, sender)
+    end
+    return true
+end
+
 -- Manifest fuer den Gildenkanal: je Beruf des Accounts nur Hersteller,
 -- Zeitstempel, Anzahl und Fingerabdruck. Wer nichts Neues hat, kostet damit ein
 -- Paket pro Login statt einer vollen Schluesselliste.
@@ -3067,6 +3148,13 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
                 entry = {
                     key = recipeKey,
                     name = ResolveRecipeName(recipeKey, recipe.name),
+                    -- Der Name, wie ihn der Scanner-Client geschrieben hat. Er
+                    -- wandert mit in den Suchtext: Ein englischer Client hat
+                    -- "Boar's Speed" gespeichert, dieser hier loest
+                    -- "Ebergeschwindigkeit" auf - gefunden werden muss beides,
+                    -- sonst suchen deutsche und englische Gildennutzer
+                    -- aneinander vorbei.
+                    scannedName = recipe.name,
                     itemID = recipe.itemID,
                     profession = profession.name or recipe.profession or "Unbekannt",
                     reagents = GC.Util.DeepCopy(recipe.reagents or {}),
@@ -3076,6 +3164,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
                 catalog[recipeKey] = entry
             else
                 entry.name = ResolveRecipeName(recipeKey, entry.name or recipe.name)
+                entry.scannedName = entry.scannedName or recipe.name
             end
             local crafterKey = GC.Util.PlayerKey(crafterName)
             if not entry.crafterKeys[crafterKey] then
@@ -3136,6 +3225,7 @@ function GC.Workshop:GetCatalogIndex()
                     entry = {
                         key = recipeKey,
                         name = ResolveRecipeName(recipeKey, known and known.name),
+                        scannedName = known and known.name,
                         itemID = known and known.itemID,
                         profession = (known and known.profession)
                             or profession.name or "Unbekannt",
@@ -3161,8 +3251,17 @@ function GC.Workshop:GetCatalogIndex()
     local byKey = {}
     for _, entry in pairs(catalog) do
         table.sort(entry.crafters)
+        -- Der Suchtext traegt BEIDE Namen, wenn Scanner- und Anzeigesprache
+        -- auseinanderliegen: aufgeloest in der Sprache dieses Clients, dazu
+        -- die Schreibweise des Scanners. So findet "boars speed" denselben
+        -- Eintrag wie "ebergeschwindigkeit".
+        local scannedPart = ""
+        if entry.scannedName and entry.scannedName ~= entry.name then
+            scannedPart = " " .. entry.scannedName
+        end
         entry.searchable = NormalizeKey(
-            entry.name .. " " .. entry.profession .. " " .. table.concat(entry.crafters, " "))
+            entry.name .. scannedPart .. " " .. entry.profession
+                .. " " .. table.concat(entry.crafters, " "))
         entry.professionKey = NormalizeKey(entry.profession)
         entries[#entries + 1] = entry
         byKey[entry.key] = entry

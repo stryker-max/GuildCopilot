@@ -8503,4 +8503,137 @@ do
     addon.Workshop.lostWants = rel_savedLost
 end
 
+-- === Pro-Enchanters-Gedanken, gildenfest gemacht ============================
+--
+-- Vier Bausteine aus 0.9.104: zweisprachiger Suchindex, Handelsfenster-Helfer,
+-- Fluesterbefehl "!rezept" und die Bruecke Ausruestungspruefung -> Werkstatt.
+do
+    pe_workshop = addon.Workshop:GetGuildWorkshop()
+    pe_savedSpellInfo = GetSpellInfo
+
+    -- (1) Zweisprachiger Suchindex: Der Scanner schrieb englisch, dieser
+    -- Client loest deutsch auf - gefunden werden muss beides.
+    pe_workshop.crafters.zweisprach = {
+        name = "Zweisprach",
+        professions = {
+            verzauberkunst = {
+                key = "verzauberkunst", name = "Verzauberkunst",
+                updatedAt = 4000, fingerprintHash = "5",
+                recipeKeys = { E99123 = true },
+            },
+        },
+    }
+    pe_workshop.catalog.E99123 = {
+        key = "E99123", recipeID = 99123, name = "Enchant Boots - Boar's Speed",
+        professionKey = "verzauberkunst", profession = "Verzauberkunst",
+        reagents = { { itemID = 22449, count = 2 } },
+    }
+    GetSpellInfo = function(spellID)
+        if tonumber(spellID) == 99123 then
+            return "Stiefel verzaubern - Ebergeschwindigkeit"
+        end
+        if pe_savedSpellInfo then
+            return pe_savedSpellInfo(spellID)
+        end
+    end
+    addon.Workshop:InvalidateCatalog()
+    assert(#addon.Workshop:GetCatalog("ebergeschwindigkeit") == 1,
+        "Der aufgelöste deutsche Name ist nicht suchbar")
+    assert(#addon.Workshop:GetCatalog("boars speed") == 1,
+        "Die Schreibweise des Scanners ist nicht mehr suchbar")
+
+    -- (2) Fluesterbefehl: aus ist aus, an antwortet mit Mats und Herstellern,
+    -- die Drossel verhindert das Melken, Fremde bleiben ohne Antwort.
+    pe_sentWhispers = {}
+    pe_savedSendChat = addon.Chat.SendChat
+    addon.Chat.SendChat = function(_, text, chatType, _, _, target)
+        pe_sentWhispers[#pe_sentWhispers + 1] = { text = text, chatType = chatType, target = target }
+        return true
+    end
+    addon.DB:GetSettings().workshopWhisperReply = nil
+    assert(addon.Workshop:AnswerRecipeWhisper("!rezept boars", "Heiler-Realm") == true,
+        "Ein Befehl gilt bei ausgeschaltetem Schalter nicht als behandelt")
+    assert(#pe_sentWhispers == 0, "Das Addon flüstert trotz ausgeschaltetem Schalter")
+    assert(addon.Workshop:AnswerRecipeWhisper("Hallo, sucht ihr noch Leute?", "Heiler-Realm") == false,
+        "Eine gewöhnliche Nachricht wird als Werkstattbefehl geschluckt")
+
+    addon.DB:GetSettings().workshopWhisperReply = true
+    addon.Workshop.recipeWhisperReplies = nil
+    assert(addon.Workshop:AnswerRecipeWhisper("!rezept boars speed", "Heiler-Realm") == true,
+        "Der eingeschaltete Befehl wird nicht behandelt")
+    assert(#pe_sentWhispers == 1, "Die Antwort auf den Befehl fehlt")
+    assert(pe_sentWhispers[1].chatType == "WHISPER" and pe_sentWhispers[1].target == "Heiler-Realm",
+        "Die Antwort geht nicht als Flüstern an den Frager")
+    assert(pe_sentWhispers[1].text:find("Ebergeschwindigkeit", 1, true) ~= nil
+            and pe_sentWhispers[1].text:find("2×", 1, true) ~= nil
+            and pe_sentWhispers[1].text:find("Zweisprach", 1, true) ~= nil,
+        "Die Antwort nennt Rezept, Mats oder Hersteller nicht: " .. pe_sentWhispers[1].text)
+    assert(addon.Workshop:AnswerRecipeWhisper("!rezept boars", "Heiler-Realm") == true
+            and #pe_sentWhispers == 1,
+        "Die Drossel je Absender greift nicht")
+    assert(addon.Workshop:AnswerRecipeWhisper("!rezept boars", "Fremder-Realm") == true
+            and #pe_sentWhispers == 1,
+        "Ein Gildenfremder bekommt eine Katalogantwort")
+    addon.DB:GetSettings().workshopWhisperReply = nil
+
+    -- (3) Handelsfenster-Helfer: Aufträge mit genau diesem Partner, samt
+    -- Primäraktion; ohne Aufträge bleibt der Helfer weg.
+    pe_orderStore = addon.Orders:GetStore()
+    pe_orderStore["pe-test-1"] = {
+        id = "pe-test-1", rev = 1, status = "CRAFTED",
+        recipeKey = "E99123", recipeName = "Enchant Boots - Boar's Speed",
+        quantity = 1, createdBy = addon:GetPlayerFullName(),
+        createdByTag = addon.DB:GetAccountTag(), createdAt = addon.Util.Now(),
+        changedAt = addon.Util.Now(), materialModel = "A", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "", acceptedByTag = "fremdtag",
+        acceptedAt = addon.Util.Now(), crafter = "Wooza-Realm", acceptedVia = "",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0, craftedCount = 1,
+        preferredCrafter = "", log = {},
+    }
+    pe_matches = addon.Orders:GetOrdersWithCounterpart("Wooza-Realm")
+    assert(#pe_matches == 1 and pe_matches[1].id == "pe-test-1",
+        "Der Auftrag mit dem Handelspartner wird nicht gefunden")
+    assert(#addon.Orders:GetOrdersWithCounterpart("Unbeteiligt-Realm") == 0,
+        "Ein Unbeteiligter bekommt fremde Aufträge angezeigt")
+
+    unitNames.NPC = "Wooza-Realm"
+    addon.UI:ShowTradeBanner()
+    assert(addon.UI.tradeBanner ~= nil and addon.UI.tradeBanner.shown == true,
+        "Der Handelsfenster-Helfer erscheint nicht")
+    assert(addon.UI.tradeBanner.rows[1].label.value:find("Boar's Speed", 1, true) ~= nil,
+        "Der Helfer nennt den Auftrag nicht: " .. tostring(addon.UI.tradeBanner.rows[1].label.value))
+    assert(addon.UI.tradeBanner.rows[1].action.label.value == "Erhalten",
+        "Die Primäraktion des Auftraggebers fehlt: "
+            .. tostring(addon.UI.tradeBanner.rows[1].action.label.value))
+    addon.UI:HideTradeBanner()
+    assert(addon.UI.tradeBanner.shown == false, "Der Helfer verschwindet nach dem Handel nicht")
+    pe_orderStore["pe-test-1"] = nil
+    unitNames.NPC = nil
+
+    -- (4) Die Bruecke: Für einen verbesserbaren Slot empfiehlt der Regelsatz
+    -- eine bestellbare Verzauberung samt Hersteller.
+    pe_workshop.catalog.E34007 = {
+        key = "E34007", recipeID = 34007, name = "Enchant Boots - Cat's Swiftness",
+        professionKey = "verzauberkunst", profession = "Verzauberkunst",
+        reagents = { { itemID = 22449, count = 8 } },
+    }
+    pe_workshop.crafters.zweisprach.professions.verzauberkunst.recipeKeys.E34007 = true
+    addon.Workshop:InvalidateCatalog()
+    pe_orderable = addon.GearAudit:GetOrderableEnchant("FEET", "HUNTER:2")
+    assert(pe_orderable ~= nil and pe_orderable.recipeKey == "E34007",
+        "Für die Stiefel eines Jägers wird keine bestellbare Verzauberung gefunden")
+    assert(pe_orderable.rule.verdict == "OPTIMAL",
+        "Die Brücke bevorzugt nicht die optimale Empfehlung")
+    assert(addon.GearAudit:GetOrderableEnchant("TRINKET1", "HUNTER:2") == nil,
+        "Für Schmuck gibt es plötzlich eine Verzauberungs-Empfehlung")
+
+    -- Aufräumen.
+    pe_workshop.crafters.zweisprach = nil
+    pe_workshop.catalog.E99123 = nil
+    pe_workshop.catalog.E34007 = nil
+    addon.Workshop:InvalidateCatalog()
+    addon.Chat.SendChat = pe_savedSendChat
+    GetSpellInfo = pe_savedSpellInfo
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

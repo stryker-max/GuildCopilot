@@ -560,6 +560,46 @@ function GC.GearAudit:SetContentPhase(phaseKey)
     return true, "Die Gilde spielt jetzt in Phase " .. GC.ContentPhaseByKey[phaseKey].label .. "."
 end
 
+-- === Bestellbare Empfehlung =================================================
+--
+-- Die Bruecke zur Werkstatt: Fuer einen eigenen Slot die beste Verzauberung,
+-- die der Regelsatz fuer diese Spec empfiehlt UND die in der Gilde wirklich
+-- zu bestellen ist (Zuordnung GC.EnchantRecipeKeys, Hersteller im Katalog).
+-- OPTIMAL schlaegt SOLID; unter Gleichen entscheidet die kleinste Enchant-ID,
+-- damit jeder Aufruf dieselbe Empfehlung nennt.
+function GC.GearAudit:GetOrderableEnchant(slotKey, specKey)
+    if not GC.EnchantRecipeKeys or not GC.Workshop then
+        return nil
+    end
+    local spec = GC.SpecByKey[specKey or ""]
+    local role = spec and spec.role or nil
+    -- RuleApplies liest slot.key - es erwartet den Slot-EINTRAG, nicht den
+    -- blossen Schluessel.
+    local slot = { key = slotKey }
+    local best
+    for enchantID, rule in pairs(GC.EnchantRuleSet.rules) do
+        if (rule.verdict == "OPTIMAL" or rule.verdict == "SOLID")
+            and self:RuleApplies(rule, slot, role, specKey) then
+            local recipeKey = GC.EnchantRecipeKeys[enchantID]
+            local entry = recipeKey and GC.Workshop:GetCatalogEntry(recipeKey)
+            if entry and #entry.crafters > 0 then
+                local better = not best
+                    or (rule.verdict == "OPTIMAL" and best.rule.verdict ~= "OPTIMAL")
+                    or (rule.verdict == best.rule.verdict and enchantID < best.enchantID)
+                if better then
+                    best = {
+                        enchantID = enchantID,
+                        rule = rule,
+                        recipeKey = recipeKey,
+                        entry = entry,
+                    }
+                end
+            end
+        end
+    end
+    return best
+end
+
 -- Eine Regel aus einer spaeteren Phase gilt noch nicht.
 function GC.GearAudit:RuleAppliesToPhase(rule)
     if not rule or not rule.phase then

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.103",
+  "## Version: 0.9.104",
 ];
 
 for (const entry of requiredMetadata) {
@@ -404,6 +404,15 @@ const requiredImplementations = [
   ["Doppelantwort-Dämpfung", /"WDETAIL\|"/],
   ["Quittung des Anfrage-Knopfs", /workshopRequestAckAt/],
   ["gildenweite Anfrage wird gedrosselt", /lastGuildRequestAt/],
+  // Pro-Enchanters-Gedanken (0.9.104): Suchindex in beiden Sprachen,
+  // Handelsfenster-Helfer, Flüsterbefehl, Bestell-Brücke.
+  ["zweisprachiger Suchindex", /scannedName/],
+  ["Handelsfenster-Helfer", /function GC\.UI:RefreshTradeBanner/],
+  ["Aufträge zum Handelspartner", /function GC\.Orders:GetOrdersWithCounterpart/],
+  ["Flüsterbefehl der Werkstatt", /function GC\.Workshop:AnswerRecipeWhisper/],
+  ["Flüsterbefehl ist Opt-in", /workshopWhisperReply/],
+  ["verifizierte Enchant-Rezept-Brücke", /GC\.EnchantRecipeKeys = \{/],
+  ["bestellbare Verzauberungs-Empfehlung", /function GC\.GearAudit:GetOrderableEnchant/],
   ["einmaliger Hinweis nach Später", /function GC\.Onboarding:NoteLaterPressed/],
   ["Hinweisfenster mit dem Weg zurück", /function GC\.UI:ShowWizardLaterHint/],
   ["× und Später teilen sich den Schließweg", /function GC\.UI:HideWelcomeWithHint/],

@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.103",
+    VERSION = "0.9.104",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -834,6 +834,53 @@ GC.EnchantRuleSet = {
 -- deshalb nicht falsch bewertet, sondern gar nicht: Sie gelten als unbewertete
 -- Verzauberung und damit als in Ordnung. Wer sie einstufen will, klickt sie in
 -- der Ausruestungspruefung einmal an - die Gildenregel sticht diesen Satz.
+
+-- Verzauberung -> Werkstatt-Rezept: die Bruecke zwischen Ausruestungspruefung
+-- und Werkstatt. Links die Enchant-ID aus dem Regelsatz oben, rechts der
+-- Katalogschluessel des Verzauberkunst-Zaubers, der sie wirkt ("E" plus
+-- Zauber-ID, genau wie der Rezeptscan ihn ablegt).
+--
+-- Jede Zeile ist am 07.08.2026 einzeln auf der Wowhead-TBC-Zauberseite
+-- nachgeschlagen worden: Der Zauber nennt dort seine Enchant-ID in der
+-- Effektzeile ("Enchant Item: ... (ID)"). Geraten wurde nichts - was sich
+-- nicht belegen liess, steht nicht drin und macht schlicht keinen
+-- Bestellvorschlag:
+--   fehlend: Handschuhe Brawn (2647), Major Strength (684), Blasting (2934),
+--   Spell Strike (2935), Schild Shield Block (2655), Waffe Major Striking
+--   (963), die Stiefel-Haelfte der Ausdauer-Doppelregel (2649, belegt ist nur
+--   der Armschienen-Zauber) - und die Beinruestungen/Zauberfaeden, die als
+--   HERSTELLBARE GEGENSTAENDE eigene Item-Schluessel braeuchten.
+-- Kopf- und Schulterverzauberungen sind Rufware, fuer sie gibt es
+-- grundsaetzlich nichts zu bestellen.
+GC.EnchantRecipeKeys = {
+    [368] = "E34004",   -- Umhang: +12 Beweglichkeit
+    [1144] = "E33990",  -- Brust: +15 Willenskraft
+    [1593] = "E34002",  -- Armschienen: +24 Angriffskraft
+    [1594] = "E33996",  -- Handschuhe: +26 Angriffskraft
+    [2322] = "E33999",  -- Handschuhe: +35 Heilung
+    [2343] = "E34010",  -- Waffe: +81 Heilung
+    [2564] = "E25080",  -- Handschuhe: +15 Beweglichkeit
+    [2617] = "E27911",  -- Armschienen: +30 Heilung
+    [2621] = "E25084",  -- Umhang: Feinheit
+    [2648] = "E27906",  -- Armschienen: +12 Verteidigungswertung
+    [2649] = "E27914",  -- Armschienen: +12 Ausdauer
+    [2650] = "E27917",  -- Armschienen: +15 Zauberschaden
+    [2657] = "E27951",  -- Stiefel: +12 Beweglichkeit
+    [2659] = "E27957",  -- Brust: +150 Leben
+    [2661] = "E27960",  -- Brust: +6 alle Werte
+    [2669] = "E27975",  -- Waffe: +40 Zauberschaden
+    [2671] = "E27981",  -- Waffe: Sonnenfeuer
+    [2672] = "E27982",  -- Waffe: Seelenfrost
+    [2673] = "E27984",  -- Waffe: Mungo
+    [2928] = "E27924",  -- Ring: +12 Zauberschaden
+    [2929] = "E27920",  -- Ring: +2 Waffenschaden
+    [2931] = "E27927",  -- Ring: +4 alle Werte
+    [2933] = "E33992",  -- Brust: +15 Abhärtung
+    [2937] = "E33997",  -- Handschuhe: +20 Zauberschaden
+    [2939] = "E34007",  -- Stiefel: Katzengeschwindigkeit
+    [2940] = "E34008",  -- Stiefel: Ebergeschwindigkeit
+    [3150] = "E33991",  -- Brust: +6 Mana alle 5 Sek.
+}
 
 -- Entscheidungen zu Pflegevorschlägen. Sie werden gildenweit synchronisiert,
 -- damit nicht mehrere Offiziere denselben Fall doppelt bearbeiten.

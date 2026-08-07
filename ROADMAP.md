@@ -298,6 +298,40 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.104 – Pro-Enchanters-Gedanken, gildenfest gemacht
+
+Der Owner fragte, ob sich aus dem Addon Pro Enchanters (GPLv3, 211.000+ Downloads) etwas für Guild Copilot gewinnen lässt – „natürlich selbst gebaut statt kopiert“. Die Antwort nach Sichtung der CurseForge-Beschreibung: Das Workorder-System hat Guild Copilot längst (Gildenaufträge), und die statische Rezeptdatenbank mit eigenen Lokalisierungen wäre ein Rückschritt – unser Scan liest live und verschlüsselt locale-frei über Item-/Zauber-IDs. Vier Dinge lohnten sich, alle nach dem 0.9.101-Muster (Prinzip übernehmen, Code nicht – GPLv3 passt ohnehin nicht in ein MIT-Repository):
+
+### Die Brücke: Regelsatz trifft Werkstatt
+
+Das Beste an der Idee „Verzauberungs-Addon“ ist im Gildenkontext etwas, das Pro Enchanters gar nicht kann: Die Ausrüstungsprüfung weiß je Slot und Archetyp, WAS optimal wäre (EnchantRuleSet); die Werkstatt weiß, WER es herstellen kann. Verbunden waren die beiden nie, weil zwei ID-Welten – Regeln hängen an der Enchant-ID auf dem Gegenstand, Rezepte an der Zauber-ID des Crafts, und keine WoW-API übersetzt dazwischen. Die Übersetzung ist jetzt eine kuratierte Tabelle (`GC.EnchantRecipeKeys`): 27 Zuordnungen, jede einzeln am 07.08.2026 auf der Wowhead-TBC-Zauberseite belegt (die Effektzeile nennt die Enchant-ID). Nach dem Vorbild des Regelsatzes gilt: Geraten wird nichts – sechs Verzauberungen und die Beinrüstungen/Zauberfäden ließen sich nicht im Budget belegen und stehen als benannte Lücke im Tabellenkommentar; sie machen einfach keinen Vorschlag.
+
+Sichtbar wird die Brücke als ein Knopf auf der Ausrüstungsseite, nur am EIGENEN Charakter: Der erste verbesserbare Slot mit bestellbarer Empfehlung bekommt „Bestellen: <Slot>“, der Tooltip nennt Empfehlung und Hersteller, der Klick öffnet den üblichen Auftragsdialog mit dem Rezept. `GearAudit:GetOrderableEnchant` wählt OPTIMAL vor SOLID und bei Gleichstand deterministisch die kleinste Enchant-ID – jeder Aufruf nennt dieselbe Empfehlung.
+
+### Handelsfenster-Helfer
+
+In TBC werden Verzauberungen im Handelsfenster gewirkt, und auch Übergaben laufen dort – exakt der Lieferweg „TRADE“ der Gildenaufträge. Beginnt ein Handel mit jemandem, mit dem Aufträge offen sind (beide Richtungen, `GetOrdersWithCounterpart`), erscheint daneben ein kleines Fenster mit bis zu drei Aufträgen und ihrer üblichen Primäraktion – derselben, die auch das Board zeigt (`OrderPrimaryAction` wird wiederverwendet, es gibt keinen zweiten Begriff von „dran sein“). Bewusst übernommen aus Pro Enchanters: im Kampf kein Fenster. Bewusst anders: kein automatischer Statuswechsel – markiert wird per Klick, wie überall.
+
+### Flüsterbefehl „!rezept“
+
+Pro Enchanters beantwortet „!enchant boots - stamina“ mit einer Matsliste. Bei uns antwortet der Katalog: Name, Reagenzien, bis zu drei Hersteller, ein Flüstern, höchstens 255 Bytes. Drei Grenzen, die dort so nicht existieren: Der Schalter steht in den Einstellungen und ist AUS, bis ihn jemand setzt – Guild Copilot hat bis heute nie ungefragt geflüstert, und das bleibt eine ausdrückliche Entscheidung („Datenschutz und Fairness“). Es antwortet nur Gildenmitgliedern – der Katalog ist Gildenwissen. Und je Absender greift eine Drossel. Ein erkannter Befehl gilt außerdem IMMER als behandelt und landet nie im Bewerber-Postfach, sonst stünde jeder Rezeptfrager als Interessent da.
+
+### Zweisprachiger Suchindex
+
+Die eigentliche Sprachlücke nach 0.9.102: Der Katalog löst Namen über Item-/Zauber-ID in der Sprache DES BETRACHTERS auf – im Suchtext stand deshalb nur eine Sprache. Ein englischer Gildie sucht „Boar's Speed“, der deutsche Client hat „Ebergeschwindigkeit“ indiziert, nichts trifft. Jetzt trägt der Suchtext zusätzlich die Schreibweise des Scanners (`scannedName`), wenn sie von der aufgelösten abweicht – beide Sprachen finden denselben Eintrag, und der Flüsterbefehl erbt das automatisch.
+
+### Geändert
+
+- `Constants.lua`: `GC.EnchantRecipeKeys` (27 belegte Zuordnungen samt benannter Lücken);
+- `GearAudit.lua`: `GetOrderableEnchant` (Slot als Eintrag mit `.key`, wie `RuleApplies` es erwartet);
+- `Workshop.lua`: `scannedName` im Katalog und Suchtext, `AnswerRecipeWhisper` mit Schalter, Gildengrenze und Drossel;
+- `Orders.lua`: `GetOrdersWithCounterpart` (beide Richtungen, nur übergabefähige Status);
+- `Chat.lua`: Werkstattbefehle laufen vor der Bewerbererfassung;
+- `UI.lua`: Handelsfenster-Helfer (TRADE_SHOW/TRADE_CLOSED, Auffrischung über ORDERS_UPDATED), Bestellknopf samt Tooltip auf der Ausrüstungsseite, Einstellungs-Karte „Werkstatt“ am Seitenende (verschiebt keine vermessene Karte);
+- `tests/smoke.lua`: beide Sprachen treffen denselben Eintrag, Flüsterbefehl aus/an/Drossel/Gildenfremde, Handelspartner-Aufträge samt Helfer und Primäraktion, Brücke wählt OPTIMAL und schweigt ohne Hersteller; Gegenprobe gegen den 0.9.103-Stand schlägt fehl;
+- `tests/validate.mjs`: Muster für alle vier Bausteine;
+- `README.md`, `CHANGELOG.md`: Stand 0.9.104.
+
 ## 0.9.103 – Der Botendienst: Daten Dritter, aber nie der ganze Raum
 
 0.9.102 hatte die Lücke sichtbar gemacht und die Entscheidung offengelassen, ob sie auch aus zweiter Hand gefüllt werden soll. Der Owner hat sie noch am selben Tag getroffen: ja – Offline-Spieler werden über andere synchronisiert. Mit einer Vorgabe, die er als Grundsatz formuliert hat: Es muss auch gut gehen, wenn in einer 500er-Gilde 250 Leute online sind. Einer fragt in die Klasse, ein, zwei antworten – nicht 250, die durcheinanderreden.
