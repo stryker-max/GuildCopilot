@@ -7,6 +7,21 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.108 – Addon
+
+**Neu**
+
+- **Sprachwahl in den Einstellungen.** Neue Karte „Sprache / Language" am
+  Ende der Einstellungsseite: Automatisch (folgt dem WoW-Client), Deutsch
+  oder English – mit Knopf zum sofortigen Neuladen, denn vollständig wirkt
+  die Umstellung erst nach /reload.
+- **Englisch, Teilschritt 4.** Alle restlichen statischen Oberflächentexte
+  (Hilfetexte, Leerzustände, Eingabe-Beschriftungen – auch die langen,
+  zusammengesetzten) sind übersetzt, dazu die meistgesehenen Chatmeldungen
+  über Platzhalter (Login-Zeile, Sitzungsstart und -ende, Rezept-Scan,
+  Wartezeit-Erinnerung). Seltene Fehler- und Randmeldungen im Chat bleiben
+  deutsch und fallen sauber zurück.
+
 ## 0.9.107 – Addon
 
 **Neu**

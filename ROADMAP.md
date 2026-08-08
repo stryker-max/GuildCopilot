@@ -298,6 +298,27 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.108 – Die Sprachwahl und der Rest der Texte
+
+Die Frage des Owners „Wo stelle ich die Sprache um?" hat die Lücke benannt: Es gab keinen Schalter – die Sprache folgte stumm der Clientsprache, und ausgerechnet der deutschsprachige Owner konnte die englische Oberfläche nie sehen. Dazu kam der Auftrag, Teilschritt 4 gleich mitzuliefern.
+
+### Die Sprachwahl
+
+Neue Karte „Sprache / Language" am Ende der Einstellungsseite (ans Seitenende gehängt wie die Werkstatt-Karte – verschiebt nichts Vermessenes): ein Zyklus-Knopf Automatisch → Deutsch → English, daneben „Jetzt neu laden". Die Wahl liegt ÜBER der Client-Automatik und wird von der Datenbank direkt nach dem Laden der SavedVariables angewandt (`GC.ApplyLanguageSetting`) – also VOR dem Aufbau der Oberfläche, deren ADDON_LOADED-Rückruf später registriert wurde. Bereits gebaute Beschriftungen behalten ihre Sprache; deshalb sagt die Karte ehrlich dazu, dass die Umstellung erst nach dem Neuladen vollständig wirkt, und bietet den Knopf gleich an.
+
+### Teilschritt 4: die restlichen Texte
+
+Ein Ernteskript hat aus UI.lua alle verbliebenen statischen Texte gezogen – auch die über `..` zusammengesetzten Hilfetexte, denn die zentrale Übersetzung in `CreateLabel` sieht den fertig verketteten String und trifft ihn als ganzen Schlüssel. 91 Fundstellen, davon ~80 übersetzt (der Rest sind Eigennamen und sprachgleiche Wörter). Für Meldungen mit Namen und Zahlen kam `GC.LFormat` dazu: Der Schlüssel bleibt ein fester Satz mit {platzhaltern}, die Werte kommen zur Laufzeit, ersetzt wird wortwörtlich (ein Prozentzeichen im Spielernamen bleibt ein Prozentzeichen). Damit sind die meistgesehenen Chatmeldungen übersetzt: Login-Zeile, Sitzungsstart und -ende, Rezept-Scan, Wartezeit-Erinnerung. **Benannter Rest:** seltene Fehler- und Randmeldungen im Chat (Sync-Warnungen, Import-Diagnosen) bleiben deutsch – sie sind dutzendfach verkettete Einzelsätze, fallen sauber zurück und lassen sich bei Bedarf einzeln nachziehen.
+
+### Geändert
+
+- `Locales.lua`: `GC.ApplyLanguageSetting`, `GC.LFormat`, ~90 neue Tabellenzeilen (statische Resttexte, Platzhalter-Meldungen);
+- `Database.lua`: Vorgabe `language = "AUTO"`, Anwendung der Wahl direkt nach dem Laden;
+- `UI.lua`: Sprachkarte samt Zyklus- und Neuladen-Knopf, Anzeige der aktuellen Wahl in `RefreshSettings`;
+- `Core.lua`/`RaidMonitor.lua`/`Workshop.lua`: Kernmeldungen über `GC.L`/`GC.LFormat`;
+- `tests/smoke.lua`: Sprachwahl (Vorgabe AUTO, EN/DE erzwingen, AUTO folgt dem Client), Platzhalter mit und ohne Übersetzung, Resttext-Stichprobe;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.108.
+
 ## 0.9.107 – Englisch in drei Teilschritten: Sprachschicht, belegte Spielbegriffe, Bedienelemente
 
 Die Sync-Ebene ist seit jeher locale-frei (Item- und Zauber-IDs statt Namen, englische Clients scannen korrekt) – aber die Oberfläche sprach nur Deutsch. Der Owner hat die Übersetzung beauftragt, in zwei bis drei Teilschritten, mit einer harten Vorgabe: **Spielbegriffe werden nie frei übersetzt.** Jeder Name eines Gegenstands, Zaubers oder einer Verzauberung muss aus einer offiziellen Quelle belegt sein (Wowhead über die Spell-/Item-ID, oder der Spielclient selbst) – dieselbe Belegdisziplin wie bei `GC.EnchantRecipeKeys`.

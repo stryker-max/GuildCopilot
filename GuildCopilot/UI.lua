@@ -1747,7 +1747,7 @@ function GC.UI:BuildSettingsPage()
     -- Die Werkstatt-Karte am Seitenende ist mit der Wartezeit-Erinnerung
     -- gewachsen; die Inhaltshoehe muss mitwachsen, sonst schneidet der
     -- Scroller die unterste Zeile ab.
-    content:SetHeight(2230)
+    content:SetHeight(2350)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -2170,6 +2170,36 @@ function GC.UI:BuildSettingsPage()
         height = 16,
     }):SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -136)
 
+    -- Die Sprachwahl. Wie die Werkstatt-Karte ans Seitenende gehaengt, damit
+    -- keine vermessene Karte darueber verrutscht. "Automatisch" folgt der
+    -- Clientsprache; eine Umstellung wirkt auf bereits gebaute Beschriftungen
+    -- erst nach dem Neuladen - der Knopf daneben erledigt das sofort.
+    local languageCard = CreateCard(content, "Sprache / Language")
+    languageCard:SetSize(752, 108)
+    languageCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2226)
+    CreateLabel(languageCard, "Sprache der Oberfläche:", { muted = true, width = 170, height = 28 })
+        :SetPoint("TOPLEFT", languageCard, "TOPLEFT", 18, -50)
+    page.languageButton = CreateButton(languageCard, "", 200, 28, function()
+        local settings = GC.DB:GetSettings()
+        local nextLanguage = { AUTO = "DE", DE = "EN", EN = "AUTO" }
+        settings.language = nextLanguage[settings.language or "AUTO"] or "AUTO"
+        GC.ApplyLanguageSetting()
+        GC.UI:RefreshSettings()
+    end)
+    page.languageButton:SetPoint("TOPLEFT", languageCard, "TOPLEFT", 196, -47)
+    page.languageReloadButton = CreateButton(languageCard, "Jetzt neu laden", 140, 28, function()
+        if ReloadUI then
+            ReloadUI()
+        end
+    end)
+    page.languageReloadButton:SetPoint("TOPLEFT", languageCard, "TOPLEFT", 406, -47)
+    CreateLabel(languageCard,
+        "„Automatisch“ folgt der Sprache des WoW-Clients. Vollständig wirkt die Umstellung nach dem Neuladen der Oberfläche.", {
+        muted = true,
+        width = 716,
+        height = 16,
+    }):SetPoint("TOPLEFT", languageCard, "TOPLEFT", 18, -84)
+
     -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
     local commandCard = CreateCard(content, "Chat-Befehle")
@@ -2297,6 +2327,15 @@ function GC.UI:RefreshSettings()
     page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
     SetToggle(page.workshopWhisperToggle, settings.workshopWhisperReply == true)
     SetToggle(page.cooldownReminderToggle, settings.cooldownReminder ~= false)
+    local language = settings.language or "AUTO"
+    if language == "DE" then
+        page.languageButton:SetText("Deutsch")
+    elseif language == "EN" then
+        page.languageButton:SetText("English")
+    else
+        page.languageButton:SetText(GC.LocaleEnglishDefault
+            and "Automatisch (English)" or "Automatisch (Deutsch)")
+    end
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.

@@ -941,8 +941,11 @@ function GC.Workshop:StoreProfession(professionName, skillLevel, maxSkillLevel, 
         local profile = GC.Profile:Get()
         profile.updatedAt = GC.Util.Now()
         self:QueueProfessionSync(profession)
-        GC:Print(professionName .. ": " .. (tonumber(scannedCount) or 0) .. " Einträge geprüft, "
-            .. #SortedKeys(recipes) .. " Rezepte gespeichert.")
+        GC:Print(GC.LFormat("{beruf}: {geprueft} Einträge geprüft, {gespeichert} Rezepte gespeichert.", {
+            beruf = professionName,
+            geprueft = tonumber(scannedCount) or 0,
+            gespeichert = #SortedKeys(recipes),
+        }))
     end
     GC:FireCallback("WORKSHOP_UPDATED", profession)
     return true, changed
@@ -1825,12 +1828,13 @@ function GC.Workshop:AnnounceDueCooldowns()
             reminded[entry.key] = entry.readyAt
         end
         if index <= MAX_COOLDOWN_REMINDER_LINES then
-            GC:Print("Wartezeit abgelaufen: " .. ResolveRecipeName(entry.recipeKey)
-                .. " (" .. GC.Util.PlayerShortName(entry.crafter)
-                .. ") – wieder herstellbar.")
+            GC:Print(GC.LFormat("Wartezeit abgelaufen: {rezept} ({charakter}) – wieder herstellbar.", {
+                rezept = ResolveRecipeName(entry.recipeKey),
+                charakter = GC.Util.PlayerShortName(entry.crafter),
+            }))
         elseif index == MAX_COOLDOWN_REMINDER_LINES + 1 then
-            GC:Print("… und " .. (#due - MAX_COOLDOWN_REMINDER_LINES)
-                .. " weitere abgelaufene Wartezeiten.")
+            GC:Print(GC.LFormat("… und {n} weitere abgelaufene Wartezeiten.",
+                { n = #due - MAX_COOLDOWN_REMINDER_LINES }))
         end
     end
     return #due

@@ -554,9 +554,10 @@ function GC.RaidMonitor:BeginSession()
         -- oder gerade jemand anderes schneller war.
         local startedBy = GC.Util.PlayerShortName(self.session.startedBy or "")
         if startedBy ~= "" then
-            return false, "Die Raidsitzung läuft bereits – gestartet von " .. startedBy .. "."
+            return false, GC.LFormat("Die Raidsitzung läuft bereits – gestartet von {name}.",
+                { name = startedBy })
         end
-        return false, "Es läuft bereits eine Sitzung."
+        return false, GC.L("Es läuft bereits eine Sitzung.")
     end
     -- Starten darf jeder. Ein Start schreibt ausschliesslich in den eigenen
     -- Mitschnitt - er nimmt niemandem etwas weg und zwingt niemandem etwas
@@ -567,7 +568,7 @@ function GC.RaidMonitor:BeginSession()
     local sessionID = tostring(GC.Util.Now()) .. tostring(math.random(1000, 9999))
     local session = self:StartSession(sessionID, GC:GetPlayerFullName(), GC.Util.Now(), nil)
     GC.Sync:AnnounceSessionStart(session)
-    return true, "Raidsitzung gestartet. Anwesenheit und Auswertung laufen mit."
+    return true, GC.L("Raidsitzung gestartet. Anwesenheit und Auswertung laufen mit.")
 end
 
 function GC.RaidMonitor:EndSession()
@@ -589,8 +590,9 @@ function GC.RaidMonitor:EndSession()
         GC.Sync:DistributeSummary(summary)
     end
     local participantCount = summary and #summary.participants or 0
-    return true, "Raidsitzung beendet. " .. participantCount
-        .. " Teilnehmer ausgewertet – die Auswertung steht unten in der Liste."
+    return true, GC.LFormat(
+        "Raidsitzung beendet. {n} Teilnehmer ausgewertet – die Auswertung steht unten in der Liste.",
+        { n = participantCount })
 end
 
 -- Beendet die Sitzung, verdichtet sie zur Zusammenfassung und verwirft die

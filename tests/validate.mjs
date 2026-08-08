@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.107",
+  "## Version: 0.9.108",
 ];
 
 for (const entry of requiredMetadata) {
@@ -452,6 +452,11 @@ const requiredImplementations = [
   ["Verbrauchsname in der Clientsprache", /function GC\.ConsumableDisplayName/],
   ["alle Beschriftungen laufen durch GC.L", /label:SetText\(GC\.L\(text or ""\)\)/],
   ["Slot-Begriffe übersetzt", /\["Waffenhand"\] = "Main Hand"/],
+  // Teilschritt 4 (0.9.108): Sprachwahl in den Einstellungen, Platzhalter-
+  // Meldungen und die restlichen statischen Texte.
+  ["Sprachwahl liegt über der Automatik", /function GC\.ApplyLanguageSetting/],
+  ["Platzhalter-Meldungen übersetzen", /function GC\.LFormat/],
+  ["Sprachkarte in den Einstellungen", /CreateCard\(content, "Sprache \/ Language"\)/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

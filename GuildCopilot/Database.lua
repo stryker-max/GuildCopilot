@@ -33,6 +33,9 @@ local DEFAULTS = {
             y = 0,
         },
         workshopFavorites = {},
+        -- Sprache der Oberflaeche: AUTO folgt der Clientsprache, DE und EN
+        -- erzwingen eine. Angewandt in GC.ApplyLanguageSetting.
+        language = "AUTO",
         -- Meldung im Chat, sobald eine Berufs-Wartezeit (Umwandlung,
         -- Spezialtuch, Sphaere) abgelaufen ist. Bewusst an: Sie ist eine
         -- einzelne Chatzeile je Sperre, kein Laerm.
@@ -268,6 +271,11 @@ function GC.DB:Initialize()
 
     GuildCopilotDB.schemaVersion = GC.Constants.SCHEMA_VERSION
     self.data = GuildCopilotDB
+    -- Die gespeicherte Sprachwahl gilt ab jetzt - und damit VOR dem Aufbau
+    -- der Oberflaeche, deren ADDON_LOADED-Rueckruf spaeter registriert wurde.
+    if GC.ApplyLanguageSetting then
+        GC.ApplyLanguageSetting()
+    end
     -- Der Datenbestand ist neu; ein Merker aus einem frueheren Durchlauf zeigt
     -- auf eine Tabelle, die es so nicht mehr gibt.
     self.guildCache = nil

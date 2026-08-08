@@ -9070,6 +9070,33 @@ do
     -- Auf dem deutschen Client bleibt auch die Verbrauchsanzeige deutsch.
     assert(addon.ConsumableDisplayName(addon.Consumables[28499]) == "Erstklassiger Manatrank",
         "Der deutsche Trankname wurde ersetzt")
+
+    -- Die Sprachwahl aus den Einstellungen: DE/EN erzwingen, AUTO folgt dem
+    -- Client. Sie liegt UEBER der Automatik und wird von der Datenbank nach
+    -- dem Laden angewandt.
+    local languageSettings = addon.DB:GetSettings()
+    assert(languageSettings.language == "AUTO", "Die Sprachwahl-Vorgabe fehlt")
+    languageSettings.language = "EN"
+    addon.ApplyLanguageSetting()
+    assert(addon.LocaleEnglish == true, "Die EN-Wahl schaltet nicht auf Englisch")
+    -- Teilschritt 4: Platzhalter-Meldungen und ein langer Hilfetext.
+    assert(addon.LFormat("Wartezeit abgelaufen: {rezept} ({charakter}) – wieder herstellbar.",
+        { rezept = "Urnether", charakter = "Testchar" })
+        == "Cooldown expired: Urnether (Testchar) – craftable again.",
+        "Die Platzhalter-Meldung übersetzt nicht")
+    assert(addon.L("Noch niemand geprüft.") == "Nobody audited yet.",
+        "Der statische Resttext bleibt deutsch")
+    languageSettings.language = "DE"
+    addon.ApplyLanguageSetting()
+    assert(addon.LocaleEnglish == false, "Die DE-Wahl schaltet nicht zurück")
+    -- Platzhalter werden auch ohne Übersetzung gefüllt.
+    assert(addon.LFormat("… und {n} weitere abgelaufene Wartezeiten.", { n = 3 })
+        == "… und 3 weitere abgelaufene Wartezeiten.",
+        "Der deutsche Platzhalter-Text wird nicht gefüllt")
+    languageSettings.language = "AUTO"
+    addon.ApplyLanguageSetting()
+    assert(addon.LocaleEnglish == addon.LocaleEnglishDefault,
+        "AUTO folgt nicht der Clientsprache")
 end
 
 -- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================

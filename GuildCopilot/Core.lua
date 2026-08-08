@@ -483,6 +483,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         -- frueher gemerkter Stand wird deshalb verworfen.
         GC.playerFullName = nil
         GC:FireCallback("PLAYER_LOGIN")
-        GC:Print("v" .. GC.Constants.VERSION .. " geladen. Öffnen mit |cffffffff/gcp|r.")
+        GC:Print(GC.LFormat("v{v} geladen. Öffnen mit |cffffffff/gcp|r.",
+            { v = GC.Constants.VERSION }))
     end
 end)

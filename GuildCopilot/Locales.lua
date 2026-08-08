@@ -383,19 +383,145 @@ local english = {
     ["|cffffb840Kein bestätigter Text. Unter „Werbung posten“ bestätigen.|r"] = "|cffffb840No confirmed text. Confirm it under Post Ad.|r",
     ["|cffffb84dDatenlage noch dünn:|r Mehr Mitglieder sollten ihr Profil bestätigen oder Logs importiert werden."] = "|cffffb84dData still thin:|r more members should confirm their profile, or import logs.",
     ["„Zur Gruppe“ führt zurück zur Übersicht."] = "\"To the group\" leads back to the overview.",
+
+    -- === Teilschritt 4: restliche statische Oberflächentexte ===============
+    ["Du"] = "You",
+    ["Menge"] = "Amount",
+    ["Symbole"] = "Icons",
+    ["Seite 1/1"] = "Page 1/1",
+    ["Bis später!"] = "See you later!",
+    ["Primär-Spec"] = "Primary spec",
+    ["Materialien"] = "Materials",
+    ["Raid-Symbol"] = "Raid marker",
+    ["0/255 Bytes"] = "0/255 bytes",
+    ["Vorschlag ab"] = "Suggested from",
+    ["0 AUSGEWÄHLT"] = "0 SELECTED",
+    ["Gut zu wissen"] = "Good to know",
+    ["Gildenwerbung"] = "Guild Ad",
+    ["Versionsprüfer"] = "Version Check",
+    ["Geschützte Ränge"] = "Protected Ranks",
+    ["Trinkgeld (Gold)"] = "Tip (gold)",
+    ["Notiz (optional)"] = "Note (optional)",
+    ["Profilbestätigung:"] = "Profile confirmation:",
+    ["Kostenrahmen (Gold)"] = "Cost limit (gold)",
+    ["Dual-Spec (optional)"] = "Dual spec (optional)",
+    ["Raidinstanz betreten"] = "Entering a raid instance",
+    ["Noch niemand geprüft."] = "Nobody audited yet.",
+    ["Was Guild Copilot kann"] = "What Guild Copilot does",
+    ["Kein Rezept ausgewählt"] = "No recipe selected",
+    ["Sprache der Oberfläche:"] = "Interface language:",
+    ["Stück insgesamt fertig:"] = "Pieces finished in total:",
+    ["Raidauswertung – Detail"] = "Raid Review – Detail",
+    ["Kein Bewerber ausgewählt"] = "No applicant selected",
+    ["OFFENE AUFTRÄGE DER GILDE"] = "OPEN GUILD ORDERS",
+    ["Rezept oder Spieler suchen"] = "Search recipe or player",
+    ["Gruppenprüfung – Ausrüstung"] = "Group Check – Gear",
+    ["Antwortvorschau  •  editierbar"] = "Reply preview  •  editable",
+    ["Wähle links einen Spieler aus."] = "Pick a player on the left.",
+    ["Noch keine Auswertung vorhanden."] = "No review available yet.",
+    ["Anzeigedauer der Meldung (Sekunden)"] = "Alert display time (seconds)",
+    ["Spaltenköpfe ziehen ordnet die Spalten"] = "Drag column headers to reorder",
+    ["Wunsch-Hersteller (optional, 24 h reserviert)"] = "Preferred crafter (optional, reserved for 24 h)",
+    ["Übergabetext ({name} und {rezept} werden ersetzt)"] = "Handover text ({name} and {rezept} are replaced)",
+    ["Mehrere deiner Charaktere beherrschen das Rezept."] = "Several of your characters know this recipe.",
+    ["Ausnahmen setzt jeder für seine eigene Ausrüstung."] = "Exceptions are set by each player for their own gear.",
+    ["Tatsächliche Materialkosten in Gold (0, wenn nichts anfiel):"] = "Actual material cost in gold (0 if nothing was spent):",
+    ["Markiere häufig benötigte Rezepte mit dem Stern in den Rezeptdetails."] = "Mark frequently needed recipes with the star in the recipe details.",
+    ["Deine Fähigkeiten ließen sich nicht lesen – bitte oben von Hand wählen."] = "Your skills could not be read – please pick manually above.",
+    ["Dein Gildenassistent für Rekrutierung, Roster, Berufe und Raidauswertung."] = "Your guild assistant for recruiting, roster, professions and raid reviews.",
+    ["Dieser Charakter hat keine Berufe mit Rezepten – hier gibt es nichts zu tun."] = "This character has no professions with recipes – nothing to do here.",
+    ["Die Meldung lässt sich mit der Maus dorthin schieben, wo sie nichts verdeckt."] = "The alert can be dragged wherever it covers nothing.",
+    ["Öffne deine Berufe einmal, damit Guild Copilot die bekannten Rezepte einliest."] = "Open your professions once so Guild Copilot can read your known recipes.",
+    ["Noch nichts gewählt.\n\nLinks eine Klasse öffnen und ganze Klasse oder Specs auswählen."] = "Nothing selected yet.\n\nOpen a class on the left and pick the whole class or single specs.",
+    ["Alles liegt in einem Fenster – die Seitenleiste links gliedert es von oben nach unten:"] = "Everything lives in one window – the sidebar on the left structures it top to bottom:",
+    ["Geändert – noch nicht bestätigt. In der Gilde steht weiter der zuletzt bestätigte Stand."] = "Changed – not confirmed yet. The guild still sees the last confirmed version.",
+    ["Von Hand gewählt. Die leere Auswahl oben schaltet zurück auf die automatische Erkennung."] = "Picked by hand. Clearing the selection above switches back to automatic detection.",
+    ["Danach weiß die Gildenwerkstatt, was du herstellen kannst – zu finden im Abschnitt GILDE."] = "After that the guild workshop knows what you can craft – found in the GUILD section.",
+    ["Das Symbol lässt sich frei ziehen: nahe der Minimap am Ring entlang, weiter weg überall hin."] = "The icon can be dragged freely: near the minimap along the ring, further away anywhere.",
+    ["Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar."] = "Guild-wide settings are read-only for your rank; local options remain editable.",
+    ["Main oder Twink und deine Abmeldung stellst du später im Abschnitt COPILOT auf der Seite „Profil“ ein."] = "Main or alt and your absence are set later in the COPILOT section on the Profile page.",
+    ["Diese Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten."] = "These entries are synchronized guild-wide so two officers never work the same case.",
+    ["Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen."] = "Your own gear is always audited automatically and compactly synchronized with addon users in the guild.",
+    ["|cff91a3b8Noch nicht geprüft. Ein Klick auf \"Ausrüstung prüfen\" liest deine angelegten Gegenstände aus.|r"] = "|cff91a3b8Not audited yet. A click on \"Audit gear\" reads your equipped items.|r",
+    ["Automatik an: Der Werbebalken bleibt offen; sobald ein Kanal bereit ist, postet dein nächster Tastendruck."] = "Auto-repeat on: the ad bar stays open; once a channel is ready, your next keypress posts.",
+    ["Prüft deine eigene Ausrüstung auf fehlende Verzauberungen und leere Sockel. Läuft nur bei dir und ohne Gruppe."] = "Audits your own gear for missing enchants and empty sockets. Runs only for you, no group needed.",
+    ["Eine Zeile je Sperre (Umwandlung, Spezialtuch, Sphäre), beim Login und bei Ablauf – auch für die eigenen Twinks."] = "One line per cooldown (transmute, specialty cloth, sphere), at login and on expiry – for your alts too.",
+    ["Die Prüfung aller Raider und den gildenweiten Regelsatz findest du im Abschnitt RAID auf der Seite „Ausrüstung“."] = "The audit of all raiders and the guild-wide rule set live in the RAID section on the Gear page.",
+    ["Antwortet Gildenmitgliedern per Flüstern mit Materialliste und Herstellern aus dem Katalog, gedrosselt je Absender."] = "Replies to guild members by whisper with a material list and crafters from the catalog, throttled per sender.",
+    ["„Automatisch“ folgt der Sprache des WoW-Clients. Vollständig wirkt die Umstellung nach dem Neuladen der Oberfläche."] = "\"Automatic\" follows the WoW client language. The change takes full effect after reloading the UI.",
+    ["Nur berechtigte Einstellungs-Ränge ändern diese gildenweiten Regeln. Geschützte Ränge erscheinen nie als Vorschlag."] = "Only authorized settings ranks change these guild-wide rules. Protected ranks never appear as suggestions.",
+    ["Trage hier direkt ein, wann du nicht verfügbar bist. Mitgliederpflege und Roster berücksichtigen den Zeitraum automatisch."] = "Enter directly when you are unavailable. Member care and roster respect the period automatically.",
+    ["Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt."] = "Alts, active absences and protected ranks are hidden. \"Check\" means: main/alt status is not confirmed.",
+    ["Automatisch aus deinen Fähigkeiten übernommen. Neue Rezepte wandern beim Öffnen des Berufsfensters von selbst in die Werkstatt."] = "Taken automatically from your skills. New recipes flow into the workshop by themselves when you open the profession window.",
+    ["Du kannst die Einrichtung jederzeit neu starten: mit /gcp welcome oder über den Knopf „Einrichtung“ oben im Guild-Copilot-Fenster."] = "You can restart the setup anytime: with /gcp welcome or via the Setup button at the top of the Guild Copilot window.",
+    ["Nur diese Ränge sehen die Mitgliederpflege - und nur sie dürfen Raidauswertungen löschen. Die Freigabe wird gildenweit synchronisiert."] = "Only these ranks see member care - and only they may delete raid reviews. The permission is synchronized guild-wide.",
+    ["Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, der Rest per Inspect in Reichweite. Klick auf eine Zeile zeigt die Verzauberungen."] = "Only the current group. Addon users report themselves, the rest via inspect in range. Click a row to see the enchants.",
+    ["Ohne diesen Schalter bleibt jede nicht bewertete Verzauberung \"Unbekannt\". Er bewertet keine Qualität, er unterscheidet nur verzaubert von nicht verzaubert."] = "Without this switch every unrated enchant stays \"Unknown\". It rates no quality, it only distinguishes enchanted from not enchanted.",
+    ["Von diesen Spielern landet nichts mehr im Postfach. Befristete Einträge verschwinden von selbst, sobald das Datum erreicht ist. Die Liste gilt nur für dich."] = "Nothing from these players reaches the inbox anymore. Dated entries expire on their own. This list applies only to you.",
+    ["Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter, nur still. Die Freigabe wird gildenweit synchronisiert."] = "Only these ranks hear the sound when someone lands in the inbox. The inbox keeps filling for everyone, just silently. The permission is synchronized guild-wide.",
+    ["Gib einen Rezept- oder Spielernamen ein, wähle einen Beruf oder öffne deine Favoriten.\n\nSo bleibt die Werkstatt auch mit tausenden bekannten Rezepten übersichtlich."] = "Enter a recipe or player name, pick a profession or open your favorites.\n\nThis keeps the workshop tidy even with thousands of known recipes.",
+    ["Diese Texte füllen die drei Knöpfe oben. Sie gelten gildenweit. Platzhalter: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}."] = "These texts fill the three buttons above. They apply guild-wide. Placeholders: {name}, {gilde}, {beschreibung}, {raidzeiten}, {progress}, {loot}, {discord}, {kontakt}.",
+    ["|cffe8b84bHinweis:|r Gerade ist niemand mit Guild Copilot online. Der Auftrag wird gespeichert und verteilt sich, sobald du gemeinsam mit anderen Addon-Nutzern online bist."] = "|cffe8b84bNote:|r nobody with Guild Copilot is online right now. The order is stored and spreads once you are online together with other addon users.",
+    ["|cff91a3b8Noch keine Log-Daten importiert.|r\nDie gespeicherte URL ist für den Companion vorbereitet. Importiert ein anderes Gildenmitglied, erscheinen die Profile auch hier von selbst."] = "|cff91a3b8No log data imported yet.|r\nThe saved URL is prepared for the companion. If another guild member imports, the profiles appear here by themselves.",
+    ["Ohne API: Name;Klasse;Primär-Spec;Dual-Spec – z. B. Nexarius;Magier;Arkan;Frost.\nAutomatisch: Im Guild-Copilot-Installer „Import erzeugen“; die Companion-CMD bleibt als Rückfall. Danach hier mit Strg+V einfügen."] = "Without API: Name;Class;PrimarySpec;DualSpec – e.g. Nexarius;Mage;Arcane;Frost.\nAutomatic: use \"Create import\" in the Guild Copilot installer; the companion CMD remains the fallback. Then paste here with Ctrl+V.",
+    ["Deine beiden Hauptberufe – vom Addon aus deinen Fähigkeiten gelesen, sonst hier von Hand wählbar. Für die Rezepte in der Gildenwerkstatt musst du dein Berufsfenster einmal öffnen; die Namen allein genügen dafür nicht."] = "Your two primary professions – read from your skills, otherwise pickable by hand. For the recipes in the guild workshop you must open your profession window once; the names alone are not enough.",
+    ["Ein WoW-Addon darf selbst nichts aus dem Internet laden – deshalb übernimmt der Windows-Helfer den Abruf. Die hier gespeicherte Gilde erspart dir dort die Eingabe, liefert Region und Realm für die Profil-Links im Postfach und wird an alle Gildenmitglieder synchronisiert."] = "A WoW addon may not load anything from the internet itself – the Windows companion does the fetching. The guild saved here spares you the input there, provides region and realm for the profile links in the inbox, and is synchronized to all guild members.",
+    ["Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ – abschalten lässt sich die Erkennung über die Schalter darüber. Diese Listen gelten nur für dich."] = "One word or phrase per line, case does not matter. An exclusion word prevents the entry even when a trigger matches. Empty trigger fields mean \"default\", not \"nothing\" – the detection is disabled via the switches above. These lists apply only to you.",
+
+    -- === Teilschritt 4: Kern-Chatmeldungen (mit Platzhaltern) ==============
+    ["v{v} geladen. Öffnen mit |cffffffff/gcp|r."] = "v{v} loaded. Open with |cffffffff/gcp|r.",
+    ["Raidsitzung gestartet. Anwesenheit und Auswertung laufen mit."] = "Raid session started. Attendance and review are being recorded.",
+    ["Es läuft bereits eine Sitzung."] = "A session is already running.",
+    ["Die Raidsitzung läuft bereits – gestartet von {name}."] = "The raid session is already running – started by {name}.",
+    ["Raidsitzung beendet. {n} Teilnehmer ausgewertet – die Auswertung steht unten in der Liste."] = "Raid session ended. {n} participants reviewed – the review is in the list below.",
+    ["Wartezeit abgelaufen: {rezept} ({charakter}) – wieder herstellbar."] = "Cooldown expired: {rezept} ({charakter}) – craftable again.",
+    ["… und {n} weitere abgelaufene Wartezeiten."] = "… and {n} more expired cooldowns.",
+    ["{beruf}: {geprueft} Einträge geprüft, {gespeichert} Rezepte gespeichert."] = "{beruf}: {geprueft} entries checked, {gespeichert} recipes saved.",
 }
 
--- Entschieden wird einmal beim Laden: Die Clientsprache aendert sich nie
--- innerhalb einer Sitzung. Alles, was nicht Deutsch ist, bekommt Englisch -
--- eine franzoesische Uebersetzung gibt es nicht, und Englisch versteht dort
--- jeder eher als Deutsch. Das Feld bleibt zur Laufzeit umschaltbar, damit
--- die Tests beide Wege pruefen koennen.
+-- Die Vorgabe entscheidet die Clientsprache: Alles, was nicht Deutsch ist,
+-- bekommt Englisch - eine franzoesische Uebersetzung gibt es nicht, und
+-- Englisch versteht dort jeder eher als Deutsch. Darueber liegt die
+-- Sprachwahl aus den Einstellungen (Automatisch/Deutsch/English); sie wird
+-- nach dem Laden der SavedVariables angewandt, denn die liegen zur Ladezeit
+-- dieser Datei noch nicht vor.
 local locale = type(GetLocale) == "function" and tostring(GetLocale() or "") or "deDE"
-GC.LocaleEnglish = locale:find("^de") == nil
+GC.LocaleEnglishDefault = locale:find("^de") == nil
+GC.LocaleEnglish = GC.LocaleEnglishDefault
+
+-- Wendet die gespeicherte Sprachwahl an. Aufgerufen von der Datenbank direkt
+-- nach dem Laden (VOR dem Aufbau der Oberflaeche - die Reihenfolge der
+-- ADDON_LOADED-Rueckrufe folgt der Ladereihenfolge der Dateien) und vom
+-- Schalter in den Einstellungen. Bereits gebaute Beschriftungen behalten
+-- ihre Sprache; vollstaendig wirkt eine Umstellung deshalb erst nach dem
+-- Neuladen der Oberflaeche - der Schalter sagt das dazu.
+function GC.ApplyLanguageSetting()
+    local settings = GC.DB and GC.DB.data and GC.DB.data.settings
+    local language = settings and settings.language or "AUTO"
+    if language == "DE" then
+        GC.LocaleEnglish = false
+    elseif language == "EN" then
+        GC.LocaleEnglish = true
+    else
+        GC.LocaleEnglish = GC.LocaleEnglishDefault
+    end
+end
 
 function GC.L(text)
     if not GC.LocaleEnglish or type(text) ~= "string" then
         return text
     end
     return english[text] or text
+end
+
+-- Uebersetzt und fuellt {platzhalter}. Fuer Meldungen mit Namen und Zahlen:
+-- Der Schluessel bleibt ein fester Satz, die Werte kommen zur Laufzeit.
+-- Ersetzt wird wortwoertlich - ein Prozentzeichen im eingesetzten Wert
+-- bleibt ein Prozentzeichen statt zur gsub-Rueckreferenz zu werden.
+function GC.LFormat(text, values)
+    text = GC.L(text)
+    for key, value in pairs(values or {}) do
+        text = text:gsub("{" .. key .. "}", (tostring(value):gsub("%%", "%%%%")))
+    end
+    return text
 end
