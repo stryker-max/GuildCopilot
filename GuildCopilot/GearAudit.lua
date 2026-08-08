@@ -238,7 +238,19 @@ function GC.GearAudit:ResolveEnchantName(link, enchantID)
             end
         end
     end
-    enchantNameCache[enchantID] = false
+    -- Ein Fehlschlag gilt nur dann als endgueltig, wenn der Gegenstand
+    -- nachweislich im Item-Cache lag. Direkt nach dem Login rendert der
+    -- Tooltip eines noch nicht geladenen Gegenstands beide Fassungen
+    -- identisch duenn - der Unterschied ist leer, und genau dieser
+    -- Fehlversuch stand dann fuer die ganze Sitzung als "kein Name" im
+    -- Cache: "Verzauberung 3010" blieb stehen, obwohl der Client den Namen
+    -- Sekunden spaeter kannte. Der GetItemInfo-Aufruf stoesst das Nachladen
+    -- zugleich an; bis dahin bleibt der Eintrag offen und darf es wieder
+    -- versuchen.
+    local itemID = tonumber(tostring(link):match("item:(%d+)"))
+    if itemID and GetItemInfo and GetItemInfo(itemID) ~= nil then
+        enchantNameCache[enchantID] = false
+    end
     return nil
 end
 
@@ -1355,9 +1367,37 @@ local function DropDerivedFields(audit)
     audit.hydrated = nil
 end
 
+-- Traegt Verzauberungsnamen nach, die beim Hydrieren nicht aufloesbar waren
+-- (kalter Item-Cache direkt nach dem Login). Laeuft bei JEDEM Lesen eines
+-- bereits hydrierten Audits und ist im Regelfall ein Durchlauf ohne Arbeit:
+-- Nur Eintraege MIT Verzauberung und OHNE Namen versuchen es erneut, ein
+-- Erfolg landet im gemeinsamen Cache und gilt fuer den ganzen Raid. Mit dem
+-- Namen entsteht auch Bewertung und Begruendung neu - sonst stuende in der
+-- Zeile weiter "Verzauberung 3010", obwohl der Name laengst da ist.
+function GC.GearAudit:HealEnchantNames(audit)
+    if type(audit) ~= "table" then
+        return audit
+    end
+    for _, entry in ipairs(audit.slots or {}) do
+        if not entry.enchantName and (tonumber(entry.enchantID) or 0) > 0
+            and (tonumber(entry.itemID) or 0) > 0
+            and not entry.exempt and not entry.unreadable then
+            local name = self:ResolveEnchantNameByID(entry.itemID, entry.enchantID)
+            if name then
+                entry.enchantName = name
+                local slot = GearSlotByKey(entry.key)
+                entry.verdict, entry.reason = self:EvaluateEnchant(
+                    slot or { key = entry.key, enchantRequired = entry.required == true },
+                    entry.enchantID, audit.role, name, audit.specKey)
+            end
+        end
+    end
+    return audit
+end
+
 function GC.GearAudit:HydrateAudit(audit)
     if type(audit) ~= "table" or audit.hydrated then
-        return audit
+        return self:HealEnchantNames(audit)
     end
     audit.hydrated = true
 

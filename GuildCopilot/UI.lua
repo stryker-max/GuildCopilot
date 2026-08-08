@@ -8915,11 +8915,16 @@ function GC.UI:BuildGearPage()
     page.gearFindings = CreateLabel(detailCard, "", { width = 488, height = 52, vertical = "TOP" })
     page.gearFindings:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -64)
 
+    -- Der Hinweis ist die einzige Spalte mit ganzen Saetzen und war mit 214
+    -- Pixeln die schmalste Erzaehlflaeche der Seite. Slot und Sockel geben
+    -- Platz ab ("Handgelenke" und "1/2" brauchen keine Reserve), der Hinweis
+    -- waechst auf 240 Pixel - was dann noch abgeschnitten ist, steht
+    -- vollstaendig im Zeilentooltip.
     local gearHeaders = {
-        { text = "SLOT", x = 18, width = 112 },
-        { text = "BEWERTUNG", x = 134, width = 96 },
-        { text = "SOCKEL", x = 234, width = 58 },
-        { text = "HINWEIS", x = 296, width = 214 },
+        { text = "SLOT", x = 18, width = 96 },
+        { text = "BEWERTUNG", x = 119, width = 88 },
+        { text = "SOCKEL", x = 211, width = 44 },
+        { text = "HINWEIS", x = 259, width = 240 },
     }
     for _, headerDefinition in ipairs(gearHeaders) do
         local headerLabel = CreateLabel(detailCard, headerDefinition.text, {
@@ -8979,17 +8984,17 @@ function GC.UI:BuildGearPage()
         row.border:Hide()
         row.label:Hide()
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((index - 1) * 27))
-        row.slot = CreateLabel(row, "", { width = 112, height = 25 })
+        row.slot = CreateLabel(row, "", { width = 96, height = 25 })
         row.slot:SetPoint("LEFT", row, "LEFT", 5, 0)
-        row.verdict = CreateLabel(row, "", { width = 96, height = 25 })
-        row.verdict:SetPoint("LEFT", row, "LEFT", 121, 0)
-        row.sockets = CreateLabel(row, "", { width = 58, height = 25 })
-        row.sockets:SetPoint("LEFT", row, "LEFT", 221, 0)
-        row.reason = CreateLabel(row, "", { width = 214, height = 25, muted = true })
-        row.reason:SetPoint("LEFT", row, "LEFT", 283, 0)
+        row.verdict = CreateLabel(row, "", { width = 88, height = 25 })
+        row.verdict:SetPoint("LEFT", row, "LEFT", 106, 0)
+        row.sockets = CreateLabel(row, "", { width = 44, height = 25 })
+        row.sockets:SetPoint("LEFT", row, "LEFT", 198, 0)
+        row.reason = CreateLabel(row, "", { width = 240, height = 25, muted = true })
+        row.reason:SetPoint("LEFT", row, "LEFT", 246, 0)
 
-        -- Der Hinweis passt selten in 214 Pixel. Abgeschnitten wird nur die
-        -- Anzeige, im Tooltip steht er vollstaendig.
+        -- Der Hinweis passt trotz breiterer Spalte nicht immer ganz hinein.
+        -- Abgeschnitten wird nur die Anzeige, im Tooltip steht er vollstaendig.
         row:HookScript("OnEnter", function(self)
             local entry = page.gearSlotEntries and page.gearSlotEntries[index]
             if not entry or not GameTooltip then
@@ -9066,13 +9071,17 @@ function GC.UI:RefreshGear()
                 .. " noch nicht lesbare Slots|r"
         end
     end
+    -- Kurz genug fuer die Statuszeile: Die lange Fassung ("Regelsatz v2 mit
+    -- 51 Verzauberungen und 26 gildeneigene Bewertungen. Alles Übrige ...")
+    -- brach in eine vierte Zeile um, und die schnitt das Label ab - zu lesen
+    -- war "gilt au…".
     local ruleParts = {}
     if shippedRules > 0 then
         ruleParts[#ruleParts + 1] = "Regelsatz v" .. GC.EnchantRuleSet.version
-            .. " mit " .. shippedRules .. " Verzauberungen"
+            .. " (" .. shippedRules .. ")"
     end
     if guildRules > 0 then
-        ruleParts[#ruleParts + 1] = guildRules .. " gildeneigene "
+        ruleParts[#ruleParts + 1] = guildRules .. " eigene "
             .. (guildRules == 1 and "Bewertung" or "Bewertungen")
     end
 
@@ -9080,7 +9089,7 @@ function GC.UI:RefreshGear()
     if #ruleParts > 0 then
         ruleLine = GC.Util.JoinGerman(ruleParts) .. "."
         if GC.GearAudit:AcceptsUnratedEnchants() then
-            ruleLine = ruleLine .. " Alles Übrige gilt automatisch als in Ordnung."
+            ruleLine = ruleLine .. " Unbewertetes gilt als in Ordnung."
         end
     elseif GC.GearAudit:AcceptsUnratedEnchants() then
         ruleLine = "|cff7ac943Automatik aktiv:|r keine Bewertungen hinterlegt, deshalb gilt jede vorhandene"
@@ -9150,12 +9159,22 @@ function GC.UI:RefreshGear()
     local selected = GC.GearAudit:GetAudit(selectedName)
     page.gearSlotEmpty:SetShown(selected == nil)
     if selected then
-        local ageMinutes = math.max(0, math.floor((GC.Util.Now() - (selected.inspectedAt or 0)) / 60))
+        -- "vor 8157 Min." liest niemand freiwillig um; ab zwei Stunden wird
+        -- in Stunden gerechnet, ab zwei Tagen in Tagen.
+        local age = math.max(0, GC.Util.Now() - (selected.inspectedAt or 0))
+        local ageText
+        if age < 120 * 60 then
+            ageText = "vor " .. math.floor(age / 60) .. " Min."
+        elseif age < 48 * 3600 then
+            ageText = "vor " .. math.floor(age / 3600) .. " Std."
+        else
+            ageText = "vor " .. math.floor(age / 86400) .. " Tagen"
+        end
         local sourceLabel = selected.source == "SELF" and "Eigene Ausrüstung"
             or selected.source == "SYNC" and "Addon-Abgleich"
             or "Inspect"
         page.gearHeadline:SetText(sourceLabel
-            .. "  •  vor " .. ageMinutes .. " Min.  •  "
+            .. "  •  " .. ageText .. "  •  "
             .. (selected.specKey and GC.GearAudit:DescribeSpec(selected.specKey)
                 or "|cffffb840Spec unbekannt|r"))
         page.gearFindings:SetText(self:FormatGearFindings(selected, 3))

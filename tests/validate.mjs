@@ -438,6 +438,7 @@ const requiredImplementations = [
   ["Rezept-Lücken der Gilde", /function GC\.GearAudit:GetMissingRecommendedRecipes/],
   ["dauerhafte Anwesenheit je Abend", /function GC\.RaidMonitor:RecordAttendance/],
   ["Anwesenheitsübersicht je Spieler", /function GC\.RaidMonitor:GetAttendanceOverview/],
+  ["Verzauberungsnamen heilen beim Lesen", /function GC\.GearAudit:HealEnchantNames/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

@@ -326,14 +326,19 @@ Die Werkstatt kennt die Sperren der eigenen Charaktere seit 0.9.97 – gemeldet 
 
 Die Ablage der Auswertungen ist bewusst klein und kurzlebig (24+12 Plätze, 30 Tage) – für „wie zuverlässig ist jemand über die Saison?" taugt sie nicht. Die Anwesenheit bekommt deshalb ihr eigenes, dauerhaftes Aggregat (`guildData.attendance`): je Abend ein kleiner Eintrag (wer, welcher Anteil), gespeist aus JEDER eintreffenden Fassung – auch einer, die die Ablage gleich wieder aussortiert, denn der Höchstwert-Merge je Teilnehmer (dasselbe Argument wie bei der Reparatur: niemand war länger da, als er da war) kann durch eine zusätzliche Quelle nur vollständiger werden. Drei Regeln halten die Quote belastbar: nur Abende mit Bosskampf (Probesitzungen verdünnen sonst), nur echte Anwesenheitsquellen (Live/Sync/Reparatur ab Zählregel-Version 2 – Warcraft Logs und Logdatei messen Encounter-Zeit und zahlten systematisch zu niedrig ein), und ein verpasster Abend zählt mit null, sonst stünde der Einmalgast bei 100 %. Deckel 60 Abende (älteste weichen), „Abend gelöscht" räumt auch hier. Sichtbar hinter dem Knopf „Anwesenheit" auf der Raidauswertungsseite: je Spieler Abende, Ø-Anteil (grün ≥ 75 %, gelb < 40 %) und letzter Abend.
 
+### Nachbesserung am selben Tag: „Verzauberung 3010" und die abgeschnittene Ausrüstungsseite
+
+Der Owner zeigte die Ausrüstungsseite: Statuszeile endet auf „gilt au…", das Prüfalter heißt „vor 8157 Min.", und in den Slots stehen „Verzauberung 3010/1593/2564" – sogar im Tooltip. Der ID-Befund ist DASSELBE Muster wie die Item-Namen in 0.9.105, nur eine Ebene höher: `ResolveEnchantName` vergleicht den Tooltip des verzauberten Links mit der nackten Fassung; bei kaltem Item-Cache rendern beide identisch dünn, der Unterschied ist leer – und dieser Fehlversuch wurde als „kein Name" **für die ganze Sitzung gecacht**, während `audit.hydrated` jede spätere Neuauflösung verhinderte. Zwei Griffe schließen den Kreis: Ein Fehlschlag wird nur noch gemerkt, wenn der Gegenstand nachweislich geladen war (der `GetItemInfo`-Aufruf stößt das Nachladen zugleich an), und jedes Lesen eines hydrierten Audits trägt fehlende Namen nach (`HealEnchantNames`) – samt neu gebauter Bewertung und Begründung, sonst stünde der Satz mit der ID einfach weiter da. Dazu die Lesbarkeit: kürzere Regelsatz-Zeile statt abgeschnittener vierter Zeile, Prüfalter als Minuten/Stunden/Tage, HINWEIS-Spalte von 214 auf 240 Pixel (Slot und Sockel gaben Reserve ab).
+
 ### Geändert
 
+- `GearAudit.lua`: negativer Namenscache nur bei geladenem Gegenstand, `HealEnchantNames` bei jedem Lesen hydrierter Audits;
 - `RaidMonitor.lua`: `AURA_RECOUNT_WINDOW`/`MarkAuraCounted` (Kampfprotokoll UND Eintritts-Scan), `ScanWeaponConsumables`/`FindWeaponOilName`/`ReadWeaponEnchantLines`, `RecordAttendance`/`GetAttendanceOverview`, Anwesenheits-Aufräumen in `DeleteEvening`;
 - `Constants.lua`: `GC.WeaponOilPatterns`, Öl-Namen nach deutschem Client;
 - `Workshop.lua`: `CollectDueCooldownReminders`/`AnnounceDueCooldowns`/`ScheduleCooldownReminder` samt Login-Haken und Neuplanung nach jedem Scan;
 - `GearAudit.lua`: `GetMissingRecommendedRecipes`;
 - `Database.lua`: Vorgabe `cooldownReminder`, Merker `cooldownReminded`, Gildenzweig `attendance`;
-- `UI.lua`: Erinnerungs-Schalter in der Werkstatt-Karte der Einstellungen, Fenster samt Knöpfen für Rezept-Lücken (Ausrüstungsseite) und Anwesenheit (Raidauswertungsseite);
+- `UI.lua`: Erinnerungs-Schalter in der Werkstatt-Karte der Einstellungen, Fenster samt Knöpfen für Rezept-Lücken (Ausrüstungsseite) und Anwesenheit (Raidauswertungsseite); Ausrüstungsseite lesbar (kurze Regelsatz-Zeile, humanes Prüfalter, breitere HINWEIS-Spalte);
 - `tests/smoke.lua`: fünf neue Blöcke (Weiteressen, Waffenöl samt Windzorn-Gegenprobe, Erinnerung einmal-je-Sperre samt Schalter, Lücke schließt sich mit Hersteller, Anwesenheits-Höchstwert samt Löschweg); der alte Dreifach-Essen-Test trägt jetzt die richtige Annahme; Gegenproben gegen den 0.9.105-Stand schlagen in allen drei Kerndateien fehl;
 - `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.106.
 

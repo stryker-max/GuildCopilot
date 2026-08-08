@@ -40,6 +40,18 @@ Installer und Addon werden getrennt gezählt.
   Probesitzungen ohne Bosskampf zählen nicht, ein verpasster Abend zählt
   mit 0 %.
 
+**Außerdem behoben (Ausrüstungsseite)**
+
+- **„Verzauberung 3010" heilt jetzt zum echten Namen.** Ein bei kaltem
+  Item-Cache fehlgeschlagener Namens-Abgleich wurde für die ganze Sitzung
+  als „kein Name" gemerkt und nie erneut versucht – die Slots-Tabelle nannte
+  dauerhaft IDs. Fehlende Namen werden jetzt bei jedem Lesen nachgetragen,
+  samt neuer Bewertung und Begründung.
+- **Lesbarkeit:** Die Statuszeile bricht nicht mehr in eine abgeschnittene
+  vierte Zeile um, das Prüfalter steht als Minuten/Stunden/Tage statt
+  „vor 8157 Min.", und die HINWEIS-Spalte ist breiter (Slot und Sockel gaben
+  Reserve ab). Was dennoch nicht passt, steht vollständig im Zeilentooltip.
+
 ## 0.9.105 – Addon
 
 **Behoben**

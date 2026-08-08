@@ -9021,4 +9021,38 @@ do
     addon.DB:GetGuild().attendance = {}
 end
 
+-- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================
+-- Direkt nach dem Login ist der Item-Cache kalt und der Verzauberungsname
+-- nicht auflösbar - "Verzauberung 3010" stand dann für die ganze Sitzung in
+-- der Zeile, weil audit.hydrated jede Neuauflösung verhinderte. Jetzt trägt
+-- jedes Lesen eines hydrierten Audits fehlende Namen nach, samt neuer
+-- Bewertung und Begründung.
+do
+    addon.DB:GetGuild().gearAudits.healtest = {
+        name = "Healtest",
+        source = "SYNC",
+        hydrated = true,
+        inspectedAt = addon.Util.Now(),
+        slots = {
+            { key = "BACK", itemID = 24259, enchantID = 2621, required = true },
+        },
+    }
+    local saved = addon.GearAudit.ResolveEnchantNameByID
+    addon.GearAudit.ResolveEnchantNameByID = function(_, itemID, enchantID)
+        if tonumber(enchantID) == 2621 then
+            return "Feingefühl"
+        end
+        return nil
+    end
+    local healed = addon.GearAudit:GetAudit("Healtest")
+    assert(healed.slots[1].enchantName == "Feingefühl",
+        "Der nachgeladene Verzauberungsname erreicht das Audit nicht: "
+            .. tostring(healed.slots[1].enchantName))
+    assert(tostring(healed.slots[1].reason or ""):find("Feingefühl", 1, true) ~= nil,
+        "Die Begründung nennt weiter die ID statt des Namens: "
+            .. tostring(healed.slots[1].reason))
+    addon.GearAudit.ResolveEnchantNameByID = saved
+    addon.DB:GetGuild().gearAudits.healtest = nil
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
