@@ -680,6 +680,13 @@ end
 local RECRUITMENT_PAYLOAD_BYTES = 160
 local RECRUITMENT_MAX_PARTS = 100
 local RECRUITMENT_INCOMING_TTL = 5 * 60
+-- Wie viele unfertige Rekrutierungs-Uebertragungen gleichzeitig offenstehen
+-- duerfen. Diese Tabelle war die letzte im Addon ohne Mengendeckel: Die
+-- Verfallszeit raeumt zwar auf, aber erst nach fuenf Minuten - bis dahin
+-- konnte jedes weitere Sender/Token-Paar bis zu 100 Teilstuecke belegen.
+-- Dieselbe Regel wie in Werkstatt, Ausruestung und Raidauswertung: Greift
+-- die Grenze, weicht die aelteste unfertige Uebertragung, nicht die neue.
+local RECRUITMENT_MAX_INCOMING = 32
 local RECRUITMENT_DISCOVERY_WAIT = 0.9
 local RECRUITMENT_REPLY_INTERVAL = 15
 -- So lange gilt eine einmal gebaute Kennzahl des Rekrutierungs-Datensatzes.
@@ -1032,9 +1039,12 @@ function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
         GC.Sync:SendReliableAck("L", token, part, sender)
         return true
     end
+    local incomingCount = 0
     for key, incoming in pairs(self.syncIncoming) do
         if (now - (tonumber(incoming.receivedAt) or 0)) > RECRUITMENT_INCOMING_TTL then
             self.syncIncoming[key] = nil
+        else
+            incomingCount = incomingCount + 1
         end
     end
 
@@ -1045,6 +1055,24 @@ function GC.WarcraftLogs:ReceiveRecruitmentData(fields, sender, distribution)
         return false
     end
     if not incoming then
+        -- Greift die Grenze, weicht die AELTESTE unfertige Uebertragung -
+        -- dieselbe Regel wie in Werkstatt, Ausruestung und Raidauswertung:
+        -- Das frische Paket ist mehr wert als eines, das seit Minuten nicht
+        -- weitergekommen ist, denn wiederholt wird hier nichts.
+        while incomingCount >= RECRUITMENT_MAX_INCOMING do
+            local oldestKey, oldestAt
+            for key, transfer in pairs(self.syncIncoming) do
+                local receivedAt = tonumber(transfer.receivedAt) or 0
+                if not oldestAt or receivedAt < oldestAt then
+                    oldestKey, oldestAt = key, receivedAt
+                end
+            end
+            if not oldestKey then
+                break
+            end
+            self.syncIncoming[oldestKey] = nil
+            incomingCount = incomingCount - 1
+        end
         incoming = {
             total = total,
             importedAt = importedAt,

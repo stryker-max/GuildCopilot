@@ -402,14 +402,39 @@ local function BuildMessage(fields)
     return table.concat(escaped, "|")
 end
 
-local function ResolveItemName(itemID, fallback)
+-- Der echte Gegenstandsname aus dem Item-Cache des Clients - oder nil, wenn
+-- der Client den Gegenstand (noch) nicht kennt. Schon der Aufruf stoesst das
+-- Nachladen beim Server an; die Ankunft meldet GET_ITEM_INFO_RECEIVED, und
+-- ScheduleNameRefresh baut den Katalogindex danach neu auf.
+local function LookupItemName(itemID)
     if tonumber(itemID) and tonumber(itemID) > 0 and GetItemInfo then
         local name = GetItemInfo(tonumber(itemID))
-        if name then
+        if name and name ~= "" then
             return name
         end
     end
-    return fallback or (tonumber(itemID) and ("Item #" .. itemID) or "Unbekannt")
+    return nil
+end
+
+-- Ein gespeicherter Name kann der Notbehelf eines frueheren Empfangs sein
+-- ("Item #25708"): Der Absender schickt nur die ID, und der Cache kannte den
+-- Gegenstand beim Dekodieren noch nicht. Solche Platzhalter sind keine
+-- Auskunft und duerfen nie als Fallback dienen - sonst ueberleben sie jedes
+-- Nachladen und stehen dauerhaft in den Rezeptdetails.
+local function IsPlaceholderName(name)
+    name = tostring(name or "")
+    return name == "" or name:match("^Item #%d+$") ~= nil
+end
+
+local function ResolveItemName(itemID, fallback)
+    local name = LookupItemName(itemID)
+    if name then
+        return name
+    end
+    if not IsPlaceholderName(fallback) then
+        return fallback
+    end
+    return tonumber(itemID) and ("Item #" .. itemID) or "Unbekannt"
 end
 
 local function ResolveRecipeName(recipeKey, fallback)
@@ -1013,7 +1038,9 @@ function GC.Workshop:ScanModernProfession()
                 if reagentItemID then
                     reagents[#reagents + 1] = {
                         itemID = reagentItemID,
-                        name = ResolveItemName(reagentItemID),
+                        -- nil statt Platzhalter: aufgeloest wird bei der
+                        -- Anzeige, dann mit gefuelltem Item-Cache.
+                        name = LookupItemName(reagentItemID),
                         count = tonumber(slot.quantityRequired) or 1,
                     }
                 end
@@ -2548,7 +2575,10 @@ local function DecodeRecipeRecord(record, professionName)
             reagentID = tonumber(reagentID)
             reagents[#reagents + 1] = {
                 itemID = reagentID,
-                name = ResolveItemName(reagentID),
+                -- Kein Platzhalter in die Ablage: Was der Cache jetzt nicht
+                -- kennt, bleibt nil und wird beim Katalogaufbau erneut
+                -- aufgeloest, sobald der Client den Gegenstand nachgeladen hat.
+                name = LookupItemName(reagentID),
                 count = tonumber(count) or 1,
             }
         end
@@ -2577,7 +2607,9 @@ local function DecodeCompactRecipeRecord(record, professionName)
             reagentID = tonumber(reagentID)
             reagents[#reagents + 1] = {
                 itemID = reagentID,
-                name = ResolveItemName(reagentID),
+                -- Wie im Langformat: nil statt Platzhalter, aufgeloest wird
+                -- beim Katalogaufbau - dann mit gefuelltem Item-Cache.
+                name = LookupItemName(reagentID),
                 count = tonumber(count) or 1,
             }
         end
@@ -3140,6 +3172,27 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
     GC:FireCallback("WORKSHOP_UPDATED")
 end
 
+-- Reagenzienlisten werden fuer den Katalogindex kopiert UND dabei neu
+-- aufgeloest. Der gespeicherte Name ist nur der Stand des letzten Dekodierens;
+-- was der Client seither nachgeladen hat, gehoert in die Anzeige. Genau hier
+-- sass "16x Item #25708" in den Rezeptdetails: Der Platzhalter wurde beim
+-- Empfang einmal gespeichert und dann bei jedem Aufbau unveraendert
+-- weiterkopiert - das Nachladen des Gegenstands erreichte die Anzeige nie.
+-- Jeder Aufbau loest jetzt erneut auf; ein noch fehlender Gegenstand wird
+-- durch den LookupItemName-Aufruf zugleich beim Server angefordert, und
+-- GET_ITEM_INFO_RECEIVED -> ScheduleNameRefresh traegt den echten Namen nach.
+local function ResolvedReagentCopies(reagents)
+    local copies = {}
+    for index, reagent in ipairs(reagents or {}) do
+        copies[index] = {
+            itemID = reagent.itemID,
+            count = reagent.count,
+            name = ResolveItemName(reagent.itemID, reagent.name),
+        }
+    end
+    return copies
+end
+
 local function AddCrafterToCatalog(catalog, crafterName, professions)
     for _, profession in pairs(professions or {}) do
         for recipeKey, recipe in pairs(profession.recipes or {}) do
@@ -3157,7 +3210,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
                     scannedName = recipe.name,
                     itemID = recipe.itemID,
                     profession = profession.name or recipe.profession or "Unbekannt",
-                    reagents = GC.Util.DeepCopy(recipe.reagents or {}),
+                    reagents = ResolvedReagentCopies(recipe.reagents),
                     crafters = {},
                     crafterKeys = {},
                 }
@@ -3172,7 +3225,7 @@ local function AddCrafterToCatalog(catalog, crafterName, professions)
                 entry.crafters[#entry.crafters + 1] = GC.Util.PlayerShortName(crafterName)
             end
             if #entry.reagents == 0 and #(recipe.reagents or {}) > 0 then
-                entry.reagents = GC.Util.DeepCopy(recipe.reagents)
+                entry.reagents = ResolvedReagentCopies(recipe.reagents)
             end
         end
     end
@@ -3229,13 +3282,13 @@ function GC.Workshop:GetCatalogIndex()
                         itemID = known and known.itemID,
                         profession = (known and known.profession)
                             or profession.name or "Unbekannt",
-                        reagents = GC.Util.DeepCopy((known and known.reagents) or {}),
+                        reagents = ResolvedReagentCopies(known and known.reagents),
                         crafters = {},
                         crafterKeys = {},
                     }
                     catalog[recipeKey] = entry
                 elseif #entry.reagents == 0 and known and #(known.reagents or {}) > 0 then
-                    entry.reagents = GC.Util.DeepCopy(known.reagents)
+                    entry.reagents = ResolvedReagentCopies(known.reagents)
                 end
                 if not entry.crafterKeys[crafterKey] then
                     entry.crafterKeys[crafterKey] = true

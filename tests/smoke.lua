@@ -8636,4 +8636,150 @@ do
     GetSpellInfo = pe_savedSpellInfo
 end
 
+-- === Rezeptdetails: Item-IDs statt Namen ====================================
+-- Ein empfangenes Rezept nennt Reagenzien nur per ID. Kennt der Item-Cache den
+-- Gegenstand beim Dekodieren noch nicht, darf der Platzhalter "Item #x" weder
+-- gespeichert werden noch das spaetere Nachladen ueberleben - genau so stand
+-- "16x Item #25708" dauerhaft in den Rezeptdetails.
+do
+    local savedGetItemInfo = GetItemInfo
+    local knownItems = { [14342] = "Mondstoff", [31361] = "Netherkluftbeinrüstung" }
+    GetItemInfo = function(itemID)
+        return knownItems[tonumber(itemID)]
+    end
+
+    local profession = {
+        key = "lederverarbeitung",
+        name = "Lederverarbeitung",
+        updatedAt = addon.Util.Now(),
+        recipes = {
+            I31361 = {
+                key = "I31361",
+                itemID = 31361,
+                name = "Netherkluftbeinrüstung",
+                reagents = { { itemID = 25708, count = 16 }, { itemID = 14342, count = 4 } },
+            },
+        },
+    }
+    for _, message in ipairs(addon.Workshop:BuildProfessionMessages(profession, true, "Buffdaeddy")) do
+        addon.Workshop:ReceiveSync(addon.Util.SplitFields(message), "Buffdaeddy-Realm", "GUILD")
+    end
+
+    local storedRecipe = addon.DB:GetGuild().workshop.catalog.I31361
+    assert(storedRecipe ~= nil, "Das empfangene Rezept fehlt im Katalog")
+    local storedUnknown, storedKnown
+    for _, reagent in ipairs(storedRecipe.reagents) do
+        if reagent.itemID == 25708 then storedUnknown = reagent end
+        if reagent.itemID == 14342 then storedKnown = reagent end
+    end
+    assert(storedKnown ~= nil and storedKnown.name == "Mondstoff",
+        "Der aufloesbare Reagenzienname wurde nicht gespeichert")
+    assert(storedUnknown ~= nil and storedUnknown.name == nil,
+        "Für einen unbekannten Gegenstand wurde ein Platzhalter gespeichert: "
+            .. tostring(storedUnknown and storedUnknown.name))
+
+    -- Solange der Gegenstand fehlt, zeigt die Anzeige den Platzhalter ...
+    local function shownReagent(itemID)
+        local entry = addon.Workshop:GetCatalogEntry("I31361")
+        for _, reagent in ipairs(entry and entry.reagents or {}) do
+            if reagent.itemID == itemID then
+                return reagent
+            end
+        end
+        return nil
+    end
+    addon.Workshop:InvalidateCatalog()
+    assert(shownReagent(25708) ~= nil and shownReagent(25708).name == "Item #25708",
+        "Ohne Cache-Treffer fehlt der erkennbare Platzhalter")
+
+    -- ... und sobald der Client ihn nachgeladen hat, den echten Namen. Genau
+    -- das fehlte: Der Platzhalter wurde einmal kopiert und nie neu aufgeloest.
+    knownItems[25708] = "Schweres Knotenhautleder"
+    addon.Workshop:InvalidateCatalog()
+    assert(shownReagent(25708).name == "Schweres Knotenhautleder",
+        "Der nachgeladene Gegenstandsname erreicht die Rezeptdetails nicht: "
+            .. tostring(shownReagent(25708).name))
+
+    -- Alte SavedVariables tragen den Platzhalter bereits als gespeicherten
+    -- Namen. Auch er weicht dem echten, sobald der Gegenstand bekannt ist.
+    storedUnknown.name = "Item #25708"
+    addon.Workshop:InvalidateCatalog()
+    assert(shownReagent(25708).name == "Schweres Knotenhautleder",
+        "Ein gespeicherter Platzhalter verdrängt den echten Namen")
+
+    addon.DB:GetGuild().workshop.catalog.I31361 = nil
+    addon.DB:GetGuild().workshop.crafters.buffdaeddy = nil
+    addon.Workshop:InvalidateCatalog()
+    GetItemInfo = savedGetItemInfo
+end
+
+-- === Sitzungsliste: die laufende Sitzung steht sofort drin ==================
+-- Wer eine Sitzung startet oder ueber Startruf/Herzschlag mitschreibt, findet
+-- den Abend ab der ersten Sekunde in der Sitzungsliste und kann ihn auswerten,
+-- ohne auf das Ende zu warten.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor.session = nil
+    local startAt = addon.Util.Now()
+    addon.RaidMonitor:StartSession("livelist1", "Ich-Realm", startAt, "Karazhan")
+    addon.RaidMonitor.session.pulls[1] = {
+        name = "Attumen", boss = true, result = "KILL",
+        startedAt = startAt + 60, endedAt = startAt + 120,
+    }
+    currentTime = currentTime + 300
+
+    local evenings = addon.RaidMonitor:GetEvenings()
+    assert(#evenings >= 1 and evenings[1].live == true,
+        "Die laufende Sitzung steht nicht am Kopf der Sitzungsliste")
+    assert(evenings[1].summary.id == "livelist1" and evenings[1].summary.live == true,
+        "Der erste Listeneintrag trägt nicht die laufende Sitzung")
+    assert(evenings[1].summary.kills == 1,
+        "Der Zwischenstand zählt den Bosskill nicht")
+
+    -- Die Momentaufnahme ist waehlbar wie jede Auswertung - das ist das
+    -- "Auswerten dazwischen".
+    local liveKey = addon.RaidMonitor:SummaryKey(evenings[1].summary)
+    local selected = addon.RaidMonitor:GetSummaryByKey(liveKey)
+    assert(selected ~= nil and selected.live == true,
+        "Die laufende Sitzung lässt sich nicht als Auswertung öffnen")
+
+    -- Laufende Anwesenheit zaehlt bis jetzt mit, ohne die Uhr anzuhalten.
+    local ownKey = addon.Util.PlayerKey(addon:GetPlayerFullName())
+    local me = addon.RaidMonitor.session.participants[ownKey]
+    assert(me ~= nil and me.presentSince ~= nil,
+        "Der Mitschreiber steht nicht als anwesend in der Sitzung")
+    local shownMe
+    for _, participant in ipairs(selected.participants) do
+        if addon.Util.PlayerKey(participant.name) == ownKey then
+            shownMe = participant
+        end
+    end
+    assert(shownMe ~= nil and shownMe.seconds >= 300,
+        "Die laufende Anwesenheit fehlt im Zwischenstand: "
+            .. tostring(shownMe and shownMe.seconds))
+    assert(me.presentSince ~= nil,
+        "Die Momentaufnahme hat die laufende Anwesenheitsuhr angehalten")
+
+    -- Die Momentaufnahme liegt nirgends gespeichert und laesst sich deshalb
+    -- auch nicht loeschen.
+    assert(addon.RaidMonitor:DeleteEvening(liveKey) == false,
+        "Die laufende Sitzung ließ sich löschen")
+    assert(addon.RaidMonitor.session ~= nil,
+        "Der Löschversuch hat die laufende Sitzung beendet")
+
+    -- Nach dem Beenden verschwindet der Live-Eintrag, und derselbe Schluessel
+    -- zeigt nahtlos auf die abgelegte Auswertung.
+    addon.RaidMonitor:FinishSession(addon.Util.Now())
+    evenings = addon.RaidMonitor:GetEvenings()
+    assert(evenings[1] == nil or evenings[1].live ~= true,
+        "Nach dem Ende steht noch ein Live-Eintrag in der Liste")
+    local storedAfter = addon.RaidMonitor:GetSummaryByKey(liveKey)
+    assert(storedAfter ~= nil and storedAfter.live ~= true and storedAfter.source == "LIVE",
+        "Die Auswahl geht nach dem Ende nicht auf die gespeicherte Auswertung über")
+    assert(storedAfter.kills == 1 and #storedAfter.participants >= 1,
+        "Die abgelegte Auswertung hat den Stand der Sitzung verloren")
+
+    addon.DB:GetGuild().raidSessions = {}
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.104",
+  "## Version: 0.9.105",
 ];
 
 for (const entry of requiredMetadata) {
@@ -419,6 +419,14 @@ const requiredImplementations = [
   ["Fertig klingt nach Stufenaufstieg", /PlaySuccessSound\("LEVEL_UP"\)/],
   ["Autorenzeile unten rechts im Assistenten", /Nexarius - Thunderstrike/],
   ["Dual-Spec und Flex im Assistenten", /frame\.wizardSecondaryKey/],
+  // Rezeptdetails und Sitzungsliste (0.9.105): Reagenziennamen werden je
+  // Katalogaufbau neu aufgeloest statt einmal beim Empfang eingefroren, und
+  // die laufende Sitzung steht als Momentaufnahme sofort in der Liste.
+  ["Platzhalter-Namen gelten nicht als Namen", /local function IsPlaceholderName/],
+  ["Reagenzien je Katalogaufbau neu aufgelöst", /local function ResolvedReagentCopies/],
+  ["Momentaufnahme der laufenden Sitzung", /function GC\.RaidMonitor:BuildLiveSummary/],
+  ["Live-Eintrag führt die Sitzungsliste an", /sources = \{ live \}, live = true/],
+  ["Rekrutierungs-Empfang gedeckelt", /RECRUITMENT_MAX_INCOMING/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

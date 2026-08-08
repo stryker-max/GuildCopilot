@@ -8365,7 +8365,12 @@ function GC.UI:RefreshStatistics()
                     extras[#extras + 1] = mark
                 end
             end
+            -- Die laufende Sitzung ist gruen als "läuft" markiert: Sie steht
+            -- seit ihrem Start in der Liste und laesst sich schon auswerten,
+            -- waehrend sie laeuft. Kein Symbol - die WoW-Schrift zeichnet
+            -- fuer Zeichen wie U+25CF nur einen leeren Kasten.
             row:SetText(FormatSessionDate(summary) .. "  " .. ShortZoneName(zone)
+                .. (evening.live and "  |cff59e695läuft|r" or "")
                 .. (#evening.sources > 1 and #extras > 0
                     and ("  |cff4ec9ff+" .. table.concat(extras, "+") .. "|r") or ""))
             local active = false
@@ -8384,6 +8389,9 @@ function GC.UI:RefreshStatistics()
             .. "  •  " .. (selected.pulls or 0) .. " Versuche, " .. (selected.kills or 0) .. " Siege, "
             .. (selected.wipes or 0) .. " Wipes  •  Quelle: "
             .. SessionSourceLabel(selected.source)
+            -- Die Momentaufnahme der laufenden Sitzung sagt, was sie ist:
+            -- Zwischenstand, kein abgeschlossener Abend.
+            .. (selected.live and "  •  |cff59e695läuft – Zwischenstand|r" or "")
             -- Ein lückenhafter Mitschnitt sagt das von sich aus. Wer eine Zahl
             -- liest, soll nicht raten müssen, ob sie vollständig ist.
             .. ((selected.gaps or 0) > 0

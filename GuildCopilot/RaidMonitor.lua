@@ -821,10 +821,19 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
     for _, key in ipairs(session.participantOrder) do
         local participant = session.participants[key]
         if participant then
+            -- Eine noch laufende Anwesenheitsuhr zaehlt bis zum Stichtag mit.
+            -- Beim Sitzungsende ist sie immer schon geschlossen (FinishSession
+            -- ruft vorher ClosePresence) - der Zweig traegt allein die
+            -- Momentaufnahme der laufenden Sitzung (BuildLiveSummary), die
+            -- nichts anhalten darf.
+            local seconds = tonumber(participant.seconds) or 0
+            if participant.presentSince then
+                seconds = seconds + math.max(0, summary.endedAt - participant.presentSince)
+            end
             local entry = {
                 name = participant.name,
                 classFile = participant.classFile,
-                seconds = math.max(0, math.floor(participant.seconds)),
+                seconds = math.max(0, math.floor(seconds)),
                 deaths = participant.deaths,
                 resurrects = participant.resurrects,
                 interrupts = participant.interrupts,
@@ -851,6 +860,23 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
             summary.participants[#summary.participants + 1] = entry
         end
     end
+    return summary
+end
+
+-- Die laufende Sitzung als Momentaufnahme: dieselbe Verdichtung wie beim
+-- Beenden, nur ohne etwas anzuhalten oder abzulegen. Damit steht der Abend
+-- schon in der Sitzungsliste, WAEHREND er laeuft, und laesst sich jederzeit
+-- auswerten - bei jedem, der ihn mitschreibt, also auch bei allen, die ueber
+-- Startruf oder Herzschlag eingestiegen sind. Das Kennzeichen "live"
+-- unterscheidet die Momentaufnahme von einer abgelegten Auswertung;
+-- gespeichert wird sie nie, die Ablage uebernimmt weiterhin FinishSession.
+function GC.RaidMonitor:BuildLiveSummary()
+    local session = self.session
+    if not session then
+        return nil
+    end
+    local summary = self:BuildSummary(session, GC.Util.Now())
+    summary.live = true
     return summary
 end
 
@@ -1066,6 +1092,11 @@ function GC.RaidMonitor:DeleteEvening(summaryKey)
     if not evening then
         return false, "Keine Auswertung gewählt."
     end
+    -- Die Momentaufnahme der laufenden Sitzung liegt nirgends gespeichert;
+    -- "löschen" gäbe es nur als leeres Erfolgsversprechen.
+    if evening.live then
+        return false, "Die laufende Sitzung lässt sich nicht löschen – erst beenden."
+    end
     local drop = {}
     local dropped = 0
     for _, summary in ipairs(evening.sources) do
@@ -1115,6 +1146,13 @@ end
 function GC.RaidMonitor:GetSummaryByKey(summaryKey)
     if not summaryKey then
         return nil
+    end
+    -- Auch die Momentaufnahme der laufenden Sitzung ist waehlbar. Ihr
+    -- Schluessel (Kennung + "LIVE") geht nach dem Beenden nahtlos auf die
+    -- dann gespeicherte Auswertung ueber - die Auswahl bleibt einfach stehen.
+    local live = self:BuildLiveSummary()
+    if live and self:SummaryKey(live) == summaryKey then
+        return live
     end
     for _, summary in ipairs(self:GetSummaries()) do
         if self:SummaryKey(summary) == summaryKey then
@@ -1402,10 +1440,18 @@ end
 -- Oberfläche sie anbieten kann.
 function GC.RaidMonitor:GetEvenings()
     local evenings = {}
+    -- Die laufende Sitzung steht als erster Eintrag in der Liste. Sie bleibt
+    -- ein eigener Abend und sammelt keine gespeicherten Quellen unter sich:
+    -- Die Momentaufnahme verschwindet mit dem Sitzungsende, und was unter ihr
+    -- gruppiert waere, fiele in diesem Moment aus der Liste.
+    local live = self:BuildLiveSummary()
+    if live then
+        evenings[1] = { summary = live, sources = { live }, live = true }
+    end
     for _, summary in ipairs(self:GetSummaries()) do
         local evening
         for _, candidate in ipairs(evenings) do
-            if self:IsSameEvening(candidate.summary, summary) then
+            if not candidate.live and self:IsSameEvening(candidate.summary, summary) then
                 evening = candidate
                 break
             end

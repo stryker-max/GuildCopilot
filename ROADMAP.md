@@ -298,6 +298,45 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.105 – Der Platzhalter, der das Nachladen überlebte, und der Abend, der schon läuft
+
+Der Owner hat das Addon zum Gesamtaudit gestellt: Synchronisation, Auswertung, Stabilität, das 250-Online-Prinzip – und zwei konkrete Befunde. Auf dem Screenshot der Werkstatt stand in den Materialien „16× Item #25708“ statt „Schweres Knotenhautleder“, und die Sitzungsliste kannte einen Raidabend erst, wenn er vorbei war.
+
+### „Item #25708“: einmal falsch aufgelöst, für immer falsch angezeigt
+
+Rezepte wandern locale-frei als Item- und Zauber-IDs durch die Gilde; den Namen löst jeder Client in seiner eigenen Sprache aus dem Item-Cache auf. Der Fehler saß im WANN: Aufgelöst wurde genau einmal, beim Dekodieren des empfangenen Pakets. Kannte der Cache den Gegenstand in dem Moment nicht – nach einem frischen Login der Normalfall –, wurde der Notbehelf „Item #25708“ als Name GESPEICHERT und danach bei jedem Katalogaufbau unverändert weiterkopiert. Das Nachladen des Gegenstands (`GET_ITEM_INFO_RECEIVED`) baute den Index zwar neu, aber der Neubau las ja nur den gespeicherten Platzhalter. Die Rezeptnamen selbst waren von diesem Fehler nie betroffen – sie werden seit jeher je Aufbau über `ResolveRecipeName` neu aufgelöst; genau deshalb stimmte auf dem Screenshot die Liste links, während rechts die Reagenzien kaputt waren.
+
+Drei Dinge ändern sich, und zusammen schließen sie den Kreis:
+
+- **Gespeichert wird kein Platzhalter mehr.** Was der Cache beim Dekodieren nicht kennt, bleibt `nil` – eine fehlende Antwort statt einer falschen.
+- **Aufgelöst wird bei jedem Katalogaufbau erneut** (`ResolvedReagentCopies`): Der gespeicherte Name ist nur noch Fallback für den Fall, dass der Cache weiterhin schweigt – und ein gespeicherter Platzhalter aus früheren Versionen gilt dabei ausdrücklich NICHT als Name (`IsPlaceholderName`). Damit heilen sich auch Alt-Bestände von selbst.
+- **Der Kreis ist geschlossen:** Der Auflösungsversuch selbst stößt das Nachladen beim Server an, `GET_ITEM_INFO_RECEIVED` → `ScheduleNameRefresh` verwirft den Index, der nächste Aufbau trägt den echten Namen ein. Bis dahin zeigt die Anzeige den Platzhalter als das, was er ist: ein Übergangszustand von Sekunden, kein Dauerzustand.
+
+### Die laufende Sitzung gehört in die Liste
+
+„Auswerten“ ging bisher erst nach „Sitzung beenden“: Die Liste zeigt gespeicherte Zusammenfassungen, und die entsteht erst beim Ende. Wer zwischendurch wissen wollte, wer wie lange da war und was eingeworfen wurde, sah nur die Statuszeile mit zwei Zahlen.
+
+Jetzt baut `BuildLiveSummary` aus der laufenden Sitzung dieselbe Verdichtung wie das Sitzungsende – nur ohne irgendetwas anzuhalten oder abzulegen. Die Momentaufnahme führt die Sitzungsliste grün als „läuft“ an, ist wählbar wie jede Auswertung (Teilnehmerliste, Sortierung, Tooltip, Detailfenster) und zählt laufende Anwesenheitsuhren bis „jetzt“ hoch, ohne sie anzufassen. Das gilt für JEDEN, der den Abend mitschreibt – also auch für alle, die über Startruf (RS) oder Herzschlag (RH) eingestiegen sind: Bei denen erscheint der Abend in der Sekunde, in der ihr Client mitzuschreiben beginnt. Drei Kanten waren zu entgraten:
+
+- Der Schlüssel der Momentaufnahme (Kennung + Quelle LIVE) ist derselbe wie der der späteren gespeicherten Auswertung – die Auswahl bleibt beim Beenden einfach stehen und zeigt nahtlos auf die Ablage.
+- Die Momentaufnahme gruppiert keine gespeicherten Quellen unter sich: Sie verschwindet mit dem Ende, und was unter ihr hinge, fiele mit ihr aus der Liste.
+- Löschen geht nicht – sie liegt nirgends. Vorher hätte der Löschknopf Erfolg gemeldet und nichts getan.
+
+Nicht gebaut, bewusst: eine laufende Übertragung des Zwischenstands an Nicht-Teilnehmer. Wer nicht im Raid mitschreibt, bekommt die Auswertung wie bisher nach dem Ende (`DistributeSummary`) – ein Dauerstrom von Zwischenständen an 250 Online wäre genau der Kanaldruck, den das 250-Online-Prinzip verbietet.
+
+### Das Audit: Befund gut, eine Lücke
+
+Der Rest des Audits bestätigt die Bauweise: Alle gildenweiten Anfragen laufen über Wahl (`IsElectedResponder`), Streuung oder beides; alle Merklisten sind gedeckelt und verfallen; die Sendewege takten sich über ChatThrottleLib bzw. das eigene Budget; die beiden OnUpdate-Rahmen (Bulk, Herzschlag) schlafen, wenn nichts anliegt. EINE Empfangstabelle war noch ungedeckelt: die eingehenden Rekrutierungs-Teiltransfers in `WarcraftLogs.lua` – jede andere (Werkstatt 64, Ausrüstung 128, Raidauswertung 40) begrenzt die Zahl gleichzeitig offener Übertragungen. Sie bekommt dieselbe Regel (32, beim Überlauf weicht die älteste unfertige), womit die letzte Stelle geschlossen ist, an der ein Paketsturm Speicher binden konnte, der erst nach fünf Minuten verfiel.
+
+### Geändert
+
+- `Workshop.lua`: `LookupItemName`/`IsPlaceholderName`/`ResolvedReagentCopies`; Dekoder speichern `nil` statt Platzhalter; Katalogaufbau löst Reagenziennamen je Aufbau neu auf;
+- `RaidMonitor.lua`: `BuildLiveSummary`; `BuildSummary` zählt offene Anwesenheitsuhren bis zum Stichtag; `GetEvenings`/`GetSummaryByKey` kennen die Momentaufnahme; `DeleteEvening` lehnt sie ab;
+- `WarcraftLogs.lua`: `RECRUITMENT_MAX_INCOMING` (32) mit Verdrängung der ältesten unfertigen Übertragung;
+- `UI.lua`: „läuft“-Markierung in Sitzungsliste und Kopfzeile (Textmarkierung statt Symbol – die WoW-Schrift zeichnet für U+25CF nur einen Kasten, die CI-Prüfung fängt das ab);
+- `tests/smoke.lua`: Platzhalter wird nie gespeichert, nachgeladener Name erreicht die Details, Alt-Platzhalter heilt; Live-Eintrag ab Start, Anwesenheit im Zwischenstand ohne Anhalten der Uhr, kein Löschen, nahtloser Übergang beim Beenden – beide Gegenproben gegen den 0.9.104-Stand schlagen fehl;
+- `CHANGELOG.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.105.
+
 ## 0.9.104 – Pro-Enchanters-Gedanken, gildenfest gemacht
 
 Der Owner fragte, ob sich aus dem Addon Pro Enchanters (GPLv3, 211.000+ Downloads) etwas für Guild Copilot gewinnen lässt – „natürlich selbst gebaut statt kopiert“. Die Antwort nach Sichtung der CurseForge-Beschreibung: Das Workorder-System hat Guild Copilot längst (Gildenaufträge), und die statische Rezeptdatenbank mit eigenen Lokalisierungen wäre ein Rückschritt – unser Scan liest live und verschlüsselt locale-frei über Item-/Zauber-IDs. Vier Dinge lohnten sich, alle nach dem 0.9.101-Muster (Prinzip übernehmen, Code nicht – GPLv3 passt ohnehin nicht in ein MIT-Repository):

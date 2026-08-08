@@ -7,6 +7,35 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.105 – Addon
+
+**Behoben**
+
+- **Rezeptdetails zeigen Namen statt „Item #25708".** Empfangene Rezepte
+  nennen Reagenzien nur per ID; kannte der Client den Gegenstand beim Empfang
+  noch nicht, blieb der Platzhalter für immer stehen. Aufgelöst wird jetzt bei
+  jedem Katalogaufbau erneut: Sobald der Client den Gegenstand nachgeladen
+  hat, steht der echte Name da – auch bei Beständen, die den Platzhalter aus
+  früheren Versionen bereits gespeichert haben. Gespeichert wird der
+  Platzhalter gar nicht mehr.
+
+**Neu**
+
+- **Die laufende Raidsitzung steht sofort in der Sitzungsliste.** Ab dem
+  Start – auch bei allen, die über Startruf oder Herzschlag mitschreiben –
+  führt sie die Liste grün als „läuft" an und lässt sich wie jede Auswertung
+  öffnen: Teilnehmer, Anwesenheit, Verbrauch und Bosszahlen als
+  Zwischenstand, ohne auf das Sitzungsende zu warten. Beim Beenden geht die
+  Auswahl nahtlos auf die abgelegte Auswertung über. Löschen lässt sich der
+  Zwischenstand nicht – er liegt nirgends gespeichert.
+
+**Stabilität**
+
+- **Letzte ungedeckelte Empfangstabelle geschlossen.** Die eingehenden
+  Rekrutierungs-Übertragungen (Warcraft-Logs-Abgleich) begrenzen jetzt wie
+  Werkstatt, Ausrüstung und Raidauswertung die Zahl gleichzeitig offener
+  Teiltransfers; beim Überlauf weicht die älteste unfertige Übertragung.
+
 ## 0.9.104 – Addon
 
 **Neu**
