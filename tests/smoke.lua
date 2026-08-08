@@ -690,6 +690,7 @@ end
 local addon = {}
 local files = {
     "Constants.lua",
+    "Locales.lua",
     "Core.lua",
     "Database.lua",
     "Profile.lua",
@@ -9019,6 +9020,35 @@ do
     end
     addon.DB:GetGuild().raidSessions = {}
     addon.DB:GetGuild().attendance = {}
+end
+
+-- === Sprache: Deutsch als Quelle, Englisch als Nachschlag ===================
+-- Teilschritt 1 der Übersetzung: Navigation, Seitentitel und Untertitel. Auf
+-- deutschen Clients gibt GC.L jeden Text unverändert zurück; auf allen
+-- anderen greift die englische Tabelle, und was dort fehlt, bleibt sichtbar
+-- deutsch statt zu brechen.
+do
+    assert(addon.L("Raidauswertung") == "Raidauswertung",
+        "Der deutsche Client bekommt eine Übersetzung untergeschoben")
+    addon.LocaleEnglish = true
+    assert(addon.L("Raidauswertung") == "Raid Review",
+        "Die englische Navigation fehlt: " .. tostring(addon.L("Raidauswertung")))
+    assert(addon.L("Ausrüstung") == "Gear", "Der Ausrüstungs-Reiter bleibt deutsch")
+    assert(addon.L("REKRUTIERUNG") == "RECRUITMENT",
+        "Die Abschnittsüberschrift bleibt deutsch")
+    assert(addon.L("Diesen Satz gibt es nicht") == "Diesen Satz gibt es nicht",
+        "Ein fehlender Eintrag fällt nicht auf Deutsch zurück")
+    -- Die zusammengesetzten Untertitel müssen als GANZER Schlüssel treffen -
+    -- exakt die Verkettung aus den Seitenbauern.
+    local joined = "Sitzungen starten nur berechtigte Ränge; gespeichert werden Zusammenfassungen, keine Rohdaten."
+        .. " Spaltenkopf: Klick sortiert, Ziehen ordnet um. Maus über einer Zeile zeigt alles im Detail."
+    assert(addon.L(joined) ~= joined,
+        "Der zusammengesetzte Untertitel der Raidauswertung trifft keinen Schlüssel")
+    local joinedPost = "Text prüfen, bestätigen und mit einem echten Klick in die ausgewählten Kanäle senden"
+        .. " — oder die Automatik postet mit dem nächsten Tastendruck, sobald ein Kanal bereit ist."
+    assert(addon.L(joinedPost) ~= joinedPost,
+        "Der zusammengesetzte Untertitel der Werbeseite trifft keinen Schlüssel")
+    addon.LocaleEnglish = false
 end
 
 -- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================

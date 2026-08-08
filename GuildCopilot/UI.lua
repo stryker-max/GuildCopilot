@@ -291,9 +291,13 @@ local function AnchorRowTooltip(frame)
 end
 
 local function CreatePageTitle(page, title, subtitle)
-    local heading = CreateLabel(page, title, { title = true })
+    -- Uebersetzt wird zentral: Jede Seite meldet Titel und Untertitel durch
+    -- diese eine Stelle an, die Tabellenzeilen stehen in Locales.lua. Ein
+    -- dynamisch zusammengesetzter Untertitel uebersetzt sich am Aufrufer
+    -- ueber einen Platzhalter-Schluessel und laeuft hier unveraendert durch.
+    local heading = CreateLabel(page, GC.L(title), { title = true })
     heading:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
-    local help = CreateLabel(page, subtitle, { muted = true, width = 770, height = 32, vertical = "TOP" })
+    local help = CreateLabel(page, GC.L(subtitle), { muted = true, width = 770, height = 32, vertical = "TOP" })
     help:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -7)
     return heading, help
 end
@@ -1297,12 +1301,14 @@ function GC.UI:CreateMainFrame()
     local navigationY = -NAV_TOP
     local currentSection
     for _, definition in ipairs(TAB_DEFINITIONS) do
+        -- Abschnitts- und Reiterbeschriftungen laufen durch GC.L; die
+        -- Schluessel in TAB_DEFINITIONS bleiben deutsch und stabil.
         if definition.section ~= currentSection then
             if currentSection then
                 navigationY = navigationY - NAV_SECTION_GAP
             end
             currentSection = definition.section
-            local sectionLabel = CreateLabel(sidebar, currentSection, {
+            local sectionLabel = CreateLabel(sidebar, GC.L(currentSection), {
                 muted = true,
                 font = "GameFontNormalSmall",
                 align = "CENTER",
@@ -1313,7 +1319,7 @@ function GC.UI:CreateMainFrame()
             navigationY = navigationY - NAV_SECTION_HEIGHT
         end
         local pageKey = definition.key
-        local tab = CreateButton(sidebar, definition.label, 160, NAV_TAB_HEIGHT, function()
+        local tab = CreateButton(sidebar, GC.L(definition.label), 160, NAV_TAB_HEIGHT, function()
             self:ShowPage(pageKey)
         end)
         tab:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 14, navigationY)
@@ -1463,9 +1469,11 @@ end
 
 function GC.UI:BuildDashboardPage()
     local page = self.pages.OVERVIEW
-    CreatePageTitle(page, "Gildenübersicht", "Bis zu "
-        .. GC.Constants.ACTIVE_RAIDER_LIMIT
-        .. " zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen.")
+    -- Der Untertitel traegt eine Zahl und uebersetzt sich deshalb ueber den
+    -- Platzhalter-Schluessel selbst; CreatePageTitle laesst ihn durch.
+    CreatePageTitle(page, "Gildenübersicht",
+        (GC.L("Bis zu {n} zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen.")
+            :gsub("{n}", tostring(GC.Constants.ACTIVE_RAIDER_LIMIT))))
 
     page.metricCards = {}
     local metrics = {

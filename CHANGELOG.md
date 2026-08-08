@@ -7,6 +7,19 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.107 – Addon
+
+**Neu**
+
+- **Englisch, Teilschritt 1 von 3.** Auf nicht-deutschen Clients zeigen
+  Seitenleiste, Seitentitel und Untertitel jetzt Englisch; alles Übrige
+  bleibt vorerst deutsch und folgt in zwei weiteren Schritten. Deutsch
+  bleibt die Quellsprache – was noch nicht übersetzt ist, fällt sichtbar
+  auf Deutsch zurück, statt zu brechen. Spielbegriffe (Gegenstände, Zauber,
+  Verzauberungen) werden im nächsten Teilschritt ausschließlich aus
+  offiziellen Quellen (Wowhead, Spielclient) übernommen und nie frei
+  übersetzt.
+
 ## 0.9.106 – Addon
 
 **Behoben**

@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.106",
+  "## Version: 0.9.107",
 ];
 
 for (const entry of requiredMetadata) {
@@ -439,6 +439,13 @@ const requiredImplementations = [
   ["dauerhafte Anwesenheit je Abend", /function GC\.RaidMonitor:RecordAttendance/],
   ["Anwesenheitsübersicht je Spieler", /function GC\.RaidMonitor:GetAttendanceOverview/],
   ["Verzauberungsnamen heilen beim Lesen", /function GC\.GearAudit:HealEnchantNames/],
+  // Englische Uebersetzung, Teilschritt 1 (0.9.107): Deutsch bleibt die
+  // Quellsprache, GC.L schlaegt auf englischen Clients nach, Navigation und
+  // Seitentitel laufen zentral hindurch. Spielbegriffe folgen in Teilschritt
+  // 2 - ausschliesslich aus offiziellen Quellen, nie frei uebersetzt.
+  ["Sprachschicht mit deutschem Schlüssel", /function GC\.L\(text\)/],
+  ["Navigation läuft durch die Sprachschicht", /GC\.L\(definition\.label\)/],
+  ["Seitentitel laufen durch die Sprachschicht", /CreateLabel\(page, GC\.L\(title\)/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

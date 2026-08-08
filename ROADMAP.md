@@ -298,6 +298,29 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.107 – Englisch, Teilschritt 1: die Sprachschicht
+
+Die Sync-Ebene ist seit jeher locale-frei (Item- und Zauber-IDs statt Namen, englische Clients scannen korrekt) – aber die Oberfläche sprach nur Deutsch. Der Owner hat die Übersetzung beauftragt, in zwei bis drei Teilschritten, mit einer harten Vorgabe: **Spielbegriffe werden nie frei übersetzt.** Jeder Name eines Gegenstands, Zaubers oder einer Verzauberung muss aus einer offiziellen Quelle belegt sein (Wowhead über die Spell-/Item-ID, oder der Spielclient selbst) – dieselbe Belegdisziplin wie bei `GC.EnchantRecipeKeys`.
+
+### Deutsch als Schlüssel
+
+`Locales.lua` definiert `GC.L(text)`: Auf deutschen Clients (GetLocale `de*`) gibt es jeden Text unverändert zurück, auf allen anderen schlägt es in der englischen Tabelle nach – **der deutsche Text selbst ist der Schlüssel**. Das ist die bewusste Gegenentscheidung zum üblichen Schlüsselsystem (`PAGE_TITLE_GEAR`): Das Addon ist deutschsprachig gewachsen, jede Zeile trägt ihren Text schon; ein Schlüsselsystem hätte tausende Stellen angefasst, bevor die erste Übersetzung sichtbar wird. So genügt eine Tabellenzeile je Text, und was (noch) fehlt, fällt sichtbar und harmlos auf Deutsch zurück – es gibt keinen halben Zustand, der bricht.
+
+Teilschritt 1 übersetzt die Rahmen: Seitenleiste (Abschnitte und Reiter) und alle dreizehn Seitentitel samt Untertiteln. Verdrahtet ist das zentral – `CreatePageTitle` und die zwei Render-Stellen der Navigation rufen `GC.L`, die Aufrufer bleiben unangetastet. Zusammengesetzte Untertitel treffen als GANZE Verkettung ihren Schlüssel (die Tests prüfen beide); der eine Untertitel mit eingebauter Zahl läuft über einen `{n}`-Platzhalter-Schlüssel. Das alles sind eigene Addon-Texte, keine Spielbegriffe – gewöhnliche Übersetzungsarbeit, die erlaubt ist.
+
+### Die nächsten Teilschritte
+
+- **Teilschritt 2 – Spielbegriffe, einzeln belegt:** Die deutschen Namen in `GC.Consumables` bekommen englische Gegenstücke, jeder einzelne über seine Spell-ID auf Wowhead nachgeschlagen und mit Beleg-Kommentar; dazu Slot-Beschriftungen (`GC.GearSlots`) und die Instanznamen der Content-Phasen. Nichts davon wird frei übersetzt – was sich nicht belegen lässt, bleibt deutsch und wird als Lücke benannt.
+- **Teilschritt 3 – Seiteninhalte:** Karten, Knöpfe, Status- und Chatmeldungen, Fenster. Der große Rest, mechanisch über dieselbe Tabelle.
+
+### Geändert
+
+- `Locales.lua` (neu): `GC.L`, englische Tabelle für Navigation, Titel und Untertitel, Fahrplan im Dateikopf;
+- `UI.lua`: `CreatePageTitle` und die Navigation laufen durch `GC.L`; der Übersicht-Untertitel nutzt den `{n}`-Platzhalter;
+- `GuildCopilot.toc`: `Locales.lua` direkt nach `Constants.lua`;
+- `tests/smoke.lua`: Sprachtest (deutscher Client unverändert, englischer Client übersetzt, fehlender Eintrag fällt auf Deutsch zurück, beide zusammengesetzten Untertitel treffen); Gegenprobe ohne `Locales.lua` schlägt fehl;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`: Stand 0.9.107.
+
 ## 0.9.106 – Elf Mahlzeiten, null Öle: was der Verbrauchszähler nicht wusste
 
 Der Owner kam mit zwei Screenshots aus dem Karazhan-Abend vom 07.08.: elf gezählte Essen bei einem einzigen Tod („Ich hab sicher keine 11 Food verbraucht") und null Öle, obwohl das Hervorragende Zauberöl nachweislich auf der Waffe saß. Beides waren keine Zufallsfehler, sondern zwei blinde Flecken derselben Zähllogik – und dazu kamen die drei in der vorigen Sitzung beschlossenen Ausbauten (Wartezeit-Erinnerung, Rezept-Lücken, Anwesenheit).
