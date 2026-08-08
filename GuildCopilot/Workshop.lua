@@ -881,6 +881,9 @@ function GC.Workshop:FinishScan(professionName, skillLevel, maxSkillLevel, recip
         professionName, skillLevel, maxSkillLevel, recipes, scannedCount)
     if stored and cooldowns and self:RecordOwnCooldowns(professionName, cooldowns) then
         self:SendCooldowns()
+        -- Der naechste Ablauf kann sich mit jedem Scan verschieben; die
+        -- Erinnerung plant dann neu.
+        self:ScheduleCooldownReminder()
     end
     return stored, changed
 end
@@ -1748,6 +1751,125 @@ function GC.Workshop:GetRecipeCooldown(recipeKey, crafterName)
         return nil
     end
     return readyAt
+end
+
+-- === Wartezeit-Erinnerung ===================================================
+--
+-- Das Addon kennt die laufenden Sperren der eigenen Charaktere - was fehlte,
+-- war der Moment, in dem dieses Wissen etwas nuetzt: wenn die Sperre
+-- ABGELAUFEN ist. Gemeldet wird im Chat, einmal je Sperre: Der Merker haelt
+-- den Ablaufzeitpunkt fest, und eine neue Umwandlung ergibt einen neuen
+-- Zeitpunkt und damit wieder genau eine Meldung. Beim Login wird gesammelt
+-- gemeldet, waehrend der Sitzung weckt ein Zeitgeber zum naechsten Ablauf.
+--
+-- Die Meldung sagt "abgelaufen", nicht "frei": Der gespeicherte Zeitpunkt ist
+-- eine Untergrenze (siehe Kopf des Wartezeiten-Abschnitts). Fuer die eigenen
+-- Charaktere ist er praktisch immer exakt, denn jede neue Umwandlung laeuft
+-- durchs eigene Berufsfenster und damit durch den Scan.
+local COOLDOWN_REMINDER_LOGIN_DELAY = 25
+local MAX_COOLDOWN_REMINDER_LINES = 5
+local COOLDOWN_REMINDER_KEEP = 30 * 24 * 60 * 60
+
+local function CooldownReminderStore()
+    if not (GC.DB and GC.DB.data) then
+        return nil
+    end
+    GC.DB.data.cooldownReminded = GC.DB.data.cooldownReminded or {}
+    return GC.DB.data.cooldownReminded
+end
+
+-- Alle abgelaufenen und noch nicht gemeldeten Sperren der eigenen Charaktere.
+function GC.Workshop:CollectDueCooldownReminders(now)
+    now = tonumber(now) or GC.Util.Now()
+    local reminded = CooldownReminderStore()
+    local due = {}
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        for _, recipeKey in ipairs(SortedKeys(entry.profession.cooldowns)) do
+            local readyAt = tonumber(entry.profession.cooldowns[recipeKey]) or 0
+            if readyAt > 0 and readyAt <= now then
+                local key = GC.Util.PlayerKey(entry.crafter) .. "|" .. recipeKey
+                if not reminded or (tonumber(reminded[key]) or 0) ~= readyAt then
+                    due[#due + 1] = {
+                        key = key,
+                        crafter = entry.crafter,
+                        recipeKey = recipeKey,
+                        readyAt = readyAt,
+                    }
+                end
+            end
+        end
+    end
+    return due
+end
+
+function GC.Workshop:AnnounceDueCooldowns()
+    if GC.DB:GetSettings().cooldownReminder == false then
+        return 0
+    end
+    local now = GC.Util.Now()
+    local due = self:CollectDueCooldownReminders(now)
+    local reminded = CooldownReminderStore()
+    if reminded then
+        -- Merker, deren Ablauf einen Monat zurueckliegt, bewirken nichts
+        -- mehr: Die laengste Sperre in TBC sind vier Tage, ein so alter
+        -- Eintrag gehoert laengst zu einer abgeraeumten Sperre.
+        local cutoff = now - COOLDOWN_REMINDER_KEEP
+        for key, readyAt in pairs(reminded) do
+            if (tonumber(readyAt) or 0) < cutoff then
+                reminded[key] = nil
+            end
+        end
+    end
+    for index, entry in ipairs(due) do
+        if reminded then
+            reminded[entry.key] = entry.readyAt
+        end
+        if index <= MAX_COOLDOWN_REMINDER_LINES then
+            GC:Print("Wartezeit abgelaufen: " .. ResolveRecipeName(entry.recipeKey)
+                .. " (" .. GC.Util.PlayerShortName(entry.crafter)
+                .. ") – wieder herstellbar.")
+        elseif index == MAX_COOLDOWN_REMINDER_LINES + 1 then
+            GC:Print("… und " .. (#due - MAX_COOLDOWN_REMINDER_LINES)
+                .. " weitere abgelaufene Wartezeiten.")
+        end
+    end
+    return #due
+end
+
+-- Plant den Zeitgeber auf den naechsten kuenftigen Ablauf. Ein laufender
+-- Zeitgeber laesst sich nicht zurueckziehen; der Stempel entwertet veraltete.
+function GC.Workshop:ScheduleCooldownReminder()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return false
+    end
+    local now = GC.Util.Now()
+    local nextAt
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        for _, readyAt in pairs(entry.profession.cooldowns or {}) do
+            readyAt = tonumber(readyAt) or 0
+            if readyAt > now and (not nextAt or readyAt < nextAt) then
+                nextAt = readyAt
+            end
+        end
+    end
+    if not nextAt then
+        return false
+    end
+    self.cooldownReminderToken = (tonumber(self.cooldownReminderToken) or 0) + 1
+    local token = self.cooldownReminderToken
+    C_Timer.After(math.max(1, nextAt - now + 2), function()
+        if GC.Workshop.cooldownReminderToken ~= token then
+            return
+        end
+        GC.Workshop:AnnounceDueCooldowns()
+        -- Nur weiterplanen, wenn die Zeit den Ablauf wirklich erreicht hat.
+        -- In Umgebungen, deren Zeitgeber sofort feuern (Tests), liefe die
+        -- Kette sonst endlos gegen denselben kuenftigen Zeitpunkt an.
+        if GC.Util.Now() >= nextAt then
+            GC.Workshop:ScheduleCooldownReminder()
+        end
+    end)
+    return true
 end
 
 -- Jede Nachricht steht fuer sich: Sperren sind einzelne Tatsachen, keine
@@ -3626,6 +3748,13 @@ end)
 GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
     self:GetOwnData()
     if C_Timer and C_Timer.After then
+        -- Erst wenn Login-Rauschen und Datenbestand stehen: die seit dem
+        -- letzten Spielen abgelaufenen Wartezeiten einmal gesammelt melden
+        -- und den Zeitgeber auf den naechsten Ablauf stellen.
+        C_Timer.After(COOLDOWN_REMINDER_LOGIN_DELAY, function()
+            GC.Workshop:AnnounceDueCooldowns()
+            GC.Workshop:ScheduleCooldownReminder()
+        end)
         C_Timer.After(10, function()
             -- Der Abgleich ist fester Hintergrunddienst und läuft über den
             -- schnellen, zuverlässigen Gildenkanal. Erst den Bestand der Gilde

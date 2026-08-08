@@ -600,6 +600,49 @@ function GC.GearAudit:GetOrderableEnchant(slotKey, specKey)
     return best
 end
 
+-- === Rezept-Lücken der Gilde ================================================
+--
+-- Die Umkehrung der Bruecke oben: Welche empfohlenen Verzauberungen kann
+-- NIEMAND in der Gilde herstellen? Der Regelsatz sagt, was gut waere, die
+-- Zuordnung GC.EnchantRecipeKeys macht daraus ein Rezept, und der Katalog
+-- weiss, wer es kann - steht dort niemand, ist das eine benannte Luecke und
+-- damit eine fertige Farm- und Einkaufsliste fuer Offiziere. Beruecksichtigt
+-- werden nur Regeln der laufenden Content-Phase; IMPROVABLE-Regeln nie, denn
+-- eine ausdruecklich schwache Verzauberung fehlt niemandem.
+function GC.GearAudit:GetMissingRecommendedRecipes()
+    local missing = {}
+    if not GC.EnchantRecipeKeys or not GC.Workshop then
+        return missing
+    end
+    for enchantID, rule in pairs(GC.EnchantRuleSet.rules) do
+        if (rule.verdict == "OPTIMAL" or rule.verdict == "SOLID")
+            and self:RuleAppliesToPhase(rule) then
+            local recipeKey = GC.EnchantRecipeKeys[enchantID]
+            if recipeKey then
+                local entry = GC.Workshop:GetCatalogEntry(recipeKey)
+                if not entry or #(entry.crafters or {}) == 0 then
+                    missing[#missing + 1] = {
+                        enchantID = enchantID,
+                        recipeKey = recipeKey,
+                        name = rule.name,
+                        verdict = rule.verdict,
+                        slots = rule.slots,
+                    }
+                end
+            end
+        end
+    end
+    -- OPTIMAL vor SOLID, darunter alphabetisch - dieselbe Liste bei jedem
+    -- Aufruf, ohne Zufall aus der pairs-Reihenfolge.
+    table.sort(missing, function(left, right)
+        if left.verdict ~= right.verdict then
+            return left.verdict == "OPTIMAL"
+        end
+        return tostring(left.name) < tostring(right.name)
+    end)
+    return missing
+end
+
 -- Eine Regel aus einer spaeteren Phase gilt noch nicht.
 function GC.GearAudit:RuleAppliesToPhase(rule)
     if not rule or not rule.phase then

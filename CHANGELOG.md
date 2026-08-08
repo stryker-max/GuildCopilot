@@ -7,6 +7,39 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.106 – Addon
+
+**Behoben**
+
+- **Essen zählt wieder ehrlich.** Wer sitzen bleibt und weiterisst, dessen
+  Sattgegessen-Aura meldet sich alle zehn Sekunden erneut – jede Meldung
+  zählte als neue Mahlzeit (11 statt real 4 an einem Vergleichsabend). Ein
+  und dieselbe Aura zählt jetzt höchstens einmal pro Minute; ein echtes
+  Nachessen später zählt weiterhin.
+- **Waffenöle werden endlich gesehen.** Öle und Wetzsteine sitzen auf der
+  Waffe, nicht als Buff auf dem Spieler – vor dem Sitzungsstart aufgetragen
+  waren sie unsichtbar und die Spalte „Öle/Steine" blieb bei null. Die eigene
+  Waffe wird jetzt beim Sitzungseintritt mitgelesen; gezählt wird nur ein
+  Treffer bekannter Öl/Stein-Namen (Windzorn und Gifte zählen nie). Die
+  „Superior"-Öle heißen jetzt wie im deutschen Client „Hervorragendes …".
+
+**Neu**
+
+- **Wartezeit-Erinnerung.** Abgelaufene Berufs-Wartezeiten (Umwandlung,
+  Spezialtuch, Sphäre) melden sich im Chat – beim Login gesammelt, während
+  des Spielens zum Ablaufzeitpunkt, auch für die eigenen Twinks. Eine Zeile
+  je Sperre, nie doppelt; abschaltbar in den Einstellungen (Werkstatt).
+- **Rezept-Lücken der Gilde.** Der Knopf auf der Ausrüstungsseite zeigt, was
+  der Regelsatz empfiehlt, aber niemand in der Gilde herstellen kann – eine
+  fertige Farm- und Einkaufsliste, OPTIMAL zuerst, nur Regeln der laufenden
+  Content-Phase.
+- **Anwesenheit über Abende hinweg.** Der Knopf „Anwesenheit" auf der
+  Raidauswertungsseite zeigt je Spieler die besuchten Bossabende und den
+  mittleren Anwesenheitsanteil – aus einem eigenen, dauerhaften Speicher
+  (bis 60 Abende), der das Löschen alter Auswertungen übersteht.
+  Probesitzungen ohne Bosskampf zählen nicht, ein verpasster Abend zählt
+  mit 0 %.
+
 ## 0.9.105 – Addon
 
 **Behoben**

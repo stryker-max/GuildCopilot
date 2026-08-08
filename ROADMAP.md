@@ -298,6 +298,45 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.106 – Elf Mahlzeiten, null Öle: was der Verbrauchszähler nicht wusste
+
+Der Owner kam mit zwei Screenshots aus dem Karazhan-Abend vom 07.08.: elf gezählte Essen bei einem einzigen Tod („Ich hab sicher keine 11 Food verbraucht") und null Öle, obwohl das Hervorragende Zauberöl nachweislich auf der Waffe saß. Beides waren keine Zufallsfehler, sondern zwei blinde Flecken derselben Zähllogik – und dazu kamen die drei in der vorigen Sitzung beschlossenen Ausbauten (Wartezeit-Erinnerung, Rezept-Lücken, Anwesenheit).
+
+### Elf Essen: der Refresh des Weiteressens
+
+Das Verbrauchsprotokoll lieferte den Beleg gleich mit: „Sattgegessen"-Einträge um 21:31:59, :32:09, :32:19 – exakter Zehnsekundentakt. Das ist kein dreifaches Essen, das ist EIN Essen: Wer sitzen bleibt, dessen Sattgegessen-Aura wird vom Client bei jedem Zehnsekundentick des Essens erneut gemeldet (`SPELL_AURA_REFRESH`), und jede Meldung zählte als neue Mahlzeit. Der Refresh wurde seinerzeit bewusst mitgezählt, damit ein Nachessen bei noch laufendem Buff nicht verloren geht – dass das Weiteressen denselben Ereignistyp feuert, war der übersehene Fall.
+
+Die Lösung ist ein Entprellfenster je Teilnehmer und Spell-ID (`AURA_RECOUNT_WINDOW`, 60 s): Dieselbe Aura innerhalb der Minute ist dieselbe Mahlzeit. Ein zweites Gericht (andere Spell-ID) zählt sofort, ein echtes Nachessen Minuten später auch – und der Eintritts-Scan setzt denselben Merker, damit „beim Betreten gerade am Essen" nicht doppelt zählt. Der alte Regressionstest hatte die Gegenannahme („dreimal gegessen ist dreimal Essen") ausdrücklich festgeschrieben und wurde mitsamt Begründung umgedreht.
+
+### Null Öle: die Verzauberung, die keine Aura ist
+
+Waffenöle und Wetzsteine sind temporäre Verzauberungen AUF DER WAFFE. Der Eintritts-Scan liest Auren, das Kampfprotokoll sieht nur das Auftragen selbst – ein Öl, das vor dem Sitzungsstart aufgetragen wurde (der Regelfall, es hält eine Stunde), war für beide Wege unsichtbar. Jetzt wird beim Sitzungseintritt zusätzlich die eigene Waffe gelesen: `GetWeaponEnchantInfo` sagt, OB eine temporäre Verzauberung sitzt, der Waffentooltip sagt WELCHE. Gezählt wird ausschließlich ein Treffer der Muster in `GC.WeaponOilPatterns` (Zauberöl/Manaöl/Wetzstein/Gewichtsstein, beide Sprachen) – Windzorn, Flammenzunge und Schurkengifte sind ebenfalls temporäre Verzauberungen und zählen ausdrücklich nie. Geraten wird nichts: Kein Treffer, kein Fund.
+
+Zwei ehrliche Grenzen, beide dokumentiert: Fremde Waffen gibt die API nicht her (wer sein Öl WÄHREND der Sitzung neu aufträgt, zählt weiterhin über das Wirkereignis), und der Tooltip-Leser ist als eigene Methode herausgelöst, damit die Tests ihn mit festen Zeilen füttern können. Nebenbefund derselben Meldung: Die „Superior"-Öle hießen in der Verbrauchsliste „Überragend", der deutsche Client sagt „Hervorragend" – korrigiert, direkt am Client abgelesen.
+
+### Wartezeit-Erinnerung: das Wissen bekommt seinen Moment
+
+Die Werkstatt kennt die Sperren der eigenen Charaktere seit 0.9.97 – gemeldet hat sie deren Ablauf nie. Jetzt: beim Login gesammelt (nach 25 s, wenn das Login-Rauschen vorbei ist), während der Sitzung per Zeitgeber zum nächsten Ablauf, je Sperre genau einmal (der Merker hält den Ablaufzeitpunkt fest; eine neue Umwandlung ergibt einen neuen Zeitpunkt und wieder genau eine Meldung). Die Meldung sagt „abgelaufen", nicht „frei" – der gespeicherte Zeitpunkt bleibt eine Untergrenze, für eigene Charaktere ist er praktisch exakt. Abschaltbar in den Einstellungen (Werkstatt-Karte), Vorgabe an. Der Zeitgeber plant nur weiter, wenn die Zeit den Ablauf wirklich erreicht hat – in Umgebungen mit sofort feuernden Zeitgebern (Tests) liefe die Kette sonst endlos.
+
+### Rezept-Lücken: die Umkehrung der Bestell-Brücke
+
+`GetOrderableEnchant` (0.9.104) beantwortet „was kann ich mir bestellen?“. Die neue `GetMissingRecommendedRecipes` beantwortet die Offiziersfrage dahinter: Welche Empfehlungen des Regelsatzes kann NIEMAND herstellen? Regelsatz × `EnchantRecipeKeys` × Katalog, gefiltert auf die laufende Content-Phase, OPTIMAL vor SOLID, deterministisch sortiert. Sichtbar als Fenster hinter dem Knopf „Rezept-Lücken der Gilde" unten in der Spielerkarte der Ausrüstungsseite (dieselbe Bauweise wie „Sitzung löschen"); das offene Fenster zieht mit dem Rezeptabgleich mit (WORKSHOP_UPDATED). IMPROVABLE-Regeln fehlen bewusst – eine ausdrücklich schwache Verzauberung fehlt niemandem.
+
+### Anwesenheit: das lange Gedächtnis neben der kurzen Ablage
+
+Die Ablage der Auswertungen ist bewusst klein und kurzlebig (24+12 Plätze, 30 Tage) – für „wie zuverlässig ist jemand über die Saison?" taugt sie nicht. Die Anwesenheit bekommt deshalb ihr eigenes, dauerhaftes Aggregat (`guildData.attendance`): je Abend ein kleiner Eintrag (wer, welcher Anteil), gespeist aus JEDER eintreffenden Fassung – auch einer, die die Ablage gleich wieder aussortiert, denn der Höchstwert-Merge je Teilnehmer (dasselbe Argument wie bei der Reparatur: niemand war länger da, als er da war) kann durch eine zusätzliche Quelle nur vollständiger werden. Drei Regeln halten die Quote belastbar: nur Abende mit Bosskampf (Probesitzungen verdünnen sonst), nur echte Anwesenheitsquellen (Live/Sync/Reparatur ab Zählregel-Version 2 – Warcraft Logs und Logdatei messen Encounter-Zeit und zahlten systematisch zu niedrig ein), und ein verpasster Abend zählt mit null, sonst stünde der Einmalgast bei 100 %. Deckel 60 Abende (älteste weichen), „Abend gelöscht" räumt auch hier. Sichtbar hinter dem Knopf „Anwesenheit" auf der Raidauswertungsseite: je Spieler Abende, Ø-Anteil (grün ≥ 75 %, gelb < 40 %) und letzter Abend.
+
+### Geändert
+
+- `RaidMonitor.lua`: `AURA_RECOUNT_WINDOW`/`MarkAuraCounted` (Kampfprotokoll UND Eintritts-Scan), `ScanWeaponConsumables`/`FindWeaponOilName`/`ReadWeaponEnchantLines`, `RecordAttendance`/`GetAttendanceOverview`, Anwesenheits-Aufräumen in `DeleteEvening`;
+- `Constants.lua`: `GC.WeaponOilPatterns`, Öl-Namen nach deutschem Client;
+- `Workshop.lua`: `CollectDueCooldownReminders`/`AnnounceDueCooldowns`/`ScheduleCooldownReminder` samt Login-Haken und Neuplanung nach jedem Scan;
+- `GearAudit.lua`: `GetMissingRecommendedRecipes`;
+- `Database.lua`: Vorgabe `cooldownReminder`, Merker `cooldownReminded`, Gildenzweig `attendance`;
+- `UI.lua`: Erinnerungs-Schalter in der Werkstatt-Karte der Einstellungen, Fenster samt Knöpfen für Rezept-Lücken (Ausrüstungsseite) und Anwesenheit (Raidauswertungsseite);
+- `tests/smoke.lua`: fünf neue Blöcke (Weiteressen, Waffenöl samt Windzorn-Gegenprobe, Erinnerung einmal-je-Sperre samt Schalter, Lücke schließt sich mit Hersteller, Anwesenheits-Höchstwert samt Löschweg); der alte Dreifach-Essen-Test trägt jetzt die richtige Annahme; Gegenproben gegen den 0.9.105-Stand schlagen in allen drei Kerndateien fehl;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.106.
+
 ## 0.9.105 – Der Platzhalter, der das Nachladen überlebte, und der Abend, der schon läuft
 
 Der Owner hat das Addon zum Gesamtaudit gestellt: Synchronisation, Auswertung, Stabilität, das 250-Online-Prinzip – und zwei konkrete Befunde. Auf dem Screenshot der Werkstatt stand in den Materialien „16× Item #25708“ statt „Schweres Knotenhautleder“, und die Sitzungsliste kannte einen Raidabend erst, wenn er vorbei war.

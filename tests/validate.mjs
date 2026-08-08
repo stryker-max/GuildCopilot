@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.105",
+  "## Version: 0.9.106",
 ];
 
 for (const entry of requiredMetadata) {
@@ -427,6 +427,17 @@ const requiredImplementations = [
   ["Momentaufnahme der laufenden Sitzung", /function GC\.RaidMonitor:BuildLiveSummary/],
   ["Live-Eintrag führt die Sitzungsliste an", /sources = \{ live \}, live = true/],
   ["Rekrutierungs-Empfang gedeckelt", /RECRUITMENT_MAX_INCOMING/],
+  // Ehrlicher Verbrauch und drei Werkstatt/Raid-Ausbauten (0.9.106):
+  // Weiteressen zaehlt einmal, Waffenöle werden auf der eigenen Waffe
+  // erkannt, Wartezeiten erinnern, Rezept-Luecken und Anwesenheit haben
+  // ihre eigene Auskunft.
+  ["Weiteressen zählt einmal", /AURA_RECOUNT_WINDOW/],
+  ["Waffenöl-Scan der eigenen Waffe", /function GC\.RaidMonitor:ScanWeaponConsumables/],
+  ["Öl-Erkennung nur über bekannte Muster", /GC\.WeaponOilPatterns = \{/],
+  ["Wartezeit-Erinnerung", /function GC\.Workshop:AnnounceDueCooldowns/],
+  ["Rezept-Lücken der Gilde", /function GC\.GearAudit:GetMissingRecommendedRecipes/],
+  ["dauerhafte Anwesenheit je Abend", /function GC\.RaidMonitor:RecordAttendance/],
+  ["Anwesenheitsübersicht je Spieler", /function GC\.RaidMonitor:GetAttendanceOverview/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

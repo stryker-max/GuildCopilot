@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.105",
+    VERSION = "0.9.106",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -389,8 +389,10 @@ GC.Consumables = {
     [17539] = { category = "ELIXIR", name = "Großes Arkanelixier" },
     [33720] = { category = "ELIXIR", name = "Elixier des Ansturms" },
     [33721] = { category = "ELIXIR", name = "Elixier des Adepten" },
-    [28017] = { category = "OIL", name = "Überragendes Zauberöl" },
-    [28019] = { category = "OIL", name = "Überragendes Manaöl" },
+    -- Der deutsche Client nennt die "Superior"-Öle "Hervorragend"
+    -- (Owner-Korrektur vom 08.08.2026, direkt am Client abgelesen).
+    [28017] = { category = "OIL", name = "Hervorragendes Zauberöl" },
+    [28019] = { category = "OIL", name = "Hervorragendes Manaöl" },
 
     -- === Essen ==============================================================
     --
@@ -414,6 +416,25 @@ GC.Consumables = {
     [33268] = { category = "FOOD", name = "Sattgegessen (+44 Heilung)" },
     [43764] = { category = "FOOD", name = "Sattgegessen (+20 Trefferwertung)" },
     [45245] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +20 Willenskraft)" },
+}
+
+-- Öle und Wetzsteine sitzen als TEMPORAERE VERZAUBERUNG auf der Waffe, nicht
+-- als Aura auf dem Spieler. Der Eintritts-Scan der Raidsitzung liest Auren -
+-- ein vor dem Sitzungsstart aufgetragenes Öl war damit unsichtbar, und die
+-- Spalte "Öle/Steine" stand auf null, obwohl das Öl nachweislich drauf war.
+--
+-- Lesbar ist nur die EIGENE Waffe (GetWeaponEnchantInfo gilt ausschliesslich
+-- fuer "player"); erkannt wird die Verzauberungszeile des Waffentooltips.
+-- Gezaehlt wird NUR bei einem Treffer dieser Muster: Windzorn und
+-- Flammenzunge (Schamane) und die Gifte (Schurke) sind ebenfalls temporaere
+-- Verzauberungen und ausdruecklich keine Verbrauchsgegenstaende - geraten
+-- wird nichts, ein Nichttreffer zaehlt schlicht nicht. Beide Sprachfassungen,
+-- verglichen als Teilzeichenkette.
+GC.WeaponOilPatterns = {
+    "Zauberöl", "Wizard Oil",
+    "Manaöl", "Mana Oil",
+    "Wetzstein", "Sharpening Stone",
+    "Gewichtsstein", "Weightstone",
 }
 
 -- Bosse der TBC-Schlachtzuege.

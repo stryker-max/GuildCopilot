@@ -1729,7 +1729,10 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    content:SetHeight(2170)
+    -- Die Werkstatt-Karte am Seitenende ist mit der Wartezeit-Erinnerung
+    -- gewachsen; die Inhaltshoehe muss mitwachsen, sonst schneidet der
+    -- Scroller die unterste Zeile ab.
+    content:SetHeight(2230)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -2125,7 +2128,7 @@ function GC.UI:BuildSettingsPage()
     -- Fairness"). Die Karte haengt am Seitenende - unten anbauen verschiebt
     -- keine der vermessenen Karten darueber.
     local workshopCard = CreateCard(content, "Werkstatt")
-    workshopCard:SetSize(752, 110)
+    workshopCard:SetSize(752, 162)
     workshopCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2048)
     page.workshopWhisperToggle = CreateToggle(workshopCard,
         "Flüsterbefehl beantworten: „!rezept <Suche>“", function(checked)
@@ -2139,6 +2142,18 @@ function GC.UI:BuildSettingsPage()
         width = 716,
         height = 16,
     }):SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -84)
+    page.cooldownReminderToggle = CreateToggle(workshopCard,
+        "Abgelaufene Berufs-Wartezeiten im Chat melden", function(checked)
+        GC.DB:GetSettings().cooldownReminder = checked
+    end)
+    page.cooldownReminderToggle:SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -104)
+    page.cooldownReminderToggle.text:SetWidth(420)
+    CreateLabel(workshopCard,
+        "Eine Zeile je Sperre (Umwandlung, Spezialtuch, Sphäre), beim Login und bei Ablauf – auch für die eigenen Twinks.", {
+        muted = true,
+        width = 716,
+        height = 16,
+    }):SetPoint("TOPLEFT", workshopCard, "TOPLEFT", 18, -136)
 
     -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
@@ -2266,6 +2281,7 @@ function GC.UI:RefreshSettings()
     page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
     page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
     SetToggle(page.workshopWhisperToggle, settings.workshopWhisperReply == true)
+    SetToggle(page.cooldownReminderToggle, settings.cooldownReminder ~= false)
 
     -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
     -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
@@ -7989,6 +8005,14 @@ function GC.UI:BuildStatisticsPage()
     end, "PRIMARY")
     page.sessionButton:SetPoint("TOPRIGHT", controlCard, "TOPRIGHT", -18, -14)
 
+    -- Die Saisonfrage neben der Tagesansicht: Wer war ueber alle Abende wie
+    -- zuverlaessig da? Der Platz reicht exakt - die Statuszeile ist 470 breit
+    -- und endet bei x=488, der Knopf beginnt bei x=490.
+    page.attendanceButton = CreateButton(controlCard, "Anwesenheit", 110, 30, function()
+        GC.UI:ShowAttendance()
+    end)
+    page.attendanceButton:SetPoint("TOPRIGHT", page.sessionButton, "TOPLEFT", -8, 0)
+
     page.requestButton = CreateButton(controlCard, "Auswertung anfordern", 150, 30, function()
         local ok, message = GC.RaidMonitor:RequestSummaries()
         page:SetActionStatus(message, ok)
@@ -8727,9 +8751,17 @@ function GC.UI:BuildGearPage()
         end
     end
 
+    -- Unten in der Spielerkarte: die Rezept-Lücken der Gilde. Der Knopf
+    -- nimmt der Liste eine Zeile - dieselbe Bauweise wie "Sitzung löschen"
+    -- auf der Raidauswertungsseite.
+    page.missingRecipesButton = CreateButton(listCard, "Rezept-Lücken der Gilde", 214, 26, function()
+        GC.UI:ShowMissingRecipes()
+    end)
+    page.missingRecipesButton:SetPoint("BOTTOMLEFT", listCard, "BOTTOMLEFT", 12, 10)
+
     local playerScroll = CreateModernScrollFrame(listCard)
     playerScroll:SetPoint("TOPLEFT", listCard, "TOPLEFT", 12, -76)
-    playerScroll:SetPoint("BOTTOMRIGHT", listCard, "BOTTOMRIGHT", -12, 12)
+    playerScroll:SetPoint("BOTTOMRIGHT", listCard, "BOTTOMRIGHT", -12, 44)
     local playerContent = CreateFrame("Frame", nil, playerScroll)
     playerContent:SetWidth(202)
     playerContent:SetHeight(1)
@@ -10699,6 +10731,278 @@ function GC.UI:RefreshConsumableLog()
     frame.content:SetHeight(math.max(320, #entries * 20))
     frame.scroll:UpdateModernThumb()
 end
+
+-- === Rezept-Lücken der Gilde ================================================
+-- Empfohlene Verzauberungen (Regelsatz, laufende Phase), die niemand in der
+-- Gilde herstellen kann - die fertige Farm- und Einkaufsliste für Offiziere.
+-- Die Daten kommen aus GearAudit:GetMissingRecommendedRecipes.
+
+local function GearSlotLabels(slotKeys)
+    if type(slotKeys) ~= "table" or #slotKeys == 0 then
+        return "alle Slots"
+    end
+    local labels = {}
+    for _, slotKey in ipairs(slotKeys) do
+        local label = slotKey
+        for _, slot in ipairs(GC.GearSlots or {}) do
+            if slot.key == slotKey then
+                label = slot.label
+                break
+            end
+        end
+        labels[#labels + 1] = label
+    end
+    return table.concat(labels, ", ")
+end
+
+function GC.UI:CreateMissingRecipesFrame()
+    if self.missingRecipesFrame then
+        return self.missingRecipesFrame
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotMissingRecipes")
+    frame:SetSize(500, 440)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 40, 10)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "Rezept-Lücken der Gilde", { title = true, width = 400 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+    frame.subtitle = CreateLabel(frame, "", { muted = true, width = 468, height = 30, vertical = "TOP" })
+    frame.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
+
+    CreateLabel(frame, "EMPFEHLUNG", { muted = true, font = "GameFontNormalSmall", width = 240, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -76)
+    CreateLabel(frame, "SLOT", { muted = true, font = "GameFontNormalSmall", width = 130, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 268, -76)
+    CreateLabel(frame, "STUFE", { muted = true, font = "GameFontNormalSmall", width = 70, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 406, -76)
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -94)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 44)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(450)
+    frame.content:SetHeight(280)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 40 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(450, 18)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 20))
+        row.name = CreateLabel(row, "", { width = 244, height = 18 })
+        row.name:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.slot = CreateLabel(row, "", { muted = true, width = 134, height = 18 })
+        row.slot:SetPoint("LEFT", row, "LEFT", 254, 0)
+        row.verdict = CreateLabel(row, "", { width = 66, height = 18 })
+        row.verdict:SetPoint("LEFT", row, "LEFT", 392, 0)
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.note = CreateLabel(frame, "", { muted = true, width = 320, height = 18 })
+    frame.note:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 12)
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 28, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 8)
+
+    frame:Hide()
+    self.missingRecipesFrame = frame
+    return frame
+end
+
+function GC.UI:ShowMissingRecipes()
+    local frame = self:CreateMissingRecipesFrame()
+    frame:Show()
+    if frame.Raise then
+        frame:Raise()
+    end
+    self:RefreshMissingRecipes()
+end
+
+function GC.UI:RefreshMissingRecipes()
+    local frame = self.missingRecipesFrame
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local missing = GC.GearAudit and GC.GearAudit:GetMissingRecommendedRecipes() or {}
+    local phase = GC.ContentPhaseByKey[GC.GearAudit and GC.GearAudit:GetContentPhase() or ""]
+    frame.subtitle:SetText("Vom Regelsatz empfohlen"
+        .. (phase and (" (bis " .. phase.key .. ")") or "")
+        .. ", aber niemand in der Gilde kann es herstellen – die Farm- und Einkaufsliste."
+        .. " Der Stand wächst mit dem Rezeptabgleich der Werkstatt mit.")
+
+    for index, row in ipairs(frame.rows) do
+        local entry = missing[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.name:SetText(entry.name or entry.recipeKey)
+            row.slot:SetText(GearSlotLabels(entry.slots))
+            row.verdict:SetText(entry.verdict == "OPTIMAL"
+                and "|cff59e695Optimal|r" or "|cff4ec9ffSolide|r")
+        end
+    end
+    frame.note:SetText(#missing == 0
+        and "Keine Lücken: Alles Empfohlene kann jemand herstellen."
+        or (#missing .. (#missing == 1 and " Lücke" or " Lücken")
+            .. " im aktuellen Regelsatz"))
+    frame.content:SetHeight(math.max(280, #missing * 20))
+    frame.scroll:UpdateModernThumb()
+end
+
+GC:RegisterCallback("WORKSHOP_UPDATED", GC.UI, function(self)
+    -- Eintreffende Rezeptdaten koennen Luecken schliessen; das offene Fenster
+    -- zieht ohne eigenen Takt einfach mit.
+    self:RefreshMissingRecipes()
+end)
+
+-- === Anwesenheit über Abende hinweg =========================================
+-- Je Spieler: besuchte Abende und mittlerer Anwesenheitsanteil über alle
+-- erfassten Bossabende. Die Daten kommen aus dem dauerhaften Aggregat
+-- (RaidMonitor:GetAttendanceOverview), nicht aus der kurzlebigen Ablage.
+
+function GC.UI:CreateAttendanceFrame()
+    if self.attendanceFrame then
+        return self.attendanceFrame
+    end
+    local frame = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotAttendance")
+    frame:SetSize(500, 500)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 50, 10)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame.title = CreateLabel(frame, "Anwesenheit", { title = true, width = 400 })
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
+    frame.closeX = CreateButton(frame, "×", 24, 24, function()
+        frame:Hide()
+    end)
+    frame.closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -10)
+    frame.subtitle = CreateLabel(frame, "", { muted = true, width = 468, height = 30, vertical = "TOP" })
+    frame.subtitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
+
+    CreateLabel(frame, "NAME", { muted = true, font = "GameFontNormalSmall", width = 150, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -76)
+    CreateLabel(frame, "ABENDE", { muted = true, font = "GameFontNormalSmall", width = 80, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 190, -76)
+    CreateLabel(frame, "ANTEIL", { muted = true, font = "GameFontNormalSmall", width = 80, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 274, -76)
+    CreateLabel(frame, "ZULETZT", { muted = true, font = "GameFontNormalSmall", width = 100, height = 14 })
+        :SetPoint("TOPLEFT", frame, "TOPLEFT", 356, -76)
+
+    local body = CreatePanel(frame, THEME.input)
+    body:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -94)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 44)
+    frame.scroll = CreateModernScrollFrame(body)
+    frame.scroll:SetPoint("TOPLEFT", body, "TOPLEFT", 6, -6)
+    frame.scroll:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10, 6)
+    frame.content = CreateFrame("Frame", nil, frame.scroll)
+    frame.content:SetWidth(450)
+    frame.content:SetHeight(340)
+    frame.scroll:SetScrollChild(frame.content)
+
+    frame.rows = {}
+    for index = 1, 80 do
+        local row = CreateFrame("Frame", nil, frame.content)
+        row:SetSize(450, 18)
+        row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, -((index - 1) * 20))
+        row.name = CreateLabel(row, "", { width = 160, height = 18 })
+        row.name:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.evenings = CreateLabel(row, "", { width = 76, height = 18 })
+        row.evenings:SetPoint("LEFT", row, "LEFT", 176, 0)
+        row.percent = CreateLabel(row, "", { width = 76, height = 18 })
+        row.percent:SetPoint("LEFT", row, "LEFT", 260, 0)
+        row.last = CreateLabel(row, "", { muted = true, width = 100, height = 18 })
+        row.last:SetPoint("LEFT", row, "LEFT", 342, 0)
+        row:Hide()
+        frame.rows[index] = row
+    end
+
+    frame.note = CreateLabel(frame, "", { muted = true, width = 320, height = 18 })
+    frame.note:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 12)
+    frame.closeButton = CreateButton(frame, "Schließen", 110, 28, function()
+        frame:Hide()
+    end)
+    frame.closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 8)
+
+    frame:Hide()
+    self.attendanceFrame = frame
+    return frame
+end
+
+function GC.UI:ShowAttendance()
+    local frame = self:CreateAttendanceFrame()
+    frame:Show()
+    if frame.Raise then
+        frame:Raise()
+    end
+    self:RefreshAttendance()
+end
+
+function GC.UI:RefreshAttendance()
+    local frame = self.attendanceFrame
+    if not frame or not frame:IsShown() then
+        return
+    end
+    local rows, evenings = GC.RaidMonitor:GetAttendanceOverview()
+    frame.subtitle:SetText("Mittlerer Anwesenheitsanteil über alle " .. evenings
+        .. " erfassten Bossabende – ein verpasster Abend zählt mit 0 %."
+        .. " Die Liste bleibt erhalten, auch wenn alte Auswertungen längst gelöscht sind.")
+
+    for index, row in ipairs(frame.rows) do
+        local entry = rows[index]
+        row:SetShown(entry ~= nil)
+        if entry then
+            row.name:SetText(entry.name or "?")
+            row.name:SetTextColor(ClassColor(entry.classFile))
+            row.evenings:SetText(entry.attended .. " / " .. evenings)
+            local red, green, blue = 1, 1, 1
+            if entry.percent >= 75 then
+                red, green, blue = 0.35, 0.9, 0.58
+            elseif entry.percent < 40 then
+                red, green, blue = 1, 0.72, 0.25
+            end
+            row.percent:SetText(entry.percent .. " %")
+            row.percent:SetTextColor(red, green, blue)
+            local lastText = ""
+            if entry.lastAt > 0 and date then
+                local ok, formatted = pcall(date, "%d.%m.", entry.lastAt)
+                if ok and formatted then
+                    lastText = formatted
+                end
+            end
+            row.last:SetText(lastText)
+        end
+    end
+    frame.note:SetText(evenings == 0
+        and "Noch kein Bossabend erfasst – Abende ohne Bosskampf zählen nicht."
+        or "Höchstens 60 Abende; Probesitzungen ohne Bosskampf zählen nicht.")
+    frame.content:SetHeight(math.max(340, #rows * 20))
+    frame.scroll:UpdateModernThumb()
+end
+
+GC:RegisterCallback("RAID_SESSION_UPDATED", GC.UI, function(self)
+    self:RefreshAttendance()
+end)
 
 -- Der Antwortzähler zu "Auswertung anfordern": Ohne ihn wirkte der Knopf
 -- wirkungslos - Antworten kamen still an oder still gar nicht.

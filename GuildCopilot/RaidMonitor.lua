@@ -315,6 +315,10 @@ function GC.RaidMonitor:SyncParticipants()
         present[participant] = true
         participant.presentSince = participant.presentSince or now
         self:ScanCarriedConsumables(unit, participant)
+        -- Nur die eigene Waffe ist lesbar; Naeheres beim Waffenscan selbst.
+        if unit == "player" then
+            self:ScanWeaponConsumables(participant)
+        end
     end
 
     -- Wer die Sitzung mitschreibt, ist immer dabei. Ohne diese Zeile bliebe
@@ -970,6 +974,11 @@ function GC.RaidMonitor:StoreSummary(summary)
     if not summary or not summary.id then
         return false
     end
+    -- Jede eintreffende Fassung traegt zur dauerhaften Anwesenheit bei -
+    -- ausdruecklich auch eine, die die Ablage gleich wieder aussortiert
+    -- (siebte SYNC-Fassung desselben Abends): Der Hoechstwert-Merge kann
+    -- durch eine zusaetzliche Quelle nur vollstaendiger werden, nie falscher.
+    self:RecordAttendance(summary)
 
     local sessions = GC.DB:GetGuild().raidSessions
     for index, stored in ipairs(sessions) do
@@ -1077,6 +1086,140 @@ function GC.RaidMonitor:StoreSummary(summary)
     return false
 end
 
+-- === Anwesenheit über Abende hinweg =========================================
+--
+-- Die Ablage der Auswertungen ist auf wenige Wochen und wenige Plaetze
+-- begrenzt - fuer die Frage "wie zuverlaessig ist jemand ueber die Saison?"
+-- taugt sie deshalb nicht. Die Anwesenheit bekommt darum ihr eigenes,
+-- dauerhaftes Aggregat: je Abend ein kleiner Eintrag (wer, welcher Anteil),
+-- unabhaengig davon, wann die Auswertung selbst aus der Ablage faellt.
+--
+-- Drei Regeln halten die Zahlen belastbar:
+--   * Es zaehlen nur Abende mit mindestens einem erkannten Bosskampf - in
+--     der Stadt gestartete Probesitzungen verduennen sonst jede Quote.
+--   * Es zaehlen nur Quellen, deren Anwesenheit echte Anwesenheit ist
+--     (Live, Sync, Reparatur - ab Zaehlregel-Version 2). Warcraft Logs und
+--     Logdatei messen reine Encounter-Zeit und wuerden systematisch zu
+--     niedrig einzahlen.
+--   * Ueber mehrere Fassungen desselben Abends gewinnt je Teilnehmer der
+--     HOECHSTWERT - dasselbe Argument wie bei der Reparatur: Niemand kann
+--     laenger dagewesen sein, als er da war.
+local ATTENDANCE_MAX_EVENINGS = 60
+local ATTENDANCE_SOURCES = { LIVE = true, SYNC = true, REPAIR = true }
+
+function GC.RaidMonitor:RecordAttendance(summary)
+    if not summary or not summary.id or summary.live then
+        return false
+    end
+    if not ATTENDANCE_SOURCES[self:SourceKind(summary.source)] then
+        return false
+    end
+    if (tonumber(summary.rulesVersion) or 1) < 2 then
+        return false
+    end
+    if (tonumber(summary.pulls) or 0) <= 0 then
+        return false
+    end
+    local duration = math.max(0,
+        (tonumber(summary.endedAt) or 0) - (tonumber(summary.startedAt) or 0))
+    if duration <= 0 then
+        return false
+    end
+
+    local log = GC.DB:GetGuild().attendance
+    local evening = log[summary.id]
+    if not evening then
+        evening = { participants = {} }
+        log[summary.id] = evening
+    end
+    evening.at = math.max(tonumber(evening.at) or 0, tonumber(summary.endedAt) or 0)
+    if GC.Util.Trim(summary.zone) ~= "" then
+        evening.zone = summary.zone
+    end
+    evening.duration = math.max(tonumber(evening.duration) or 0, duration)
+    for _, participant in ipairs(summary.participants or {}) do
+        local key = GC.Util.PlayerKey(participant.name)
+        if key ~= "" then
+            local share = math.min(1, (tonumber(participant.seconds) or 0) / duration)
+            local known = evening.participants[key]
+            if not known then
+                evening.participants[key] = {
+                    name = GC.Util.PlayerShortName(participant.name),
+                    classFile = participant.classFile,
+                    share = share,
+                }
+            else
+                known.share = math.max(tonumber(known.share) or 0, share)
+                known.classFile = known.classFile or participant.classFile
+            end
+        end
+    end
+
+    -- Deckel: die aeltesten Abende weichen. 60 Abende sind bei drei Raids je
+    -- Woche fast fuenf Monate - genug fuer jede Saisonfrage, und der Eintrag
+    -- je Abend ist klein.
+    local order = {}
+    for id, entry in pairs(log) do
+        order[#order + 1] = { id = id, at = tonumber(entry.at) or 0 }
+    end
+    if #order > ATTENDANCE_MAX_EVENINGS then
+        table.sort(order, function(left, right)
+            return left.at > right.at
+        end)
+        for index = ATTENDANCE_MAX_EVENINGS + 1, #order do
+            log[order[index].id] = nil
+        end
+    end
+    return true
+end
+
+-- Die Uebersicht: je Spieler die Zahl der besuchten Abende und der mittlere
+-- Anwesenheitsanteil ueber ALLE erfassten Abende - ein Fehlender Abend zaehlt
+-- als null, sonst stuende ein Einmalgast mit einem vollen Abend bei 100 %.
+function GC.RaidMonitor:GetAttendanceOverview()
+    if not (GC.DB and GC.DB.data) then
+        return {}, 0
+    end
+    local log = GC.DB:GetGuild().attendance
+    local evenings = 0
+    local players = {}
+    for _, evening in pairs(log) do
+        evenings = evenings + 1
+        for key, participant in pairs(evening.participants or {}) do
+            local row = players[key]
+            if not row then
+                row = {
+                    key = key,
+                    name = participant.name,
+                    classFile = participant.classFile,
+                    attended = 0,
+                    shareSum = 0,
+                    lastAt = 0,
+                }
+                players[key] = row
+            end
+            row.attended = row.attended + 1
+            row.shareSum = row.shareSum + (tonumber(participant.share) or 0)
+            row.classFile = row.classFile or participant.classFile
+            row.lastAt = math.max(row.lastAt, tonumber(evening.at) or 0)
+        end
+    end
+
+    local rows = {}
+    for _, row in pairs(players) do
+        row.percent = evenings > 0
+            and math.floor((row.shareSum / evenings) * 100 + 0.5) or 0
+        rows[#rows + 1] = row
+    end
+    table.sort(rows, function(left, right)
+        if left.percent ~= right.percent then
+            return left.percent > right.percent
+        end
+        return left.name < right.name
+    end)
+    return rows, evenings
+end
+
 -- Löscht einen ganzen Abend mit allen Quellen (Live, Logs, Datei) aus dem
 -- lokalen Bestand. Nur lokal: Andere Clients behalten ihre Kopien, und
 -- "Auswertung anfordern" kann Gelöschtes bewusst zurückholen.
@@ -1102,6 +1245,12 @@ function GC.RaidMonitor:DeleteEvening(summaryKey)
     for _, summary in ipairs(evening.sources) do
         drop[self:SummaryKey(summary)] = true
         dropped = dropped + 1
+        -- "Abend gelöscht" heisst auch: raus aus der dauerhaften Anwesenheit.
+        -- Eine falsch mitgeschriebene Sitzung soll die Quote nicht weiter
+        -- verfaelschen; echte Abende loescht ohnehin niemand.
+        if summary.id then
+            GC.DB:GetGuild().attendance[summary.id] = nil
+        end
     end
     local sessions = GC.DB:GetGuild().raidSessions
     for index = #sessions, 1, -1 do
@@ -1669,6 +1818,32 @@ local function ResolveConsumable(spellID)
     return GC.ConsumableCategoryByKey[consumable.category], consumable
 end
 
+-- Beim WEITERESSEN meldet der Client die Sattgegessen-Aura alle zehn Sekunden
+-- erneut (SPELL_AURA_REFRESH). Jede Meldung zaehlte als neue Mahlzeit: Ein
+-- einziges Essen ueber dreissig Sekunden stand dreifach im Protokoll - am
+-- Vergleichsabend vom 07.08.2026 elf gezaehlte Essen bei real vier
+-- Mahlzeiten, die Eintraege exakt im Zehnsekundentakt. Innerhalb dieses
+-- Fensters gilt dieselbe Aura desselben Teilnehmers deshalb als EINE
+-- Mahlzeit. Sechzig Sekunden decken die laengste Essdauer ab; ein echtes
+-- Nachessen Minuten spaeter zaehlt weiterhin.
+local AURA_RECOUNT_WINDOW = 60
+
+local function MarkAuraCounted(participant, spellID)
+    local key = tonumber(spellID) or 0
+    local now = GC.Util.Now()
+    local counted = participant.auraCountedAt
+    if not counted then
+        counted = {}
+        participant.auraCountedAt = counted
+    end
+    local last = tonumber(counted[key])
+    if last and (now - last) < AURA_RECOUNT_WINDOW then
+        return false
+    end
+    counted[key] = now
+    return true
+end
+
 local function RecordConsumable(participant, category, consumable, spellID, spellName)
     participant.consumables[category.key] = (participant.consumables[category.key] or 0) + 1
 
@@ -1709,6 +1884,12 @@ local function CountConsumable(monitor, session, playerName, spellID, spellName,
     end
     local participant = monitor:FindParticipant(session, playerName)
     if not participant then
+        return
+    end
+    -- Aura-Kategorien (Essen) zusaetzlich entprellen: Das Weiteressen
+    -- refresht dieselbe Aura im Zehnsekundentakt, und jeder Refresh kam
+    -- hier als eigenes Ereignis an.
+    if category.track == "AURA" and not MarkAuraCounted(participant, spellID) then
         return
     end
     RecordConsumable(participant, category, consumable, spellID, spellName)
@@ -1769,9 +1950,108 @@ function GC.RaidMonitor:ScanCarriedConsumables(unit, participant)
     ForEachBuff(unit, function(spellID, spellName)
         local category, consumable = ResolveConsumable(spellID)
         if category and category.scan then
+            -- Der Eintritts-Scan setzt denselben Merker wie das Kampfprotokoll:
+            -- Wer beim Betreten gerade isst, wuerde sonst einmal vom Scan und
+            -- Sekunden spaeter erneut vom Aura-Refresh gezaehlt.
+            if category.track == "AURA" and not MarkAuraCounted(participant, spellID) then
+                return
+            end
             RecordConsumable(participant, category, consumable, spellID, spellName)
         end
     end)
+end
+
+-- === Öle und Steine auf der eigenen Waffe ===================================
+--
+-- Waffenöle sind keine Aura, sondern eine temporaere Verzauberung AUF DER
+-- WAFFE - der Aura-Scan oben sieht sie nie, und wer sein Öl vor dem
+-- Sitzungsstart auftraegt (der Regelfall, es haelt eine Stunde), stand mit
+-- null in der Spalte "Öle/Steine". Gelesen wird deshalb zusaetzlich die
+-- eigene Waffe: GetWeaponEnchantInfo sagt, OB eine temporaere Verzauberung
+-- sitzt, der Waffentooltip sagt WELCHE. Gezaehlt wird nur ein Treffer der
+-- Muster aus GC.WeaponOilPatterns - Windzorn, Flammenzunge und Gifte sind
+-- ebenfalls temporaere Verzauberungen und keine Verbrauchsgegenstaende.
+--
+-- Nur die eigene Waffe: Fuer fremde Spieler gibt die API das nicht her. Wer
+-- sein Öl waehrend der Sitzung neu auftraegt, wird weiterhin ueber das
+-- Wirkereignis im Kampfprotokoll gezaehlt.
+
+local weaponScanTooltip
+
+-- Die Tooltipzeilen eines eigenen Ausruestungsplatzes. Als eigene Methode
+-- herausgeloest, damit die Tests sie durch feste Zeilen ersetzen koennen -
+-- einen echten Tooltip gibt es nur im Spielclient.
+function GC.RaidMonitor:ReadWeaponEnchantLines(slot)
+    local lines = {}
+    if not CreateFrame or not UIParent then
+        return lines
+    end
+    if not weaponScanTooltip then
+        local ok, tooltip = pcall(CreateFrame, "GameTooltip",
+            "GuildCopilotWeaponScan", nil, "GameTooltipTemplate")
+        if not ok or not tooltip then
+            return lines
+        end
+        weaponScanTooltip = tooltip
+    end
+    local ok = pcall(function()
+        weaponScanTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+        weaponScanTooltip:ClearLines()
+        weaponScanTooltip:SetInventoryItem("player", slot)
+    end)
+    if not ok then
+        return lines
+    end
+    for index = 1, (tonumber(weaponScanTooltip:NumLines()) or 0) do
+        local text = _G["GuildCopilotWeaponScanTextLeft" .. index]
+        local value = text and text.GetText and text:GetText()
+        if type(value) == "string" and value ~= "" then
+            lines[#lines + 1] = value
+        end
+    end
+    return lines
+end
+
+-- Die erste Tooltipzeile, die nach einem bekannten Öl oder Stein aussieht.
+-- Kein Treffer heisst kein Fund - lieber eine Null zu viel als ein
+-- Windzorn-Totem als "Öl" verbucht.
+function GC.RaidMonitor:FindWeaponOilName(lines)
+    for _, line in ipairs(lines or {}) do
+        for _, pattern in ipairs(GC.WeaponOilPatterns or {}) do
+            if line:find(pattern, 1, true) then
+                return line
+            end
+        end
+    end
+    return nil
+end
+
+function GC.RaidMonitor:ScanWeaponConsumables(participant)
+    if not participant or participant.weaponScanDone then
+        return
+    end
+    if type(GetWeaponEnchantInfo) ~= "function" then
+        return
+    end
+    local category = GC.ConsumableCategoryByKey.OIL
+    if not category then
+        return
+    end
+    participant.weaponScanDone = true
+    local hasMainHand, _, _, hasOffHand = GetWeaponEnchantInfo()
+    local slots = {}
+    if hasMainHand then
+        slots[#slots + 1] = 16
+    end
+    if hasOffHand then
+        slots[#slots + 1] = 17
+    end
+    for _, slot in ipairs(slots) do
+        local name = self:FindWeaponOilName(self:ReadWeaponEnchantLines(slot))
+        if name then
+            RecordConsumable(participant, category, nil, nil, SanitizedText(name, 44))
+        end
+    end
 end
 
 -- Der Combat Log liefert im Raid tausende Schadensereignisse pro Kampf. Sie

@@ -33,6 +33,10 @@ local DEFAULTS = {
             y = 0,
         },
         workshopFavorites = {},
+        -- Meldung im Chat, sobald eine Berufs-Wartezeit (Umwandlung,
+        -- Spezialtuch, Sphaere) abgelaufen ist. Bewusst an: Sie ist eine
+        -- einzelne Chatzeile je Sperre, kein Laerm.
+        cooldownReminder = true,
         postBar = {
             hidden = true,
             x = 0,
@@ -90,6 +94,9 @@ local DEFAULTS = {
     },
     characters = {},
     guilds = {},
+    -- Bereits gemeldete Wartezeit-Ablaeufe: je Sperre der Ablaufzeitpunkt,
+    -- damit dieselbe Sperre nicht bei jedem Login erneut gemeldet wird.
+    cooldownReminded = {},
 }
 
 local GUILD_DEFAULTS = {
@@ -163,6 +170,11 @@ local GUILD_DEFAULTS = {
         tabs = {},
     },
     raidSessions = {},
+    -- Dauerhafte Anwesenheit je Raidabend, getrennt von den Auswertungen:
+    -- Die Ablage der Auswertungen ist bewusst klein und kurzlebig, die
+    -- Saisonfrage "wie zuverlaessig ist jemand?" braucht ein laengeres
+    -- Gedaechtnis (Naeheres bei RaidMonitor:RecordAttendance).
+    attendance = {},
     gearAudits = {},
     -- Bewertungen ohne Spec-Bezug. Sie gelten fuer alle und sind der
     -- Rueckfall, wenn fuer eine Spec nichts hinterlegt ist.

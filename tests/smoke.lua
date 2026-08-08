@@ -1687,8 +1687,12 @@ FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 35476)
 FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Schurke", 35476)
 FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Heiler", 35476)
 FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Tester", 35476)
--- Essen erzeugt nie einen Zauber, nur die Aura. Dreimal gegessen ist dreimal
--- Essen - auch wenn der Buff beim zweiten Mal nur aufgefrischt wird.
+-- Essen erzeugt nie einen Zauber, nur die Aura. Der REFRESH derselben Aura
+-- kurz nach dem Auftragen ist WEITERESSEN (der Client meldet ihn beim
+-- Sitzenbleiben alle zehn Sekunden) und zaehlt nicht erneut - hier stand
+-- lange die Gegenannahme, und sie zaehlte eine Mahlzeit dreifach. Ein
+-- ZWEITES Gericht (andere Spell-ID) zaehlt dagegen sofort, und ein echtes
+-- Nachessen Minuten spaeter prueft der eigene Block am Dateiende.
 FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 43764)
 FireCombatLog("SPELL_AURA_REFRESH", "Heiler", "Heiler", 43764)
 FireCombatLog("SPELL_AURA_APPLIED", "Heiler", "Heiler", 33257)
@@ -1704,7 +1708,8 @@ assert(healer.consumables.FLASK == 2, "Ein zweites Fläschchen wurde nicht gezä
 assert(rogue.consumables.DRUM == 1, "Die geworfene Trommel wurde nicht beim Werfer gezählt")
 assert(healer.consumables.DRUM == 0 and liveSession.participants.tester.consumables.DRUM == 0,
     "Ein Trommelbuff wurde dem Empfänger als Verbrauch angerechnet")
-assert(healer.consumables.FOOD == 3, "Mehrfach gegessenes Buffood wurde nicht mehrfach gezählt")
+assert(healer.consumables.FOOD == 2,
+    "Zwei Gerichte samt Weiteressen müssen als zwei Mahlzeiten zählen, nicht als drei")
 assert(rogue.interrupts == 1, "Der Interrupt wurde nicht gezählt")
 assert(healer.dispels == 1, "Der Dispel wurde nicht gezählt")
 assert(liveSession.participants.tester.deaths == 1, "Der Spielertod wurde nicht gezählt")
@@ -8780,6 +8785,240 @@ do
         "Die abgelegte Auswertung hat den Stand der Sitzung verloren")
 
     addon.DB:GetGuild().raidSessions = {}
+end
+
+-- === Verbrauch: Weiteressen zählt einmal ====================================
+-- Der Client meldet die Sattgegessen-Aura beim Weiteressen alle zehn Sekunden
+-- erneut (SPELL_AURA_REFRESH). Eine Mahlzeit ist trotzdem eine Mahlzeit;
+-- Trommeln (CAST) duerfen dagegen weiterhin im kurzen Abstand zaehlen.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:StartSession("foodtest", "Ich-Realm", addon.Util.Now(), "Karazhan")
+    local session = addon.RaidMonitor.session
+    addon.RaidMonitor:GetParticipant(session, "Esser", "MAGE")
+    local function eat(subevent)
+        addon.RaidMonitor:HandleCombatLogEvent(subevent,
+            "guid", "Esser", "guid", "Esser", 33263, "Sattgegessen")
+    end
+    eat("SPELL_AURA_APPLIED")
+    currentTime = currentTime + 10
+    eat("SPELL_AURA_REFRESH")
+    currentTime = currentTime + 10
+    eat("SPELL_AURA_REFRESH")
+    local esser = addon.RaidMonitor:FindParticipant(session, "Esser")
+    assert(esser.consumables.FOOD == 1,
+        "Das Weiteressen zählt eine Mahlzeit mehrfach: " .. tostring(esser.consumables.FOOD))
+    currentTime = currentTime + 120
+    eat("SPELL_AURA_REFRESH")
+    assert(esser.consumables.FOOD == 2,
+        "Ein echtes Nachessen Minuten später zählt nicht mehr")
+    addon.RaidMonitor:HandleCombatLogEvent("SPELL_CAST_SUCCESS",
+        "guid", "Esser", "guid", "Esser", 35476, "Trommeln der Schlacht")
+    currentTime = currentTime + 30
+    addon.RaidMonitor:HandleCombatLogEvent("SPELL_CAST_SUCCESS",
+        "guid", "Esser", "guid", "Esser", 35476, "Trommeln der Schlacht")
+    assert(esser.consumables.DRUM == 2, "Trommeln wurden fälschlich entprellt")
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:SetCombatLogTracking(false)
+    addon.DB:GetGuild().raidSessions = {}
+end
+
+-- === Verbrauch: Waffenöl auf der eigenen Waffe ==============================
+-- Vor dem Sitzungsstart aufgetragene Öle sind keine Aura; sie werden über die
+-- temporäre Verzauberung der eigenen Waffe erkannt - und NUR bei einem
+-- Treffer der bekannten Öl/Stein-Muster: Windzorn zählt nie als Öl.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:StartSession("oiltest", "Ich-Realm", addon.Util.Now(), "Karazhan")
+    local session = addon.RaidMonitor.session
+    local oiler = addon.RaidMonitor:GetParticipant(session, "Öler", "MAGE")
+
+    GetWeaponEnchantInfo = function()
+        return true, 3300000, 0, false
+    end
+    local savedReader = addon.RaidMonitor.ReadWeaponEnchantLines
+    addon.RaidMonitor.ReadWeaponEnchantLines = function()
+        return { "Zweihandstab", "Hervorragendes Zauberöl (+42 Zaubermacht) (55 Min.)" }
+    end
+    addon.RaidMonitor:ScanWeaponConsumables(oiler)
+    assert(oiler.consumables.OIL == 1,
+        "Das vor der Sitzung aufgetragene Waffenöl wurde nicht gezählt")
+    addon.RaidMonitor:ScanWeaponConsumables(oiler)
+    assert(oiler.consumables.OIL == 1, "Der Waffenscan zählt dieselbe Waffe doppelt")
+
+    local totemfan = addon.RaidMonitor:GetParticipant(session, "Totemfan", "SHAMAN")
+    addon.RaidMonitor.ReadWeaponEnchantLines = function()
+        return { "Einhandaxt", "Windzorn (10 Min.)" }
+    end
+    addon.RaidMonitor:ScanWeaponConsumables(totemfan)
+    assert((totemfan.consumables.OIL or 0) == 0, "Windzorn wurde als Öl gezählt")
+
+    addon.RaidMonitor.ReadWeaponEnchantLines = savedReader
+    GetWeaponEnchantInfo = nil
+    addon.RaidMonitor.session = nil
+    addon.RaidMonitor:SetCombatLogTracking(false)
+    addon.DB:GetGuild().raidSessions = {}
+end
+
+-- === Wartezeit-Erinnerung ===================================================
+-- Eine abgelaufene Sperre wird genau einmal gemeldet; eine NEUE Sperre
+-- desselben Rezepts meldet wieder, und der Schalter schaltet wirklich ab.
+do
+    local cd_workshop = addon.Workshop:GetOwnData()
+    cd_workshop.professions.alchimie = {
+        key = "alchimie",
+        name = "Alchimie",
+        skillLevel = 375,
+        maxSkillLevel = 375,
+        updatedAt = addon.Util.Now(),
+        recipes = { I21885 = { key = "I21885", itemID = 21885, name = "Urwasser", reagents = {} } },
+        cooldowns = { I25867 = addon.Util.Now() - 60 },
+        cooldownsAt = addon.Util.Now(),
+    }
+    addon.Workshop:InvalidateCatalog()
+    assert(addon.Workshop:AnnounceDueCooldowns() == 1,
+        "Die abgelaufene Wartezeit wurde nicht gemeldet")
+    assert(addon.Workshop:AnnounceDueCooldowns() == 0,
+        "Dieselbe abgelaufene Wartezeit wurde erneut gemeldet")
+    cd_workshop.professions.alchimie.cooldowns.I25867 = addon.Util.Now() - 30
+    assert(addon.Workshop:AnnounceDueCooldowns() == 1,
+        "Eine neue Sperre desselben Rezepts bleibt stumm")
+    cd_workshop.professions.alchimie.cooldowns.I25867 = addon.Util.Now() - 10
+    addon.DB:GetSettings().cooldownReminder = false
+    assert(addon.Workshop:AnnounceDueCooldowns() == 0,
+        "Die Abschaltung der Erinnerung wirkt nicht")
+    addon.DB:GetSettings().cooldownReminder = true
+    -- Ein kuenftiger Ablauf plant den Zeitgeber. In dieser Umgebung feuert er
+    -- sofort und darf dabei NICHT endlos gegen denselben kuenftigen Zeitpunkt
+    -- anlaufen - genau das prueft der blosse Rueckkehr-Erfolg.
+    cd_workshop.professions.alchimie.cooldowns.I25867 = addon.Util.Now() + 3600
+    assert(addon.Workshop:ScheduleCooldownReminder() == true,
+        "Der Zeitgeber auf den nächsten Ablauf wurde nicht geplant")
+    cd_workshop.professions.alchimie = nil
+    addon.Workshop:InvalidateCatalog()
+end
+
+-- === Rezept-Lücken der Gilde ================================================
+-- Empfohlene Verzauberungen ohne Hersteller sind eine benannte Lücke; sobald
+-- jemand das Rezept kann, verschwindet sie.
+do
+    local mr_workshop = addon.DB:GetGuild().workshop
+    local missing = addon.GearAudit:GetMissingRecommendedRecipes()
+    assert(#missing > 0, "Ohne einen einzigen Hersteller gibt es angeblich keine Lücken")
+    assert(missing[1].verdict == "OPTIMAL", "Die Lückenliste beginnt nicht mit OPTIMAL")
+    local hatBrust = false
+    for _, entry in ipairs(missing) do
+        if entry.recipeKey == "E27960" then
+            hatBrust = true
+        end
+    end
+    assert(hatBrust, "Die Brust-Empfehlung fehlt in der Lückenliste")
+
+    mr_workshop.catalog.E27960 = {
+        key = "E27960", recipeID = 27960, name = "Enchant Chest - Exceptional Stats",
+        professionKey = "verzauberkunst", profession = "Verzauberkunst",
+        reagents = { { itemID = 22449, count = 4 } },
+    }
+    mr_workshop.crafters.lueckentest = {
+        name = "Lueckentest",
+        professions = {
+            verzauberkunst = {
+                key = "verzauberkunst", name = "Verzauberkunst",
+                updatedAt = addon.Util.Now(),
+                recipeKeys = { E27960 = true },
+            },
+        },
+    }
+    addon.Workshop:InvalidateCatalog()
+    local after = addon.GearAudit:GetMissingRecommendedRecipes()
+    assert(#after == #missing - 1, "Die geschlossene Lücke steht noch in der Liste")
+    for _, entry in ipairs(after) do
+        assert(entry.recipeKey ~= "E27960", "Die Brust-Lücke blieb trotz Hersteller stehen")
+    end
+    mr_workshop.catalog.E27960 = nil
+    mr_workshop.crafters.lueckentest = nil
+    addon.Workshop:InvalidateCatalog()
+end
+
+-- === Anwesenheit über Abende hinweg =========================================
+-- Das dauerhafte Aggregat: nur Bossabende, Höchstwert über mehrere Fassungen,
+-- ein verpasster Abend zählt mit null, WCL-Quellen zählen gar nicht.
+do
+    addon.DB:GetGuild().raidSessions = {}
+    addon.DB:GetGuild().attendance = {}
+    local at_now = addon.Util.Now()
+    addon.RaidMonitor:StoreSummary({
+        id = "att-1", source = "LIVE", rulesVersion = 2, complete = true,
+        startedAt = at_now - 7200, endedAt = at_now, zone = "Karazhan",
+        pulls = 5, kills = 4, wipes = 1,
+        participants = {
+            { name = "Voll", classFile = "MAGE", seconds = 7200, consumables = {} },
+            { name = "Halb", classFile = "PRIEST", seconds = 3600, consumables = {} },
+        },
+    })
+    addon.RaidMonitor:StoreSummary({
+        id = "att-1", source = "SYNC:Zeuge", rulesVersion = 2, complete = true,
+        startedAt = at_now - 7200, endedAt = at_now, zone = "Karazhan",
+        pulls = 5, kills = 4, wipes = 1,
+        participants = {
+            { name = "Halb", seconds = 7200, consumables = {} },
+        },
+    })
+    addon.RaidMonitor:StoreSummary({
+        id = "att-stadt", source = "LIVE", rulesVersion = 2, complete = true,
+        startedAt = at_now - 600, endedAt = at_now, zone = "Shattrath",
+        pulls = 0, kills = 0, wipes = 0,
+        participants = { { name = "Voll", seconds = 600, consumables = {} } },
+    })
+    local rows, evenings = addon.RaidMonitor:GetAttendanceOverview()
+    assert(evenings == 1,
+        "Die Probesitzung ohne Bosskampf zählt als Abend: " .. tostring(evenings))
+    assert(#rows == 2, "Die Anwesenheitsübersicht kennt nicht beide Teilnehmer")
+    local voll, halb
+    for _, row in ipairs(rows) do
+        if row.name == "Voll" then voll = row end
+        if row.name == "Halb" then halb = row end
+    end
+    assert(voll ~= nil and voll.percent == 100, "Volle Anwesenheit ergibt keine 100 %")
+    assert(halb ~= nil and halb.percent == 100,
+        "Der Höchstwert aus der zweiten Fassung wurde nicht übernommen")
+
+    addon.RaidMonitor:StoreSummary({
+        id = "att-2", source = "LIVE", rulesVersion = 2, complete = true,
+        startedAt = at_now + 86400 - 7200, endedAt = at_now + 86400,
+        zone = "Gruuls Unterschlupf", pulls = 2, kills = 2, wipes = 0,
+        participants = { { name = "Voll", classFile = "MAGE", seconds = 7200, consumables = {} } },
+    })
+    rows, evenings = addon.RaidMonitor:GetAttendanceOverview()
+    assert(evenings == 2, "Der zweite Bossabend fehlt im Aggregat")
+    for _, row in ipairs(rows) do
+        if row.name == "Halb" then
+            assert(row.percent == 50 and row.attended == 1,
+                "Ein verpasster Abend senkt den Schnitt nicht: " .. tostring(row.percent))
+        end
+    end
+
+    addon.RaidMonitor:RecordAttendance({
+        id = "att-wcl", source = "WCL", rulesVersion = 2,
+        startedAt = at_now, endedAt = at_now + 3600, pulls = 3,
+        participants = { { name = "Voll", seconds = 1200, consumables = {} } },
+    })
+    local _, evenings2 = addon.RaidMonitor:GetAttendanceOverview()
+    assert(evenings2 == 2, "Eine WCL-Quelle zählt fälschlich in die Anwesenheit")
+
+    -- "Abend gelöscht" räumt auch die Anwesenheit dieses Abends.
+    addon.DB:GetGuild().memberCare.accessRanksConfigured = true
+    addon.DB:GetGuild().memberCare.accessRanks = { ["0"] = true, ["1"] = true, ["5"] = true }
+    local att2 = addon.RaidMonitor:GetSummary("att-2", "LIVE")
+    local deleted = addon.RaidMonitor:DeleteEvening(addon.RaidMonitor:SummaryKey(att2))
+    if deleted then
+        local _, evenings3 = addon.RaidMonitor:GetAttendanceOverview()
+        assert(evenings3 == 1, "Der gelöschte Abend steht noch in der Anwesenheit")
+    end
+    addon.DB:GetGuild().raidSessions = {}
+    addon.DB:GetGuild().attendance = {}
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
