@@ -510,7 +510,7 @@ end
 -- Ein Knopf traegt entweder Text oder ein Symbol. Beides zugleich passt in die
 -- Kantenlaengen nicht, um die es hier ueberhaupt geht.
 local function SetButtonMark(button, mark)
-    button:SetText("")
+    button:SetText(GC.L(""))
     mark:ClearAllPoints()
     mark:SetPoint("CENTER", button, "CENTER", 0, 0)
     button.mark = mark
@@ -932,7 +932,7 @@ function GC.UI:RefreshDatePicker()
             button.border:SetColorTexture(edge[1], edge[2], edge[3], 1)
         else
             button.iso = nil
-            button:SetText("")
+            button:SetText(GC.L(""))
             button:Hide()
         end
     end
@@ -1230,7 +1230,7 @@ function GC.UI:CreateMainFrame()
         local stats = GC.Sync:GetAddonUserStats()
         local status = GC.Sync:GetSyncStatus()
         GameTooltip:SetOwner(badge, "ANCHOR_BOTTOM")
-        GameTooltip:SetText("Abgleich mit der Gilde")
+        GameTooltip:SetText(GC.L("Abgleich mit der Gilde"))
         if status.state == "RUNNING" then
             GameTooltip:AddLine("Läuft gerade: " .. status.percent .. " %, noch "
                 .. status.outstanding .. " offen.", 0.18, 0.78, 0.86, true)
@@ -1282,7 +1282,7 @@ function GC.UI:CreateMainFrame()
             return
         end
         GameTooltip:SetOwner(selfButton, "ANCHOR_BOTTOM")
-        GameTooltip:SetText("Erste Schritte")
+        GameTooltip:SetText(GC.L("Erste Schritte"))
         GameTooltip:AddLine("Öffnet den Einrichtungsassistenten mit der Funktionstour"
             .. " und holt die Checkliste im Profil zurück.", 1, 1, 1, true)
         GameTooltip:Show()
@@ -1359,7 +1359,7 @@ function GC.UI:CreateMainFrame()
         tab:HookScript("OnEnter", function(self)
             if self.locked and GameTooltip then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Für deinen Gildenrang gesperrt")
+                GameTooltip:SetText(GC.L("Für deinen Gildenrang gesperrt"))
                 GameTooltip:AddLine("Berechtigte Ränge legen die Freigabe in den Einstellungen fest.",
                     1, 1, 1, true)
                 GameTooltip:Show()
@@ -1453,7 +1453,8 @@ local function ProfessionSummary(profile)
     for slot = 1, 2 do
         local profession = profile and profile.professions and profile.professions[slot]
         if profession and profession.name then
-            labels[#labels + 1] = profession.name
+            -- Einzeln uebersetzen (Tailoring/Enchanting), dann verketten.
+            labels[#labels + 1] = GC.L(profession.name)
         end
     end
     return #labels > 0 and table.concat(labels, " / ") or "–"
@@ -1465,13 +1466,13 @@ local function LastOnlineLabel(member)
     end
     local hours = member.lastOnlineHours
     if hours == nil then
-        return "unbekannt"
+        return GC.L("unbekannt")
     elseif hours < 24 then
-        return "vor " .. math.max(1, math.floor(hours)) .. "h"
+        return GC.LFormat("vor {n}h", { n = math.max(1, math.floor(hours)) })
     elseif hours < 24 * 365 then
-        return "vor " .. math.floor(hours / 24) .. "T"
+        return GC.LFormat("vor {n}T", { n = math.floor(hours / 24) })
     end
-    return "> 1 Jahr"
+    return GC.L("> 1 Jahr")
 end
 
 function GC.UI:BuildDashboardPage()
@@ -1521,7 +1522,7 @@ function GC.UI:BuildDashboardPage()
         end
         local stats = GC.Sync:GetAddonUserStats()
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:SetText("Guild Copilot in der Gilde")
+        GameTooltip:SetText(GC.L("Guild Copilot in der Gilde"))
         GameTooltip:AddLine(stats.players .. " Spieler mit "
             .. stats.known .. " erkannten Charakteren, davon " .. stats.compatible
             .. " mit passender Datenversion", 1, 1, 1, true)
@@ -1664,9 +1665,10 @@ function GC.UI:RefreshDashboard()
         end
     end
     if #ranks == 0 or selectedRanks == #ranks then
-        page.rankFilterButton:SetText("Ränge: alle")
+        page.rankFilterButton:SetText(GC.L("Ränge: alle"))
     else
-        page.rankFilterButton:SetText("Ränge: " .. selectedRanks .. "/" .. #ranks)
+        page.rankFilterButton:SetText(GC.LFormat("Ränge: {n}/{m}",
+            { n = selectedRanks, m = #ranks }))
     end
 
     local raiders = GC.Roster:GetActiveRaiders(GC.Constants.ACTIVE_RAIDER_LIMIT)
@@ -1677,38 +1679,40 @@ function GC.UI:RefreshDashboard()
             local profile = GC.Roster:GetProfile(member.name)
             local primary = profile and GC.SpecByKey[profile.raidSpecKey or profile.detectedSpecKey or ""]
             local secondary = profile and GC.SpecByKey[profile.secondarySpecKey or ""]
-            local specText = primary and primary.name or (member.className or "–")
+            -- Spec- und Klassennamen einzeln uebersetzen, dann verketten:
+            -- der zusammengesetzte Text traefe keinen Schluessel.
+            local specText = primary and GC.L(primary.name) or GC.L(member.className or "–")
             if secondary then
-                specText = specText .. " / " .. secondary.name
+                specText = specText .. " / " .. GC.L(secondary.name)
             end
             -- Der Status trug frueher drei verschiedene Aussagen in einem Wort.
             -- Farbe und Tooltip trennen sie jetzt: Wer gar kein Profil hat,
             -- ist etwas anderes als wer eines hat und es nicht bestaetigt hat.
             local statusText, statusColor, statusHint
             if not profile then
-                statusText = "kein Profil"
+                statusText = GC.L("kein Profil")
                 statusColor = THEME.muted
-                statusHint = "Dieser Spieler hat sein Raidprofil noch nie ausgefüllt."
+                statusHint = GC.L("Dieser Spieler hat sein Raidprofil noch nie ausgefüllt.")
             else
                 if profile.source == "WARCRAFT_LOGS" then
                     statusText = "Logs"
-                    statusHint = "Stammt aus einem Warcraft-Logs-Import, nicht vom Spieler selbst."
+                    statusHint = GC.L("Stammt aus einem Warcraft-Logs-Import, nicht vom Spieler selbst.")
                 elseif profile.source == "MANUAL" then
-                    statusText = "Manuell"
-                    statusHint = "Wurde von Hand eingetragen, nicht vom Spieler selbst."
+                    statusText = GC.L("Manuell")
+                    statusHint = GC.L("Wurde von Hand eingetragen, nicht vom Spieler selbst.")
                 else
                     -- Angezeigt wird "Twink"; gespeichert und uebertragen wird
                     -- weiterhin "ALT", sonst verstehen sich alte und neue
                     -- Clients beim Abgleich nicht mehr.
-                    statusText = profile.mainStatus == "ALT" and "Twink" or "Main"
-                    statusHint = profile.mainStatus == "ALT"
+                    statusText = GC.L(profile.mainStatus == "ALT" and "Twink" or "Main")
+                    statusHint = GC.L(profile.mainStatus == "ALT"
                         and "Als Zweitcharakter gemeldet."
-                        or "Als Hauptcharakter gemeldet."
+                        or "Als Hauptcharakter gemeldet.")
                 end
                 if not profile.confirmed and profile.source ~= "WARCRAFT_LOGS" then
                     statusText = statusText .. " ?"
                     statusColor = THEME.warning
-                    statusHint = statusHint .. " Der Spieler hat das Profil noch nicht bestätigt."
+                    statusHint = statusHint .. GC.L(" Der Spieler hat das Profil noch nicht bestätigt.")
                 else
                     statusColor = THEME.text
                 end
@@ -1796,18 +1800,18 @@ function GC.UI:BuildSettingsPage()
             local success, reason = GC.Roster:SetGuildProfileRankActive(rankIndex, checked)
             if not success then
                 if reason == "OWN_RANK" then
-                    page.settingsStatus:SetText("Den eigenen Rang kannst du nicht abwählen.")
+                    page.settingsStatus:SetText(GC.L("Den eigenen Rang kannst du nicht abwählen."))
                 elseif reason == "HIGHER_RANK_REQUIRED" then
-                    page.settingsStatus:SetText("Diesen Rang darf nur ein höherer Gildenrang abwählen.")
+                    page.settingsStatus:SetText(GC.L("Diesen Rang darf nur ein höherer Gildenrang abwählen."))
                 elseif reason == "LAST_EDITOR" then
-                    page.settingsStatus:SetText("Mindestens ein berechtigter Rang muss erhalten bleiben.")
+                    page.settingsStatus:SetText(GC.L("Mindestens ein berechtigter Rang muss erhalten bleiben."))
                 else
-                    page.settingsStatus:SetText("Dein Gildenrang darf diese Berechtigung nicht ändern.")
+                    page.settingsStatus:SetText(GC.L("Dein Gildenrang darf diese Berechtigung nicht ändern."))
                 end
                 SetTextColor(page.settingsStatus, THEME.danger)
                 GC.UI:RefreshSettings()
             elseif reason == "RECOVERED" then
-                page.settingsStatus:SetText("Dein eigener Rang wurde einmalig wieder freigeschaltet.")
+                page.settingsStatus:SetText(GC.L("Dein eigener Rang wurde einmalig wieder freigeschaltet."))
                 SetTextColor(page.settingsStatus, THEME.success)
             end
         end
@@ -1827,7 +1831,7 @@ function GC.UI:BuildSettingsPage()
         toggle = CreateToggle(accessCard, "", function(checked)
             if toggle.rankIndex ~= nil
                 and not GC.Roster:SetMemberCareAccessRank(toggle.rankIndex, checked) then
-                page.settingsStatus:SetText("Mindestens ein Rang muss Zugriff auf die Mitgliederpflege behalten.")
+                page.settingsStatus:SetText(GC.L("Mindestens ein Rang muss Zugriff auf die Mitgliederpflege behalten."))
                 SetTextColor(page.settingsStatus, THEME.danger)
                 GC.UI:RefreshSettings()
             end
@@ -1939,7 +1943,7 @@ function GC.UI:BuildSettingsPage()
         toggle = CreateToggle(soundRankCard, "", function(checked)
             if toggle.rankIndex ~= nil
                 and not GC.Roster:SetInboxSoundRank(toggle.rankIndex, checked) then
-                page.settingsStatus:SetText("Nur freigegebene Gildenränge dürfen den Bewerberton umstellen.")
+                page.settingsStatus:SetText(GC.L("Nur freigegebene Gildenränge dürfen den Bewerberton umstellen."))
                 SetTextColor(page.settingsStatus, THEME.danger)
                 GC.UI:RefreshSettings()
             end
@@ -1986,7 +1990,7 @@ function GC.UI:BuildSettingsPage()
         for key, edit in pairs(page.recruitmentWordEdits) do
             GC.Chat:SetRecruitmentWordText(key, edit:GetText())
         end
-        page.recruitmentWordStatus:SetText("Gespeichert. Leere Trigger-Felder nutzen wieder die Vorgabe.")
+        page.recruitmentWordStatus:SetText(GC.L("Gespeichert. Leere Trigger-Felder nutzen wieder die Vorgabe."))
         SetTextColor(page.recruitmentWordStatus, THEME.success)
         GC.UI:RefreshSettings()
     end, "PRIMARY")
@@ -1994,7 +1998,7 @@ function GC.UI:BuildSettingsPage()
 
     CreateButton(triggerCard, "Vorgabe wiederherstellen", 200, 34, function()
         GC.Chat:RestoreRecruitmentDefaults()
-        page.recruitmentWordStatus:SetText("Alle vier Listen stehen wieder auf der Vorgabe.")
+        page.recruitmentWordStatus:SetText(GC.L("Alle vier Listen stehen wieder auf der Vorgabe."))
         SetTextColor(page.recruitmentWordStatus, THEME.success)
         GC.UI:RefreshSettings()
     end):SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 186, -324)
@@ -2006,7 +2010,7 @@ function GC.UI:BuildSettingsPage()
         for key, edit in pairs(page.recruitmentWordEdits) do
             edit:SetText(GC.Chat:GetRecruitmentDefaultText(key))
         end
-        page.recruitmentWordStatus:SetText("Vorgabe eingetragen – jetzt bearbeiten und speichern.")
+        page.recruitmentWordStatus:SetText(GC.L("Vorgabe eingetragen – jetzt bearbeiten und speichern."))
         SetTextColor(page.recruitmentWordStatus, THEME.muted)
     end):SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 394, -324)
 
@@ -2329,9 +2333,9 @@ function GC.UI:RefreshSettings()
     SetToggle(page.cooldownReminderToggle, settings.cooldownReminder ~= false)
     local language = settings.language or "AUTO"
     if language == "DE" then
-        page.languageButton:SetText("Deutsch")
+        page.languageButton:SetText(GC.L("Deutsch"))
     elseif language == "EN" then
-        page.languageButton:SetText("English")
+        page.languageButton:SetText(GC.L("English"))
     else
         page.languageButton:SetText(GC.LocaleEnglishDefault
             and "Automatisch (English)" or "Automatisch (Deutsch)")
@@ -2359,19 +2363,19 @@ function GC.UI:RefreshSettings()
             page.recruitmentWordStatus:SetText("Vorgabe greift bei: "
                 .. GC.Util.JoinGerman(usingDefaults) .. ".")
         else
-            page.recruitmentWordStatus:SetText("Es gelten durchgehend deine eigenen Listen.")
+            page.recruitmentWordStatus:SetText(GC.L("Es gelten durchgehend deine eigenen Listen."))
         end
         SetTextColor(page.recruitmentWordStatus, THEME.muted)
     end
 
     if canEditGuildProfile then
         if page.settingsStatus:GetText() == "" then
-            page.settingsStatus:SetText("Gildenweite Änderungen sind für deinen Rang freigegeben.")
+            page.settingsStatus:SetText(GC.L("Gildenweite Änderungen sind für deinen Rang freigegeben."))
             SetTextColor(page.settingsStatus, THEME.muted)
         end
     else
-        page.settingsStatus:SetText(
-            "Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar.")
+        page.settingsStatus:SetText(GC.L(
+            "Gildenweite Einstellungen sind für deinen Rang schreibgeschützt; lokale Optionen bleiben änderbar."))
         SetTextColor(page.settingsStatus, THEME.warning)
     end
 
@@ -2980,23 +2984,23 @@ function GC.UI:RefreshWizardProfile()
     if detected then
         page.detected:SetText("Aus deinen Talenten erkannt: " .. detected.name .. ".")
     else
-        page.detected:SetText("Keine Talente erkannt – wähle deine Spec von Hand.")
+        page.detected:SetText(GC.L("Keine Talente erkannt – wähle deine Spec von Hand."))
     end
 
     if done then
         page.status:SetText(detail or "Bestätigt.")
         SetTextColor(page.status, THEME.success)
-        page.confirm:SetText("Erneut bestätigen")
+        page.confirm:SetText(GC.L("Erneut bestätigen"))
     else
         local confirmation = GC.Profile:GetLastConfirmation()
         if confirmation and not confirmation.ok then
             page.status:SetText(confirmation.message or "")
             SetTextColor(page.status, THEME.warning)
         else
-            page.status:SetText("Ein Klick genügt – ändern kannst du alles jederzeit.")
+            page.status:SetText(GC.L("Ein Klick genügt – ändern kannst du alles jederzeit."))
             SetTextColor(page.status, THEME.muted)
         end
-        page.confirm:SetText("Profil bestätigen")
+        page.confirm:SetText(GC.L("Profil bestätigen"))
     end
 end
 
@@ -3048,15 +3052,15 @@ function GC.UI:RefreshWizardProfessions()
                 row.open:SetAttribute("spell", row.windowSpell)
             end
             if isScanned then
-                row.status:SetText("Rezepte eingelesen – ein Klick öffnet das Fenster erneut")
+                row.status:SetText(GC.L("Rezepte eingelesen – ein Klick öffnet das Fenster erneut"))
                 SetTextColor(row.status, THEME.success)
                 row.open:Hide()
             elseif not row.windowSpell then
-                row.status:SetText("Sammelberuf ohne Rezepte – nichts einzulesen")
+                row.status:SetText(GC.L("Sammelberuf ohne Rezepte – nichts einzulesen"))
                 SetTextColor(row.status, THEME.muted)
                 row.open:Hide()
             else
-                row.status:SetText("Noch nicht eingelesen")
+                row.status:SetText(GC.L("Noch nicht eingelesen"))
                 SetTextColor(row.status, THEME.muted)
                 row.open.label:SetText(name == windowSpell
                     and "Fenster öffnen" or (windowSpell .. " öffnen"))
@@ -3076,20 +3080,20 @@ function GC.UI:RefreshWizardGear()
     local audit = GC.GearAudit and GC.GearAudit:GetAudit(GC:GetPlayerFullName())
     if audit then
         page.findings:SetText(self:FormatGearFindings(audit, 4))
-        page.status:SetText("Geprüft wird von allein weiter – bei jedem Login und nach jedem Ausrüstungswechsel.")
+        page.status:SetText(GC.L("Geprüft wird von allein weiter – bei jedem Login und nach jedem Ausrüstungswechsel."))
     else
-        page.findings:SetText("|cff91a3b8Die Prüfung läuft gerade im Hintergrund – das Ergebnis erscheint hier.|r")
-        page.status:SetText("")
+        page.findings:SetText(GC.L("|cff91a3b8Die Prüfung läuft gerade im Hintergrund – das Ergebnis erscheint hier.|r"))
+        page.status:SetText(GC.L(""))
     end
 end
 
 function GC.UI:RefreshWizardDone()
     local page = self.welcomeFrame.wizardPages.DONE
     if GC.Onboarding:IsFinished() then
-        page.status:SetText("Dieser Charakter ist eingerichtet.")
+        page.status:SetText(GC.L("Dieser Charakter ist eingerichtet."))
         SetTextColor(page.status, THEME.success)
     else
-        page.status:SetText("Offene Schritte warten in der Checkliste oben auf der Profilseite – ganz ohne Eile.")
+        page.status:SetText(GC.L("Offene Schritte warten in der Checkliste oben auf der Profilseite – ganz ohne Eile."))
         SetTextColor(page.status, THEME.muted)
     end
 end
@@ -3417,10 +3421,10 @@ function GC.UI:RefreshOnboarding()
         if GC.Onboarding:NoteCompleted() and GC.Chat and GC.Chat.PlayProfileSound then
             GC.Chat:PlayProfileSound()
         end
-        page.onboardingStatus:SetText("Fertig – dieser Charakter ist eingerichtet.")
+        page.onboardingStatus:SetText(GC.L("Fertig – dieser Charakter ist eingerichtet."))
         SetTextColor(page.onboardingStatus, THEME.success)
     else
-        page.onboardingStatus:SetText("")
+        page.onboardingStatus:SetText(GC.L(""))
     end
 end
 
@@ -3657,7 +3661,7 @@ function GC.UI:BuildRosterPage()
     page.saveAbsence:SetPoint("TOPLEFT", absenceCard, "TOPLEFT", 18, -135)
     page.clearAbsence = CreateButton(absenceCard, "Abmeldung löschen", 160, 32, function()
         GC.Profile:ClearAbsence()
-        page.absenceStatus:SetText("Abmeldung gelöscht und mit der Gilde synchronisiert.")
+        page.absenceStatus:SetText(GC.L("Abmeldung gelöscht und mit der Gilde synchronisiert."))
         SetTextColor(page.absenceStatus, THEME.success)
         page.absenceDirty = nil
         GC.UI:RefreshRoster()
@@ -3731,9 +3735,9 @@ function GC.UI:RefreshProfileGear()
     end
     local audit = GC.GearAudit:GetAudit(GC:GetPlayerFullName())
     if not audit then
-        page.profileGearFindings:SetText("|cff91a3b8Noch nicht geprüft. Ein Klick auf "
-            .. "\"Ausrüstung prüfen\" liest deine angelegten Gegenstände aus.|r")
-        page.profileGearAge:SetText("")
+        page.profileGearFindings:SetText(GC.L("|cff91a3b8Noch nicht geprüft. Ein Klick auf "
+            .. "\"Ausrüstung prüfen\" liest deine angelegten Gegenstände aus.|r"))
+        page.profileGearAge:SetText(GC.L(""))
         return
     end
     page.profileGearFindings:SetText(self:FormatGearFindings(audit, 3))
@@ -3800,15 +3804,15 @@ function GC.UI:RefreshRoster()
             -- laengst geaenderten Auswahl stehen bleiben: Gespeichert und
             -- gildenweit geteilt ist weiterhin der alte Stand.
             page.profileStatusMark:Hide()
-            page.profileStatus:SetText("Geändert – noch nicht bestätigt. "
-                .. "In der Gilde steht weiter der zuletzt bestätigte Stand.")
+            page.profileStatus:SetText(GC.L("Geändert – noch nicht bestätigt. "
+                .. "In der Gilde steht weiter der zuletzt bestätigte Stand."))
             SetTextColor(page.profileStatus, THEME.warning)
         elseif profile.confirmed then
             page.profileStatusMark:Show()
-            page.profileStatus:SetText("")
+            page.profileStatus:SetText(GC.L(""))
         else
             page.profileStatusMark:Hide()
-            page.profileStatus:SetText("Noch nicht bestätigt.")
+            page.profileStatus:SetText(GC.L("Noch nicht bestätigt."))
             SetTextColor(page.profileStatus, THEME.muted)
         end
     end
@@ -3849,7 +3853,7 @@ function GC.UI:RefreshRoster()
         local profession = (profile.professions or {})[slot]
         local professionName = profession and GC.Util.Trim(profession.name or "") or ""
         if professionName == "" then
-            line:SetText("")
+            line:SetText(GC.L(""))
         else
             local skill = tonumber(profession.skillLevel) or 0
             local maxSkill = tonumber(profession.maxSkillLevel) or 0
@@ -3888,19 +3892,19 @@ function GC.UI:RefreshRoster()
     -- und sah aus wie ein Ergebnis.
     local professionSource = GC.Profile:GetProfessionSource(profile)
     if professionSource == "OK" then
-        page.professionStatus:SetText("Automatisch aus deinen Fähigkeiten übernommen. "
-            .. "Neue Rezepte wandern beim Öffnen des Berufsfensters von selbst in die Werkstatt.")
+        page.professionStatus:SetText(GC.L("Automatisch aus deinen Fähigkeiten übernommen. "
+            .. "Neue Rezepte wandern beim Öffnen des Berufsfensters von selbst in die Werkstatt."))
         SetTextColor(page.professionStatus, THEME.muted)
     elseif professionSource == "EMPTY" then
-        page.professionStatus:SetText("Nachgesehen: Dieser Charakter hat keinen Hauptberuf erlernt.")
+        page.professionStatus:SetText(GC.L("Nachgesehen: Dieser Charakter hat keinen Hauptberuf erlernt."))
         SetTextColor(page.professionStatus, THEME.muted)
     elseif professionSource == "MANUAL" then
-        page.professionStatus:SetText("Von Hand gewählt. Die leere Auswahl oben schaltet zurück "
-            .. "auf die automatische Erkennung.")
+        page.professionStatus:SetText(GC.L("Von Hand gewählt. Die leere Auswahl oben schaltet zurück "
+            .. "auf die automatische Erkennung."))
         SetTextColor(page.professionStatus, THEME.muted)
     else
-        page.professionStatus:SetText("Deine Fähigkeiten ließen sich nicht lesen – "
-            .. "bitte oben von Hand wählen.")
+        page.professionStatus:SetText(GC.L("Deine Fähigkeiten ließen sich nicht lesen – "
+            .. "bitte oben von Hand wählen."))
         SetTextColor(page.professionStatus, THEME.warning)
     end
 
@@ -3933,11 +3937,11 @@ function GC.UI:RefreshRoster()
         SetTextColor(page.absenceStatus, THEME.warning)
         page.clearAbsence:Enable()
     elseif absenceState == "EXPIRED" then
-        page.absenceStatus:SetText("Abmeldung abgelaufen – neu eintragen oder löschen.")
+        page.absenceStatus:SetText(GC.L("Abmeldung abgelaufen – neu eintragen oder löschen."))
         SetTextColor(page.absenceStatus, THEME.muted)
         page.clearAbsence:Enable()
     else
-        page.absenceStatus:SetText("Keine Abmeldung eingetragen.")
+        page.absenceStatus:SetText(GC.L("Keine Abmeldung eingetragen."))
         SetTextColor(page.absenceStatus, THEME.muted)
         page.clearAbsence:Disable()
     end
@@ -3987,7 +3991,7 @@ function GC.UI:BuildSuggestionsPage()
     card:SetSize(776, 408)
     card:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -158)
     page.rosterRefresh = CreateButton(card, "Roster aktualisieren", 170, 28, function()
-        page.rosterRefreshStatus:SetText("Roster wird neu abgefragt …")
+        page.rosterRefreshStatus:SetText(GC.L("Roster wird neu abgefragt …"))
         SetTextColor(page.rosterRefreshStatus, THEME.accent)
         GC.Roster:Refresh()
     end)
@@ -4046,9 +4050,9 @@ function GC.UI:RefreshSuggestions()
     if GC.Roster.lastUpdate and GC.Roster.lastUpdate > 0 and date then
         page.rosterRefreshStatus:SetText("Stand: " .. date("%H:%M", GC.Roster.lastUpdate))
     elseif GC.Roster.lastUpdate and GC.Roster.lastUpdate > 0 then
-        page.rosterRefreshStatus:SetText("Roster aktuell")
+        page.rosterRefreshStatus:SetText(GC.L("Roster aktuell"))
     else
-        page.rosterRefreshStatus:SetText("Noch nicht abgefragt")
+        page.rosterRefreshStatus:SetText(GC.L("Noch nicht abgefragt"))
     end
     page.metricCards.PROFILE.value:SetText(#missing == 0 and "BEREIT" or (#missing .. " OFFEN"))
     page.metricCards.COVERAGE.value:SetText(summary.knownProfiles .. "/" .. summary.total)
@@ -4067,16 +4071,16 @@ function GC.UI:RefreshSuggestions()
     end
 
     if #suggestions == 0 then
-        page.suggestionNotice:SetText("|cff59e695Keine automatische Lücke erkannt.|r Du kannst trotzdem Klassen und Specs manuell wählen.")
+        page.suggestionNotice:SetText(GC.L("|cff59e695Keine automatische Lücke erkannt.|r Du kannst trotzdem Klassen und Specs manuell wählen."))
         page.applySuggestions:Disable()
     else
         page.applySuggestions:Enable()
         if #missing > 0 then
             page.suggestionNotice:SetText("|cffffb84dVor dem Posten ergänzen:|r " .. table.concat(missing, ", ") .. ".")
         elseif summary.knownProfiles < math.max(1, math.floor(summary.total * 0.5)) then
-            page.suggestionNotice:SetText("|cffffb84dDatenlage noch dünn:|r Mehr Mitglieder sollten ihr Profil bestätigen oder Logs importiert werden.")
+            page.suggestionNotice:SetText(GC.L("|cffffb84dDatenlage noch dünn:|r Mehr Mitglieder sollten ihr Profil bestätigen oder Logs importiert werden."))
         else
-            page.suggestionNotice:SetText("|cff59e695Workflow bereit:|r Vorschläge übernehmen, Auswahl prüfen und anschließend den Werbetext bestätigen.")
+            page.suggestionNotice:SetText(GC.L("|cff59e695Workflow bereit:|r Vorschläge übernehmen, Auswahl prüfen und anschließend den Werbetext bestätigen."))
         end
     end
 end
@@ -4109,7 +4113,7 @@ function GC.UI:BuildMemberCarePage()
     page.memberCareThreshold = CreateChoiceDropdown(rulesCard, 150, thresholdOptions, function(value)
         local days = tonumber(tostring(value):match("(%d+)"))
         if not GC.Roster:SetMemberCareInactivityDays(days) then
-            page.memberCareRulesStatus:SetText("Dein Gildenrang darf die Prüfregeln nicht ändern.")
+            page.memberCareRulesStatus:SetText(GC.L("Dein Gildenrang darf die Prüfregeln nicht ändern."))
             SetTextColor(page.memberCareRulesStatus, THEME.danger)
             GC.UI:RefreshMemberCare()
         end
@@ -4125,7 +4129,7 @@ function GC.UI:BuildMemberCarePage()
         local toggle
         toggle = CreateToggle(rulesCard, "", function(checked)
             if toggle.rankIndex ~= nil and not GC.Roster:SetMemberCareRankProtected(toggle.rankIndex, checked) then
-                page.memberCareRulesStatus:SetText("Dein Gildenrang darf den Rangschutz nicht ändern.")
+                page.memberCareRulesStatus:SetText(GC.L("Dein Gildenrang darf den Rangschutz nicht ändern."))
                 SetTextColor(page.memberCareRulesStatus, THEME.danger)
                 GC.UI:RefreshMemberCare()
             end
@@ -4233,7 +4237,7 @@ function GC.UI:BuildMemberCarePage()
                     return
                 end
                 row.removeArmed = true
-                row.removeButton:SetText("Sicher?")
+                row.removeButton:SetText(GC.L("Sicher?"))
                 page:SetMemberCareStatus("Noch einmal klicken, um "
                     .. GC.Util.PlayerShortName(row.playerName) .. " endgültig zu entfernen.", false)
                 return
@@ -4306,11 +4310,11 @@ function GC.UI:RefreshMemberCare()
     local canEdit = GC.Roster:CanEditGuildProfile()
     if canEdit then
         page.memberCareThreshold:Enable()
-        page.memberCareRulesStatus:SetText("Regeln werden gildenweit synchronisiert.")
+        page.memberCareRulesStatus:SetText(GC.L("Regeln werden gildenweit synchronisiert."))
         SetTextColor(page.memberCareRulesStatus, THEME.muted)
     else
         page.memberCareThreshold:Disable()
-        page.memberCareRulesStatus:SetText("Prüfregeln sind für deinen Rang schreibgeschützt.")
+        page.memberCareRulesStatus:SetText(GC.L("Prüfregeln sind für deinen Rang schreibgeschützt."))
         SetTextColor(page.memberCareRulesStatus, THEME.warning)
     end
 
@@ -4348,12 +4352,12 @@ function GC.UI:RefreshMemberCare()
         end
     end
     if #guildAbsences == 0 then
-        page.guildAbsenceNotice:SetText("Keine aktiven oder geplanten Abmeldungen bekannt.")
+        page.guildAbsenceNotice:SetText(GC.L("Keine aktiven oder geplanten Abmeldungen bekannt."))
     elseif #guildAbsences > #page.guildAbsenceRows then
-        page.guildAbsenceNotice:SetText("Weitere " .. (#guildAbsences - #page.guildAbsenceRows)
-            .. " Abmeldungen sind gespeichert.")
+        page.guildAbsenceNotice:SetText(GC.LFormat("Weitere {n} Abmeldungen sind gespeichert.",
+            { n = #guildAbsences - #page.guildAbsenceRows }))
     else
-        page.guildAbsenceNotice:SetText("")
+        page.guildAbsenceNotice:SetText(GC.L(""))
     end
 
     local candidates = GC.Roster:GetMemberCareCandidates()
@@ -4365,7 +4369,7 @@ function GC.UI:RefreshMemberCare()
         if candidate then
             row.playerName = candidate.member.name
             row.removeArmed = false
-            row.removeButton:SetText("Entfernen")
+            row.removeButton:SetText(GC.L("Entfernen"))
             row.name:SetText(GC.Util.PlayerShortName(candidate.member.name))
             row.name:SetTextColor(ClassColor(candidate.member.classFile))
             row.status:SetText(candidate.status)
@@ -4412,12 +4416,12 @@ function GC.UI:RefreshMemberCare()
         and "Keine Ausnahmen hinterlegt. Vorschläge lassen sich als Ausnahme, später oder erledigt ablegen."
         or "")
     if #candidates == 0 then
-        page.memberCareSuggestionNotice:SetText("Keine Mitglieder erfüllen die aktuellen Prüfregeln.")
+        page.memberCareSuggestionNotice:SetText(GC.L("Keine Mitglieder erfüllen die aktuellen Prüfregeln."))
     elseif #candidates > #page.memberCareSuggestionRows then
-        page.memberCareSuggestionNotice:SetText("Weitere "
-            .. (#candidates - #page.memberCareSuggestionRows) .. " Vorschläge sind vorhanden.")
+        page.memberCareSuggestionNotice:SetText(GC.LFormat("Weitere {n} Vorschläge sind vorhanden.",
+            { n = #candidates - #page.memberCareSuggestionRows }))
     else
-        page.memberCareSuggestionNotice:SetText("Nur Vorschläge – keine automatische Entfernung.")
+        page.memberCareSuggestionNotice:SetText(GC.L("Nur Vorschläge – keine automatische Entfernung."))
     end
 end
 
@@ -4484,7 +4488,7 @@ function GC.UI:BuildWorkshopPage()
     -- Das × leert die Suche mit einem Klick; es erscheint nur, wenn etwas
     -- drinsteht (Owner-Wunsch).
     page.workshopSearchClear = CreateButton(page.workshopSearch.container, "×", 20, 20, function()
-        page.workshopSearch:SetText("")
+        page.workshopSearch:SetText(GC.L(""))
         page.workshopSearch:ClearFocus()
         GC.UI:RefreshWorkshop()
     end)
@@ -4702,7 +4706,7 @@ function GC.UI:BuildWorkshopPage()
         end
         local status = GC.Sync:GetSyncStatus()
         GameTooltip:SetOwner(bar, "ANCHOR_TOP")
-        GameTooltip:SetText("Stand des Gildenabgleichs")
+        GameTooltip:SetText(GC.L("Stand des Gildenabgleichs"))
         GameTooltip:AddLine(status.outbound .. " Pakete zu senden, "
             .. status.inbound .. " Teile im Empfang, "
             .. status.missing .. " Berufe angekündigt und noch nicht da.", 1, 1, 1, true)
@@ -4814,15 +4818,15 @@ function GC.UI:RefreshWorkshop()
         and GC.Workshop:GetCatalog(query, professionFilter, page.workshopFavoritesOnly)
         or {}
     page.workshopFavorites:SetActive(page.workshopFavoritesOnly == true)
-    page.workshopFavorites:SetText("Favoriten")
+    page.workshopFavorites:SetText(GC.L("Favoriten"))
     if page.workshopFavoritesOnly then
-        page.workshopListTitle:SetText("Favorisierte Rezepte")
+        page.workshopListTitle:SetText(GC.L("Favorisierte Rezepte"))
     elseif professionFilter ~= "" then
         page.workshopListTitle:SetText("Rezepte  •  " .. professionFilter)
     elseif query ~= "" then
-        page.workshopListTitle:SetText("Suchergebnisse")
+        page.workshopListTitle:SetText(GC.L("Suchergebnisse"))
     else
-        page.workshopListTitle:SetText("Gezielte Rezeptsuche")
+        page.workshopListTitle:SetText(GC.L("Gezielte Rezeptsuche"))
     end
     local pageSize = #page.workshopRows
     local pageCount = math.max(1, math.ceil(#entries / pageSize))
@@ -4879,21 +4883,21 @@ function GC.UI:RefreshWorkshop()
         page.workshopFavorite:Hide()
         page.workshopOrderButton:Hide()
         if not hasScope then
-            page.workshopRecipeTitle:SetText("Wonach suchst du?")
-            page.workshopDetails:SetText(
+            page.workshopRecipeTitle:SetText(GC.L("Wonach suchst du?"))
+            page.workshopDetails:SetText(GC.L(
                 "Gib einen Rezept- oder Spielernamen ein, wähle einen Beruf oder öffne deine Favoriten.\n\n"
-                .. "So bleibt die Werkstatt auch mit tausenden bekannten Rezepten übersichtlich.")
+                .. "So bleibt die Werkstatt auch mit tausenden bekannten Rezepten übersichtlich."))
         elseif page.workshopFavoritesOnly then
-            page.workshopRecipeTitle:SetText("Keine Favoriten gefunden")
-            page.workshopDetails:SetText(
-                "Markiere häufig benötigte Rezepte mit dem Stern in den Rezeptdetails.")
+            page.workshopRecipeTitle:SetText(GC.L("Keine Favoriten gefunden"))
+            page.workshopDetails:SetText(GC.L(
+                "Markiere häufig benötigte Rezepte mit dem Stern in den Rezeptdetails."))
         else
-            page.workshopRecipeTitle:SetText("Keine Treffer")
+            page.workshopRecipeTitle:SetText(GC.L("Keine Treffer"))
             if professionFilter ~= "" then
                 page.workshopDetails:SetText("Für " .. professionFilter
                     .. " wurden noch keine passenden Rezepte erfasst. Öffne das Berufsfenster oder frage Gildendaten an.")
             else
-                page.workshopDetails:SetText("Prüfe den Suchbegriff oder frage aktuelle Gildendaten an.")
+                page.workshopDetails:SetText(GC.L("Prüfe den Suchbegriff oder frage aktuelle Gildendaten an."))
             end
         end
         -- Ohne Auswahl duerfen keine Materialzeilen von vorhin stehen bleiben.
@@ -4904,8 +4908,8 @@ function GC.UI:RefreshWorkshop()
         for _, row in ipairs(page.workshopMaterialRows) do
             row:Hide()
         end
-        page.workshopMaterialSummary:SetText("")
-        page.workshopMaterialFooter:SetText("")
+        page.workshopMaterialSummary:SetText(GC.L(""))
+        page.workshopMaterialFooter:SetText(GC.L(""))
         page.workshopScrollAnchor = nil
         page.workshopDetailContent:SetHeight(220)
     else
@@ -4997,7 +5001,7 @@ function GC.UI:RefreshWorkshop()
         end
 
         if not status then
-            page.workshopMaterialSummary:SetText("Keine Reagenzien erfasst.")
+            page.workshopMaterialSummary:SetText(GC.L("Keine Reagenzien erfasst."))
             SetTextColor(page.workshopMaterialSummary, THEME.muted)
         elseif #status.missing > 0 then
             local parts, fromBank = {}, 0
@@ -5013,7 +5017,7 @@ function GC.UI:RefreshWorkshop()
                     or ""))
             SetTextColor(page.workshopMaterialSummary, THEME.text)
         else
-            page.workshopMaterialSummary:SetText("|cff59e695Alle Materialien vorhanden.|r")
+            page.workshopMaterialSummary:SetText(GC.L("|cff59e695Alle Materialien vorhanden.|r"))
             SetTextColor(page.workshopMaterialSummary, THEME.text)
         end
         cursor = cursor + 8
@@ -5076,13 +5080,13 @@ end
 local function AgeLabel(timestamp)
     local age = GC.Util.Now() - (tonumber(timestamp) or 0)
     if age < 60 then
-        return "gerade eben"
+        return GC.L("gerade eben")
     elseif age < 3600 then
-        return "vor " .. math.floor(age / 60) .. " Min."
+        return GC.LFormat("vor {n} Min.", { n = math.floor(age / 60) })
     elseif age < 24 * 3600 then
-        return "vor " .. math.floor(age / 3600) .. " Std."
+        return GC.LFormat("vor {n} Std.", { n = math.floor(age / 3600) })
     end
-    return "vor " .. math.floor(age / (24 * 3600)) .. " Tagen"
+    return GC.LFormat("vor {n} Tagen", { n = math.floor(age / (24 * 3600)) })
 end
 
 -- Der Balken unten in der Werkstatt und die Zeile darunter.
@@ -5214,9 +5218,10 @@ function GC.UI:RefreshSyncBar(force)
             page.syncBar:SetProgress(1, THEME.success)
             percentText = "100 %"
             percentColor = THEME.success
-            text = "|cff59e695Vollständig synchronisiert|r  •  abgeglichen mit "
-                .. (others == 1 and "einem weiteren Nutzer" or (others .. " weiteren Nutzern"))
-                .. "  •  Stand: " .. AgeLabel(status.lastSyncedAt) .. "."
+            text = "|cff59e695" .. GC.L("Vollständig synchronisiert") .. "|r  •  "
+                .. (others == 1 and GC.L("abgeglichen mit einem weiteren Nutzer")
+                    or GC.LFormat("abgeglichen mit {n} weiteren Nutzern", { n = others }))
+                .. "  •  " .. GC.LFormat("Stand: {zeit}.", { zeit = AgeLabel(status.lastSyncedAt) })
         end
         color = THEME.success
     else
@@ -5245,7 +5250,7 @@ function GC.UI:RefreshSyncBar(force)
             page.workshopRequest:SetText("Angefragt … " .. math.ceil(ackRemaining) .. " s")
         else
             page.workshopRequest:Enable()
-            page.workshopRequest:SetText("Daten anfragen")
+            page.workshopRequest:SetText(GC.L("Daten anfragen"))
         end
     end
 
@@ -5598,7 +5603,7 @@ local function FillOrderRow(row, boardRow, isOpenSection)
         row.primaryHandler = function(id)
             return GC.UI:AcceptOrder(id)
         end
-        row.primary:SetText("Annehmen")
+        row.primary:SetText(GC.L("Annehmen"))
         row.primary:SetShown(boardRow.canAccept == true)
         if boardRow.reserved then
             row.detail:SetText("|cffe8b84bReserviert für "
@@ -5922,12 +5927,12 @@ function GC.UI:OpenOrderCreateDialog(recipeKey)
     -- der Auftrag geht nicht verloren, aber er erreicht die Gilde erst
     -- beim nächsten gemeinsamen Online-Moment.
     if GC.Orders:GetOnlineAddonUserCount() == 0 then
-        dialog.status:SetText("|cffe8b84bHinweis:|r Gerade ist niemand mit Guild Copilot online. "
+        dialog.status:SetText(GC.L("|cffe8b84bHinweis:|r Gerade ist niemand mit Guild Copilot online. "
             .. "Der Auftrag wird gespeichert und verteilt sich, sobald du gemeinsam "
-            .. "mit anderen Addon-Nutzern online bist.")
+            .. "mit anderen Addon-Nutzern online bist."))
         SetTextColor(dialog.status, THEME.text)
     else
-        dialog.status:SetText("")
+        dialog.status:SetText(GC.L(""))
     end
     dialog:Show()
 end
@@ -5942,7 +5947,7 @@ function GC.UI:BuildOrderLogDialog(page)
     dialog.noteSend = CreateButton(dialog, "Notiz senden", 118, 26, function()
         local ok, message = GC.Orders:AddNote(dialog.orderID, dialog.noteEdit:GetText())
         if ok then
-            dialog.noteEdit:SetText("")
+            dialog.noteEdit:SetText(GC.L(""))
             GC.UI:RefreshOrderLogDialog()
         end
         GC.UI:SetOrdersStatus(message, ok)
@@ -5991,7 +5996,7 @@ function GC.UI:OpenOrderLogDialog(orderID)
         return
     end
     dialog.orderID = orderID
-    dialog.noteEdit:SetText("")
+    dialog.noteEdit:SetText(GC.L(""))
     dialog:Show()
     self:RefreshOrderLogDialog()
 end
@@ -6033,7 +6038,7 @@ function GC.UI:OpenOrderCostDialog(orderID)
     end
     local order = GC.Orders:GetOrder(orderID)
     dialog.orderID = orderID
-    dialog.costEdit:SetText("")
+    dialog.costEdit:SetText(GC.L(""))
     local isC = order and order.materialModel == "C"
     dialog.caption:SetShown(isC == true)
     dialog.costEdit.container:SetShown(isC == true)
@@ -6365,7 +6370,7 @@ function GC.UI:RefreshOrderTracker()
     if #rows > #tracker.rows then
         tracker.title:SetText("Gildenaufträge – du bist dran (" .. #rows .. ")")
     else
-        tracker.title:SetText("Gildenaufträge – du bist dran")
+        tracker.title:SetText(GC.L("Gildenaufträge – du bist dran"))
     end
     -- Der Rahmen ist so hoch wie sein Inhalt: Titelzeile plus die sichtbaren
     -- Zeilen. Drei leere Plätze vorzuhalten sah nach kaputtem Fenster aus.
@@ -6842,11 +6847,11 @@ function GC.UI:RefreshRecruitment()
             end
         end
         if GC.Recruitment:IsClassSelected(classFile) then
-            row.header.count:SetText("ganze Klasse")
+            row.header.count:SetText(GC.L("ganze Klasse"))
         elseif selectedSpecs > 0 then
             row.header.count:SetText(selectedSpecs .. " Specs")
         else
-            row.header.count:SetText("")
+            row.header.count:SetText(GC.L(""))
         end
         local red, green, blue = ClassColor(classFile)
         row.header.label:SetTextColor(red, green, blue)
@@ -6900,7 +6905,7 @@ local function AttachAutoRepeatTooltip(toggle)
         if not AnchorRowTooltip(self) then
             return
         end
-        GameTooltip:SetText("Automatisch wiederholen")
+        GameTooltip:SetText(GC.L("Automatisch wiederholen"))
         GameTooltip:AddLine("Wiederholt die bestätigte Werbung von selbst,"
             .. " solange der Werbebalken eingeblendet ist.", 1, 1, 1, true)
         GameTooltip:AddLine("WoW verlangt für jede Kanalnachricht eine echte Eingabe."
@@ -6947,7 +6952,7 @@ function GC.UI:BuildPostPage()
             recruitment.adText = GC.Recruitment:GenerateAdvertisement()
             recruitment.confirmedText = nil
             page.adEdit:SetText(recruitment.adText)
-            page.postResult:SetText("Raid-Symbol geändert. Bitte den Text erneut bestätigen.")
+            page.postResult:SetText(GC.L("Raid-Symbol geändert. Bitte den Text erneut bestätigen."))
             SetTextColor(page.postResult, THEME.warning)
             GC.UI:RefreshPost()
         end)
@@ -6966,13 +6971,13 @@ function GC.UI:BuildPostPage()
         page.adEdit:SetText(text)
         if text == "" then
             GC.DB:GetGuild().recruitment.confirmedText = nil
-            page.postResult:SetText("Ein leerer Werbetext kann nicht bestätigt werden.")
+            page.postResult:SetText(GC.L("Ein leerer Werbetext kann nicht bestätigt werden."))
             SetTextColor(page.postResult, THEME.danger)
             GC.UI:RefreshPost()
             return
         end
         GC.DB:GetGuild().recruitment.confirmedText = text
-        page.postResult:SetText("Werbetext bestätigt und bereit.")
+        page.postResult:SetText(GC.L("Werbetext bestätigt und bereit."))
         SetTextColor(page.postResult, THEME.success)
         GC.UI:RefreshPost()
     end, "PRIMARY")
@@ -7022,11 +7027,11 @@ function GC.UI:BuildPostPage()
     page.autoRepeatToggle = CreateToggle(page, "Automatisch wiederholen", function(enabled)
         GC.UI:SetAutoRepeat(enabled)
         if enabled then
-            page.postResult:SetText("Automatik an: Der Werbebalken bleibt offen; sobald ein Kanal bereit ist,"
-                .. " postet dein nächster Tastendruck.")
+            page.postResult:SetText(GC.L("Automatik an: Der Werbebalken bleibt offen; sobald ein Kanal bereit ist,"
+                .. " postet dein nächster Tastendruck."))
             SetTextColor(page.postResult, THEME.success)
         else
-            page.postResult:SetText("Automatik aus: Gepostet wird nur noch per Klick.")
+            page.postResult:SetText(GC.L("Automatik aus: Gepostet wird nur noch per Klick."))
             SetTextColor(page.postResult, THEME.muted)
         end
     end)
@@ -7209,19 +7214,19 @@ function GC.UI:BuildInboxPage()
     page.clearInboxButton = CreateButton(leadCard, "Alle löschen", 188, 30, function()
         if not page.confirmClearInbox then
             page.confirmClearInbox = true
-            page.clearInboxButton:SetText("Löschen bestätigen")
+            page.clearInboxButton:SetText(GC.L("Löschen bestätigen"))
             return
         end
         if GC.Chat:ClearInbox() then
             GC.UI.selectedLeadKey = nil
             page.leadPage = 1
             page.replyDrafts = {}
-            page.replyEdit:SetText("")
-            page.replyResult:SetText("Postfach vollständig geleert.")
+            page.replyEdit:SetText(GC.L(""))
+            page.replyResult:SetText(GC.L("Postfach vollständig geleert."))
             SetTextColor(page.replyResult, THEME.muted)
         end
         page.confirmClearInbox = false
-        page.clearInboxButton:SetText("Alle löschen")
+        page.clearInboxButton:SetText(GC.L("Alle löschen"))
         GC.UI:RefreshInbox()
     end)
     page.clearInboxButton:SetPoint("BOTTOMLEFT", leadCard, "BOTTOMLEFT", 18, 14)
@@ -7340,11 +7345,11 @@ function GC.UI:BuildInboxPage()
             -- Verschickt ist verschickt: Der Entwurf hat seinen Zweck erfuellt
             -- und darf nicht beim naechsten Aufruf wieder dastehen.
             page.replyDrafts[GC.Util.NormalizeName(lead.name)] = nil
-            page.replyEdit:SetText("")
+            page.replyEdit:SetText(GC.L(""))
             page.replyResult:SetText("Antwort an " .. lead.name .. " gesendet.")
             SetTextColor(page.replyResult, THEME.success)
         else
-            page.replyResult:SetText("Bitte Interessent und Antwort auswählen.")
+            page.replyResult:SetText(GC.L("Bitte Interessent und Antwort auswählen."))
             SetTextColor(page.replyResult, THEME.danger)
         end
         GC.UI:RefreshInbox()
@@ -7368,7 +7373,7 @@ function GC.UI:BuildInboxPage()
     local function FilterSelectedLead(days)
         local lead = GC.UI:GetSelectedLead()
         if not lead then
-            page.replyResult:SetText("Kein Interessent ausgewählt.")
+            page.replyResult:SetText(GC.L("Kein Interessent ausgewählt."))
             SetTextColor(page.replyResult, THEME.danger)
             return
         end
@@ -7422,7 +7427,7 @@ function GC.UI:BuildInboxPage()
 
     page.saveTemplates = CreateButton(templateCard, "Vorlagen speichern", 180, 32, function()
         if not GC.Roster:CanEditGuildProfile() then
-            page.templateStatus:SetText("Dein Gildenrang darf die gildenweiten Vorlagen nicht bearbeiten.")
+            page.templateStatus:SetText(GC.L("Dein Gildenrang darf die gildenweiten Vorlagen nicht bearbeiten."))
             SetTextColor(page.templateStatus, THEME.danger)
             return
         end
@@ -7442,7 +7447,7 @@ function GC.UI:BuildInboxPage()
 
         GC.Sync:QueueGuildProfile()
         GC:FireCallback("GUILD_PROFILE_UPDATED")
-        page.templateStatus:SetText("Vorlagen gespeichert und für die Gilde synchronisiert.")
+        page.templateStatus:SetText(GC.L("Vorlagen gespeichert und für die Gilde synchronisiert."))
         SetTextColor(page.templateStatus, THEME.success)
     end, "PRIMARY")
     page.saveTemplates:SetPoint("BOTTOMLEFT", templateCard, "BOTTOMLEFT", 134, 14)
@@ -7571,7 +7576,7 @@ function GC.UI:RefreshInbox()
     end
     SetButtonEnabled(page.saveTemplates, canEditTemplates)
     if not canEditTemplates and page.templateStatus:GetText() == "" then
-        page.templateStatus:SetText("Die Vorlagen sind für deinen Rang schreibgeschützt.")
+        page.templateStatus:SetText(GC.L("Die Vorlagen sind für deinen Rang schreibgeschützt."))
         SetTextColor(page.templateStatus, THEME.warning)
     end
 
@@ -7583,7 +7588,7 @@ function GC.UI:RefreshInbox()
     end
     if #inbox == 0 then
         page.confirmClearInbox = false
-        page.clearInboxButton:SetText("Alle löschen")
+        page.clearInboxButton:SetText(GC.L("Alle löschen"))
     end
     local replyMarker = math.floor(tonumber(GC.DB:GetGuild().recruitment.replyMarker) or 0)
     page.replyMarkerOff:SetActive(replyMarker == 0)
@@ -7640,17 +7645,17 @@ function GC.UI:RefreshInbox()
                 row.until_:SetText("ausgeblendet bis " .. entry.until_
                     .. (days and ("  •  noch " .. days .. (days == 1 and " Tag" or " Tage")) or ""))
             else
-                row.until_:SetText("dauerhaft ignoriert")
+                row.until_:SetText(GC.L("dauerhaft ignoriert"))
             end
         end
     end
     if #filters == 0 then
-        page.filterNotice:SetText("Niemand ausgeblendet.")
+        page.filterNotice:SetText(GC.L("Niemand ausgeblendet."))
     elseif #filters > #page.filterRows then
-        page.filterNotice:SetText("Weitere " .. (#filters - #page.filterRows)
-            .. " ausgeblendete Spieler sind vorhanden.")
+        page.filterNotice:SetText(GC.LFormat("Weitere {n} ausgeblendete Spieler sind vorhanden.",
+            { n = #filters - #page.filterRows }))
     else
-        page.filterNotice:SetText("")
+        page.filterNotice:SetText(GC.L(""))
     end
 
     SetButtonEnabled(page.hideTempButton, selectedLead ~= nil)
@@ -7658,10 +7663,10 @@ function GC.UI:RefreshInbox()
 
     local lead = selectedLead
     if not lead then
-        page.leadTitle:SetText("Noch keine Interessenten")
-        page.lastMessage:SetText("Starte eine Suche. Eingehende Flüsternachrichten erscheinen automatisch hier.")
+        page.leadTitle:SetText(GC.L("Noch keine Interessenten"))
+        page.lastMessage:SetText(GC.L("Starte eine Suche. Eingehende Flüsternachrichten erscheinen automatisch hier."))
         if not page.replyEdit:HasFocus() then
-            page.replyEdit:SetText("")
+            page.replyEdit:SetText(GC.L(""))
         end
         self:SetLeadProfileLinks(nil)
         page.replyButton:Disable()
@@ -7711,9 +7716,9 @@ function GC.UI:SetLeadProfileLinks(lead)
         end
     end
     if missing then
-        page.leadLinkNotice:SetText("Für Links zuerst unter Warcraft Logs die Gildenquelle speichern.")
+        page.leadLinkNotice:SetText(GC.L("Für Links zuerst unter Warcraft Logs die Gildenquelle speichern."))
     else
-        page.leadLinkNotice:SetText("")
+        page.leadLinkNotice:SetText(GC.L(""))
     end
 end
 
@@ -7748,7 +7753,7 @@ function GC.UI:BuildGuildPage()
 
     page.guildSaveButton = CreateButton(card, "Speichern & weiter", 200, 38, function()
         if not GC.Roster:CanEditGuildProfile() then
-            page.saveResult:SetText("Dein Gildenrang darf das Gildenprofil nicht bearbeiten.")
+            page.saveResult:SetText(GC.L("Dein Gildenrang darf das Gildenprofil nicht bearbeiten."))
             SetTextColor(page.saveResult, THEME.danger)
             return
         end
@@ -7774,7 +7779,7 @@ function GC.UI:BuildGuildPage()
             GC.Sync:QueueGuildProfile()
         end
         GC:FireCallback("GUILD_PROFILE_UPDATED")
-        page.saveResult:SetText("Gespeichert und zur Gildensynchronisierung vorgemerkt.")
+        page.saveResult:SetText(GC.L("Gespeichert und zur Gildensynchronisierung vorgemerkt."))
         SetTextColor(page.saveResult, THEME.success)
         GC.UI:ShowPage("SUGGESTIONS")
     end, "PRIMARY")
@@ -7803,12 +7808,12 @@ function GC.UI:RefreshGuild()
     if canEdit then
         page.guildSaveButton:Enable()
         if page.saveResult:GetText() == "" then
-            page.saveResult:SetText("Dein Rang darf dieses gildenweite Profil bearbeiten.")
+            page.saveResult:SetText(GC.L("Dein Rang darf dieses gildenweite Profil bearbeiten."))
             SetTextColor(page.saveResult, THEME.muted)
         end
     else
         page.guildSaveButton:Disable()
-        page.saveResult:SetText("Nur in Einstellungen freigegebene Gildenränge dürfen Änderungen speichern.")
+        page.saveResult:SetText(GC.L("Nur in Einstellungen freigegebene Gildenränge dürfen Änderungen speichern."))
         SetTextColor(page.saveResult, THEME.warning)
     end
 end
@@ -7836,7 +7841,7 @@ function GC.UI:BuildWarcraftLogsPage()
 
     local detect = CreateButton(sourceCard, "Aus Gilde erkennen", 170, 34, function()
         page.wclURL:SetText(GC.WarcraftLogs:GetSuggestedURL())
-        page.wclResult:SetText("Link aus Region, Realm und Gildenname vorbereitet.")
+        page.wclResult:SetText(GC.L("Link aus Region, Realm und Gildenname vorbereitet."))
         SetTextColor(page.wclResult, THEME.muted)
     end)
     detect:SetPoint("TOPLEFT", sourceCard, "TOPLEFT", 18, -138)
@@ -7862,7 +7867,7 @@ function GC.UI:BuildWarcraftLogsPage()
     -- stillschweigend ab und der Import scheitert ohne erkennbaren Grund.
     page.wclImport = CreateTextArea(importCard, 740, 82, 60000)
     page.wclImport.container:SetPoint("TOPLEFT", importCard, "TOPLEFT", 18, -92)
-    page.wclImport:SetText("")
+    page.wclImport:SetText(GC.L(""))
 
     -- Der Import ersetzt die gespeicherten Profile vollständig. Solange die
     -- Meldung nach einem Klick genauso aussehen kann wie vorher, weiß niemand,
@@ -7874,7 +7879,7 @@ function GC.UI:BuildWarcraftLogsPage()
     local function DisarmImport()
         page.wclImportArmed = false
         if import then
-            import:SetText("Daten importieren")
+            import:SetText(GC.L("Daten importieren"))
         end
     end
 
@@ -7894,7 +7899,7 @@ function GC.UI:BuildWarcraftLogsPage()
         local stored = GC.WarcraftLogs:GetImportedCount()
         if stored > 0 and not page.wclImportArmed then
             page.wclImportArmed = true
-            import:SetText("Wirklich ersetzen")
+            import:SetText(GC.L("Wirklich ersetzen"))
             ShowImportResult(stored .. " gespeicherte Profile werden ersetzt. "
                 .. "Zum Bestätigen erneut klicken.", false)
             return
@@ -7915,7 +7920,7 @@ function GC.UI:BuildWarcraftLogsPage()
             return
         end
         DisarmImport()
-        page.wclImportResult:SetText("")
+        page.wclImportResult:SetText(GC.L(""))
     end)
     page.wclImportResult = CreateLabel(importCard, "", { width = 535 })
     page.wclImportResult:SetPoint("LEFT", import, "RIGHT", 14, 0)
@@ -7965,9 +7970,9 @@ function GC.UI:RefreshWarcraftLogs()
             .. "\nDiese Specs ergänzen jetzt automatisch die Roster- und Copilot-Auswertung."
             .. " Profile werden automatisch in der Gilde geteilt; vollständige Kampfauswertungen bleiben lokal.")
     else
-        page.wclStatus:SetText("|cff91a3b8Noch keine Log-Daten importiert.|r"
+        page.wclStatus:SetText(GC.L("|cff91a3b8Noch keine Log-Daten importiert.|r"
             .. "\nDie gespeicherte URL ist für den Companion vorbereitet."
-            .. " Importiert ein anderes Gildenmitglied, erscheinen die Profile auch hier von selbst.")
+            .. " Importiert ein anderes Gildenmitglied, erscheinen die Profile auch hier von selbst."))
     end
 end
 
@@ -8108,11 +8113,11 @@ function GC.UI:BuildStatisticsPage()
     page.deleteSessionButton = CreateButton(listCard, "Sitzung löschen", 206, 26, function()
         if not page.deleteArmed then
             page.deleteArmed = GC.RaidMonitor.selectedSessionID
-            page.deleteSessionButton:SetText("Wirklich löschen?")
+            page.deleteSessionButton:SetText(GC.L("Wirklich löschen?"))
             return
         end
         page.deleteArmed = nil
-        page.deleteSessionButton:SetText("Sitzung löschen")
+        page.deleteSessionButton:SetText(GC.L("Sitzung löschen"))
         local ok, message = GC.RaidMonitor:DeleteEvening(GC.RaidMonitor.selectedSessionID)
         page:SetActionStatus(message, ok)
         GC.UI:RefreshStatistics()
@@ -8388,12 +8393,12 @@ function GC.UI:RefreshStatistics()
         page.sessionStatus:SetText("|cff59e695Sitzung läuft|r  •  " .. participantCount .. " Teilnehmer  •  "
             .. pullCount .. " Versuche\nGestartet von " .. (session.startedBy ~= "" and session.startedBy or "unbekannt")
             .. (session.zone ~= "" and ("  •  " .. session.zone) or ""))
-        page.sessionButton:SetText("Sitzung beenden")
+        page.sessionButton:SetText(GC.L("Sitzung beenden"))
     else
         page.sessionStatus:SetText("|cff91a3b8Keine laufende Sitzung.|r\n"
             .. (canControl and "Du darfst eine Sitzung starten und beenden."
                 or "Nur die in den Einstellungen freigegebenen Gildenränge dürfen Sitzungen steuern."))
-        page.sessionButton:SetText("Sitzung starten")
+        page.sessionButton:SetText(GC.L("Sitzung starten"))
     end
     SetButtonEnabled(page.sessionButton, canControl)
     SetButtonEnabled(page.requestButton, canControl)
@@ -8415,7 +8420,7 @@ function GC.UI:RefreshStatistics()
     -- Sitzung gewählt wird - sonst löschte der zweite Klick die falsche.
     if page.deleteArmed and page.deleteArmed ~= selectedID then
         page.deleteArmed = nil
-        page.deleteSessionButton:SetText("Sitzung löschen")
+        page.deleteSessionButton:SetText(GC.L("Sitzung löschen"))
     end
     SetButtonEnabled(page.deleteSessionButton,
         #evenings > 0 and GC.Roster:CanAccessMemberCare())
@@ -8476,7 +8481,7 @@ function GC.UI:RefreshStatistics()
                 and ("  •  |cffffb840" .. selected.gaps .. " Lücke"
                     .. ((selected.gaps > 1) and "n" or "") .. "|r") or ""))
     else
-        page.sessionHeadline:SetText("")
+        page.sessionHeadline:SetText(GC.L(""))
     end
 
     -- Die Quellenknöpfe erscheinen nur, wenn es wirklich mehr als eine gibt.
@@ -8578,10 +8583,10 @@ function GC.UI:RefreshStatistics()
         end
     end
     if selected and #participants == 0 then
-        page.participantEmpty:SetText("Für diese Sitzung wurden keine Teilnehmer erfasst.")
+        page.participantEmpty:SetText(GC.L("Für diese Sitzung wurden keine Teilnehmer erfasst."))
         page.participantEmpty:SetShown(true)
     elseif selected then
-        page.participantEmpty:SetText("Wähle links eine Sitzung aus.")
+        page.participantEmpty:SetText(GC.L("Wähle links eine Sitzung aus."))
     end
     for index, row in ipairs(page.participantRows) do
         local participant = participants[index]
@@ -8910,8 +8915,8 @@ function GC.UI:BuildGearPage()
                     -- Grün heißt fertig, Rot heißt Arbeit (Owner-Wunsch) - so
                     -- ist die Liste auf einen Blick lesbar.
                     row:SetText(audit.name .. (issues > 0
-                        and ("  •  |cffff6166" .. issues
-                            .. (issues == 1 and " Fund" or " Funde") .. "|r")
+                        and ("  •  |cffff6166" .. (issues == 1 and GC.L("1 Fund")
+                            or GC.LFormat("{n} Funde", { n = issues })) .. "|r")
                         or "  •  |cff59e695ok|r"))
                     row:SetActive(audit.name == selectedName)
                 end
@@ -8953,7 +8958,7 @@ function GC.UI:BuildGearPage()
             return
         end
         GameTooltip:SetOwner(button, "ANCHOR_TOP")
-        GameTooltip:SetText("Empfehlung des Regelsatzes")
+        GameTooltip:SetText(GC.L("Empfehlung des Regelsatzes"))
         GameTooltip:AddLine(target.slotLabel .. ": " .. (target.ruleName or "?"), 1, 1, 1, true)
         GameTooltip:AddLine("Können: " .. table.concat(target.crafters or {}, ", "),
             0.57, 0.64, 0.72, true)
@@ -9103,26 +9108,31 @@ function GC.UI:RefreshGear()
         guildRules = guildRules + 1
     end
     local overview = GC.GearAudit:GetOverview()
-    local statusText = GC.GearAudit.status
+    -- Der gespeicherte Status ist einer von wenigen festen Saetzen; er und
+    -- alle Zaehlbausteine laufen einzeln durch die Sprachschicht.
+    local statusText = GC.L(GC.GearAudit.status)
     if statusText == "" then
-        statusText = overview.players > 0 and "Bereit." or "Noch keine Prüfung gelaufen."
+        statusText = GC.L(overview.players > 0 and "Bereit." or "Noch keine Prüfung gelaufen.")
     end
     if overview.players > 0 then
-        statusText = statusText .. "  •  " .. overview.players .. " geprüft"
-            .. ", davon " .. overview.clean .. " ohne Funde"
+        statusText = statusText .. "  •  "
+            .. GC.LFormat("{n} geprüft, davon {m} ohne Funde",
+                { n = overview.players, m = overview.clean })
         if overview.missingEnchants > 0 then
-            statusText = statusText .. "  •  |cffff6166" .. overview.missingEnchants
-                .. " fehlende Verzauberungen|r"
+            statusText = statusText .. "  •  |cffff6166"
+                .. GC.LFormat("{n} fehlende Verzauberungen", { n = overview.missingEnchants }) .. "|r"
         end
         if overview.emptySockets > 0 then
-            statusText = statusText .. "  •  |cffff6166" .. overview.emptySockets .. " leere Sockel|r"
+            statusText = statusText .. "  •  |cffff6166"
+                .. GC.LFormat("{n} leere Sockel", { n = overview.emptySockets }) .. "|r"
         end
         if overview.emptySlots > 0 then
-            statusText = statusText .. "  •  |cffffb840" .. overview.emptySlots .. " leere Pflichtslots|r"
+            statusText = statusText .. "  •  |cffffb840"
+                .. GC.LFormat("{n} leere Pflichtslots", { n = overview.emptySlots }) .. "|r"
         end
         if overview.unreadableSlots > 0 then
-            statusText = statusText .. "  •  |cffffb840" .. overview.unreadableSlots
-                .. " noch nicht lesbare Slots|r"
+            statusText = statusText .. "  •  |cffffb840"
+                .. GC.LFormat("{n} noch nicht lesbare Slots", { n = overview.unreadableSlots }) .. "|r"
         end
     end
     -- Kurz genug fuer die Statuszeile: Die lange Fassung ("Regelsatz v2 mit
@@ -9131,26 +9141,26 @@ function GC.UI:RefreshGear()
     -- war "gilt au…".
     local ruleParts = {}
     if shippedRules > 0 then
-        ruleParts[#ruleParts + 1] = "Regelsatz v" .. GC.EnchantRuleSet.version
-            .. " (" .. shippedRules .. ")"
+        ruleParts[#ruleParts + 1] = GC.LFormat("Regelsatz v{v} ({n})",
+            { v = GC.EnchantRuleSet.version, n = shippedRules })
     end
     if guildRules > 0 then
-        ruleParts[#ruleParts + 1] = guildRules .. " eigene "
-            .. (guildRules == 1 and "Bewertung" or "Bewertungen")
+        ruleParts[#ruleParts + 1] = guildRules == 1 and GC.L("1 eigene Bewertung")
+            or GC.LFormat("{n} eigene Bewertungen", { n = guildRules })
     end
 
     local ruleLine
     if #ruleParts > 0 then
         ruleLine = GC.Util.JoinGerman(ruleParts) .. "."
         if GC.GearAudit:AcceptsUnratedEnchants() then
-            ruleLine = ruleLine .. " Unbewertetes gilt als in Ordnung."
+            ruleLine = ruleLine .. " " .. GC.L("Unbewertetes gilt als in Ordnung.")
         end
     elseif GC.GearAudit:AcceptsUnratedEnchants() then
-        ruleLine = "|cff7ac943Automatik aktiv:|r keine Bewertungen hinterlegt, deshalb gilt jede vorhandene"
-            .. " Verzauberung als in Ordnung. Gemeldet werden fehlende Verzauberungen und leere Sockel."
+        ruleLine = GC.L("|cff7ac943Automatik aktiv:|r keine Bewertungen hinterlegt, deshalb gilt jede vorhandene"
+            .. " Verzauberung als in Ordnung. Gemeldet werden fehlende Verzauberungen und leere Sockel.")
     else
-        ruleLine = "|cffffb840Der Regelsatz ist noch leer: fehlende Verzauberungen und leere Sockel werden"
-            .. " exakt erkannt, vorhandene Verzauberungen bleiben \"Unbekannt\".|r"
+        ruleLine = GC.L("|cffffb840Der Regelsatz ist noch leer: fehlende Verzauberungen und leere Sockel werden"
+            .. " exakt erkannt, vorhandene Verzauberungen bleiben \"Unbekannt\".|r")
     end
     page.gearStatus:SetText(statusText .. "\n" .. ruleLine)
 
@@ -9224,17 +9234,17 @@ function GC.UI:RefreshGear()
         else
             ageText = "vor " .. math.floor(age / 86400) .. " Tagen"
         end
-        local sourceLabel = selected.source == "SELF" and "Eigene Ausrüstung"
+        local sourceLabel = GC.L(selected.source == "SELF" and "Eigene Ausrüstung"
             or selected.source == "SYNC" and "Addon-Abgleich"
-            or "Inspect"
+            or "Inspect")
         page.gearHeadline:SetText(sourceLabel
             .. "  •  " .. ageText .. "  •  "
             .. (selected.specKey and GC.GearAudit:DescribeSpec(selected.specKey)
                 or "|cffffb840Spec unbekannt|r"))
         page.gearFindings:SetText(self:FormatGearFindings(selected, 3))
     else
-        page.gearHeadline:SetText("")
-        page.gearFindings:SetText("")
+        page.gearHeadline:SetText(GC.L(""))
+        page.gearFindings:SetText(GC.L(""))
     end
 
     local slots = selected and selected.slots or {}
@@ -9317,25 +9327,29 @@ function GC.UI:RefreshSyncBadge()
     local status = GC.Sync:GetSyncStatus()
 
     if status.state == "RUNNING" then
-        badge:SetText("|cff2ed9e6• Abgleich läuft … " .. status.percent .. " %|r")
+        badge:SetText("|cff2ed9e6• "
+            .. GC.LFormat("Abgleich läuft … {p} %", { p = status.percent }) .. "|r")
     elseif status.state == "INCOMPLETE" then
-        badge:SetText("|cffff6266• Abgleich unvollständig|r")
+        badge:SetText(GC.L("|cffff6266• Abgleich unvollständig|r"))
     elseif players <= 1 then
-        badge:SetText("|cff8b98a5• kein anderer Nutzer erkannt|r")
+        badge:SetText(GC.L("|cff8b98a5• kein anderer Nutzer erkannt|r"))
     elseif differing > 0 then
-        badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote .. ", "
-            .. differing .. " mit anderer Version|r")
+        badge:SetText("|cffffb840• "
+            .. GC.LFormat("{n} Nutzer{chars}, {d} mit anderer Version",
+                { n = players, chars = characterNote, d = differing }) .. "|r")
     elseif status.state == "SYNCED" then
         -- "Daten vollstaendig" nur, wenn keine Bestandsluecke bekannt ist:
         -- Sonst stand genau diese Zeile gruen ueber einem Drittel des Katalogs,
         -- waehrend die Rezepte der Offline-Spieler schlicht fehlten.
         local coverage = status.coverage
         if coverage and (coverage.professions or 0) > 0 then
-            badge:SetText("|cffffb840• " .. players .. " Nutzer" .. characterNote
-                .. ", Bestand lückenhaft|r")
+            badge:SetText("|cffffb840• "
+                .. GC.LFormat("{n} Nutzer{chars}, Bestand lückenhaft",
+                    { n = players, chars = characterNote }) .. "|r")
         else
-            badge:SetText("|cff59e695• " .. players .. " Nutzer" .. characterNote
-                .. ", Daten vollständig|r")
+            badge:SetText("|cff59e695• "
+                .. GC.LFormat("{n} Nutzer{chars}, Daten vollständig",
+                    { n = players, chars = characterNote }) .. "|r")
         end
     else
         badge:SetText("|cff8b98a5• " .. players .. " Nutzer" .. characterNote
@@ -9611,7 +9625,7 @@ function GC.UI:RefreshPostBar()
     local recruitment = GC.DB:GetGuild().recruitment
     local confirmed = recruitment.confirmedText or ""
     if confirmed == "" then
-        bar.text:SetText("|cffffb840Kein bestätigter Text. Unter „Werbung posten“ bestätigen.|r")
+        bar.text:SetText(GC.L("|cffffb840Kein bestätigter Text. Unter „Werbung posten“ bestätigen.|r"))
     else
         -- Voller Text statt 110 Bytes: Was hier steht, geht so in den Chat.
         bar.text:SetText(GC.Util.SafeChatText(confirmed, GC.Constants.MAX_CHAT_BYTES))
@@ -9639,7 +9653,7 @@ function GC.UI:RefreshPostBar()
     if longest > 0 and ready == 0 then
         bar.sendButton:SetText(math.ceil(longest) .. "s Cooldown")
     else
-        bar.sendButton:SetText("Suche starten")
+        bar.sendButton:SetText(GC.L("Suche starten"))
     end
 
     -- Die Automatik ist genau dann scharf, wenn jetzt auch ein Klick posten
@@ -9665,13 +9679,13 @@ function GC.UI:RefreshPostBar()
         bar.status:SetText("Automatik: der nächste Tastendruck postet (" .. ready .. " bereit).")
         SetTextColor(bar.status, THEME.success)
     elseif automatik and confirmed == "" then
-        bar.status:SetText("Automatik wartet auf einen bestätigten Text.")
+        bar.status:SetText(GC.L("Automatik wartet auf einen bestätigten Text."))
         SetTextColor(bar.status, THEME.warning)
     elseif automatik and longest > 0 then
         bar.status:SetText("Automatik: nächster Post in " .. math.ceil(longest) .. "s.")
         SetTextColor(bar.status, THEME.muted)
     elseif automatik then
-        bar.status:SetText("Automatik: kein ausgewählter Kanal beigetreten.")
+        bar.status:SetText(GC.L("Automatik: kein ausgewählter Kanal beigetreten."))
         SetTextColor(bar.status, THEME.warning)
     elseif bar.status:GetText() == "" or waiting > 0 or ready > 0 then
         bar.status:SetText(ready .. " Kanäle bereit"
@@ -9859,7 +9873,7 @@ function GC.UI:AddMinimapButton()
             return
         end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Guild Copilot")
+        GameTooltip:SetText(GC.L("Guild Copilot"))
         local nextStep = GC.Onboarding:GetNextStep()
         if nextStep then
             GameTooltip:AddLine("Einrichtung offen: " .. nextStep, 0.18, 0.78, 0.86, true)
@@ -10131,10 +10145,10 @@ function GC.UI:RefreshGroupGearCheck()
     frame.back:SetShown(detail ~= nil)
     frame.rescan:SetShown(detail == nil)
     if detail then
-        frame.subtitle:SetText("„Zur Gruppe“ führt zurück zur Übersicht.")
-        frame.headName:SetText("SLOT")
-        frame.headStand:SetText("BEWERTUNG")
-        frame.headBefund:SetText("VERZAUBERUNG & SOCKEL")
+        frame.subtitle:SetText(GC.L("„Zur Gruppe“ führt zurück zur Übersicht."))
+        frame.headName:SetText(GC.L("SLOT"))
+        frame.headStand:SetText(GC.L("BEWERTUNG"))
+        frame.headBefund:SetText(GC.L("VERZAUBERUNG & SOCKEL"))
         local slots = detail.slots or {}
         for index, row in ipairs(frame.rows) do
             local entry = slots[index]
@@ -10181,11 +10195,11 @@ function GC.UI:RefreshGroupGearCheck()
         return
     end
 
-    frame.subtitle:SetText("Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, der Rest per "
-        .. "Inspect in Reichweite. Klick auf eine Zeile zeigt die Verzauberungen.")
-    frame.headName:SetText("NAME")
-    frame.headStand:SetText("STAND")
-    frame.headBefund:SetText("BEFUND")
+    frame.subtitle:SetText(GC.L("Nur die aktuelle Gruppe. Addon-Nutzer liefern selbst, der Rest per "
+        .. "Inspect in Reichweite. Klick auf eine Zeile zeigt die Verzauberungen."))
+    frame.headName:SetText(GC.L("NAME"))
+    frame.headStand:SetText(GC.L("STAND"))
+    frame.headBefund:SetText(GC.L("BEFUND"))
     local ok, findings, missing = 0, 0, 0
     local entries = {}
     -- Dieselbe Gruppenliste wie der Versionsprüfer; solo steht man allein drin.
@@ -10434,7 +10448,7 @@ function GC.UI:RefreshSessionReview()
         evening = monitor:GetEveningOf(frame.anchorID)
     end
     if not evening then
-        frame.headline:SetText("Keine Auswertung vorhanden. Auf der Seite Raidauswertung einen Abend wählen.")
+        frame.headline:SetText(GC.L("Keine Auswertung vorhanden. Auf der Seite Raidauswertung einen Abend wählen."))
         for _, row in ipairs(frame.rows) do
             row:Hide()
         end
@@ -10442,7 +10456,7 @@ function GC.UI:RefreshSessionReview()
             button:Hide()
         end
         frame.compareButton:Hide()
-        frame.note:SetText("")
+        frame.note:SetText(GC.L(""))
         return
     end
 
@@ -10754,7 +10768,7 @@ function GC.UI:RefreshConsumableLog()
                 cat = CategoryLabel(event.c),
             }
         end
-        frame.subtitle:SetText("Live mitgeschrieben: jeder gezählte Einwurf mit Uhrzeit.")
+        frame.subtitle:SetText(GC.L("Live mitgeschrieben: jeder gezählte Einwurf mit Uhrzeit."))
         local dropped = tonumber(participant.consumableLogDropped) or 0
         frame.note:SetText(#entries .. " Einträge"
             .. (dropped > 0 and ("  ·  " .. dropped .. " ältere verworfen") or ""))
@@ -10778,7 +10792,7 @@ function GC.UI:RefreshConsumableLog()
                 cat = item.c and CategoryLabel(item.c) or "?",
             }
         end
-        frame.subtitle:SetText("Aus Warcraft Logs: exakte Gegenstände mit Anzahl - Uhrzeiten kennt der Export nicht.")
+        frame.subtitle:SetText(GC.L("Aus Warcraft Logs: exakte Gegenstände mit Anzahl - Uhrzeiten kennt der Export nicht."))
         frame.note:SetText(#entries .. " verschiedene Gegenstände")
     else
         for _, category in ipairs(GC.ConsumableCategories) do
@@ -10787,12 +10801,12 @@ function GC.UI:RefreshConsumableLog()
                 entries[#entries + 1] = { time = count .. "×", name = GC.L(category.label), cat = "" }
             end
         end
-        frame.subtitle:SetText("Diese Quelle liefert nur Kategoriezähler ohne Einzelheiten.")
+        frame.subtitle:SetText(GC.L("Diese Quelle liefert nur Kategoriezähler ohne Einzelheiten."))
         frame.note:SetText(#entries > 0 and (#entries .. " Kategorien") or "")
     end
     if #entries == 0 then
-        frame.subtitle:SetText("Für diesen Teilnehmer wurde kein Verbrauch erfasst.")
-        frame.note:SetText("")
+        frame.subtitle:SetText(GC.L("Für diesen Teilnehmer wurde kein Verbrauch erfasst."))
+        frame.note:SetText(GC.L(""))
     end
 
     for index, row in ipairs(frame.rows) do
@@ -11092,7 +11106,7 @@ GC:RegisterCallback("RAID_SUMMARY_ANSWERS", GC.UI, function(self)
         return
     end
     if stats.answers == 0 then
-        page.actionStatus:SetText("Auswertung angefragt - warte auf Antworten …")
+        page.actionStatus:SetText(GC.L("Auswertung angefragt - warte auf Antworten …"))
         SetTextColor(page.actionStatus, THEME.muted)
     else
         page.actionStatus:SetText(stats.answers .. " Antworten empfangen, davon "
@@ -11318,10 +11332,10 @@ function GC.UI:RefreshVersionCheck()
                 row.version:SetText(entry.version or "?")
                 SetTextColor(row.version, THEME.danger)
             elseif entry.state == "WAITING" then
-                row.version:SetText("Warte auf Antwort …")
+                row.version:SetText(GC.L("Warte auf Antwort …"))
                 SetTextColor(row.version, THEME.warning)
             else
-                row.version:SetText("Nicht installiert")
+                row.version:SetText(GC.L("Nicht installiert"))
                 SetTextColor(row.version, THEME.muted)
             end
         end

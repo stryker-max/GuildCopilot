@@ -407,10 +407,12 @@ end
 function GC.GearAudit:DescribeSpec(specKey)
     local spec = specKey and GC.SpecByKey[specKey]
     if not spec then
-        return "ohne Spec"
+        return GC.L("ohne Spec")
     end
     local class = GC.Classes[spec.classFile]
-    return (class and class.name or spec.classFile) .. " " .. spec.name
+    -- Klassen- und Spec-Name laufen einzeln durch die Sprachschicht: Die
+    -- englischen Gegenstuecke sind die offiziellen Begriffe (Locales.lua).
+    return GC.L(class and class.name or spec.classFile) .. " " .. GC.L(spec.name)
 end
 
 -- Erst die Spec, dann die allgemeine Regel.
@@ -719,7 +721,7 @@ end
 function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKey)
     if (tonumber(enchantID) or 0) <= 0 then
         if slot.enchantRequired then
-            return "MISSING", "Keine Verzauberung auf einem Pflichtslot."
+            return "MISSING", GC.L("Keine Verzauberung auf einem Pflichtslot.")
         end
         return nil
     end
@@ -728,14 +730,16 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKe
     if guildRule and GC.GearVerdicts[guildRule.verdict] then
         local label = enchantName
         if not label or label == "" then
-            label = guildRule.name ~= "" and guildRule.name or ("Verzauberung " .. enchantID)
+            label = guildRule.name ~= "" and guildRule.name
+                or GC.LFormat("Verzauberung {id}", { id = enchantID })
         end
         -- Sichtbar machen, worauf die Bewertung beruht: auf der Spec des
         -- Geprueften oder auf einer Regel, die fuer alle gilt.
         local scope = fromSpec
-            and ("Regel für " .. self:DescribeSpec(specKey))
-            or "Regel für alle Specs"
-        return guildRule.verdict, label .. "  •  " .. scope .. ", von " .. (guildRule.by or "?")
+            and GC.LFormat("Regel für {spec}", { spec = self:DescribeSpec(specKey) })
+            or GC.L("Regel für alle Specs")
+        return guildRule.verdict, label .. "  •  " .. scope
+            .. GC.LFormat(", von {name}", { name = guildRule.by or "?" })
     end
 
     local rule = GC.EnchantRuleSet.rules[tonumber(enchantID)]
@@ -750,22 +754,24 @@ function GC.GearAudit:EvaluateEnchant(slot, enchantID, role, enchantName, specKe
     if not rule then
         local label = (enchantName and enchantName ~= "")
             and enchantName
-            or ("Verzauberung " .. enchantID)
+            or GC.LFormat("Verzauberung {id}", { id = enchantID })
         if self:AcceptsUnratedEnchants() then
-            return "SOLID", "Verzaubert: " .. label .. "  •  automatisch anerkannt"
+            return "SOLID", GC.LFormat("Verzaubert: {name}  •  automatisch anerkannt",
+                { name = label })
         end
         if enchantName and enchantName ~= "" then
-            return "UNKNOWN", "Verzaubert: " .. enchantName
+            return "UNKNOWN", GC.LFormat("Verzaubert: {name}", { name = enchantName })
         end
-        return "UNKNOWN", "Verzauberung " .. enchantID .. " ist in der Regelliste noch nicht bewertet."
+        return "UNKNOWN", GC.LFormat(
+            "Verzauberung {id} ist in der Regelliste noch nicht bewertet.", { id = enchantID })
     end
 
     local reason = enchantName
     if not reason or reason == "" then
-        reason = rule.name or ("Verzauberung " .. enchantID)
+        reason = rule.name or GC.LFormat("Verzauberung {id}", { id = enchantID })
     end
     if rule.source and rule.source ~= "" then
-        reason = reason .. "  •  Quelle: " .. rule.source
+        reason = reason .. "  •  " .. GC.LFormat("Quelle: {quelle}", { quelle = rule.source })
     end
     return rule.verdict or "UNKNOWN", reason
 end
@@ -1675,12 +1681,13 @@ function GC.GearAudit:GetFindings(audit)
     if #missingEnchants == 1 then
         findings[#findings + 1] = {
             severity = "PROBLEM",
-            text = "1 fehlende Verzauberung: " .. missingEnchants[1],
+            text = GC.L("1 fehlende Verzauberung") .. ": " .. missingEnchants[1],
         }
     elseif #missingEnchants > 1 then
         findings[#findings + 1] = {
             severity = "PROBLEM",
-            text = #missingEnchants .. " fehlende Verzauberungen: " .. table.concat(missingEnchants, ", "),
+            text = GC.LFormat("{n} fehlende Verzauberungen", { n = #missingEnchants })
+                .. ": " .. table.concat(missingEnchants, ", "),
         }
     end
 
@@ -1688,7 +1695,8 @@ function GC.GearAudit:GetFindings(audit)
     if emptySockets > 0 then
         findings[#findings + 1] = {
             severity = "PROBLEM",
-            text = (emptySockets == 1 and "1 leerer Sockel" or (emptySockets .. " leere Sockel"))
+            text = (emptySockets == 1 and GC.L("1 leerer Sockel")
+                or GC.LFormat("{n} leere Sockel", { n = emptySockets }))
                 .. ": " .. table.concat(socketSlots, ", "),
         }
     end
@@ -1696,7 +1704,8 @@ function GC.GearAudit:GetFindings(audit)
     if #emptySlots > 0 then
         findings[#findings + 1] = {
             severity = "WARNING",
-            text = (#emptySlots == 1 and "1 leerer Ausrüstungsplatz" or (#emptySlots .. " leere Ausrüstungsplätze"))
+            text = (#emptySlots == 1 and GC.L("1 leerer Ausrüstungsplatz")
+                or GC.LFormat("{n} leere Ausrüstungsplätze", { n = #emptySlots }))
                 .. ": " .. table.concat(emptySlots, ", "),
         }
     end
@@ -1705,8 +1714,8 @@ function GC.GearAudit:GetFindings(audit)
         findings[#findings + 1] = {
             severity = "WARNING",
             text = (#unreadableSlots == 1
-                and "1 Ausrüstungsplatz noch nicht lesbar"
-                or (#unreadableSlots .. " Ausrüstungsplätze noch nicht lesbar"))
+                and GC.L("1 Ausrüstungsplatz noch nicht lesbar")
+                or GC.LFormat("{n} Ausrüstungsplätze noch nicht lesbar", { n = #unreadableSlots }))
                 .. ": " .. table.concat(unreadableSlots, ", "),
         }
     end
@@ -1714,7 +1723,7 @@ function GC.GearAudit:GetFindings(audit)
     if #findings == 0 then
         findings[#findings + 1] = {
             severity = "OK",
-            text = "Alles verzaubert und alle Sockel besetzt.",
+            text = GC.L("Alles verzaubert und alle Sockel besetzt."),
         }
     end
 
@@ -1727,7 +1736,8 @@ function GC.GearAudit:GetFindings(audit)
     if ruleCount > 0 and unknownEnchants > 0 then
         findings[#findings + 1] = {
             severity = "INFO",
-            text = unknownEnchants .. " Verzauberungen sind noch nicht bewertet.",
+            text = GC.LFormat("{n} Verzauberungen sind noch nicht bewertet.",
+                { n = unknownEnchants }),
         }
     end
     return findings
@@ -1758,19 +1768,21 @@ end
 function GC.GearAudit:DescribeFindings(audit)
     local parts = {}
     if (audit.missingEnchants or 0) > 0 then
-        parts[#parts + 1] = audit.missingEnchants .. " fehlende Verzauberungen"
+        parts[#parts + 1] = GC.LFormat("{n} fehlende Verzauberungen",
+            { n = audit.missingEnchants })
     end
     if (audit.emptySockets or 0) > 0 then
-        parts[#parts + 1] = audit.emptySockets .. " leere Sockel"
+        parts[#parts + 1] = GC.LFormat("{n} leere Sockel", { n = audit.emptySockets })
     end
     if (audit.emptySlots or 0) > 0 then
-        parts[#parts + 1] = audit.emptySlots .. " leere Slots"
+        parts[#parts + 1] = GC.LFormat("{n} leere Slots", { n = audit.emptySlots })
     end
     if (audit.unreadableSlots or 0) > 0 then
-        parts[#parts + 1] = audit.unreadableSlots .. " noch nicht lesbare Slots"
+        parts[#parts + 1] = GC.LFormat("{n} noch nicht lesbare Slots",
+            { n = audit.unreadableSlots })
     end
     if #parts == 0 then
-        return "keine fehlenden Verzauberungen oder leeren Sockel."
+        return GC.L("keine fehlenden Verzauberungen oder leeren Sockel.")
     end
     return GC.Util.JoinGerman(parts) .. "."
 end

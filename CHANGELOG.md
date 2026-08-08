@@ -7,6 +7,21 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.109 – Addon
+
+**Verbessert**
+
+- **Englisch, Nachzügler-Runde.** Der Praxistest des Owners (Sprachwahl auf
+  English) zeigte die Reste: Texte, die erst beim Aktualisieren gesetzt
+  werden (162 Stellen laufen jetzt durch die Sprachschicht), Klassen, Specs
+  und Berufe (offizielle englische Begriffe: Retribution, Enhancement,
+  Tailoring …), Rekrutierungs-Labels und -Begründungen, Kennzahlen-Karten,
+  Spaltenköpfe sowie die zusammengesetzten Anzeigen (Kopfzeilen-Status,
+  Werkstatt-Abgleichzeile, Ausrüstungs-Status, Funde, Bewertungsgründe,
+  Zeitangaben „vor 3 Std."). Was der Spielclient selbst benennt (gescannte
+  Rezeptnamen, Verzauberungszeilen), bleibt in der Clientsprache – das gibt
+  die WoW-API nicht anders her.
+
 ## 0.9.108 – Addon
 
 **Neu**

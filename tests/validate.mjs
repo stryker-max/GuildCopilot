@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.108",
+  "## Version: 0.9.109",
 ];
 
 for (const entry of requiredMetadata) {
@@ -457,6 +457,13 @@ const requiredImplementations = [
   ["Sprachwahl liegt über der Automatik", /function GC\.ApplyLanguageSetting/],
   ["Platzhalter-Meldungen übersetzen", /function GC\.LFormat/],
   ["Sprachkarte in den Einstellungen", /CreateCard\(content, "Sprache \/ Language"\)/],
+  // Teilschritt 4b (0.9.109): SetText laeuft durch die Sprachschicht,
+  // Spiel-Stammdaten tragen offizielle englische Begriffe, Composites
+  // uebersetzen ueber Platzhalter.
+  ["Spec-Namen mit offiziellen Begriffen", /\["Vergeltung"\] = "Retribution"/],
+  ["Berufsnamen mit offiziellen Begriffen", /\["Verzauberkunst"\] = "Enchanting"/],
+  ["DescribeSpec läuft durch die Sprachschicht", /GC\.L\(class and class\.name or spec\.classFile\)/],
+  ["Bindewörter übersetzen", /GC\.L\(" und "\)/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

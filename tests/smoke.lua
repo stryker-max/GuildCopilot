@@ -9097,6 +9097,26 @@ do
     addon.ApplyLanguageSetting()
     assert(addon.LocaleEnglish == addon.LocaleEnglishDefault,
         "AUTO folgt nicht der Clientsprache")
+
+    -- Teilschritt 4b: Spiel-Stammdaten (offizielle englische Begriffe) und
+    -- die zusammengesetzten Anzeigen.
+    addon.LocaleEnglish = true
+    assert(addon.L("Verzauberkunst") == "Enchanting", "Der Berufsname bleibt deutsch")
+    assert(addon.L("Vergeltung") == "Retribution", "Der Spec-Name bleibt deutsch")
+    assert(addon.L("Verstärker-Schamanen") == "Enhancement Shamans",
+        "Das Rekrutierungs-Label bleibt deutsch")
+    assert(addon.GearAudit:DescribeSpec("MAGE:1") == "Mage Arcane",
+        "DescribeSpec übersetzt nicht: " .. tostring(addon.GearAudit:DescribeSpec("MAGE:1")))
+    assert(addon.LFormat("{n} Nutzer{chars}, Daten vollständig",
+        { n = 26, chars = " (36 Chars)" }) == "26 users (36 Chars), data complete",
+        "Die Kopfzeilen-Meldung übersetzt nicht")
+    assert(addon.Util.JoinGerman({ "A", "B" }) == "A and B",
+        "Das Bindewort bleibt deutsch: " .. addon.Util.JoinGerman({ "A", "B" }))
+    addon.LocaleEnglish = false
+    assert(addon.Util.JoinGerman({ "A", "B" }) == "A und B",
+        "Das deutsche Bindewort wurde ersetzt")
+    assert(addon.GearAudit:DescribeSpec("MAGE:1") == "Magier Arkan",
+        "Die deutsche Spec-Beschreibung wurde ersetzt")
 end
 
 -- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================

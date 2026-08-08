@@ -298,6 +298,27 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.109 – Der Praxistest: was der Sprachschalter noch aufdeckte
+
+Der Owner hat die Sprachwahl auf English gestellt und Screenshots aller Seiten geschickt: „da fehlt noch einiges". Der Befund zerfiel in drei Klassen, und jede hatte einen eigenen Grund:
+
+**Erstens die SetText-Lücke.** Die zentrale Übersetzung sass in `CreateLabel` – der ERZEUGUNG. Texte, die eine Auffrischung später per `SetText` setzt („Gezielte Rezeptsuche", „Wonach suchst du?", „Von Hand gewählt …"), liefen daran vorbei, obwohl ihre Übersetzungen längst in der Tabelle standen. Ein Codemod hat alle 162 SetText-Stellen mit reinem String-Literal (auch verkettete) durch `GC.L` geführt – dieselbe Erntemechanik wie beim Harvesting, nur schreibend.
+
+**Zweitens die Spiel-Stammdaten.** Klassen, Specs und Berufe standen als deutsche Datenfelder in `Constants.lua` und erreichten die Anzeige unübersetzt. Die englischen Gegenstücke sind die offiziellen Begriffe (Wowhead-Klassen-, Talent- und Berufsseiten): Vergeltung→Retribution, Verstärkung→Enhancement, Schneiderei→Tailoring – dazu alle 27 Rekrutierungs-Labels und die sieben Empfehlungsbegründungen. Eine bewusste Kante: Bei Klassen, deren deutsche Ein- und Mehrzahl gleich lauten (Krieger, Jäger, Priester, Magier, Hexenmeister), trägt der Schlüssel die Einzahl – die Klassenliste zeigt dann „Warrior" statt „Warriors", was verständlich bleibt, während die falsche Mehrzahl in „Mage Arcane" ein Fehler wäre.
+
+**Drittens die Composites.** Zusammengesetzte Anzeigen treffen als Ganzes nie einen Schlüssel; sie brauchen `GC.LFormat` an der Baustelle: Kopfzeilen-Status („{n} Nutzer{chars}, Daten vollständig"), Werkstatt-Abgleichzeile, Ausrüstungs-Status samt Zählbausteinen, Funde-Zähler, die Bewertungsgründe aus `EvaluateEnchant`, Zeitangaben (AgeLabel, LastOnlineLabel) und die „Weitere {n} …"-Hinweise. `JoinGerman` übersetzt seine Bindewörter jetzt selbst („A und B" → „A and B").
+
+**Die bleibende Grenze, ehrlich benannt:** Was der Spielclient selbst benennt – gescannte Rezeptnamen, die grünen Verzauberungszeilen, Zonennamen –, liefert die WoW-API nur in der Clientsprache. Auf einem deutschen Client mit englischer Addon-Sprache bleiben genau diese Namen deutsch; nur die per Wowhead belegten Verbrauchsnamen kommen aus der eigenen Tabelle und sind auch dort englisch.
+
+### Geändert
+
+- `UI.lua`: 162 SetText-Stellen per Codemod durch `GC.L`; Composite-Stellen auf `GC.LFormat` (Kopfzeilen-Badge, Werkstatt-Abgleich, Ausrüstungs-Status, Funde, Zeitangaben, „Weitere {n} …"); Spec-/Berufs-/Status-Zellen der Übersicht übersetzen einzeln vor dem Verketten;
+- `GearAudit.lua`: `DescribeSpec`, Befundtexte und `EvaluateEnchant`-Begründungen über die Sprachschicht;
+- `Core.lua`: `JoinGerman` mit übersetzten Bindewörtern;
+- `Locales.lua`: ~150 neue Einträge (Stammdaten, Kennzahlen, Composites, Resttexte);
+- `tests/smoke.lua`: Stichproben für Stammdaten, `DescribeSpec` in beiden Sprachen, Composite-Schlüssel, Bindewörter;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.109.
+
 ## 0.9.108 – Die Sprachwahl und der Rest der Texte
 
 Die Frage des Owners „Wo stelle ich die Sprache um?" hat die Lücke benannt: Es gab keinen Schalter – die Sprache folgte stumm der Clientsprache, und ausgerechnet der deutschsprachige Owner konnte die englische Oberfläche nie sehen. Dazu kam der Auftrag, Teilschritt 4 gleich mitzuliefern.

@@ -191,14 +191,16 @@ function GC.Util.JoinGerman(items)
     elseif #items == 1 then
         return items[1]
     elseif #items == 2 then
-        return items[1] .. " und " .. items[2]
+        -- Die Bindewoerter laufen durch die Sprachschicht: Auf englischen
+        -- Clients wird aus "A und B" ein "A and B".
+        return items[1] .. GC.L(" und ") .. items[2]
     end
 
     local head = {}
     for index = 1, #items - 1 do
         head[#head + 1] = items[index]
     end
-    return table.concat(head, ", ") .. " sowie " .. items[#items]
+    return table.concat(head, ", ") .. GC.L(" sowie ") .. items[#items]
 end
 
 function GC.Util.SafeChatText(text, maximumBytes)
