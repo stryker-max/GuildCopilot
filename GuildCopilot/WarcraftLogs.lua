@@ -280,6 +280,10 @@ local function DecodeConsumables(payload)
             if count > 0 then
                 items[#items + 1] = {
                     n = consumable.name,
+                    -- Die ID bleibt dabei: Die Anzeige loest den Namen damit
+                    -- in der Clientsprache auf, statt den beim Dekodieren
+                    -- eingefrorenen deutschen weiterzureichen.
+                    s = tonumber(spellID),
                     c = category.key,
                     count = count,
                 }

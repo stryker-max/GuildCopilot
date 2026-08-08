@@ -338,61 +338,79 @@ end
 -- bewusst erweiterbar gehalten: unbekannte Spell-IDs werden schlicht nicht
 -- gezählt, es entstehen also keine falschen Zahlen, sondern nur unvollständige.
 -- Vor dem Scharfschalten gegen echte Logs abgleichen.
+--
+-- ZWEI Sprachen, ZWEI Quellen - und beide sind belegt, nichts ist frei
+-- uebersetzt (Owner-Vorgabe vom 08.08.2026):
+--
+--   name    Deutsch, direkt am deutschen Anniversary-Client abgelesen
+--           (Owner-Korrekturen: "Super" heisst dort "Erstklassig", die
+--           Major-Elixiere "uebermaechtig", die Superior-Öle "Hervorragend").
+--           Wowheads deutsche Locale weicht davon teils ab ("Ueberragendes
+--           Zauberoel", "Elixier der erheblichen Staerke") - der Client hat
+--           das letzte Wort.
+--   nameEN  Englisch, am 08.08.2026 einzeln ueber die Item-ID gegen
+--           Wowheads TBC-Datenbank verifiziert (nether.wowhead.com/tooltip/
+--           item/<id>?dataEnv=5&locale=0); die Item-ID steht als Kommentar
+--           am Eintrag. Die vier Salben/Nethergon-Flaschen sind zusaetzlich
+--           ueber die "Used by"-Daten ihrer Spell-Seiten belegt (Items
+--           32902-32905). Die Sattgegessen-Zeilen unten tragen den
+--           offiziellen Buffnamen "Well Fed" von ihren Spell-Tooltips;
+--           nur der Werte-Zusatz in Klammern ist wie im Deutschen eine
+--           eigene Beschriftung aus dem jeweiligen Bufftext.
 GC.Consumables = {
-    -- Namen wie im deutschen Client (Owner-Korrektur): "Super" heißt dort
-    -- "Erstklassig", die Major-Elixiere heißen "übermächtig".
-    [28495] = { category = "POTION", name = "Erstklassiger Heiltrank" },
-    [28499] = { category = "POTION", name = "Erstklassiger Manatrank" },
-    [28507] = { category = "POTION", name = "Hasttrank" },
-    [28508] = { category = "POTION", name = "Zerstörungstrank" },
-    [28494] = { category = "POTION", name = "Trank der irren Stärke" },
-    [28506] = { category = "POTION", name = "Heldentrank" },
+    [28495] = { category = "POTION", name = "Erstklassiger Heiltrank", nameEN = "Super Healing Potion" },      -- Item 22829
+    [28499] = { category = "POTION", name = "Erstklassiger Manatrank", nameEN = "Super Mana Potion" },         -- Item 22832
+    [28507] = { category = "POTION", name = "Hasttrank", nameEN = "Haste Potion" },                            -- Item 22838
+    [28508] = { category = "POTION", name = "Zerstörungstrank", nameEN = "Destruction Potion" },               -- Item 22839
+    [28494] = { category = "POTION", name = "Trank der irren Stärke", nameEN = "Insane Strength Potion" },     -- Item 22828
+    [28506] = { category = "POTION", name = "Heldentrank", nameEN = "Heroic Potion" },                         -- Item 22837
     -- 28511 und 28512 trugen bis 0.9.86 die Namen "Heldentrank" und
     -- "Eisenschildtrank". Beide waren falsch: es sind die Schutztränke, und
     -- der echte Heldentrank (28506) fehlte deshalb ganz.
-    [28511] = { category = "POTION", name = "Großer Feuerschutztrank" },
-    [28512] = { category = "POTION", name = "Großer Frostschutztrank" },
-    [38908] = { category = "POTION", name = "Teufelsmanatrank" },
+    [28511] = { category = "POTION", name = "Großer Feuerschutztrank", nameEN = "Major Fire Protection Potion" },   -- Item 22841
+    [28512] = { category = "POTION", name = "Großer Frostschutztrank", nameEN = "Major Frost Protection Potion" },  -- Item 22842
+    [38908] = { category = "POTION", name = "Teufelsmanatrank", nameEN = "Fel Mana Potion" },                  -- Item 31677
     -- Die Salben und Flaschen aus Zangarmarschen und Netherstrum. Sie sind in
     -- TBC der meistbenutzte Manatrank überhaupt und fehlten bis 0.9.86
     -- komplett - im Vergleichslog vom 02.08.2026 kamen allein auf sie 146
     -- Anwendungen, während die Spalte "Tränke" bei den Betroffenen auf null
-    -- stand.
-    [41617] = { category = "POTION", name = "Manatrank (Cenarische Salbe)" },
-    [41618] = { category = "POTION", name = "Manatrank (Nethergonenergie)" },
-    [41619] = { category = "POTION", name = "Heiltrank (Cenarische Salbe)" },
-    [41620] = { category = "POTION", name = "Heiltrank (Nethergondampf)" },
-    [16666] = { category = "RUNE", name = "Dämonische Rune" },
-    [27869] = { category = "RUNE", name = "Dunkle Rune" },
-    [35476] = { category = "DRUM", name = "Trommeln der Schlacht" },
-    [35475] = { category = "DRUM", name = "Trommeln des Krieges" },
-    [35478] = { category = "DRUM", name = "Trommeln der Wiederherstellung" },
-    [35477] = { category = "DRUM", name = "Trommeln der Schnelligkeit" },
-    [35474] = { category = "DRUM", name = "Trommeln der Panik" },
-    [28518] = { category = "FLASK", name = "Fläschchen der Festigung" },
-    [28519] = { category = "FLASK", name = "Fläschchen der mächtigen Wiederherstellung" },
-    [28520] = { category = "FLASK", name = "Fläschchen des unerbittlichen Angriffs" },
-    [28521] = { category = "FLASK", name = "Fläschchen des blendenden Lichts" },
-    [28540] = { category = "FLASK", name = "Fläschchen des reinen Todes" },
-    [28490] = { category = "ELIXIR", name = "Elixier der übermächtigen Stärke" },
-    [28497] = { category = "ELIXIR", name = "Elixier der übermächtigen Beweglichkeit" },
-    [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft" },
-    [28493] = { category = "ELIXIR", name = "Elixier der übermächtigen Frostmacht" },
-    [28501] = { category = "ELIXIR", name = "Elixier der übermächtigen Feuermacht" },
-    [28502] = { category = "ELIXIR", name = "Elixier der übermächtigen Verteidigung" },
-    [28503] = { category = "ELIXIR", name = "Elixier der übermächtigen Schattenmacht" },
-    [28509] = { category = "ELIXIR", name = "Elixier des übermächtigen Magierbluts" },
-    [39625] = { category = "ELIXIR", name = "Elixier der übermächtigen Seelenstärke" },
-    [39627] = { category = "ELIXIR", name = "Elixier der draenischen Weisheit" },
+    -- stand. Die deutschen Namen sind bewusst beschreibende Etiketten
+    -- ("Manatrank (...)"); die englischen sind die echten Itemnamen.
+    [41617] = { category = "POTION", name = "Manatrank (Cenarische Salbe)", nameEN = "Cenarion Mana Salve" },       -- Item 32903
+    [41618] = { category = "POTION", name = "Manatrank (Nethergonenergie)", nameEN = "Bottled Nethergon Energy" }, -- Item 32902
+    [41619] = { category = "POTION", name = "Heiltrank (Cenarische Salbe)", nameEN = "Cenarion Healing Salve" },   -- Item 32904
+    [41620] = { category = "POTION", name = "Heiltrank (Nethergondampf)", nameEN = "Bottled Nethergon Vapor" },    -- Item 32905
+    [16666] = { category = "RUNE", name = "Dämonische Rune", nameEN = "Demonic Rune" },                        -- Item 12662
+    [27869] = { category = "RUNE", name = "Dunkle Rune", nameEN = "Dark Rune" },                               -- Item 20520
+    [35476] = { category = "DRUM", name = "Trommeln der Schlacht", nameEN = "Drums of Battle" },               -- Item 29529
+    [35475] = { category = "DRUM", name = "Trommeln des Krieges", nameEN = "Drums of War" },                   -- Item 29528
+    [35478] = { category = "DRUM", name = "Trommeln der Wiederherstellung", nameEN = "Drums of Restoration" }, -- Item 29531
+    [35477] = { category = "DRUM", name = "Trommeln der Schnelligkeit", nameEN = "Drums of Speed" },           -- Item 29530
+    [35474] = { category = "DRUM", name = "Trommeln der Panik", nameEN = "Drums of Panic" },                   -- Item 29532
+    [28518] = { category = "FLASK", name = "Fläschchen der Festigung", nameEN = "Flask of Fortification" },    -- Item 22851
+    [28519] = { category = "FLASK", name = "Fläschchen der mächtigen Wiederherstellung", nameEN = "Flask of Mighty Restoration" }, -- Item 22853
+    [28520] = { category = "FLASK", name = "Fläschchen des unerbittlichen Angriffs", nameEN = "Flask of Relentless Assault" },     -- Item 22854
+    [28521] = { category = "FLASK", name = "Fläschchen des blendenden Lichts", nameEN = "Flask of Blinding Light" },               -- Item 22861
+    [28540] = { category = "FLASK", name = "Fläschchen des reinen Todes", nameEN = "Flask of Pure Death" },    -- Item 22866
+    [28490] = { category = "ELIXIR", name = "Elixier der übermächtigen Stärke", nameEN = "Elixir of Major Strength" },        -- Item 22824
+    [28497] = { category = "ELIXIR", name = "Elixier der übermächtigen Beweglichkeit", nameEN = "Elixir of Major Agility" },  -- Item 22831
+    [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft", nameEN = "Elixir of Healing Power" },     -- Item 22825
+    [28493] = { category = "ELIXIR", name = "Elixier der übermächtigen Frostmacht", nameEN = "Elixir of Major Frost Power" }, -- Item 22827
+    [28501] = { category = "ELIXIR", name = "Elixier der übermächtigen Feuermacht", nameEN = "Elixir of Major Firepower" },   -- Item 22833
+    [28502] = { category = "ELIXIR", name = "Elixier der übermächtigen Verteidigung", nameEN = "Elixir of Major Defense" },   -- Item 22834
+    [28503] = { category = "ELIXIR", name = "Elixier der übermächtigen Schattenmacht", nameEN = "Elixir of Major Shadow Power" }, -- Item 22835
+    [28509] = { category = "ELIXIR", name = "Elixier des übermächtigen Magierbluts", nameEN = "Elixir of Major Mageblood" },  -- Item 22840
+    [39625] = { category = "ELIXIR", name = "Elixier der übermächtigen Seelenstärke", nameEN = "Elixir of Major Fortitude" }, -- Item 32062
+    [39627] = { category = "ELIXIR", name = "Elixier der draenischen Weisheit", nameEN = "Elixir of Draenic Wisdom" },        -- Item 32067
     -- Aus dem Vergleichslog vom 02.08.2026 nachgetragen: drei gebräuchliche
     -- Elixiere, die die Liste nicht kannte.
-    [17539] = { category = "ELIXIR", name = "Großes Arkanelixier" },
-    [33720] = { category = "ELIXIR", name = "Elixier des Ansturms" },
-    [33721] = { category = "ELIXIR", name = "Elixier des Adepten" },
+    [17539] = { category = "ELIXIR", name = "Großes Arkanelixier", nameEN = "Greater Arcane Elixir" },         -- Item 13454
+    [33720] = { category = "ELIXIR", name = "Elixier des Ansturms", nameEN = "Onslaught Elixir" },             -- Item 28102
+    [33721] = { category = "ELIXIR", name = "Elixier des Adepten", nameEN = "Adept's Elixir" },                -- Item 28103
     -- Der deutsche Client nennt die "Superior"-Öle "Hervorragend"
     -- (Owner-Korrektur vom 08.08.2026, direkt am Client abgelesen).
-    [28017] = { category = "OIL", name = "Hervorragendes Zauberöl" },
-    [28019] = { category = "OIL", name = "Hervorragendes Manaöl" },
+    [28017] = { category = "OIL", name = "Hervorragendes Zauberöl", nameEN = "Superior Wizard Oil" },          -- Item 22522
+    [28019] = { category = "OIL", name = "Hervorragendes Manaöl", nameEN = "Superior Mana Oil" },              -- Item 22521
 
     -- === Essen ==============================================================
     --
@@ -406,17 +424,30 @@ GC.Consumables = {
     -- 33258, 33262, 33264, 33266), die reine Regenerationsvariante 33269 und
     -- das Tierfutter 33272 (+10 Zufriedenheit) - letzteres beglueckt das
     -- Jaegertier, nicht den Raidteilnehmer.
-    [33254] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer)" },
-    [33256] = { category = "FOOD", name = "Sattgegessen (+20 Stärke)" },
-    [33257] = { category = "FOOD", name = "Sattgegessen (+30 Ausdauer)" },
-    [33259] = { category = "FOOD", name = "Sattgegessen (+40 Angriffskraft)" },
-    [33261] = { category = "FOOD", name = "Sattgegessen (+20 Beweglichkeit)" },
-    [33263] = { category = "FOOD", name = "Sattgegessen (+23 Zaubermacht)" },
-    [33265] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +8 Mana/5s)" },
-    [33268] = { category = "FOOD", name = "Sattgegessen (+44 Heilung)" },
-    [43764] = { category = "FOOD", name = "Sattgegessen (+20 Trefferwertung)" },
-    [45245] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +20 Willenskraft)" },
+    [33254] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer)", nameEN = "Well Fed (+20 Stamina)" },
+    [33256] = { category = "FOOD", name = "Sattgegessen (+20 Stärke)", nameEN = "Well Fed (+20 Strength)" },
+    [33257] = { category = "FOOD", name = "Sattgegessen (+30 Ausdauer)", nameEN = "Well Fed (+30 Stamina)" },
+    [33259] = { category = "FOOD", name = "Sattgegessen (+40 Angriffskraft)", nameEN = "Well Fed (+40 Attack Power)" },
+    [33261] = { category = "FOOD", name = "Sattgegessen (+20 Beweglichkeit)", nameEN = "Well Fed (+20 Agility)" },
+    [33263] = { category = "FOOD", name = "Sattgegessen (+23 Zaubermacht)", nameEN = "Well Fed (+23 Spell Damage)" },
+    [33265] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +8 Mana/5s)", nameEN = "Well Fed (+20 Stamina, +8 mana/5s)" },
+    [33268] = { category = "FOOD", name = "Sattgegessen (+44 Heilung)", nameEN = "Well Fed (+44 Healing)" },
+    [43764] = { category = "FOOD", name = "Sattgegessen (+20 Trefferwertung)", nameEN = "Well Fed (+20 Hit Rating)" },
+    [45245] = { category = "FOOD", name = "Sattgegessen (+20 Ausdauer, +20 Willenskraft)", nameEN = "Well Fed (+20 Stamina, +20 Spirit)" },
 }
+
+-- Der Anzeigename eines Verbrauchsgegenstands in der Clientsprache. Die
+-- englischen Namen sind einzeln belegt (siehe Tabellenkopf); fehlt einer,
+-- bleibt es sichtbar beim deutschen statt bei einer freien Uebersetzung.
+function GC.ConsumableDisplayName(consumable)
+    if type(consumable) ~= "table" then
+        return nil
+    end
+    if GC.LocaleEnglish and type(consumable.nameEN) == "string" and consumable.nameEN ~= "" then
+        return consumable.nameEN
+    end
+    return consumable.name
+end
 
 -- Öle und Wetzsteine sitzen als TEMPORAERE VERZAUBERUNG auf der Waffe, nicht
 -- als Aura auf dem Spieler. Der Eintritts-Scan der Raidsitzung liest Auren -

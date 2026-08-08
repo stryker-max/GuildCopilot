@@ -446,6 +446,12 @@ const requiredImplementations = [
   ["Sprachschicht mit deutschem Schlüssel", /function GC\.L\(text\)/],
   ["Navigation läuft durch die Sprachschicht", /GC\.L\(definition\.label\)/],
   ["Seitentitel laufen durch die Sprachschicht", /CreateLabel\(page, GC\.L\(title\)/],
+  // Teilschritt 2+3: belegte Spielbegriffe (nameEN je Eintrag, Wowhead per
+  // Item-ID) und die zentrale Uebersetzungsstelle aller Beschriftungen.
+  ["belegte englische Verbrauchsnamen", /nameEN = "Super Mana Potion"/],
+  ["Verbrauchsname in der Clientsprache", /function GC\.ConsumableDisplayName/],
+  ["alle Beschriftungen laufen durch GC.L", /label:SetText\(GC\.L\(text or ""\)\)/],
+  ["Slot-Begriffe übersetzt", /\["Waffenhand"\] = "Main Hand"/],
   // Die moderne Engine feuert geschuetzte Aktionen je nach Einstellung beim
   // Druecken ODER Loslassen; nur eine Flanke zu registrieren hiess im Spiel
   // "der Knopf tut nichts".

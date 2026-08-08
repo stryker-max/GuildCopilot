@@ -11,14 +11,19 @@ Installer und Addon werden getrennt gezählt.
 
 **Neu**
 
-- **Englisch, Teilschritt 1 von 3.** Auf nicht-deutschen Clients zeigen
-  Seitenleiste, Seitentitel und Untertitel jetzt Englisch; alles Übrige
-  bleibt vorerst deutsch und folgt in zwei weiteren Schritten. Deutsch
-  bleibt die Quellsprache – was noch nicht übersetzt ist, fällt sichtbar
-  auf Deutsch zurück, statt zu brechen. Spielbegriffe (Gegenstände, Zauber,
-  Verzauberungen) werden im nächsten Teilschritt ausschließlich aus
-  offiziellen Quellen (Wowhead, Spielclient) übernommen und nie frei
-  übersetzt.
+- **Englische Oberfläche (Teilschritte 1–3).** Auf nicht-deutschen Clients
+  zeigen Seitenleiste, Seitentitel, Karten, Knöpfe, Schalter, Spaltenköpfe
+  und die gängigen Statusmeldungen jetzt Englisch. Deutsch bleibt die
+  Quellsprache – was (noch) nicht übersetzt ist, fällt sichtbar auf Deutsch
+  zurück, statt zu brechen; längere Hilfetexte und Chat-Ausgaben bleiben
+  vorerst deutsch.
+- **Spielbegriffe einzeln belegt, nie frei übersetzt.** Alle ~50 Namen der
+  Verbrauchsliste (Tränke, Fläschchen, Elixiere, Trommeln, Öle, Essen)
+  tragen jetzt ihr englisches Gegenstück – jeder Name am 08.08.2026 über
+  seine Item-ID gegen Wowheads TBC-Datenbank verifiziert, die Belege stehen
+  als Kommentar im Code. Slots heißen wie auf Wowhead (Head, Main Hand,
+  Trinket …). Das Verbrauchsprotokoll und die Warcraft-Logs-Details zeigen
+  die Namen in der Clientsprache.
 
 ## 0.9.106 – Addon
 

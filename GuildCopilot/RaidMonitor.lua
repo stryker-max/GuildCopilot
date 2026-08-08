@@ -1858,7 +1858,10 @@ local function RecordConsumable(participant, category, consumable, spellID, spel
     end
     log[#log + 1] = {
         t = GC.Util.Now(),
-        n = (consumable and consumable.name)
+        -- In der Clientsprache: Auf englischen Clients der belegte englische
+        -- Name aus der Tabelle, sonst der deutsche; erst danach der rohe
+        -- Zaubername aus dem Kampfprotokoll.
+        n = (consumable and GC.ConsumableDisplayName(consumable))
             or (spellName and tostring(spellName))
             or ("Zauber " .. tostring(spellID or "?")),
         c = category.key,

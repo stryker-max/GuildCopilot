@@ -298,7 +298,7 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
-## 0.9.107 – Englisch, Teilschritt 1: die Sprachschicht
+## 0.9.107 – Englisch in drei Teilschritten: Sprachschicht, belegte Spielbegriffe, Bedienelemente
 
 Die Sync-Ebene ist seit jeher locale-frei (Item- und Zauber-IDs statt Namen, englische Clients scannen korrekt) – aber die Oberfläche sprach nur Deutsch. Der Owner hat die Übersetzung beauftragt, in zwei bis drei Teilschritten, mit einer harten Vorgabe: **Spielbegriffe werden nie frei übersetzt.** Jeder Name eines Gegenstands, Zaubers oder einer Verzauberung muss aus einer offiziellen Quelle belegt sein (Wowhead über die Spell-/Item-ID, oder der Spielclient selbst) – dieselbe Belegdisziplin wie bei `GC.EnchantRecipeKeys`.
 
@@ -308,17 +308,23 @@ Die Sync-Ebene ist seit jeher locale-frei (Item- und Zauber-IDs statt Namen, eng
 
 Teilschritt 1 übersetzt die Rahmen: Seitenleiste (Abschnitte und Reiter) und alle dreizehn Seitentitel samt Untertiteln. Verdrahtet ist das zentral – `CreatePageTitle` und die zwei Render-Stellen der Navigation rufen `GC.L`, die Aufrufer bleiben unangetastet. Zusammengesetzte Untertitel treffen als GANZE Verkettung ihren Schlüssel (die Tests prüfen beide); der eine Untertitel mit eingebauter Zahl läuft über einen `{n}`-Platzhalter-Schlüssel. Das alles sind eigene Addon-Texte, keine Spielbegriffe – gewöhnliche Übersetzungsarbeit, die erlaubt ist.
 
-### Die nächsten Teilschritte
+### Teilschritt 2: Spielbegriffe, einzeln belegt
 
-- **Teilschritt 2 – Spielbegriffe, einzeln belegt:** Die deutschen Namen in `GC.Consumables` bekommen englische Gegenstücke, jeder einzelne über seine Spell-ID auf Wowhead nachgeschlagen und mit Beleg-Kommentar; dazu Slot-Beschriftungen (`GC.GearSlots`) und die Instanznamen der Content-Phasen. Nichts davon wird frei übersetzt – was sich nicht belegen lässt, bleibt deutsch und wird als Lücke benannt.
-- **Teilschritt 3 – Seiteninhalte:** Karten, Knöpfe, Status- und Chatmeldungen, Fenster. Der große Rest, mechanisch über dieselbe Tabelle.
+Die harte Vorgabe wurde woertlich umgesetzt. Alle ~50 Namen der Verbrauchsliste tragen jetzt ein `nameEN`, und **jeder einzelne ist belegt**: am 08.08.2026 über die Item-ID gegen Wowheads TBC-Datenbank geprüft (`nether.wowhead.com/tooltip/item/<id>?dataEnv=5&locale=0`), die Item-ID steht als Kommentar am Eintrag. Zwei Funde aus der Verifikation, die den Aufwand rechtfertigen: Meine ersten Kandidaten-IDs für die vier Zangarmarschen-Salben waren falsch (die IDs gehörten zu Bauplänen) – die richtigen kamen aus den „Used by“-Daten der Spell-Seiten (Items 32902–32905). Und Wowheads **deutsche** Locale weicht vom Anniversary-Client ab („Überragendes Zauberöl“, „Elixier der erheblichen Stärke“) – die deutschen Namen bleiben deshalb beim Client als Quelle (Owner-Ablesung), nur Englisch kommt von Wowhead. Hätte ich Deutsch „nach Wowhead korrigiert“, wäre es falsch geworden – genau das belegt die Regel, nichts frei zu übersetzen. Die Sattgegessen-Zeilen tragen den offiziellen Buffnamen „Well Fed“ von ihren Spell-Tooltips; nur der Werte-Zusatz in Klammern ist wie im Deutschen eine eigene Beschriftung aus dem jeweiligen Bufftext. `GC.ConsumableDisplayName` wählt zur Laufzeit die Clientsprache; Verbrauchsprotokoll und Warcraft-Logs-Details lösen dabei über die mitgespeicherte Spell-ID neu auf, statt den beim Dekodieren eingefrorenen Namen weiterzureichen (dasselbe Muster wie 0.9.105/0.9.106). Slots heißen wie auf Wowheads Itemseiten (Head, Wrist, Finger, Trinket, Main Hand, Off Hand, Ranged).
+
+### Teilschritt 3: eine Stelle statt tausend
+
+Karten, Knöpfe und Schalter bauen ihre Beschriftung alle über `CreateLabel` – **eine** `GC.L`-Zeile dort übersetzt sie zentral, dazu `button:SetText` für spätere Umbeschriftungen („Sitzung beenden“, „Wirklich löschen?“). Kein Aufrufer wurde angefasst; die Arbeit steckt in der Tabelle: ~270 Einträge für alle Kartentitel, Knöpfe, Schalter, Spaltenköpfe und die statischen Status- und Zustandsmeldungen, geerntet per Skript aus den Aufrufstellen. **Benannter Rest:** Längere Hilfetexte in den Karten, dynamisch zusammengesetzte Statuszeilen und die Chat-Ausgaben (`GC:Print`) bleiben deutsch – das sind hunderte verkettete Sätze, die einzeln verlegt werden müssen; sie fallen sauber auf Deutsch zurück und sind der Kandidat für einen vierten Teilschritt, wenn der Owner ihn will.
 
 ### Geändert
 
-- `Locales.lua` (neu): `GC.L`, englische Tabelle für Navigation, Titel und Untertitel, Fahrplan im Dateikopf;
-- `UI.lua`: `CreatePageTitle` und die Navigation laufen durch `GC.L`; der Übersicht-Untertitel nutzt den `{n}`-Platzhalter;
+- `Locales.lua` (neu): `GC.L`, englische Tabelle (Navigation, Titel, Untertitel, Spielbegriffe, ~270 statische UI-Texte), Fahrplan im Dateikopf;
+- `Constants.lua`: `nameEN` je Verbrauchseintrag samt Item-ID-Beleg, `GC.ConsumableDisplayName`;
+- `UI.lua`: zentrale Übersetzung in `CreateLabel`/`button:SetText`/`CreatePageTitle`/Navigation; Kategorien-, Verdikt- und Slot-Beschriftungen laufen durch `GC.L`; Warcraft-Logs-Details lösen per Spell-ID in der Clientsprache auf;
+- `GearAudit.lua`: Slot-Labels über `GC.L` (drei Stellen);
+- `RaidMonitor.lua`/`WarcraftLogs.lua`: Verbrauchsprotokoll bzw. Import speichern sprachneutral (Spell-ID) und zeigen in der Clientsprache;
 - `GuildCopilot.toc`: `Locales.lua` direkt nach `Constants.lua`;
-- `tests/smoke.lua`: Sprachtest (deutscher Client unverändert, englischer Client übersetzt, fehlender Eintrag fällt auf Deutsch zurück, beide zusammengesetzten Untertitel treffen); Gegenprobe ohne `Locales.lua` schlägt fehl;
+- `tests/smoke.lua`: Sprachtests für alle drei Teilschritte (deutscher Client unverändert, englischer übersetzt, Fallback, belegte Namen, Stichproben der Bedienelemente); Gegenproben ohne `Locales.lua` bzw. mit altem `Constants.lua` schlagen fehl;
 - `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Constants.lua`: Stand 0.9.107.
 
 ## 0.9.106 – Elf Mahlzeiten, null Öle: was der Verbrauchszähler nicht wusste

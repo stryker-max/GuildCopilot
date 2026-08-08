@@ -202,7 +202,11 @@ local function CreateLabel(parent, text, style)
     style = style or {}
     local font = style.font or (style.title and "GameFontNormalLarge" or "GameFontNormal")
     local label = parent:CreateFontString(nil, "OVERLAY", font)
-    label:SetText(text or "")
+    -- DIE zentrale Uebersetzungsstelle der Oberflaeche: Karten, Knoepfe und
+    -- Schalter bauen ihre Beschriftung alle ueber CreateLabel. Ein Text, der
+    -- in der englischen Tabelle steht, erscheint damit uebersetzt, ohne dass
+    -- ein Aufrufer angefasst wird; alles andere laeuft unveraendert durch.
+    label:SetText(GC.L(text or ""))
     label:SetJustifyH(style.align or "LEFT")
     label:SetJustifyV(style.vertical or "MIDDLE")
     SetTextColor(label, style.color or (style.muted and THEME.muted or THEME.text))
@@ -324,7 +328,10 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     button.active = false
 
     function button:SetText(value)
-        self.label:SetText(value or "")
+        -- Auch spaetere Umbeschriftungen ("Sitzung beenden", "Wirklich
+        -- löschen?") laufen durch die Sprachschicht; zusammengesetzte Texte
+        -- treffen keinen Schluessel und bleiben unveraendert.
+        self.label:SetText(GC.L(value or ""))
     end
 
     function button:SetActive(active)
@@ -8296,7 +8303,7 @@ function GC.UI:BuildStatisticsPage()
                 if count > 0 then
                     red, green, blue = 1, 1, 1
                 end
-                GameTooltip:AddDoubleLine(category.label, tostring(count), red, green, blue, red, green, blue)
+                GameTooltip:AddDoubleLine(GC.L(category.label), tostring(count), red, green, blue, red, green, blue)
             end
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Klick: Verbrauch im Detail", 0.31, 0.79, 1)
@@ -9236,7 +9243,7 @@ function GC.UI:RefreshGear()
         if entry then
             local style = GEAR_VERDICT_STYLE[entry.verdict] or GEAR_VERDICT_STYLE.UNKNOWN
             row.slot:SetText(entry.label)
-            row.verdict:SetText(style.label)
+            row.verdict:SetText(GC.L(style.label))
             SetTextColor(row.verdict, style.color)
             local emptySockets = entry.emptySockets or 0
             row.sockets:SetText(emptySockets > 0 and ("|cffff6166" .. emptySockets .. " leer|r") or "–")
@@ -10694,7 +10701,7 @@ function GC.UI:RefreshConsumableLog()
 
     local function CategoryLabel(key)
         local category = GC.ConsumableCategoryByKey[key]
-        return (category and category.label) or tostring(key or "?")
+        return (category and GC.L(category.label)) or tostring(key or "?")
     end
 
     local entries = {}
@@ -10714,10 +10721,13 @@ function GC.UI:RefreshConsumableLog()
             .. (dropped > 0 and ("  ·  " .. dropped .. " ältere verworfen") or ""))
     elseif items and #items > 0 then
         for _, item in ipairs(items) do
-            local itemName = item.n
+            -- Erst die eigene Tabelle in der Clientsprache (die englischen
+            -- Namen sind einzeln belegt), dann der beim Import gespeicherte
+            -- Name, zuletzt der Spielclient.
+            local consumable = item.s and GC.Consumables[tonumber(item.s)]
+            local itemName = (consumable and GC.ConsumableDisplayName(consumable))
+                or item.n
             if not itemName and item.s then
-                -- Die eigene Tabelle kennt die ID nicht - der Spielclient
-                -- meist schon.
                 if GetSpellInfo then
                     itemName = GetSpellInfo(item.s)
                 end
@@ -10735,7 +10745,7 @@ function GC.UI:RefreshConsumableLog()
         for _, category in ipairs(GC.ConsumableCategories) do
             local count = (participant.consumables or {})[category.key] or 0
             if count > 0 then
-                entries[#entries + 1] = { time = count .. "×", name = category.label, cat = "" }
+                entries[#entries + 1] = { time = count .. "×", name = GC.L(category.label), cat = "" }
             end
         end
         frame.subtitle:SetText("Diese Quelle liefert nur Kategoriezähler ohne Einzelheiten.")
@@ -10766,14 +10776,14 @@ end
 
 local function GearSlotLabels(slotKeys)
     if type(slotKeys) ~= "table" or #slotKeys == 0 then
-        return "alle Slots"
+        return GC.L("alle Slots")
     end
     local labels = {}
     for _, slotKey in ipairs(slotKeys) do
         local label = slotKey
         for _, slot in ipairs(GC.GearSlots or {}) do
             if slot.key == slotKey then
-                label = slot.label
+                label = GC.L(slot.label)
                 break
             end
         end

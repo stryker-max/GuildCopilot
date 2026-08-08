@@ -9048,7 +9048,28 @@ do
         .. " — oder die Automatik postet mit dem nächsten Tastendruck, sobald ein Kanal bereit ist."
     assert(addon.L(joinedPost) ~= joinedPost,
         "Der zusammengesetzte Untertitel der Werbeseite trifft keinen Schlüssel")
+
+    -- Teilschritt 2: Spielbegriffe sind einzeln belegt, nie frei übersetzt.
+    -- Die Verbrauchsnamen kommen aus der nameEN-Spalte (Wowhead per Item-ID);
+    -- Slots tragen die offiziellen englischen Slot-Begriffe.
+    assert(addon.ConsumableDisplayName(addon.Consumables[28499]) == "Super Mana Potion",
+        "Der belegte englische Trankname fehlt: "
+            .. tostring(addon.ConsumableDisplayName(addon.Consumables[28499])))
+    assert(addon.ConsumableDisplayName(addon.Consumables[33263]) == "Well Fed (+23 Spell Damage)",
+        "Der belegte Well-Fed-Name fehlt")
+    assert(addon.L("Waffenhand") == "Main Hand", "Der Slot-Begriff bleibt deutsch")
+    assert(addon.L("Öle/Steine") == "Oils/Stones", "Die Verbrauchskategorie bleibt deutsch")
+
+    -- Teilschritt 3: Karten, Knöpfe und statische Meldungen laufen zentral
+    -- durch CreateLabel; ein paar Stichproben genügen als Wächter.
+    assert(addon.L("Sitzung starten") == "Start session", "Der Sitzungsknopf bleibt deutsch")
+    assert(addon.L("Geprüfte Spieler") == "Audited Players", "Die Spielerkarte bleibt deutsch")
+    assert(addon.L("Wirklich löschen?") == "Really delete?", "Die Löschbestätigung bleibt deutsch")
+
     addon.LocaleEnglish = false
+    -- Auf dem deutschen Client bleibt auch die Verbrauchsanzeige deutsch.
+    assert(addon.ConsumableDisplayName(addon.Consumables[28499]) == "Erstklassiger Manatrank",
+        "Der deutsche Trankname wurde ersetzt")
 end
 
 -- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================

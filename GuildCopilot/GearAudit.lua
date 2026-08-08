@@ -806,7 +806,7 @@ function GC.GearAudit:BuildAudit(playerName, classFile, readLink, source, readIt
         local parsed = link and self:ParseItemLink(link)
         local entry = {
             key = slot.key,
-            label = slot.label,
+            label = GC.L(slot.label),
             itemLink = link,
         }
 
@@ -1091,7 +1091,7 @@ function GC.GearAudit:BuildSyncedAudit(sender, classFile, specKey, inspectedAt, 
         local measured = records[slot.id]
         local entry = {
             key = slot.key,
-            label = slot.label,
+            label = GC.L(slot.label),
             required = slot.enchantRequired == true,
         }
         local exemptionReason = exceptions and exceptions[slot.key]
@@ -1415,7 +1415,7 @@ function GC.GearAudit:HydrateAudit(audit)
 
     for _, entry in ipairs(audit.slots or {}) do
         local slot = GearSlotByKey(entry.key)
-        entry.label = slot and slot.label or entry.key
+        entry.label = slot and GC.L(slot.label) or entry.key
 
         if readOwnLink and slot then
             local link = readOwnLink(slot.id)
