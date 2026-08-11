@@ -213,6 +213,27 @@ Vorlagen-Knopf), der Gefertigt-Dialog bei Stückzahlen > 1, der
 Teilzahlungs-Dialog und die Statistik – die Tests decken Logik ab, nicht
 die Pixel.
 
+### Nachtrag 0.9.110–0.9.112: Gildenrückmeldung in fünf Punkten
+
+Umgesetzt (Einzelheiten in den ROADMAP-Abschnitten): scrollendes Board mit
+eigenem Abschnitt für fremde laufende Aufträge, lokales Ablehnen,
+Stückzahlen in Zeile und Statistik, Fenstergröße und Deckkraft,
+Freitext-Aufträge über den Beruf als Schlüssel, Herstellen aus dem Cockpit
+samt selbst mitgezähltem Fortschritt.
+
+**Im Spiel zu prüfen, weil die Tests dort nicht hinreichen:**
+
+- Meldet der Client nach `TRADE_SKILL_CLOSE` wirklich eine leere Rezeptliste?
+  Wenn nicht, hält der Herstellen-Knopf ein geschlossenes Fenster für offen –
+  ohne Schaden, aber mit einem Klick zu viel.
+- Feuert `UNIT_SPELLCAST_SUCCEEDED` bei der Craft-API (Verzauberkunst) mit
+  derselben ID, die `GetCraftItemLink` liefert? Der Mitzähler hängt daran.
+- Fehlt der Herstellen-Knopf in der Auftragszeile? Er sitzt bewusst nur an
+  der Rezeptkarte und im Gefertigt-Dialog – in der Zeile ist zwischen
+  Verlauf, Abbrechen und Primäraktion kein Platz ohne abgeschnittene Namen.
+- Reicht der Kompakt-Tracker mit seinen drei Zeilen noch, jetzt wo das Board
+  daneben alles zeigt?
+
 ---
 
 ## 6. Rezeptfilter nach benötigter Skill-Stufe – Datenproblem, noch ungelöst
