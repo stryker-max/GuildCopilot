@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.114",
+    VERSION = "0.9.115",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -392,6 +392,15 @@ GC.Consumables = {
     [28520] = { category = "FLASK", name = "Fläschchen des unerbittlichen Angriffs", nameEN = "Flask of Relentless Assault" },     -- Item 22854
     [28521] = { category = "FLASK", name = "Fläschchen des blendenden Lichts", nameEN = "Flask of Blinding Light" },               -- Item 22861
     [28540] = { category = "FLASK", name = "Fläschchen des reinen Todes", nameEN = "Flask of Pure Death" },    -- Item 22866
+    -- Classic-Fläschchen, in TBC weiter benutzt - und bis 0.9.114 unbekannt.
+    -- Aufgefallen am Abend des 09.08.2026: Ein Heiler stand als Einziger von
+    -- 25 ohne Fläschchen in der Auswertung. Beleg ist das Kampflog desselben
+    -- Abends, das ihn zweimal trinken sah:
+    --   SPELL_CAST_SUCCESS ... 17627,"Destillierte Weisheit"
+    --   SPELL_AURA_APPLIED ... 17627,"Destillierte Weisheit",0x1,BUFF
+    -- Der Zaubername stammt damit aus dem Spielclient selbst.
+    [17627] = { category = "FLASK", name = "Fläschchen der destillierten Weisheit",
+        nameEN = "Flask of Distilled Wisdom" },                                                                -- Item 13511
     [28490] = { category = "ELIXIR", name = "Elixier der übermächtigen Stärke", nameEN = "Elixir of Major Strength" },        -- Item 22824
     [28497] = { category = "ELIXIR", name = "Elixier der übermächtigen Beweglichkeit", nameEN = "Elixir of Major Agility" },  -- Item 22831
     [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft", nameEN = "Elixir of Healing Power" },     -- Item 22825

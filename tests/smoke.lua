@@ -1732,6 +1732,10 @@ FireCombatLog("SPELL_AURA_APPLIED", "Schurke", "Schurke", 28507)
 -- Zwei Fläschchen über den Abend sind zwei Fläschchen, nicht eins.
 FireCombatLog("SPELL_CAST_SUCCESS", "Heiler", "Heiler", 28518)
 FireCombatLog("SPELL_CAST_SUCCESS", "Heiler", "Heiler", 28518)
+-- Und ein Classic-Fläschchen zählt genauso. Am 09.08.2026 trank ein Heiler
+-- zweimal "Destillierte Weisheit" (17627) und stand als Einziger von 25 ohne
+-- Fläschchen in der Auswertung - die Kennung fehlte schlicht in der Tabelle.
+FireCombatLog("SPELL_CAST_SUCCESS", "Heiler", "Heiler", 17627)
 -- Trommeln buffen die ganze Gruppe. Verbraucht hat sie ausschliesslich der
 -- Werfer; wer den Buff bekommt, hat nichts ausgegeben.
 FireCombatLog("SPELL_CAST_SUCCESS", "Schurke", "Schurke", 35476)
@@ -1755,7 +1759,9 @@ FireCombatLog("UNIT_DIED", "", "Prinz Malchezaar", nil, "Creature-1234")
 local rogue = liveSession.participants.schurke
 local healer = liveSession.participants.heiler
 assert(rogue.consumables.POTION == 3, "Wiederholbare Tränke wurden nicht mehrfach gezählt")
-assert(healer.consumables.FLASK == 2, "Ein zweites Fläschchen wurde nicht gezählt")
+assert(healer.consumables.FLASK == 3,
+    "Fläschchen wurden nicht vollständig gezählt (zwei TBC-, ein Classic-Fläschchen): "
+        .. tostring(healer.consumables.FLASK))
 assert(rogue.consumables.DRUM == 1, "Die geworfene Trommel wurde nicht beim Werfer gezählt")
 assert(healer.consumables.DRUM == 0 and liveSession.participants.tester.consumables.DRUM == 0,
     "Ein Trommelbuff wurde dem Empfänger als Verbrauch angerechnet")

@@ -221,6 +221,23 @@ Stückzahlen in Zeile und Statistik, Fenstergröße und Deckkraft,
 Freitext-Aufträge über den Beruf als Schlüssel, Herstellen aus dem Cockpit
 samt selbst mitgezähltem Fortschritt.
 
+### Offen aus 0.9.115: der Eintritts-Scan liest nur einmal
+
+`RaidMonitor:ScanCarriedConsumables` setzt `participant.auraScanDone` beim
+ersten Moment, in dem ein Spieler existiert und sichtbar ist – und liest ihn
+nie wieder. Wer in diesem Augenblick noch nicht gebufft war, wird für den Rest
+des Abends nur noch über das Kampfprotokoll erfasst; alles vor Sitzungsbeginn
+Aufgetragene bleibt unsichtbar.
+
+Der Umbau: Merker je **Zauber-ID** statt je Teilnehmer
+(`participant.scanCounted[spellID]`), dann darf bei jedem Anwesenheitsabgleich
+neu gelesen werden. Damit ein Buff nicht doppelt zählt, muss auch der
+Kampfprotokoll-Pfad die Kennung im Merker eintragen – der Scan zählt nur, was
+noch nicht darin steht, während ein echter Zauber immer zählt.
+
+Nicht die Ursache des Falls vom 09.08.2026 (das war eine fehlende Kennung),
+aber dieselbe Art Lücke.
+
 **Im Spiel zu prüfen, weil die Tests dort nicht hinreichen:**
 
 - Meldet der Client nach `TRADE_SKILL_CLOSE` wirklich eine leere Rezeptliste?

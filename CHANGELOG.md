@@ -7,6 +7,16 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.115 – Addon
+
+**Behoben**
+
+- **Ein Fläschchen wurde nicht gezählt.** Wer das Classic-Fläschchen der
+  destillierten Weisheit trinkt – in TBC weiterhin üblich –, stand in der
+  Raidauswertung ohne Fläschchen da, obwohl er eins hatte. Die Kennung
+  fehlte schlicht in der Tabelle; sie ist jetzt eingetragen, auch für den
+  Warcraft-Logs-Import.
+
 ## 0.9.114 – Addon
 
 **Neu**

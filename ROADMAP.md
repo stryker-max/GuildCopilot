@@ -298,6 +298,48 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.115 – Der Einzige von 25 ohne Fläschchen
+
+„Mîasanmîa hat angeblich keine Cons genutzt, hatte er aber." Eine Meldung dieser Art ist die wertvollste, die ein Zählwerk bekommen kann – und die einzige Art, die sich nicht durch Nachdenken beantworten lässt, sondern nur durch Daten.
+
+### Was die Ablage sagte
+
+Fünf Manatränke über den Abend verteilt (20:04 bis 23:11), sonst nichts: keine Fläschchen, keine Elixiere, kein Essen. Bei 3,54 h gezählter Anwesenheit, und als **Einziger von 25** – die anderen 24 hatten alle mindestens eines der drei. Beide Fassungen des Abends, der eigene LIVE-Mitschnitt und die von Hottí synchronisierte, kamen unabhängig auf dieselben fünf Tränke.
+
+Die verteilten Trankzeitpunkte schlossen die naheliegendste Erklärung sofort aus: Der Mitschreiber hatte ihn den ganzen Abend in Reichweite.
+
+### Die falsche Fährte
+
+Die erste Vermutung galt dem Eintritts-Scan aus 0.9.x, der einmal je Teilnehmer liest, was jemand schon an Buffs trägt (`participant.auraScanDone`). Ein Scan, der genau einen Augenblick sieht und diesen Augenblick beim ersten Sichtkontakt wählt, kann alles verpassen, was danach kommt – eine plausible Geschichte, und sie war falsch.
+
+### Was das Kampflog sagte
+
+Der Owner hatte die bessere Idee als der Umweg über Warcraft Logs, dessen Seite eine Bot-Prüfung verlangt: Das Kampflog des Abends lag noch auf der Platte, 210 MB, vom 09.08. 19:48 bis 23:32. Darin steht die Antwort in zwei Zeilen:
+
+```
+SPELL_CAST_SUCCESS ... 17627,"Destillierte Weisheit"
+SPELL_AURA_APPLIED ... 17627,"Destillierte Weisheit",0x1,BUFF
+```
+
+Er hat das **Fläschchen der destillierten Weisheit** getrunken, zweimal, mitten in der Sitzung. Das ist ein Classic-Fläschchen (Item 13511), das in TBC weiter benutzt wird, weil es für Manaklassen billig und gut ist. `GC.Consumables` kannte die fünf TBC-Fläschchen – und dieses nicht. Eine unbekannte Kennung wird stillschweigend nicht gezählt; genau die Eigenschaft, die verhindert, dass falsche Zahlen entstehen, lässt hier eine richtige fehlen.
+
+Alles andere, was die Auswertung über ihn sagte, war korrekt: Im ganzen Log steht bei ihm kein einziges Elixier und kein Essen. Der Gegencheck dazu war nötig, weil der deutsche Client zwei verschiedene Dinge „Satt" nennt – die Sattgegessen-Buffs (BUFF, 33254 ff.) und die Sättigung nach Kampfrausch (DEBUFF, 57724). Nur der Auratyp trennt sie, und er trug 476-mal den Debuff.
+
+### Was daraus folgt
+
+Eingetragen ist jetzt genau eine Kennung, belegt aus dem Spielclient selbst – nach derselben Regel, unter der auch die Verzauberungen und die englischen Namen stehen: keine Kennung ohne Beleg. Die drei Geschwister-Fläschchen aus Classic (Titanen, Höchste Macht, Chromatischer Widerstand) stehen bewusst **nicht** dabei: In diesem Log kommen sie nicht vor, und aus dem Gedächtnis eingetragene Zahlen sind genau die Art Datenmüll, den diese Tabelle vermeiden soll. Sie kommen dazu, sobald ein Log sie zeigt.
+
+Dieselbe Kennung fehlte auch in der Filterliste des Warcraft-Logs-Companions, die entscheidet, was ein Import überhaupt überträgt. Ohne sie hätte der Import denselben Heiler erneut ohne Fläschchen gemeldet – und diesmal mit dem Anschein einer unabhängigen Bestätigung.
+
+**Der Eintritts-Scan bleibt trotzdem eine schwache Stelle**, nur eben nicht diese: Er liest einmal und nie wieder. Wer beim ersten Sichtkontakt noch nicht gebufft ist, wird bis zum Sitzungsende nur noch über das Kampfprotokoll erfasst. Der Umbau wäre ein Merker je Zauber statt je Teilnehmer; er steht in `docs/TODO-naechste-sitzung.md`.
+
+### Geändert
+
+- `Constants.lua`: `[17627]` als Fläschchen, mit dem Kampflog als Beleg im Kommentar;
+- `Companion/WCL-Import.mjs`: dieselbe Kennung in der Übertragungsliste;
+- `tests/smoke.lua`: das Classic-Fläschchen zählt wie die TBC-Fläschchen;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.115.
+
 ## 0.9.114 – Zuklappen statt zumachen
 
 „Es sollte irgendwie so einen Minimieren-Button geben, der quasi das Fenster ähnlich wie WeakAuras klein macht, dass man den Bildschirm frei hat, nur die oberste Zeile sozusagen."
