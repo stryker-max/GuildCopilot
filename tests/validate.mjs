@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.113",
+  "## Version: 0.9.114",
 ];
 
 for (const entry of requiredMetadata) {
@@ -906,6 +906,28 @@ const navNumber = (name) => {
   return Number(match[1]);
 };
 const frameHeight = Number(uiSource.match(/frame:SetSize\(\d+, (\d+)\)/)[1]);
+// Dieselbe Hoehe steht als Konstante da, weil das Minimieren sie wechselt und
+// wieder zuruecksetzen muss. Laufen beide auseinander, klappt das Fenster in
+// eine falsche Groesse auf.
+const windowHeightConstant = Number(uiSource.match(/local WINDOW_HEIGHT = (\d+)/)?.[1]);
+if (windowHeightConstant !== frameHeight) {
+  throw new Error(
+    `WINDOW_HEIGHT (${windowHeightConstant}) und die Fensterhoehe beim Aufbau ` +
+      `(${frameHeight}) stimmen nicht ueberein.`
+  );
+}
+// Zugeklappt bleibt genau die Kopfzeile stehen - samt der beiden Randlinien.
+const headerHeight = Number(uiSource.match(/header:SetHeight\((\d+)\)/)?.[1]);
+const minimizedHeight = Number(uiSource.match(/local WINDOW_MINIMIZED_HEIGHT = (\d+)/)?.[1]);
+if (!headerHeight || !minimizedHeight) {
+  throw new Error("Kopfzeilen- oder Minimierthoehe fehlen in UI.lua.");
+}
+if (minimizedHeight < headerHeight + 2) {
+  throw new Error(
+    `Das minimierte Fenster (${minimizedHeight} px) ist niedriger als seine Kopfzeile ` +
+      `(${headerHeight} px plus zwei Randlinien).`
+  );
+}
 const sidebarTop = Number(uiSource.match(/sidebar:SetPoint\("TOPLEFT", frame, "TOPLEFT", 1, -(\d+)\)/)[1]);
 const tabBlock = uiSource.slice(
   uiSource.indexOf("local TAB_DEFINITIONS = {"),

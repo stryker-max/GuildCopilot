@@ -47,6 +47,9 @@ local DEFAULTS = {
         window = {
             scale = 100,
             alpha = 100,
+            -- Zugeklappt auf die Kopfzeile (UI:SetWindowMinimized). Der
+            -- Zustand ueberlebt den Ausstieg, wie bei jedem Fenster.
+            minimized = false,
         },
         -- Meldung im Chat, sobald eine Berufs-Wartezeit (Umwandlung,
         -- Spezialtuch, Sphaere) abgelaufen ist. Bewusst an: Sie ist eine

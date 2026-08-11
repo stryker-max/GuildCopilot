@@ -318,6 +318,8 @@ local english = {
     ["{n} selbst gefertigt, noch nicht gemeldet"] = "{n} crafted by you, not reported yet",
     ["Gildenaufträge"] = "Guild Orders",
     ["Fenstergröße ziehen"] = "Drag to resize",
+    ["Minimieren"] = "Minimize",
+    ["Wieder aufklappen"] = "Restore",
 
     -- === Teilschritt 3: statische Meldungen und Zustände ===================
     ["Abgleich mit der Gilde"] = "Guild sync",

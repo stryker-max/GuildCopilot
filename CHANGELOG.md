@@ -7,6 +7,19 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.114 – Addon
+
+**Neu**
+
+- **Minimieren.** Neben dem Schließen-× sitzt ein zweiter Knopf: Er klappt
+  alles unter der Kopfzeile weg, sodass nur noch der Balken mit Titel,
+  Abgleichstand und Knöpfen stehen bleibt – der Bildschirm ist frei, das
+  Fenster aber nicht geschlossen. Der Balken lässt sich weiter verschieben,
+  ein zweiter Klick holt alles zurück, und wer zugeklappt ausloggt, findet
+  ihn beim nächsten Mal wieder so vor. Wird eine Seite von außen
+  aufgeschlagen (etwa über den Auftrags-Tracker), klappt das Fenster von
+  selbst auf.
+
 ## 0.9.113 – Addon
 
 **Behoben**

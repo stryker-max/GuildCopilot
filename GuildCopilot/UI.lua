@@ -46,6 +46,12 @@ local SLASH_COMMANDS = {
 
 -- Masse der Seitenleiste. Sie muessen zur Fensterhoehe passen: kommt ein
 -- Navigationspunkt dazu, prueft tests/validate.mjs, ob noch alles hineinpasst.
+-- Die Hoehe des Hauptfensters steht zweimal: beim Aufbau als feste Zahl (dort
+-- liest tests/validate.mjs sie ab, um Seitenhoehen nachzurechnen) und hier,
+-- weil das Minimieren sie wechselt und wieder zuruecksetzen muss. Der Test
+-- haelt beide Zahlen gleich.
+local WINDOW_HEIGHT = 690
+
 local NAV_TOP = 10
 local NAV_SECTION_GAP = 3
 local NAV_SECTION_HEIGHT = 22
@@ -495,6 +501,25 @@ local function CursorInUISpace()
     end
     local scale = UIScale()
     return cursorX / scale, cursorY / scale
+end
+
+-- Minimieren und Wiederherstellen: der waagerechte Strich und das Rechteck,
+-- die jedes Fenster seit dreissig Jahren traegt.
+local function CreateMinimizeMark(parent, size, color)
+    local mark = CreateMark(parent, size)
+    mark:AddArea(0.18, 0.70, 0.64, 0.12)
+    mark:SetColor(color or THEME.text)
+    return mark
+end
+
+local function CreateRestoreMark(parent, size, color)
+    local mark = CreateMark(parent, size)
+    mark:AddArea(0.18, 0.24, 0.64, 0.10)
+    mark:AddArea(0.18, 0.76, 0.64, 0.10)
+    mark:AddArea(0.18, 0.24, 0.10, 0.62)
+    mark:AddArea(0.72, 0.24, 0.10, 0.62)
+    mark:SetColor(color or THEME.text)
+    return mark
 end
 
 -- Griff zum Ziehen: drei Schraegstriche in der Ecke, wie sie jeder kennt.
@@ -1356,6 +1381,43 @@ function GC.UI:CreateMainFrame()
     close:SetPoint("RIGHT", header, "RIGHT", -13, 0)
     close.label:SetFontObject("GameFontNormalLarge")
 
+    -- Minimieren nach dem Muster, das aus WeakAuras bekannt ist: Alles unter
+    -- der Kopfzeile klappt weg, stehen bleibt der Balken mit Titel, Abgleich
+    -- und den Knöpfen. Der Bildschirm ist frei, das Fenster aber nicht
+    -- geschlossen - und es steht danach wieder da, wo es stand.
+    self.minimizeButton = CreateButton(header, "", 34, 34, function()
+        GC.UI:SetWindowMinimized(not GC.DB:GetSettings().window.minimized)
+    end)
+    self.minimizeButton:SetPoint("RIGHT", close, "LEFT", -6, 0)
+    self.minimizeMark = CreateMinimizeMark(self.minimizeButton, 14)
+    self.restoreMark = CreateRestoreMark(self.minimizeButton, 12)
+    SetButtonMark(self.minimizeButton, self.minimizeMark)
+    self.restoreMark:SetPoint("CENTER", self.minimizeButton, "CENTER", 0, 0)
+    self.restoreMark:Hide()
+    self.minimizeButton:SetScript("OnEnter", function(selfButton)
+        if not selfButton.active then
+            SetTextureColor(selfButton.background, THEME.cardHover)
+        end
+        if not GameTooltip then
+            return
+        end
+        GameTooltip:SetOwner(selfButton, "ANCHOR_BOTTOM")
+        if GC.DB:GetSettings().window.minimized then
+            GameTooltip:SetText(GC.L("Wieder aufklappen"))
+        else
+            GameTooltip:SetText(GC.L("Minimieren"))
+            GameTooltip:AddLine("Klappt alles unter der Kopfzeile weg. Der Balken bleibt"
+                .. " stehen und lässt sich weiter verschieben.", 1, 1, 1, true)
+        end
+        GameTooltip:Show()
+    end)
+    self.minimizeButton:SetScript("OnLeave", function(selfButton)
+        selfButton:SetActive(selfButton.active)
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+
     -- Die Einrichtung laesst sich jederzeit wieder aufrufen - auch nach
     -- "Nicht mehr anzeigen" und auch, wenn schon alles erledigt ist. Der
     -- Knopf oeffnet den Assistenten mit der Funktionstour und holt zugleich
@@ -1367,7 +1429,7 @@ function GC.UI:CreateMainFrame()
         GC.UI:RefreshOnboarding()
         GC.UI:ShowWelcome()
     end)
-    setup:SetPoint("RIGHT", close, "LEFT", -8, 0)
+    setup:SetPoint("RIGHT", self.minimizeButton, "LEFT", -8, 0)
     setup:SetScript("OnEnter", function(selfButton)
         SetTextureColor(selfButton.background, THEME.cardHover)
         if not GameTooltip then
@@ -1539,6 +1601,10 @@ function GC.UI:CreateMainFrame()
     self:BuildGearPage()
     self:ShowPage(self.activePage)
     self:ApplyWindowLook()
+    -- Zugeklappt ausgeloggt heisst zugeklappt eingeloggt.
+    if GC.DB:GetSettings().window.minimized then
+        self:SetWindowMinimized(true)
+    end
 end
 
 -- Maßstab und Deckkraft des Hauptfensters (Nutzerrückmeldung 08/2026).
@@ -1573,17 +1639,27 @@ end
 -- trotzdem keiner - die Ecke folgt dem Zeiger, weil das Fenster für die Dauer
 -- des Ziehens oben links verankert wird. Ohne das wüchse es um seine Mitte,
 -- und die Ecke liefe dem Zeiger davon.
-function GC.UI:BeginWindowResize()
+-- Nagelt das Fenster an seiner oberen linken Ecke fest. Ohne das wüchse und
+-- schrumpfte es um seine Mitte - beim Ziehen liefe die Ecke dem Mauszeiger
+-- davon, und beim Minimieren spränge der Balken in die Bildschirmmitte.
+function GC.UI:FreezeWindowTopLeft()
     local frame = self.frame
     if not frame then
         return
     end
     local scale = frame:GetScale() or 1
-    -- Die obere linke Ecke in Bildschirmeinheiten; sie bleibt liegen.
     frame.resizeLeft = (frame:GetLeft() or 0) * scale
     frame.resizeTop = (frame:GetTop() or 0) * scale
-    frame.resizing = true
     self:AnchorWindowTopLeft(scale)
+end
+
+function GC.UI:BeginWindowResize()
+    local frame = self.frame
+    if not frame then
+        return
+    end
+    frame.resizing = true
+    self:FreezeWindowTopLeft()
 end
 
 -- Verankert das Fenster an seiner gemerkten oberen linken Ecke. Die Versätze
@@ -1619,6 +1695,54 @@ function GC.UI:StepWindowResize()
     GC.DB:GetSettings().window.scale = percent
 end
 
+-- === Minimieren =============================================================
+--
+-- Aus dem Spiel gewünscht, nach dem Vorbild von WeakAuras: „nur die oberste
+-- Zeile, dass man den Bildschirm frei hat". Zugeklappt bleibt die Kopfzeile
+-- mit Titel, Abgleichstand und Knöpfen - sie ist zugleich der Griff zum
+-- Verschieben, weil das ganze Fenster auf Ziehen reagiert.
+--
+-- Der Zustand wird gemerkt: Wer zugeklappt ausloggt, findet den Balken
+-- wieder. Verwechseln lässt er sich mit einem geschlossenen Fenster nicht -
+-- er trägt seinen Namen.
+local WINDOW_MINIMIZED_HEIGHT = 60
+
+function GC.UI:SetWindowMinimized(minimized)
+    local frame = self.frame
+    if not frame then
+        return
+    end
+    minimized = minimized == true
+    GC.DB:GetSettings().window.minimized = minimized
+    frame.minimized = minimized
+
+    -- Erst den Anker festnageln, dann die Höhe ändern: Sonst wandert der
+    -- Balken beim Zuklappen in die Mitte des Bildschirms.
+    self:FreezeWindowTopLeft()
+    frame.sidebar:SetShown(not minimized)
+    for key, page in pairs(self.pages) do
+        -- Das Verstecken der Seiten schließt über deren OnHide auch alle
+        -- offenen Dialoge - genau richtig, sie hätten sonst über dem Balken
+        -- gestanden.
+        page:SetShown(not minimized and key == self.activePage)
+    end
+    if frame.resizeGrip then
+        frame.resizeGrip:SetShown(not minimized)
+    end
+    frame:SetHeight(minimized and WINDOW_MINIMIZED_HEIGHT or WINDOW_HEIGHT)
+    self:AnchorWindowTopLeft()
+
+    if self.minimizeMark then
+        self.minimizeMark:SetShown(not minimized)
+        self.restoreMark:SetShown(minimized)
+    end
+    if not minimized and self:IsVisible() then
+        -- Aufgeklappt zeigt die Seite den aktuellen Stand, nicht den von vor
+        -- dem Zuklappen.
+        self:RefreshPage(self.activePage)
+    end
+end
+
 function GC.UI:EndWindowResize()
     local frame = self.frame
     if not frame then
@@ -1647,6 +1771,12 @@ function GC.UI:RefreshTabHighlight()
 end
 
 function GC.UI:ShowPage(pageKey)
+    -- Wer eine Seite aufschlaegt, will sie sehen: Ein zugeklapptes Fenster
+    -- klappt dafuer auf. Sonst zeichnete sich die Seite in einen 60 Pixel
+    -- hohen Balken.
+    if self.frame and self.frame.minimized then
+        self:SetWindowMinimized(false)
+    end
     if pageKey == "MEMBERCARE" and not GC.Roster:CanAccessMemberCare() then
         pageKey = "ROSTER"
         GC:Print("Mitgliederpflege ist für deinen Gildenrang gesperrt – "

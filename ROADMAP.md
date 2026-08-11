@@ -298,6 +298,38 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.114 – Zuklappen statt zumachen
+
+„Es sollte irgendwie so einen Minimieren-Button geben, der quasi das Fenster ähnlich wie WeakAuras klein macht, dass man den Bildschirm frei hat, nur die oberste Zeile sozusagen."
+
+Das Vorbild ist gut gewählt, denn es beschreibt genau den Unterschied zum Schließen: Ein geschlossenes Fenster ist weg, ein zugeklapptes ist da und im Weg-Sein sichtbar. Wer im Raid kurz Platz braucht, will nicht die Seite verlieren, auf der er gerade war.
+
+### Was stehen bleibt
+
+Die Kopfzeile, vollständig: Logo, Titel, Version, der Abgleichstand („29 Nutzer, Daten vollständig"), „Einrichtung", der neue Knopf und das ×. Sie ist zugleich der Griff zum Verschieben – das ganze Fenster reagiert auf Ziehen, der Balken also auch.
+
+Weg klappen Seitenleiste, Seite und der Griff zum Größenziehen. Dass die Seiten sich verstecken, erledigt nebenbei etwas Zweites: Ihr `OnHide` schließt alle offenen Dialoge. Ein Erstellen-Dialog, der über einem 60 Pixel hohen Balken stehen bliebe, wäre genau die Art Bruchstelle, die man erst im Spiel sieht.
+
+### Zwei Feinheiten
+
+**Der Anker.** Das Fenster hängt in der Voreinstellung an der Bildschirmmitte. Ändert man dort die Höhe, wächst und schrumpft es symmetrisch – der Balken spränge beim Zuklappen nach oben und beim Aufklappen wieder zurück. Vor jeder Höhenänderung wird die obere linke Ecke deshalb festgenagelt; dieselbe Mechanik, die seit 0.9.113 die Ecke beim Ziehen dem Mauszeiger folgen lässt (`FreezeWindowTopLeft`, jetzt von beiden benutzt).
+
+**Der Weg zurück von außen.** `ShowPage` klappt ein zugeklapptes Fenster auf. Ohne das zeichnete ein Klick auf den Auftrags-Tracker seine Seite in den Balken hinein – sichtbar wäre nichts, kaputt aber alles.
+
+Der Zustand wird gemerkt. Wer zugeklappt ausloggt, findet den Balken wieder; verwechseln lässt er sich mit einem geschlossenen Fenster nicht, er trägt seinen Namen.
+
+### Zwei Zahlen, die zusammenbleiben müssen
+
+Die Fensterhöhe steht jetzt zweimal im Code: als feste Zahl beim Aufbau (dort liest `tests/validate.mjs` sie ab, um Seitenhöhen nachzurechnen) und als Konstante, weil das Aufklappen sie zurücksetzen muss. Der Test hält beide gleich und prüft zusätzlich, dass die zugeklappte Höhe die Kopfzeile samt ihrer beiden Randlinien wirklich trägt.
+
+### Geändert
+
+- `UI.lua`: `SetWindowMinimized` samt Knopf in der Kopfzeile und den beiden Symbolen (`CreateMinimizeMark`, `CreateRestoreMark`), `FreezeWindowTopLeft` als gemeinsame Grundlage von Minimieren und Größenziehen, `ShowPage` klappt auf, `WINDOW_HEIGHT` als Konstante;
+- `Database.lua`: `settings.window.minimized`;
+- `Locales.lua`: „Minimieren", „Wieder aufklappen";
+- `tests/smoke.lua`: Zuklappen versteckt Seitenleiste, Seite und Ziehgriff, merkt sich den Zustand und tauscht das Symbol; das Aufschlagen einer Seite klappt auf;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.114.
+
 ## 0.9.113 – Der erste Blick im Spiel: vier Befunde
 
 Der Owner hat 0.9.112 im Spiel aufgeschlagen und vier Dinge zurückgemeldet. Drei davon waren in keinem Test zu sehen – sie leben in Rahmenebenen, Textbreiten und in der Frage, wo das Auge zuerst hinschaut.

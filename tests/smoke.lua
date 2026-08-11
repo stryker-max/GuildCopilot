@@ -6043,6 +6043,45 @@ do
 end
 
 do
+    -- Minimieren nach dem Muster von WeakAuras: Stehen bleibt die Kopfzeile,
+    -- alles darunter klappt weg, und der Zustand überlebt den Ausstieg.
+    window_settings = addon.DB:GetSettings().window
+    assert(window_settings.minimized == false, "Das Fenster startet zugeklappt")
+    addon.UI.frame:Show()
+    addon.UI:ShowPage("WORKSHOP")
+
+    addon.UI:SetWindowMinimized(true)
+    assert(addon.UI.frame.height == 60,
+        "Das zugeklappte Fenster ist nicht so hoch wie seine Kopfzeile: "
+            .. tostring(addon.UI.frame.height))
+    assert(addon.UI.frame.sidebar.shown == false,
+        "Die Seitenleiste bleibt im zugeklappten Fenster stehen")
+    assert(addon.UI.pages.WORKSHOP.shown == false,
+        "Die Seite bleibt im zugeklappten Fenster stehen")
+    assert(addon.UI.frame.resizeGrip.shown == false,
+        "Der Griff zum Ziehen bleibt am zugeklappten Fenster")
+    assert(window_settings.minimized == true, "Der zugeklappte Zustand wird nicht gemerkt")
+    assert(addon.UI.frame.shown == true, "Zuklappen hat das Fenster geschlossen")
+    -- Der Knopf zeigt jetzt das Wiederherstellen-Zeichen, nicht mehr den
+    -- Minimieren-Strich.
+    assert(addon.UI.restoreMark.shown == true and addon.UI.minimizeMark.shown == false,
+        "Der Knopf trägt zugeklappt weiterhin das Minimieren-Zeichen")
+
+    -- Wer eine Seite aufschlägt, klappt damit auf - sonst zeichnete sie sich
+    -- in einen 60 Pixel hohen Balken.
+    addon.UI:ShowPage("ROSTER")
+    assert(window_settings.minimized == false,
+        "Das Aufschlagen einer Seite klappt das Fenster nicht auf")
+    assert(addon.UI.frame.height == 690,
+        "Das aufgeklappte Fenster hat nicht seine volle Höhe: "
+            .. tostring(addon.UI.frame.height))
+    assert(addon.UI.pages.ROSTER.shown == true, "Die aufgeschlagene Seite bleibt verborgen")
+    assert(addon.UI.frame.sidebar.shown == true, "Die Seitenleiste kehrt nicht zurück")
+
+    addon.UI:ShowPage("WORKSHOP")
+end
+
+do
     -- Herstellen aus dem Cockpit (Nutzerrückmeldung 08/2026) samt Mitzähler.
     -- Der eigene Charakter hat Schneiderei mit "Mondstofftasche" (I14155)
     -- aus dem Berufsscan weiter oben.
