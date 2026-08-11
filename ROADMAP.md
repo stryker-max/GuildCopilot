@@ -298,6 +298,35 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.111 – Ein Maßstab statt einer Fensterkante
+
+Punkt drei der Gildenrückmeldung: „GCP-Fenster skalieren oder verkleinern nach Bedarf, oder die Möglichkeit der Transparenz". Das Hauptfenster war seit jeher auf 1020 × 690 festgenagelt – auf 1280 × 720 füllt das den halben Bildschirm, und im Raid verdeckt es, was man sehen will.
+
+### Warum Maßstab und nicht Größe ziehen
+
+Der naheliegende Weg – `SetResizable`, eine Ecke zum Ziehen – wäre der falsche. Jede der dreizehn Seiten ist pixelgenau vermessen: Karten stehen an festen Punkten, Textbreiten sind auf ihre Spalte abgestimmt, und `tests/validate.mjs` rechnet an sechs Stellen mit genau diesen Zahlen nach, dass sich nichts überlappt und nichts aus seiner Karte ragt. Eine ziehbare Kante hieße, dreizehn Seiten umbruchfähig zu machen – ein Umbau, der weit über die Rückmeldung hinausschießt und jede dieser Prüfungen ersatzlos verlöre.
+
+Ein Maßstab erreicht dasselbe Ziel ohne eine einzige verschobene Karte: Das Fenster wird kleiner, alles darin bleibt im selben Verhältnis. 70 bis 130 Prozent in Schritten von fünf, dazu die Deckkraft von 40 bis 100 Prozent.
+
+### Zwei Knöpfe statt eines Schiebereglers
+
+Blizzards Schieberegler brächte sein Rahmenwerk in eine Oberfläche, die sich sonst alles selbst malt – dieselbe Überlegung wie beim goldenen Häkchen aus 0.9.x, das eigenen Symbolen gewichen ist. Ein Textfeld wie bei der Anzeigedauer der Bildschirmmeldung schied aus einem konkreten Grund aus: Wer „125" tippt, erzeugt unterwegs „1" und „12". Bei einer Zahl, die sofort wirkt, wäre das ein Springen des halben Bildschirms je Tastendruck.
+
+Geworden ist es ein Zahlenregler aus „–", Anzeige und „+", der an seinen Grenzen den jeweiligen Knopf ausgraut. Er liegt als `CreateStepper` bei den anderen Bedienelementen und ist damit für die nächste Zahleneinstellung schon da.
+
+### Was bewusst nicht mitskaliert
+
+Tracker, Werbebalken und Bildschirmmeldung bleiben unverändert. Sie merken sich ihre Position als Versatz zur Bildschirmmitte; ein Maßstab würde diesen Versatz mitrechnen und die drei unter der Hand verschieben – ausgerechnet die Rahmen, die der Nutzer selbst dorthin gezogen hat, wo sie nichts verdecken. Groß ist ohnehin nur das Hauptfenster.
+
+Die Deckkraft gilt für das ganze Fenster samt Schrift; darum ist bei 40 Prozent Schluss und die Karte sagt es dazu. Eine Halbtransparenz, die beim Überfahren mit der Maus auf 100 Prozent springt, wäre der nächste Schritt – erst einmal ist die Frage, ob der feste Wert reicht.
+
+### Geändert
+
+- `UI.lua`: `CreateStepper` als neues Bedienelement, Karte „Fenster" am Ende der Einstellungsseite (Größe, Deckkraft, Zurücksetzen), `ApplyWindowLook` beim Aufbau des Hauptfensters und bei jeder Änderung, `RefreshSettings` setzt die Regler stumm nach; Inhaltshöhe der Einstellungsseite auf 2516;
+- `Database.lua`: `settings.window` mit `scale` und `alpha` in Prozent;
+- `tests/smoke.lua`: Massstab und Deckkraft im Rahmenmock ablesbar, Regler samt Grenzen, Zurücksetzen, und dass das Zeichnen der Seite den gespeicherten Wert nicht überschreibt;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.111.
+
 ## 0.9.110 – Drei Zeilen waren nie eine Liste
 
 Aus der Gilde kam eine Rückmeldung in fünf Punkten. Die ersten beiden betrafen dasselbe Fenster: „bei mehreren Aufträgen kann man nicht scrollen und einen expliziten Auftrag an- oder abwählen, es werden nur 3 angezeigt" und „Menge von hergestellten Items wird nicht getrackt". Beides stimmte, und beides hatte dieselbe Ursache: Das Board war als Ansicht gebaut, nicht als Liste.

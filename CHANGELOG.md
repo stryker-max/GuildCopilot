@@ -7,6 +7,16 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.111 – Addon
+
+**Neu**
+
+- **Fenstergröße und Deckkraft einstellbar.** Neue Karte „Fenster" am Ende
+  der Einstellungsseite: Größe von 70 bis 130 Prozent, Deckkraft von 40 bis
+  100 Prozent, beides wirkt sofort und lässt sich mit einem Knopf
+  zurücksetzen. Damit passt Guild Copilot auch auf kleinere Auflösungen und
+  verdeckt weniger vom Spiel.
+
 ## 0.9.110 – Addon
 
 **Neu**

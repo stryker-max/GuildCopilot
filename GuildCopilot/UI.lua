@@ -683,6 +683,44 @@ local function CreateEdit(parent, width, height)
     return edit
 end
 
+-- Ein Zahlenregler aus zwei Knöpfen und einer Anzeige.
+--
+-- Blizzards Schieberegler brächte sein Rahmenwerk in eine flache Oberfläche,
+-- die sich sonst alles selbst malt. Ein Textfeld wie bei der Anzeigedauer
+-- brächte ungültige Zwischenstände: Wer „125" tippt, erzeugt unterwegs „1"
+-- und „12" - bei einer Fenstergröße, die sofort wirkt, wäre das ein Springen
+-- des halben Bildschirms.
+local function CreateStepper(parent, minimum, maximum, step, onChanged)
+    local stepper = CreateFrame("Frame", nil, parent)
+    stepper:SetSize(146, 28)
+    stepper.value = minimum
+
+    function stepper:SetValue(value, announce)
+        value = math.floor((tonumber(value) or minimum) / step + 0.5) * step
+        value = math.max(minimum, math.min(maximum, value))
+        self.value = value
+        self.display:SetText(value .. " %")
+        SetButtonEnabled(self.down, value > minimum)
+        SetButtonEnabled(self.up, value < maximum)
+        if announce and onChanged then
+            onChanged(value)
+        end
+    end
+
+    stepper.down = CreateButton(stepper, "–", 28, 28, function()
+        stepper:SetValue(stepper.value - step, true)
+    end)
+    stepper.down:SetPoint("LEFT", stepper, "LEFT", 0, 0)
+    stepper.display = CreateLabel(stepper, "", { align = "CENTER", width = 82, height = 28 })
+    stepper.display:SetPoint("LEFT", stepper.down, "RIGHT", 0, 0)
+    stepper.up = CreateButton(stepper, "+", 28, 28, function()
+        stepper:SetValue(stepper.value + step, true)
+    end)
+    stepper.up:SetPoint("LEFT", stepper.display, "RIGHT", 0, 0)
+    stepper:SetValue(minimum)
+    return stepper
+end
+
 local function CreateModernScrollFrame(parent)
     local scroll = CreateFrame("ScrollFrame", nil, parent)
     scroll.track = scroll:CreateTexture(nil, "BACKGROUND")
@@ -1394,6 +1432,24 @@ function GC.UI:CreateMainFrame()
     self:BuildStatisticsPage()
     self:BuildGearPage()
     self:ShowPage(self.activePage)
+    self:ApplyWindowLook()
+end
+
+-- Maßstab und Deckkraft des Hauptfensters (Nutzerrückmeldung 08/2026).
+--
+-- Bewusst nur das Hauptfenster: Tracker, Werbebalken und Bildschirmmeldung
+-- merken sich ihre Position als Versatz zur Bildschirmmitte - ein Maßstab
+-- würde diesen Versatz mitskalieren und die drei unter der Hand verschieben.
+-- Sie sind ohnehin klein; groß ist das Fenster mit seinen 1020 × 690.
+function GC.UI:ApplyWindowLook()
+    if not self.frame then
+        return
+    end
+    local window = GC.DB:GetSettings().window or {}
+    local scale = math.max(70, math.min(130, tonumber(window.scale) or 100))
+    local alpha = math.max(40, math.min(100, tonumber(window.alpha) or 100))
+    self.frame:SetScale(scale / 100)
+    self.frame:SetAlpha(alpha / 100)
 end
 
 function GC.UI:ShowPage(pageKey)
@@ -1748,10 +1804,10 @@ function GC.UI:BuildSettingsPage()
     scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -4, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(752)
-    -- Die Werkstatt-Karte am Seitenende ist mit der Wartezeit-Erinnerung
-    -- gewachsen; die Inhaltshoehe muss mitwachsen, sonst schneidet der
-    -- Scroller die unterste Zeile ab.
-    content:SetHeight(2350)
+    -- Die Karten am Seitenende sind mit der Wartezeit-Erinnerung, der
+    -- Sprachwahl und zuletzt der Fensterkarte gewachsen; die Inhaltshoehe
+    -- muss mitwachsen, sonst schneidet der Scroller die unterste Zeile ab.
+    content:SetHeight(2516)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
@@ -2204,6 +2260,47 @@ function GC.UI:BuildSettingsPage()
         height = 16,
     }):SetPoint("TOPLEFT", languageCard, "TOPLEFT", 18, -84)
 
+    -- Fenstergröße und Deckkraft (Nutzerrückmeldung 08/2026: „GCP-Fenster
+    -- skalieren oder verkleinern nach Bedarf, oder die Möglichkeit der
+    -- Transparenz"). Auch diese Karte hängt am Seitenende.
+    --
+    -- Skalieren statt Ziehen: Jede Seite ist pixelgenau vermessen - eine
+    -- frei ziehbare Fensterkante müsste dreizehn Seiten neu umbrechen, und
+    -- tests/validate.mjs rechnet mit genau diesen festen Maßen nach. Ein
+    -- Maßstab lässt das Fenster kleiner werden, ohne eine einzige Karte zu
+    -- verschieben.
+    local windowCard = CreateCard(content, "Fenster")
+    windowCard:SetSize(752, 150)
+    windowCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2350)
+    CreateLabel(windowCard, "Fenstergröße:", { muted = true, width = 170, height = 28 })
+        :SetPoint("TOPLEFT", windowCard, "TOPLEFT", 18, -50)
+    page.windowScaleStepper = CreateStepper(windowCard, 70, 130, 5, function(value)
+        GC.DB:GetSettings().window.scale = value
+        GC.UI:ApplyWindowLook()
+    end)
+    page.windowScaleStepper:SetPoint("TOPLEFT", windowCard, "TOPLEFT", 196, -50)
+    CreateLabel(windowCard, "Deckkraft:", { muted = true, width = 170, height = 28 })
+        :SetPoint("TOPLEFT", windowCard, "TOPLEFT", 380, -50)
+    page.windowAlphaStepper = CreateStepper(windowCard, 40, 100, 5, function(value)
+        GC.DB:GetSettings().window.alpha = value
+        GC.UI:ApplyWindowLook()
+    end)
+    page.windowAlphaStepper:SetPoint("TOPLEFT", windowCard, "TOPLEFT", 500, -50)
+    page.windowResetButton = CreateButton(windowCard, "Zurücksetzen", 140, 28, function()
+        local windowSettings = GC.DB:GetSettings().window
+        windowSettings.scale = 100
+        windowSettings.alpha = 100
+        GC.UI:ApplyWindowLook()
+        GC.UI:RefreshSettings()
+    end)
+    page.windowResetButton:SetPoint("TOPLEFT", windowCard, "TOPLEFT", 18, -88)
+    CreateLabel(windowCard,
+        "Gilt für das Hauptfenster und wirkt sofort. Die Deckkraft betrifft das ganze Fenster samt Schrift – wer sie zu weit senkt, liest schlechter.", {
+        muted = true,
+        width = 716,
+        height = 16,
+    }):SetPoint("TOPLEFT", windowCard, "TOPLEFT", 18, -122)
+
     -- Die Chatbefehle dort, wo man sie sucht (Owner-Wunsch): auf der
     -- Einstellungsseite, gespeist aus derselben Tabelle wie /gcp help.
     local commandCard = CreateCard(content, "Chat-Befehle")
@@ -2227,6 +2324,11 @@ function GC.UI:RefreshSettings()
     if not page then
         return
     end
+    -- Ohne "announce" bleibt das Setzen stumm: Sonst schriebe jedes Zeichnen
+    -- der Seite den Wert zurück in die Einstellungen, den es gerade gelesen hat.
+    local window = GC.DB:GetSettings().window or {}
+    page.windowScaleStepper:SetValue(tonumber(window.scale) or 100)
+    page.windowAlphaStepper:SetValue(tonumber(window.alpha) or 100)
     local ranks = GC.Roster:GetRankDefinitions()
     local canEditGuildProfile = GC.Roster:CanEditGuildProfile()
     for index = 1, 10 do

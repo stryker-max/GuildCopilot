@@ -39,6 +39,12 @@ local DEFAULTS = {
         -- Sprache der Oberflaeche: AUTO folgt der Clientsprache, DE und EN
         -- erzwingen eine. Angewandt in GC.ApplyLanguageSetting.
         language = "AUTO",
+        -- Maßstab und Deckkraft des Hauptfensters in Prozent (UI:ApplyWindowLook).
+        -- 100/100 ist der Auslieferungszustand: unveraendert wie bisher.
+        window = {
+            scale = 100,
+            alpha = 100,
+        },
         -- Meldung im Chat, sobald eine Berufs-Wartezeit (Umwandlung,
         -- Spezialtuch, Sphaere) abgelaufen ist. Bewusst an: Sie ist eine
         -- einzelne Chatzeile je Sperre, kein Laerm.

@@ -36,6 +36,23 @@ Dummy.__index = function(self, key)
         return function(frame)
             return frame.verticalScroll or 0
         end
+    elseif key == "SetScale" then
+        -- Fuer die Fensterkarte: Massstab und Deckkraft bleiben ablesbar.
+        return function(frame, value)
+            frame.scale = tonumber(value)
+        end
+    elseif key == "GetScale" then
+        return function(frame)
+            return frame.scale or 1
+        end
+    elseif key == "SetAlpha" then
+        return function(frame, value)
+            frame.alpha = tonumber(value)
+        end
+    elseif key == "GetAlpha" then
+        return function(frame)
+            return frame.alpha or 1
+        end
     elseif key == "SetHeight" then
         -- Fuer Layouttests: die gesetzte Hoehe bleibt ablesbar.
         return function(frame, value)
@@ -9266,6 +9283,52 @@ do
         "Das deutsche Bindewort wurde ersetzt")
     assert(addon.GearAudit:DescribeSpec("MAGE:1") == "Magier Arkan",
         "Die deutsche Spec-Beschreibung wurde ersetzt")
+end
+
+do
+    -- Fenstergröße und Deckkraft (Nutzerrückmeldung 08/2026). Beide wirken
+    -- sofort auf das Hauptfenster, bleiben in den Einstellungen stehen und
+    -- lassen sich nicht über ihre Grenzen hinaustreiben.
+    window_settings = addon.DB:GetSettings().window
+    assert(window_settings.scale == 100 and window_settings.alpha == 100,
+        "Die Vorgabe für Größe und Deckkraft fehlt")
+    assert(addon.UI.frame.scale == 1 and addon.UI.frame.alpha == 1,
+        "Der Auslieferungszustand verändert das Fenster")
+
+    window_page = addon.UI.pages.SETTINGS
+    window_page.windowScaleStepper.down.scripts.OnClick(window_page.windowScaleStepper.down)
+    assert(window_settings.scale == 95, "Der Regler verkleinert das Fenster nicht: "
+        .. tostring(window_settings.scale))
+    assert(addon.UI.frame.scale == 0.95, "Der Maßstab erreicht das Fenster nicht: "
+        .. tostring(addon.UI.frame.scale))
+
+    -- Die Grenzen halten: 70 % ist Schluss, der Knopf wird unbedienbar.
+    for _ = 1, 20 do
+        window_page.windowScaleStepper.down.scripts.OnClick(window_page.windowScaleStepper.down)
+    end
+    assert(window_settings.scale == 70, "Der Maßstab läuft unter seine Grenze: "
+        .. tostring(window_settings.scale))
+    assert(window_page.windowScaleStepper.down.disabled == true,
+        "Der Verkleinern-Knopf bleibt an der Grenze bedienbar")
+
+    window_settings.alpha = 55
+    addon.UI:ApplyWindowLook()
+    assert(addon.UI.frame.alpha == 0.55, "Die Deckkraft erreicht das Fenster nicht: "
+        .. tostring(addon.UI.frame.alpha))
+
+    -- Zurücksetzen stellt beides her, und das Zeichnen der Seite schreibt
+    -- nichts zurück, was es gerade gelesen hat.
+    window_page.windowResetButton.scripts.OnClick(window_page.windowResetButton)
+    assert(window_settings.scale == 100 and window_settings.alpha == 100,
+        "Das Zurücksetzen stellt Größe und Deckkraft nicht her")
+    window_settings.scale = 115
+    addon.UI:RefreshSettings()
+    assert(window_settings.scale == 115,
+        "Das Zeichnen der Einstellungen überschreibt den gespeicherten Maßstab")
+    assert(window_page.windowScaleStepper.value == 115,
+        "Der Regler zeigt den gespeicherten Maßstab nicht")
+    window_settings.scale = 100
+    addon.UI:ApplyWindowLook()
 end
 
 -- === Ausrüstung: Verzauberungsnamen heilen beim Lesen =======================
