@@ -298,6 +298,52 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.113 – Der erste Blick im Spiel: vier Befunde
+
+Der Owner hat 0.9.112 im Spiel aufgeschlagen und vier Dinge zurückgemeldet. Drei davon waren in keinem Test zu sehen – sie leben in Rahmenebenen, Textbreiten und in der Frage, wo das Auge zuerst hinschaut.
+
+### „Beruf wählen" tat nichts
+
+Der schwerste Befund, und ein lehrreicher. Das Aufklappmenü der Dropdowns hängt bewusst nicht unter seiner Karte, sondern unter dem Hauptfenster – Seiten liegen in einem Bildlauf, und ein Bildlauf beschneidet, was über seinen Rand ragt. Seine Rahmenebene wurde beim Aufbau einmal gesetzt: **Fenster + 60**.
+
+Dialoge liegen bei **Fenster + 80**. Das Menü der Berufswahl öffnete sich also ordnungsgemäß – zwanzig Ebenen hinter dem Dialog, hinter dessen deckendem Hintergrund. Sichtbar passierte nichts, klickbar war nichts.
+
+Die Ebene wird jetzt bei jedem Aufklappen gesetzt, und zwar relativ zum **Knopf** statt zum Fenster: `dropdown:GetFrameLevel() + 20`. Damit stimmt sie für ein Dropdown auf einer Seite genauso wie für eines in einem Dialog, und sie stimmt auch dann noch, wenn ein Dialog später seine Ebene ändert.
+
+Der Regressionstest dafür brauchte einen ehrlicheren Rahmenmock: Bis 0.9.112 lieferte `GetFrameLevel` ohne ausdrücklich gesetzten Wert `nil`, in WoW liegt ein Rahmen ohne eigene Ebene aber eine über seinem Elternteil. Der Mock erbt jetzt genauso – und `CreateFrame` merkt sich endlich sein Elternteil.
+
+### „Tracker einble…"
+
+Der Knopf war 96 Pixel breit und trägt „Tracker ausblenden". Er ist jetzt 150 breit; die Statuszeile daneben gibt die Pixel her. Die Regel dahinter steht als Test: Die Breite richtet sich nach der längsten Beschriftung, nicht nach der kürzesten.
+
+### Katalog und Gildenaufträge waren nicht zu finden
+
+„Zu versteckt, nicht logisch, nicht intuitiv – die Buttons oben, die muss man erstmal wissen, dass sie da sind." Der Befund sitzt: Zwei Umschalter am rechten Rand der Kopfzeile, in derselben Zeile wie ein Hilfetext, sehen aus wie Aktionen und nicht wie Navigation. Wer die Gildenaufträge sucht, sucht sie in der **Seitenleiste** – dort steht alles andere auch.
+
+Die Werkstatt hat deshalb einen zweiten Navigationspunkt bekommen: **Gildenwerkstatt** öffnet den Katalog, **Gildenaufträge** das Board. Beide zeigen dieselbe Seite; die Definition eines Navigationspunkts kennt dafür jetzt zwei optionale Felder (`page` und `view`). Welcher Punkt leuchtet, entscheidet bei geteilten Seiten zusätzlich die Ansicht – das übernimmt `RefreshTabHighlight`, aufgerufen aus `ShowPage` und aus `SetWorkshopView`.
+
+Die Umschalter oben rechts bleiben, wo sie sind. Sie sind jetzt nicht mehr der einzige Weg, sondern die Anzeige „hier stehst du" – und wer schon auf der Seite ist, wechselt weiter mit einem Klick, ohne zur Seitenleiste zu greifen.
+
+Platz war da: Die Seitenleiste trägt rechnerisch bis zu fünfzehn Punkte, mit dem neuen sind es vierzehn. `tests/validate.mjs` rechnet das bei jedem Lauf nach.
+
+### Die Ecke ziehen
+
+0.9.111 hatte die Fenstergröße als Regler in die Einstellungen gelegt und in dieser ROADMAP begründet, warum eine echte Größenänderung nicht in Frage kommt. Der Wunsch kam trotzdem wieder: „Das Fenster sollte rechts unten an der Kante per Drag and Drop kleiner oder größer gezogen werden können."
+
+Die Begründung gegen eine ziehbare **Kante** gilt unverändert – dreizehn pixelgenau vermessene Seiten. Die Handbewegung ist davon aber gar nicht betroffen: Gezogen wird der Maßstab, und die Ecke folgt trotzdem dem Mauszeiger. Dafür wird das Fenster für die Dauer des Ziehens oben links verankert; ohne das wüchse es um seine Mitte und liefe dem Zeiger davon. Der neue Maßstab ist schlicht der Abstand des Zeigers zur linken Fensterkante, geteilt durch die Fensterbreite, begrenzt auf dieselben 70 bis 130 Prozent wie der Regler.
+
+Zwei Kleinigkeiten, die den Unterschied zwischen „geht" und „fühlt sich richtig an" ausmachen:
+
+- Gerundet wird auf ganze Prozent **vor** dem Anwenden. Sonst stünde das Fenster auf 78,43 % und der Regler in den Einstellungen auf 78 – der nächste Klick dort ließe es sichtbar springen.
+- Beendet wird das Ziehen über den Zustand der Maustaste, nicht über `OnMouseUp`. Wer beim Ziehen aus dem kleinen Griff herausfährt, bekäme sonst nie ein Ende, und das Fenster bliebe am Zeiger kleben.
+
+### Geändert
+
+- `UI.lua`: `PlacePopup` setzt die Rahmenebene relativ zum Knopf; Navigationspunkte kennen `page`/`view`, neuer Punkt „Gildenaufträge", `RefreshTabHighlight`; Griff zum Ziehen samt `BeginWindowResize`/`StepWindowResize`/`EndWindowResize` und `CreateResizeMark`; `UIScale`/`CursorInUISpace` nach oben gezogen, weil sie jetzt zwei weit auseinanderliegende Stellen brauchen; Tracker-Knopf 150 statt 96 Pixel;
+- `Locales.lua`: „Gildenaufträge" als Navigationspunkt, „Fenstergröße ziehen";
+- `tests/smoke.lua`: Rahmenmock erbt Rahmenebenen und merkt sich das Elternteil, UIParent hat Maße; Aufklappmenü liegt über seinem Dialog, Navigationspunkt schaltet die Ansicht samt Leuchten, Ziehen rechnet und begrenzt richtig und zieht den Regler nach, Tracker-Knopfbreite;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.113.
+
 ## 0.9.112 – Was der Katalog nicht kennt, und was der Client selbst tun kann
 
 Die letzten beiden Punkte der Gildenrückmeldung: „Freitext-Aufträge für nicht vorhandene Rezepte einbauen" und „Möglichkeit, aus dem Cockpit heraus Items herzustellen?". Beide sind Ja – mit Entscheidungen, die hier begründet stehen, weil der Owner den Fragedialog nicht beantwortet hat und die Arbeit weiterlaufen sollte.

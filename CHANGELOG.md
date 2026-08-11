@@ -7,6 +7,25 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.113 – Addon
+
+**Behoben**
+
+- **Im freien Auftrag ließ sich kein Beruf wählen.** Das Aufklappmenü öffnete
+  sich hinter dem Dialog – unsichtbar und nicht anklickbar.
+- **„Tracker einble…"** – der Knopf war zu schmal für seine eigene
+  Beschriftung.
+
+**Neu**
+
+- **Gildenaufträge stehen jetzt in der Seitenleiste.** Die beiden Umschalter
+  oben rechts waren zu versteckt: Man musste erst wissen, dass es sie gibt.
+  Beide Ansichten der Werkstatt haben deshalb einen eigenen
+  Navigationspunkt; der aktive leuchtet wie gewohnt.
+- **Fenstergröße an der Ecke ziehen.** Unten rechts sitzt ein Griff: Ziehen
+  macht das Fenster kleiner oder größer, die Ecke folgt dem Mauszeiger. Es
+  ist derselbe Wert wie der Regler in den Einstellungen.
+
 ## 0.9.112 – Addon
 
 **Neu**

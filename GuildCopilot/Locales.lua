@@ -316,6 +316,8 @@ local english = {
     ["Berufsfenster öffnen"] = "Open profession window",
     ["{n}× herstellen"] = "Craft {n}×",
     ["{n} selbst gefertigt, noch nicht gemeldet"] = "{n} crafted by you, not reported yet",
+    ["Gildenaufträge"] = "Guild Orders",
+    ["Fenstergröße ziehen"] = "Drag to resize",
 
     -- === Teilschritt 3: statische Meldungen und Zustände ===================
     ["Abgleich mit der Gilde"] = "Guild sync",

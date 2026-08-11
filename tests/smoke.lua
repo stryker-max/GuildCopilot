@@ -146,8 +146,19 @@ Dummy.__index = function(self, key)
             frame.frameLevel = tonumber(level)
         end
     elseif key == "GetFrameLevel" then
+        -- Wie in WoW: Ohne eigene Ebene liegt ein Rahmen eine ueber seinem
+        -- Elternteil. Ohne diese Vererbung liesse sich nicht pruefen, ob ein
+        -- Aufklappmenue ueber seinem Dialog liegt - und genau daran scheiterte
+        -- die Berufswahl im Freitext-Auftrag.
         return function(frame)
-            return frame.frameLevel
+            if frame.frameLevel then
+                return frame.frameLevel
+            end
+            local parent = frame.parent
+            if parent and parent.GetFrameLevel then
+                return (parent:GetFrameLevel() or 0) + 1
+            end
+            return 1
         end
     end
     if type(key) ~= "string" or not key:match("^%u") then
@@ -157,7 +168,9 @@ Dummy.__index = function(self, key)
     end
 end
 
-UIParent = setmetatable({}, Dummy)
+-- Ein Bildschirm mit Massen: Aufklappmenues entscheiden anhand der Hoehe von
+-- UIParent, ob sie nach oben oder nach unten aufgehen.
+UIParent = setmetatable({ width = 1920, height = 1080 }, Dummy)
 Minimap = setmetatable({}, Dummy)
 function Minimap:GetCenter()
     return 0, 0
@@ -190,8 +203,8 @@ end }
 -- Tooltipzeilen je Item-Link, damit die Verzauberungsaufloesung pruefbar ist.
 tooltipLines = {}
 
-function CreateFrame(_, name)
-    local frame = setmetatable({ shown = false, scripts = {} }, Dummy)
+function CreateFrame(_, name, parent)
+    local frame = setmetatable({ shown = false, scripts = {}, parent = parent }, Dummy)
     if name then
         _G[name] = frame
     end
@@ -5930,6 +5943,103 @@ do
         "Der Freitext-Auftrag wurde nicht fertig: " .. tostring(orders_order.status))
 
     addon.DB:GetGuild().workshop.orders = {}
+end
+
+do
+    -- Aus dem Spiel gemeldet (0.9.113): Im Freitext-Auftrag ließ sich kein
+    -- Beruf wählen. Das Aufklappmenü lag 60 Ebenen über dem FENSTER - der
+    -- Dialog liegt 80 darüber, also verschwand es dahinter. Es zählt die
+    -- Ebene des Knopfes, nicht die des Fensters.
+    orders_page = addon.UI.pages.WORKSHOP
+    addon.UI:OpenOrderCreateDialog()
+    orders_result = orders_page.orderCreateDialog
+    assert(orders_result.professionDropdown.shown == true,
+        "Der Freitext-Dialog zeigt die Berufswahl nicht")
+    orders_result.professionDropdown:PlacePopup()
+    assert(orders_result.professionDropdown.popup.frameLevel
+        > orders_result:GetFrameLevel(),
+        "Das Aufklappmenü der Berufswahl liegt hinter seinem Dialog: "
+            .. tostring(orders_result.professionDropdown.popup.frameLevel)
+            .. " gegen " .. tostring(orders_result:GetFrameLevel()))
+    -- Und die Auswahl kommt an.
+    orders_result.professionDropdown:SetValue("Schneiderei")
+    assert(orders_result.professionDropdown.value == "Schneiderei",
+        "Die Berufswahl merkt sich nichts")
+    orders_result:Hide()
+
+    -- Der Tracker-Knopf trägt "Tracker ausblenden" - bei 96 px stand dort
+    -- "Tracker einble…".
+    assert((orders_page.ordersView.trackerToggle.width or 0) >= 140,
+        "Der Tracker-Knopf ist zu schmal für seine Beschriftung: "
+            .. tostring(orders_page.ordersView.trackerToggle.width))
+end
+
+do
+    -- Die Gildenaufträge haben einen eigenen Navigationspunkt bekommen: Die
+    -- Umschalter oben rechts waren "zu versteckt, muss man erstmal wissen".
+    nav_ordersTab = nil
+    nav_catalogTab = nil
+    for _, tab in ipairs(addon.UI.tabs) do
+        if tab.key == "WORKSHOP" then
+            if tab.view == "ORDERS" then
+                nav_ordersTab = tab
+            else
+                nav_catalogTab = tab
+            end
+        end
+    end
+    assert(nav_ordersTab ~= nil, "Die Gildenaufträge haben keinen Navigationspunkt")
+    assert(nav_catalogTab ~= nil, "Der Katalog hat seinen Navigationspunkt verloren")
+
+    nav_ordersTab.scripts.OnClick(nav_ordersTab)
+    assert(addon.UI.activePage == "WORKSHOP",
+        "Der Auftrags-Navigationspunkt öffnet die Werkstatt nicht")
+    assert(addon.UI.pages.WORKSHOP.workshopView == "ORDERS",
+        "Der Auftrags-Navigationspunkt zeigt nicht das Board")
+    assert(nav_ordersTab.active == true and nav_catalogTab.active == false,
+        "Der leuchtende Navigationspunkt folgt der Ansicht nicht")
+
+    nav_catalogTab.scripts.OnClick(nav_catalogTab)
+    assert(addon.UI.pages.WORKSHOP.workshopView == "CATALOG",
+        "Der Werkstatt-Navigationspunkt kehrt nicht zum Katalog zurück")
+    assert(nav_catalogTab.active == true and nav_ordersTab.active == false,
+        "Der leuchtende Navigationspunkt folgt dem Rücksprung nicht")
+end
+
+do
+    -- Fenstergröße an der Ecke ziehen (aus dem Spiel gewünscht). Gezogen wird
+    -- der Maßstab; die Ecke folgt dem Zeiger, weil das Fenster dabei oben
+    -- links verankert liegt.
+    window_settings = addon.DB:GetSettings().window
+    window_settings.scale = 100
+    addon.UI:ApplyWindowLook()
+    cursorX, cursorY = 800, 200
+    addon.UI:BeginWindowResize()
+    addon.UI:StepWindowResize()
+    assert(window_settings.scale == 78,
+        "Das Ziehen rechnet den Maßstab falsch: " .. tostring(window_settings.scale))
+    assert(addon.UI.frame.scale == 0.78,
+        "Der gezogene Maßstab erreicht das Fenster nicht: " .. tostring(addon.UI.frame.scale))
+
+    -- Die Grenzen sind dieselben wie beim Regler in den Einstellungen.
+    cursorX = 4000
+    addon.UI:StepWindowResize()
+    assert(window_settings.scale == 130, "Das Ziehen läuft über 130 % hinaus: "
+        .. tostring(window_settings.scale))
+    cursorX = 10
+    addon.UI:StepWindowResize()
+    assert(window_settings.scale == 70, "Das Ziehen läuft unter 70 % hinaus: "
+        .. tostring(window_settings.scale))
+    addon.UI:EndWindowResize()
+    assert(addon.UI.frame.resizing == false, "Das Ziehen hört nicht auf")
+    -- Nach dem Ziehen zeigt der Regler in den Einstellungen denselben Wert.
+    assert(addon.UI.pages.SETTINGS.windowScaleStepper.value == 70,
+        "Der Regler folgt der gezogenen Ecke nicht")
+
+    window_settings.scale = 100
+    addon.UI:ApplyWindowLook()
+    addon.UI:RefreshSettings()
+    cursorX, cursorY = 0, 0
 end
 
 do

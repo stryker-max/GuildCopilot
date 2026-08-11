@@ -99,6 +99,12 @@ local TAB_DEFINITIONS = {
     { key = "INBOX", section = "REKRUTIERUNG", label = "Postfach", icon = "Interface\\Icons\\INV_Letter_05" },
     { key = "MEMBERCARE", section = "GILDE", label = "Mitgliederpflege", icon = "Interface\\Icons\\INV_Misc_Note_06" },
     { key = "WORKSHOP", section = "GILDE", label = "Gildenwerkstatt", icon = "Interface\\Icons\\INV_Hammer_20" },
+    -- Zwei Navigationspunkte auf dieselbe Seite: Die Werkstatt hat zwei
+    -- Ansichten, und die Umschalter oben rechts waren aus der Gilde als
+    -- "zu versteckt, muss man erstmal wissen" zurueckgekommen. Wer die
+    -- Auftraege sucht, findet sie jetzt dort, wo er alles andere auch findet.
+    { key = "ORDERS", page = "WORKSHOP", view = "ORDERS", section = "GILDE",
+        label = "Gildenaufträge", icon = "Interface\\Icons\\INV_Scroll_03" },
     { key = "WCL", section = "RAID", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
     { key = "STATISTICS", section = "RAID", label = "Raidauswertung", icon = "Interface\\Icons\\INV_Misc_Book_11" },
     { key = "GEAR", section = "RAID", label = "Ausrüstung", icon = "Interface\\Icons\\INV_Chest_Plate06" },
@@ -469,6 +475,35 @@ local function CreateMark(parent, size)
         end
     end
 
+    return mark
+end
+
+-- Der Mauszeiger in UIParent-Einheiten. Steht hier oben, weil ihn zwei
+-- weit auseinanderliegende Stellen brauchen: der Griff zum Ziehen der
+-- Fenstergroesse und das Minimap-Symbol.
+local function UIScale()
+    return (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+end
+
+local function CursorInUISpace()
+    if type(GetCursorPosition) ~= "function" then
+        return nil, nil
+    end
+    local cursorX, cursorY = GetCursorPosition()
+    if not cursorX or not cursorY then
+        return nil, nil
+    end
+    local scale = UIScale()
+    return cursorX / scale, cursorY / scale
+end
+
+-- Griff zum Ziehen: drei Schraegstriche in der Ecke, wie sie jeder kennt.
+local function CreateResizeMark(parent, size, color)
+    local mark = CreateMark(parent, size)
+    mark:AddStroke(0.12, 0.96, 0.96, 0.12, 0.10)
+    mark:AddStroke(0.44, 0.96, 0.96, 0.44, 0.10)
+    mark:AddStroke(0.76, 0.96, 0.96, 0.76, 0.10)
+    mark:SetColor(color or THEME.muted)
     return mark
 end
 
@@ -1129,8 +1164,8 @@ local function CreateChoiceDropdown(parent, width, options, onSelected, openBelo
     local popup = CreatePanel(popupHost, THEME.input, THEME.accent)
     popup:SetSize(width, (visibleRows * ROW_HEIGHT) + 8)
     popup:SetFrameStrata(popupHost.GetFrameStrata and popupHost:GetFrameStrata() or "DIALOG")
-    local hostLevel = popupHost.GetFrameLevel and popupHost:GetFrameLevel() or 1
-    popup:SetFrameLevel((hostLevel or 1) + 60)
+    -- Die Rahmenebene setzt PlacePopup bei jedem Aufklappen; eine feste Zahl
+    -- hier wäre für Dropdowns in Dialogen zu niedrig.
     popup:Hide()
     dropdown.popup = popup
 
@@ -1144,6 +1179,13 @@ local function CreateChoiceDropdown(parent, width, options, onSelected, openBelo
     -- reicht, sonst nach unten. GetTop und GetBottom messen beide vom unteren
     -- Bildschirmrand.
     function dropdown:PlacePopup()
+        -- Die Rahmenebene erst beim Aufklappen, und relativ zum KNOPF statt
+        -- zum Fenster: Ein Dropdown in einem Dialog liegt achtzig Ebenen über
+        -- dem Fenster. Ein beim Aufbau gesetzter fester Wert lag darunter -
+        -- das Menü öffnete sich hinter dem Dialog, war unsichtbar und nicht
+        -- anklickbar. Genau so ließ sich im Freitext-Auftrag kein Beruf
+        -- wählen.
+        popup:SetFrameLevel((self:GetFrameLevel() or 1) + 20)
         popup:ClearAllPoints()
         local needed = popup:GetHeight() + 5
         local spaceAbove = UIParent:GetHeight() - (self:GetTop() or 0)
@@ -1347,7 +1389,50 @@ function GC.UI:CreateMainFrame()
     -- Ist alles erledigt, bleibt die Erfolgsmeldung bis zum Schliessen stehen.
     frame:SetScript("OnHide", function()
         GC.Onboarding:NoteWindowClosed()
+        GC.UI:EndWindowResize()
     end)
+
+    -- Der Griff in der unteren rechten Ecke. Losgelassen wird über den
+    -- Mausknopf selbst und nicht über OnMouseUp: Wer beim Ziehen aus dem
+    -- Griff herausfährt, bekäme sonst nie ein Ende und das Fenster bliebe am
+    -- Zeiger kleben.
+    local grip = CreateFrame("Button", nil, frame)
+    grip:SetSize(18, 18)
+    grip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -3, 3)
+    grip:EnableMouse(true)
+    grip.mark = CreateResizeMark(grip, 14)
+    grip.mark:SetPoint("CENTER", grip, "CENTER", 0, 0)
+    grip:SetScript("OnEnter", function(self)
+        self.mark:SetColor(THEME.accent)
+        if not GameTooltip then
+            return
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+        GameTooltip:SetText(GC.L("Fenstergröße ziehen"))
+        GameTooltip:AddLine("Zieh die Ecke, um das Fenster kleiner oder größer zu machen."
+            .. " Derselbe Wert steht als Regler in den Einstellungen.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    grip:SetScript("OnLeave", function(self)
+        self.mark:SetColor(THEME.muted)
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+    grip:SetScript("OnMouseDown", function(self)
+        GC.UI:BeginWindowResize()
+        self:SetScript("OnUpdate", function()
+            if type(IsMouseButtonDown) == "function" and not IsMouseButtonDown("LeftButton") then
+                GC.UI:EndWindowResize()
+                return
+            end
+            GC.UI:StepWindowResize()
+        end)
+    end)
+    grip:SetScript("OnMouseUp", function()
+        GC.UI:EndWindowResize()
+    end)
+    frame.resizeGrip = grip
 
     local sidebar = CreatePanel(frame, THEME.sidebar, THEME.sidebar)
     sidebar:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -59)
@@ -1375,13 +1460,22 @@ function GC.UI:CreateMainFrame()
             sectionLabel:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 14, navigationY)
             navigationY = navigationY - NAV_SECTION_HEIGHT
         end
-        local pageKey = definition.key
+        -- "page" und "view" sind optional: Ohne sie ist der Punkt eine eigene
+        -- Seite, mit ihnen eine bestimmte Ansicht einer geteilten Seite.
+        local pageKey = definition.page or definition.key
+        local viewKey = definition.view
         local tab = CreateButton(sidebar, GC.L(definition.label), 160, NAV_TAB_HEIGHT, function()
             self:ShowPage(pageKey)
+            if viewKey then
+                self:SetWorkshopView(viewKey)
+            elseif pageKey == "WORKSHOP" then
+                self:SetWorkshopView("CATALOG")
+            end
         end)
         tab:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 14, navigationY)
         navigationY = navigationY - NAV_TAB_SPACING
         tab.key = pageKey
+        tab.view = viewKey
         tab.label:ClearAllPoints()
         tab.label:SetPoint("LEFT", tab, "LEFT", 43, 0)
         tab.label:SetPoint("RIGHT", tab, "RIGHT", -8, 0)
@@ -1453,15 +1547,103 @@ end
 -- merken sich ihre Position als Versatz zur Bildschirmmitte - ein Maßstab
 -- würde diesen Versatz mitskalieren und die drei unter der Hand verschieben.
 -- Sie sind ohnehin klein; groß ist das Fenster mit seinen 1020 × 690.
+local WINDOW_SCALE_MINIMUM = 70
+local WINDOW_SCALE_MAXIMUM = 130
+
 function GC.UI:ApplyWindowLook()
     if not self.frame then
         return
     end
     local window = GC.DB:GetSettings().window or {}
-    local scale = math.max(70, math.min(130, tonumber(window.scale) or 100))
+    local scale = math.max(WINDOW_SCALE_MINIMUM,
+        math.min(WINDOW_SCALE_MAXIMUM, tonumber(window.scale) or 100))
     local alpha = math.max(40, math.min(100, tonumber(window.alpha) or 100))
     self.frame:SetScale(scale / 100)
     self.frame:SetAlpha(alpha / 100)
+end
+
+-- === Größe ziehen ===========================================================
+--
+-- Aus dem Spiel gemeldet: „Das Fenster sollte rechts unten an der Kante per
+-- Drag and Drop kleiner oder größer gezogen werden können."
+--
+-- Gezogen wird der MASSSTAB, nicht die Kante. Der Grund steht in 0.9.111: Die
+-- dreizehn Seiten sind pixelgenau vermessen, eine echte Größenänderung müsste
+-- jede davon umbrechen. Für die Hand am Mauszeiger ist der Unterschied
+-- trotzdem keiner - die Ecke folgt dem Zeiger, weil das Fenster für die Dauer
+-- des Ziehens oben links verankert wird. Ohne das wüchse es um seine Mitte,
+-- und die Ecke liefe dem Zeiger davon.
+function GC.UI:BeginWindowResize()
+    local frame = self.frame
+    if not frame then
+        return
+    end
+    local scale = frame:GetScale() or 1
+    -- Die obere linke Ecke in Bildschirmeinheiten; sie bleibt liegen.
+    frame.resizeLeft = (frame:GetLeft() or 0) * scale
+    frame.resizeTop = (frame:GetTop() or 0) * scale
+    frame.resizing = true
+    self:AnchorWindowTopLeft(scale)
+end
+
+-- Verankert das Fenster an seiner gemerkten oberen linken Ecke. Die Versätze
+-- eines SetPoint gelten im Maßstab des Fensters - deshalb wird geteilt.
+function GC.UI:AnchorWindowTopLeft(scale)
+    local frame = self.frame
+    if not frame or not frame.resizeLeft then
+        return
+    end
+    scale = scale or frame:GetScale() or 1
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+        frame.resizeLeft / scale, frame.resizeTop / scale)
+end
+
+function GC.UI:StepWindowResize()
+    local frame = self.frame
+    if not frame or not frame.resizing then
+        return
+    end
+    local cursorX = CursorInUISpace()
+    local width = frame:GetWidth() or 0
+    if not cursorX or width <= 0 then
+        return
+    end
+    -- Auf ganze Prozent gerundet, und zwar VOR dem Anwenden: Sonst stünde das
+    -- Fenster auf 78,43 % und der Regler in den Einstellungen auf 78 - ein
+    -- Klick dort ließe es dann sichtbar springen.
+    local percent = math.max(WINDOW_SCALE_MINIMUM, math.min(WINDOW_SCALE_MAXIMUM,
+        math.floor((((cursorX - frame.resizeLeft) / width) * 100) + 0.5)))
+    frame:SetScale(percent / 100)
+    self:AnchorWindowTopLeft(percent / 100)
+    GC.DB:GetSettings().window.scale = percent
+end
+
+function GC.UI:EndWindowResize()
+    local frame = self.frame
+    if not frame then
+        return
+    end
+    frame.resizing = false
+    if frame.resizeGrip then
+        frame.resizeGrip:SetScript("OnUpdate", nil)
+    end
+    -- Der Regler in den Einstellungen zeigt denselben Wert wie die Ecke.
+    self:RefreshSettings()
+end
+
+-- Welcher Navigationspunkt leuchtet? Die Werkstatt teilen sich zwei Punkte;
+-- dort entscheidet zusätzlich die Ansicht, sonst allein die Seite.
+function GC.UI:RefreshTabHighlight()
+    local workshop = self.pages and self.pages.WORKSHOP
+    local workshopView = (workshop and workshop.workshopView) or "CATALOG"
+    for _, tab in ipairs(self.tabs or {}) do
+        local active = tab.key == self.activePage
+        if active and tab.key == "WORKSHOP" then
+            active = (tab.view or "CATALOG") == workshopView
+        end
+        tab:SetActive(active)
+    end
 end
 
 function GC.UI:ShowPage(pageKey)
@@ -1474,9 +1656,7 @@ function GC.UI:ShowPage(pageKey)
     for key, page in pairs(self.pages) do
         page:SetShown(key == pageKey)
     end
-    for _, tab in ipairs(self.tabs) do
-        tab:SetActive(tab.key == pageKey)
-    end
+    self:RefreshTabHighlight()
     -- Die aufgeschlagene Seite wird immer neu gezeichnet, auch wenn sie nicht
     -- als veraltet vorgemerkt war: Ein Klick auf einen Reiter soll den
     -- aktuellen Stand zeigen, nicht den von vorhin.
@@ -5473,6 +5653,8 @@ function GC.UI:SetWorkshopView(view)
             page.ordersView.scroll:SetVerticalScroll(0)
         end
     end
+    -- Die Ansicht entscheidet mit, welcher Navigationspunkt leuchtet.
+    self:RefreshTabHighlight()
     self:RefreshWorkshop()
 end
 
@@ -5884,14 +6066,17 @@ function GC.UI:BuildOrdersView(page)
     view.openRows = view.open.rows
     view.closedRows = view.closed.rows
 
-    view.trackerToggle = CreateButton(view, "Tracker", 96, 24, function()
+    -- 150 statt 96: Der Knopf trägt „Tracker ausblenden", und das stand als
+    -- „Tracker einble…" abgeschnitten da (aus dem Spiel gemeldet). Die Breite
+    -- richtet sich nach der längsten Beschriftung, nicht nach der kürzesten.
+    view.trackerToggle = CreateButton(view, "Tracker", 150, 24, function()
         GC.UI:ToggleOrderTracker()
     end)
     view.trackerToggle:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", 0, 0)
 
-    -- Schmaler als bis 0.9.111 (640): Rechts steht jetzt ein dritter Knopf,
-    -- und eine Statusmeldung darf nicht unter ihm hindurchlaufen.
-    view.status = CreateLabel(view, "", { muted = true, width = 396, height = 30, vertical = "TOP" })
+    -- Schmaler als bis 0.9.111 (640): Rechts stehen jetzt drei Knöpfe, und
+    -- eine Statusmeldung darf nicht unter ihnen hindurchlaufen.
+    view.status = CreateLabel(view, "", { muted = true, width = 350, height = 30, vertical = "TOP" })
     view.status:SetPoint("BOTTOMLEFT", view, "BOTTOMLEFT", 0, 0)
 
     view.statsButton = CreateButton(view, "Statistik", 96, 24, function()
@@ -10239,22 +10424,6 @@ local MINIMAP_FREE_DISTANCE = 130
 -- Bildschirmpixel, GetCenter dagegen Koordinaten im Massstab des jeweiligen
 -- Rahmens - und Minimap und UIParent koennen verschieden skaliert sein. Wer
 -- beides ungerechnet vergleicht, misst Unsinn.
-local function UIScale()
-    return (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-end
-
-local function CursorInUISpace()
-    if type(GetCursorPosition) ~= "function" then
-        return nil, nil
-    end
-    local cursorX, cursorY = GetCursorPosition()
-    if not cursorX or not cursorY then
-        return nil, nil
-    end
-    local scale = UIScale()
-    return cursorX / scale, cursorY / scale
-end
-
 local function MinimapCenterInUISpace()
     if not Minimap or type(Minimap.GetCenter) ~= "function" then
         return nil, nil
