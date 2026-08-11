@@ -1846,6 +1846,26 @@ local function MarkAuraCounted(participant, spellID)
     return true
 end
 
+-- Der Merker des Eintritts-Scans: Was einmal gezaehlt wurde, liest der Scan
+-- nie wieder als neuen Verbrauch. Er sitzt am Zauber, nicht am Teilnehmer -
+-- die Begruendung steht bei ScanCarriedConsumables.
+local function MarkScanned(participant, spellID)
+    local key = tonumber(spellID)
+    if not key then
+        return false
+    end
+    local scanned = participant.scanned
+    if not scanned then
+        scanned = {}
+        participant.scanned = scanned
+    end
+    if scanned[key] then
+        return false
+    end
+    scanned[key] = true
+    return true
+end
+
 local function RecordConsumable(participant, category, consumable, spellID, spellName)
     participant.consumables[category.key] = (participant.consumables[category.key] or 0) + 1
 
@@ -1897,6 +1917,12 @@ local function CountConsumable(monitor, session, playerName, spellID, spellName,
     if category.track == "AURA" and not MarkAuraCounted(participant, spellID) then
         return
     end
+    -- Was das Kampfprotokoll gezaehlt hat, darf der Eintritts-Scan nicht ein
+    -- zweites Mal zaehlen: Der Buff steht danach noch stundenlang auf dem
+    -- Charakter, und jeder Scan saehe ihn erneut.
+    if category.scan then
+        MarkScanned(participant, spellID)
+    end
     RecordConsumable(participant, category, consumable, spellID, spellName)
 end
 
@@ -1934,12 +1960,29 @@ end
 -- stand deshalb mit lauter Nullen da (im Vergleichslog vom 02.08.2026: 23 von
 -- 25 Teilnehmern ohne Fläschchen).
 --
--- Einmal je Teilnehmer wird deshalb abgelesen, was er beim Eintreten schon
--- traegt. Nur einmal - sonst zaehlte jeder Durchlauf des Anwesenheitsabgleichs
--- denselben Buff erneut. Wer spaeter nachlegt, wird ganz normal ueber das
--- Kampfprotokoll erfasst.
+-- Abgelesen wird deshalb, was jemand schon traegt. Die Frage ist nur, WIE OFT.
+--
+-- Bis 0.9.115 galt: genau einmal je Teilnehmer (`auraScanDone`). Das hatte
+-- zwei Seiten, und beide waren falsch:
+--
+--   * Wer beim ersten Sichtkontakt noch nicht gebufft war, wurde nie wieder
+--     gelesen - ein Scan sieht nur EINEN Augenblick, und der lag oft vor dem
+--     ersten Fläschchen.
+--   * Und der Merker hielt nicht, was er versprach. Am Abend des 09.08.2026
+--     bekamen beim Zonenwechsel von der Höhle des Schlangenschreins ins Auge
+--     23 von 25 Teilnehmern binnen zweier Minuten je eine zusaetzliche
+--     Mahlzeit gutgeschrieben - zu einem Zeitpunkt, an dem das Kampflog
+--     dieser Minuten ueberhaupt kein Ereignis kennt. Gegessen hatte niemand;
+--     der Scan lief erneut und zaehlte, was laengst gezaehlt war.
+--
+-- Der Merker sitzt jetzt am ZAUBER statt am Teilnehmer: Was einmal gezaehlt
+-- wurde, zaehlt der Scan nie wieder - egal, wie oft er laeuft. Damit darf er
+-- bei jedem Anwesenheitsabgleich laufen und schliesst die erste Luecke gleich
+-- mit. Das Kampfprotokoll bleibt davon unberuehrt: Ein echter Zauber ist ein
+-- echter Verbrauch und zaehlt immer, er traegt seine Kennung nur zusaetzlich
+-- in den Merker ein.
 function GC.RaidMonitor:ScanCarriedConsumables(unit, participant)
-    if not participant or participant.auraScanDone or not unit then
+    if not participant or not unit then
         return
     end
     -- Erst ablesen, wenn der Spieler wirklich sichtbar ist: In einer anderen
@@ -1951,16 +1994,9 @@ function GC.RaidMonitor:ScanCarriedConsumables(unit, participant)
     if UnitIsVisible and not UnitIsVisible(unit) then
         return
     end
-    participant.auraScanDone = true
     ForEachBuff(unit, function(spellID, spellName)
         local category, consumable = ResolveConsumable(spellID)
-        if category and category.scan then
-            -- Der Eintritts-Scan setzt denselben Merker wie das Kampfprotokoll:
-            -- Wer beim Betreten gerade isst, wuerde sonst einmal vom Scan und
-            -- Sekunden spaeter erneut vom Aura-Refresh gezaehlt.
-            if category.track == "AURA" and not MarkAuraCounted(participant, spellID) then
-                return
-            end
+        if category and category.scan and MarkScanned(participant, spellID) then
             RecordConsumable(participant, category, consumable, spellID, spellName)
         end
     end)

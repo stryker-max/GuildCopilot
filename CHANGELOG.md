@@ -7,6 +7,23 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.116 – Addon
+
+**Behoben**
+
+- **Doppelt gezählte Mahlzeiten und Buffs.** Beim Zonenwechsel mitten im Raid
+  las Guild Copilot die getragenen Buffs des ganzen Raids erneut ein und
+  schrieb sie noch einmal gut – am 09.08. traf das 23 von 25 Teilnehmern in
+  zwei Minuten. Was einmal gezählt ist, zählt jetzt nie wieder.
+- **Nachträglich aufgetragene Buffs fehlten.** Umgekehrt las das Addon die
+  getragenen Buffs bisher nur ein einziges Mal je Teilnehmer: Wer sein
+  Fläschchen erst nach dem ersten Sichtkontakt aufmachte, stand den ganzen
+  Abend ohne da. Beides ist dieselbe Änderung – gemerkt wird jetzt der
+  einzelne Buff statt „schon geschaut".
+- **Zwei weitere Verbrauchsgegenstände.** Elixier des Mungos und
+  Eisenschildtrank wurden nicht gezählt. Im Log des 09.08. betraf das sieben
+  Elixiere bei einem Spieler und vier Tränke bei zwei weiteren.
+
 ## 0.9.115 – Addon
 
 **Behoben**

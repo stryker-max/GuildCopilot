@@ -45,11 +45,13 @@ export const CONSUMABLE_IDS = [
   16666, 27869,
   35476, 35475, 35478, 35477, 35474,
   28518, 28519, 28520, 28521, 28540,
-  // Fläschchen der destillierten Weisheit - ein Classic-Fläschchen, das in TBC
-  // weiter getrunken wird. Im Kampflog vom 09.08.2026 belegt; ohne diese Zeile
-  // filtert die Abfrage es weg, und der Import zeigt denselben Heiler wieder
-  // als einzigen ohne Fläschchen.
-  17627,
+  // Drei Classic-Gegenstaende, die in TBC weiter benutzt werden und bis
+  // 0.9.115 in keiner der beiden Listen standen: Flaeschchen der destillierten
+  // Weisheit, Elixier des Mungos, Eisenschildtrank. Alle drei sind im Kampflog
+  // vom 09.08.2026 belegt. Ohne diese Zeile filtert die Abfrage sie weg, und
+  // der Import bestaetigt denselben Fehler noch einmal - mit dem Anschein
+  // einer unabhaengigen Quelle.
+  17627, 17538, 28515,
   28490, 28497, 28491, 28493, 28501, 28502, 28503, 28509, 39625, 39627,
   17539, 33720, 33721,
   28017, 28019,

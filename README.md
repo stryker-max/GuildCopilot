@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.115
+# Guild Copilot 0.9.116
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -148,7 +148,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.115.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.116.
 
 ### Warum Windows beim Herunterladen warnt
 

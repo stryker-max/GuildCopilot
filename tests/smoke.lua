@@ -1772,6 +1772,57 @@ assert(healer.dispels == 1, "Der Dispel wurde nicht gezählt")
 assert(liveSession.participants.tester.deaths == 1, "Der Spielertod wurde nicht gezählt")
 assert(liveSession.segment.lastNPCDeath == "Prinz Malchezaar", "Der gestorbene Gegner wurde nicht erfasst")
 
+do
+    -- Der Befund vom 09.08.2026: Beim Zonenwechsel von der Höhle des
+    -- Schlangenschreins ins Auge bekamen 23 von 25 Teilnehmern binnen zweier
+    -- Minuten je eine zusätzliche Mahlzeit gutgeschrieben - in Minuten, in
+    -- denen das Kampflog überhaupt kein Ereignis kennt. Der Eintritts-Scan
+    -- lief erneut und zählte, was das Kampfprotokoll längst gezählt hatte.
+    --
+    -- Der Buff steht nach dem Essen noch eine halbe Stunde auf dem Charakter;
+    -- jeder weitere Scan sieht ihn. Zählen darf er ihn nie wieder.
+    scanBuffs = { { "Sattgegessen", 43764 }, { "Fläschchen der Festigung", 28518 } }
+    function UnitIsVisible()
+        return true
+    end
+    function UnitBuff(_, index)
+        local entry = scanBuffs[index]
+        if not entry then
+            return nil
+        end
+        return entry[1], nil, nil, nil, nil, nil, nil, nil, nil, entry[2]
+    end
+
+    local foodBefore = healer.consumables.FOOD
+    local flaskBefore = healer.consumables.FLASK
+    addon.RaidMonitor:ScanCarriedConsumables("player", healer)
+    assert(healer.consumables.FOOD == foodBefore,
+        "Der Eintritts-Scan zählt eine Mahlzeit erneut, die das Kampfprotokoll schon hatte: "
+            .. tostring(healer.consumables.FOOD) .. " statt " .. tostring(foodBefore))
+    assert(healer.consumables.FLASK == flaskBefore,
+        "Der Eintritts-Scan zählt ein Fläschchen erneut, das das Kampfprotokoll schon hatte: "
+            .. tostring(healer.consumables.FLASK) .. " statt " .. tostring(flaskBefore))
+
+    -- Und zehn Scans später immer noch nicht.
+    for _ = 1, 10 do
+        addon.RaidMonitor:ScanCarriedConsumables("player", healer)
+    end
+    assert(healer.consumables.FOOD == foodBefore and healer.consumables.FLASK == flaskBefore,
+        "Wiederholte Scans treiben die Zahlen hoch")
+
+    -- Die andere Richtung: Was NEU dazukommt, muss der Scan finden. Bis
+    -- 0.9.115 war nach dem ersten Scan Schluss - wer sein Fläschchen erst
+    -- später aufmachte, stand den Abend über ohne da.
+    scanBuffs[#scanBuffs + 1] = { "Elixier des Adepten", 33721 }
+    local elixirBefore = healer.consumables.ELIXIR
+    addon.RaidMonitor:ScanCarriedConsumables("player", healer)
+    assert(healer.consumables.ELIXIR == elixirBefore + 1,
+        "Ein nachträglich aufgetragener Buff wird vom Scan nicht mehr gefunden")
+
+    UnitBuff = nil
+    UnitIsVisible = nil
+end
+
 currentTime = currentTime + 120
 addon.RaidMonitor:CloseSegment(currentTime)
 assert(#liveSession.pulls == 1, "Der Kampfabschnitt wurde nicht als Versuch gewertet")

@@ -298,6 +298,67 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.116 – Die vollständige Gegenprüfung gegen das Kampflog
+
+Der Auftrag des Owners nach dem Fläschchen-Fund: „Schau, ob GCP jetzt alles exakt und richtig erfasst. Es muss wasserdicht sein, keine Fehler erlaubt." Und, nachgeschoben: „Vor allem, dass die Anzahl exakt stimmt und nichts doppelt gezählt wird."
+
+Das ließ sich diesmal wirklich beantworten, und zwar strenger als über Warcraft Logs: Das Kampflog des 09.08. und die gespeicherte Auswertung stammen vom **selben Client desselben Abends**. Der Ereignisstrom ist identisch – jede Abweichung ist ein Befund, keine Messungenauigkeit.
+
+### Wie geprüft wurde
+
+Ein Prüfprogramm lädt `GC.Consumables` aus `Constants.lua` selbst (keine zweite Wahrheit), streamt die 734.689 Logzeilen und wendet exakt die Regeln aus `HandleCombatLogEvent` an: Tränke, Runen, Trommeln, Fläschchen und Elixiere nur aus `SPELL_CAST_SUCCESS` beim Wirkenden, Essen nur aus Aura-Ereignissen beim Ziel, mit derselben 60-Sekunden-Sperre gegen das Weiteressen.
+
+Der erste Durchlauf verglich Summen und fand 24 Abweichungen – aber die Sitzung lief von 19:40 bis 23:28, das Log erst ab 19:48:59. Ein Vergleich von Summen über verschiedene Zeitfenster beweist nichts. Guild Copilot protokolliert jeden Verbrauch aber **mit Zeitstempel**; damit ließ sich seine Zählung auf genau das Logfenster einschränken. Erst dieser Vergleich ist ein Beweis:
+
+**140 von 175 Paaren aus Teilnehmer und Kategorie stimmten exakt.** Bei 17 war das Protokoll gekappt (es hebt nur die letzten 40 Einträge auf) und damit nicht beweisbar. Blieben 14 Überschüsse und 4 Fehlbeträge.
+
+### Der Überschuss: 23 Mahlzeiten, die niemand gegessen hat
+
+Die Überschüsse waren fast alle Essen. Nebeneinandergelegt zeigte sich bei einem Spieler zwölf Einträgen in der Auswertung gegen zehn Aura-Ereignisse im Log – und die beiden Zusatzeinträge lagen zu Zeitpunkten, an denen sein Sattgegessen-Buff längst lief.
+
+Die Gegenprobe über alle Teilnehmer machte es eindeutig: Um **21:42 und 21:43 bekamen 23 von 25 Teilnehmern gleichzeitig** je eine Mahlzeit gutgeschrieben. Das Kampflog kennt zwischen 21:40:01 und 21:43:35 **kein einziges Ereignis** – es ist die Pause, in der der Raid von der Höhle des Schlangenschreins ins Auge zog.
+
+Gegessen hatte niemand. Der Eintritts-Scan lief erneut und zählte, was das Kampfprotokoll längst gezählt hatte.
+
+### Warum der alte Merker nicht half – und der neue hilft
+
+`participant.auraScanDone` saß am TEILNEHMER: „bei dem habe ich schon geschaut". Das ist die falsche Frage. Es kommt nicht darauf an, ob geschaut wurde, sondern ob **dieser Buff** schon gezählt ist – ein Fläschchen steht danach noch zwei Stunden auf dem Charakter, ein Sattgegessen eine halbe, und jeder weitere Blick sieht sie wieder.
+
+Der Merker sitzt jetzt am ZAUBER (`participant.scanned[spellID]`), und beide Zählwege tragen dort ein: Der Scan zählt nur, was noch nicht drinsteht; das Kampfprotokoll zählt immer – ein echter Zauber ist ein echter Verbrauch – und vermerkt die Kennung zusätzlich.
+
+Das behebt beide Richtungen desselben Fehlers auf einmal:
+
+- **Zu viel** kann nicht mehr entstehen, egal wie oft der Scan läuft.
+- **Zu wenig** auch nicht mehr: Weil Doppelzählung jetzt strukturell ausgeschlossen ist, darf der Scan bei **jedem** Anwesenheitsabgleich laufen statt nur einmal. Wer sein Fläschchen erst nach dem ersten Sichtkontakt aufmacht, wird jetzt gefunden – die Lücke, die in `docs/TODO-naechste-sitzung.md` als offener Punkt stand.
+
+Gegen die echten Daten nachgerechnet: Bei **allen 19 überprüften Betroffenen** des 21:42-Scans war der Essenszauber vorher bereits gezählt. Der neue Merker hätte jeden dieser Zusatzzähler verhindert – ausnahmslos.
+
+### Die Fehlbeträge: zwei weitere unbekannte Kennungen
+
+Nach dem Eintrag des Fläschchens aus 0.9.115 blieben vier Fehlbeträge, und alle vier waren wieder fehlende Kennungen. Gefunden wurden sie über eine Signatur, die kein Klassenzauber haben kann: **derselbe Zauber, gewirkt von Spielern mehrerer Klassen, der sich selbst bufft** – das kann nur etwas aus der Tasche sein. Die Kategorie folgt der im Log gemessenen Wirkdauer:
+
+| Kennung | Name | Klassen | Dauer | Kategorie |
+|---|---|---|---|---|
+| 17627 | Destillierte Weisheit | – | – | Fläschchen (0.9.115) |
+| 17538 | Elixier des Mungos | 2 | 63 Min | Elixier |
+| 28515 | Eisenschild | 2 | 2 Min | Trank |
+
+Betroffen waren sieben Elixiere bei einem Spieler und vier Tränke bei zwei weiteren. Alle anderen Kandidaten dieser Signatur waren Schmuckstück-Procs (Segen des Silberwappens, Kampfeslust), Völkerfähigkeiten (Wille der Verlassenen, Kochendes Blut) oder Kurioses (Angeln, Arrrr!) – sie bleiben bewusst draußen.
+
+### Was ehrlicherweise offen bleibt
+
+- **17 Paare sind nicht beweisbar.** Das Verbrauchsprotokoll hebt je Teilnehmer die letzten 40 Einträge auf; bei sechs Vielverbrauchern wurden bis zu 16 verworfen. Die ZÄHLER sind davon unberührt und vollständig – nur die nachträgliche Beweisführung endet dort. Ein höheres Limit wäre möglich, kostet aber Platz in den SavedVariables; das ist eine Entscheidung des Owners.
+- **Geprüft ist ein Abend.** Ein Kampflog liegt auf der Platte, die anderen Abende sind nicht gegenprüfbar.
+- **Die Prüfung selbst ist kein Test der Auslieferung**, sondern ein Werkzeug im Scratchpad. Was daraus dauerhaft bleibt, sind die Regressionstests.
+
+### Geändert
+
+- `RaidMonitor.lua`: `MarkScanned` als Merker je Zauber, `ScanCarriedConsumables` ohne `auraScanDone` und damit wiederholbar, das Kampfprotokoll trägt gezählte Kennungen in den Merker ein;
+- `Constants.lua`: `[17538]` Elixier des Mungos, `[28515]` Eisenschildtrank, beide mit Beleg;
+- `Companion/WCL-Import.mjs`: dieselben Kennungen in der Übertragungsliste;
+- `tests/smoke.lua`: Der Scan nach dem Kampfprotokoll zählt nicht doppelt, zehn Scans hintereinander ändern nichts, ein nachträglich aufgetragener Buff wird gefunden;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.116.
+
 ## 0.9.115 – Der Einzige von 25 ohne Fläschchen
 
 „Mîasanmîa hat angeblich keine Cons genutzt, hatte er aber." Eine Meldung dieser Art ist die wertvollste, die ein Zählwerk bekommen kann – und die einzige Art, die sich nicht durch Nachdenken beantworten lässt, sondern nur durch Daten.

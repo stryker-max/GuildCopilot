@@ -221,22 +221,30 @@ Stückzahlen in Zeile und Statistik, Fenstergröße und Deckkraft,
 Freitext-Aufträge über den Beruf als Schlüssel, Herstellen aus dem Cockpit
 samt selbst mitgezähltem Fortschritt.
 
-### Offen aus 0.9.115: der Eintritts-Scan liest nur einmal
+### Erledigt in 0.9.116: der Eintritts-Scan
 
-`RaidMonitor:ScanCarriedConsumables` setzt `participant.auraScanDone` beim
-ersten Moment, in dem ein Spieler existiert und sichtbar ist – und liest ihn
-nie wieder. Wer in diesem Augenblick noch nicht gebufft war, wird für den Rest
-des Abends nur noch über das Kampfprotokoll erfasst; alles vor Sitzungsbeginn
-Aufgetragene bleibt unsichtbar.
+Der Merker sitzt jetzt am Zauber statt am Teilnehmer; der Scan darf damit bei
+jedem Anwesenheitsabgleich laufen, ohne je doppelt zu zählen. Einzelheiten im
+ROADMAP-Abschnitt 0.9.116.
 
-Der Umbau: Merker je **Zauber-ID** statt je Teilnehmer
-(`participant.scanCounted[spellID]`), dann darf bei jedem Anwesenheitsabgleich
-neu gelesen werden. Damit ein Buff nicht doppelt zählt, muss auch der
-Kampfprotokoll-Pfad die Kennung im Merker eintragen – der Scan zählt nur, was
-noch nicht darin steht, während ein echter Zauber immer zählt.
+### Offen: Vollständigkeit des Verbrauchsprotokolls
 
-Nicht die Ursache des Falls vom 09.08.2026 (das war eine fehlende Kennung),
-aber dieselbe Art Lücke.
+Die Gegenprüfung gegen das Kampflog vom 09.08.2026 blieb bei 17 von 175
+Paaren ohne Beweis, weil `BuildSummary` je Teilnehmer nur die letzten **40**
+Protokolleinträge aufhebt (`consumableLogDropped` zählt die verworfenen).
+Bei Vielverbrauchern fielen bis zu 16 Einträge weg.
+
+Die **Zähler selbst sind davon unberührt** – nur die nachträgliche
+Beweisführung endet dort. Ein höheres Limit (die Laufzeitgrenze liegt bei 100)
+macht künftige Prüfungen lückenlos, kostet aber Platz in den SavedVariables:
+rund 25 Teilnehmer × 60 zusätzliche Einträge je Abend. Entscheidung des Owners.
+
+### Offen: weitere Abende gegenprüfen
+
+Geprüft ist ein einziger Abend, weil nur ein Kampflog auf der Platte liegt.
+Wer künftig mitloggt (`/combatlog`), macht denselben Abgleich für weitere
+Abende möglich – die Prüfwerkzeuge dafür stehen im Sitzungs-Scratchpad und
+sind in 0.9.116 beschrieben.
 
 **Im Spiel zu prüfen, weil die Tests dort nicht hinreichen:**
 

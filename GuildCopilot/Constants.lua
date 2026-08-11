@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.115",
+    VERSION = "0.9.116",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -401,6 +401,14 @@ GC.Consumables = {
     -- Der Zaubername stammt damit aus dem Spielclient selbst.
     [17627] = { category = "FLASK", name = "Fläschchen der destillierten Weisheit",
         nameEN = "Flask of Distilled Wisdom" },                                                                -- Item 13511
+    -- Zwei weitere Kennungen aus demselben Kampflog. Gefunden wurden sie ueber
+    -- eine Signatur, die kein Klassenzauber haben kann: gewirkt von Spielern
+    -- MEHRERER KLASSEN und dabei sich selbst buffend - das kann nur etwas aus
+    -- der Tasche sein. Die Kategorie folgt der gemessenen Wirkdauer.
+    [17538] = { category = "ELIXIR", name = "Elixier des Mungos",
+        nameEN = "Elixir of the Mongoose" },     -- Item 13452, gemessen 63 Min
+    [28515] = { category = "POTION", name = "Eisenschildtrank",
+        nameEN = "Ironshield Potion" },          -- Item 22849, gemessen 2 Min
     [28490] = { category = "ELIXIR", name = "Elixier der übermächtigen Stärke", nameEN = "Elixir of Major Strength" },        -- Item 22824
     [28497] = { category = "ELIXIR", name = "Elixier der übermächtigen Beweglichkeit", nameEN = "Elixir of Major Agility" },  -- Item 22831
     [28491] = { category = "ELIXIR", name = "Elixier der Heilkraft", nameEN = "Elixir of Healing Power" },     -- Item 22825
