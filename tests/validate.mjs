@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.109",
+  "## Version: 0.9.110",
 ];
 
 for (const entry of requiredMetadata) {
@@ -990,11 +990,13 @@ for (const text of tourTexts) {
   }
 }
 
-// Das Auftragsboard hat drei Abschnitte untereinander in einer Ansicht ohne
-// Bildlaufleiste. Seit die eigenen Auftraege eine dritte Zeile fuer den
-// Preisrahmen tragen, sind ihre Zeilen hoeher als die der offenen Auftraege -
-// alles darunter rutscht mit. Hier wird nachgerechnet, dass der Inhalt ueber
-// der Statuszeile bleibt.
+// Das Auftragsboard hat vier Abschnitte untereinander, seit 0.9.110 in einem
+// Bildlauf mit wachsendem Zeilenvorrat. Die alte Rechnung "passt der ganze
+// Inhalt auf die Seite?" ist damit hinfaellig - gescrollt wird ohnehin.
+// Geblieben ist die Frage dahinter: Sieht man ohne Scrollen ueberhaupt etwas?
+// Geprueft wird deshalb der schlechteste Fall, in dem alle vier Ueberschriften
+// zugleich stehen: Darunter muss noch eine ganze Zeile der eigenen Auftraege
+// passen, sonst faengt das Board mit einer reinen Ueberschriftenwand an.
 const ordersNumber = (name) => {
   const match = uiSource.match(new RegExp(`local ${name} = (\\d+)`));
   if (!match) throw new Error(`Mass ${name} des Auftragsboards fehlt in UI.lua.`);
@@ -1006,29 +1008,41 @@ const pageTop = Number(
 const pageBottom = Number(
   uiSource.match(/page:SetPoint\("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -\d+, (\d+)\)/)[1]
 );
-const ordersRows = ordersNumber("ORDERS_ROWS_PER_SECTION");
-const ordersRowGap = ordersNumber("ORDERS_ROW_GAP");
-const ordersSection = (headerHeight, rowHeight) =>
-  headerHeight + ordersRows * rowHeight + (ordersRows - 1) * ordersRowGap;
-const ordersContentHeight =
-  ordersSection(ordersNumber("ORDERS_HEADER_HEIGHT"), ordersNumber("ORDERS_MINE_ROW_HEIGHT")) +
-  ordersNumber("ORDERS_SECTION_GAP") +
-  ordersSection(
-    ordersNumber("ORDERS_FILTER_HEADER_HEIGHT"),
-    ordersNumber("ORDERS_OPEN_ROW_HEIGHT")
-  ) +
-  ordersNumber("ORDERS_SECTION_GAP") +
+// Drei Ueberschriften mit ihrer leeren Auskunftszeile, dazu die vierte samt
+// erster Auftragszeile.
+const ordersMinimumHeight =
+  3 *
+    (ordersNumber("ORDERS_HEADER_HEIGHT") +
+      ordersNumber("ORDERS_EMPTY_LINE_HEIGHT") +
+      ordersNumber("ORDERS_SECTION_GAP")) +
   ordersNumber("ORDERS_HEADER_HEIGHT") +
-  ordersRows * ordersNumber("ORDERS_CLOSED_LINE_HEIGHT");
-// Unten stehen Statuszeile und die Knoepfe "Statistik"/"Tracker" (30 px hoch,
-// am unteren Rand verankert); so viel Platz muss frei bleiben.
+  ordersNumber("ORDERS_MINE_ROW_HEIGHT");
 const ordersViewHeight =
-  frameHeight - pageTop - pageBottom - ordersNumber("ORDERS_VIEW_TOP") - 30;
-if (ordersContentHeight > ordersViewHeight) {
+  frameHeight -
+  pageTop -
+  pageBottom -
+  ordersNumber("ORDERS_VIEW_TOP") -
+  ordersNumber("ORDERS_BOTTOM_BAR");
+if (ordersMinimumHeight > ordersViewHeight) {
   throw new Error(
-    `Das Auftragsboard ist zu hoch: Die Abschnitte brauchen ${ordersContentHeight} px, ` +
-      `ueber der Statuszeile stehen ${ordersViewHeight} px zur Verfuegung.`
+    `Das Auftragsboard zeigt keine ganze Zeile mehr: Ueberschriften und erste Zeile ` +
+      `brauchen ${ordersMinimumHeight} px, im Bildlauf stehen ${ordersViewHeight} px.`
   );
+}
+// Die Zeilen duerfen nicht unter der Bildlaufleiste hervorschauen: Sie laeuft
+// rechts in der Spur, die zwischen Zeilenbreite und Seitenbreite frei bleibt.
+const ordersRowWidth = ordersNumber("ORDERS_ROW_WIDTH");
+if (ordersRowWidth > 776 - 12) {
+  throw new Error(
+    `Die Auftragszeilen sind ${ordersRowWidth} px breit und laufen damit unter die ` +
+      `Bildlaufleiste (776 px Seitenbreite, 12 px Spur).`
+  );
+}
+// Der Bildlauf braucht die Gesamthoehe seines Inhalts. Ohne sie bliebe die
+// Leiste stehen, egal wie viele Zeilen darunter warten - genau der Fehler, den
+// das feste Dreierraster hatte.
+if (!/view\.content:SetHeight\(/.test(uiSource)) {
+  throw new Error("Das Auftragsboard setzt die Hoehe seines Bildlaufinhalts nicht.");
 }
 // Die Preiszeile muss in ihre Karte passen - sonst haengt sie in die naechste.
 const orderRowBlock = uiSource.slice(
@@ -1050,7 +1064,7 @@ if (priceBottom > ordersNumber("ORDERS_MINE_ROW_HEIGHT")) {
 }
 // Sie darf auch nicht stumm verschwinden: Nur die eigenen Auftraege bekommen
 // sie, und gefuellt wird sie beim Zeichnen jeder Zeile.
-if (!/BuildOrderRow\(view, ORDERS_MINE_ROW_HEIGHT, true, true\)/.test(uiSource)) {
+if (!/BuildOrderRow\(content, ORDERS_MINE_ROW_HEIGHT, true, true\)/.test(uiSource)) {
   throw new Error("Die Zeilen der eigenen Auftraege werden ohne Preisrahmen-Zeile gebaut.");
 }
 if (!/row\.price:SetText\(OrderPriceFrameLine\(order\)\)/.test(uiSource)) {

@@ -286,6 +286,24 @@ local english = {
     ["DU BIST DRAN"] = "YOUR TURN",
     ["VERZAUBERUNG & SOCKEL"] = "ENCHANT & SOCKETS",
 
+    -- === Auftragsboard (0.9.110) ===========================================
+    -- Die Ueberschriften tragen ihre Anzahl mit und laufen deshalb ueber
+    -- GC.LFormat; die Platzhalter bleiben in beiden Sprachen dieselben.
+    ["DU BIST DRAN  ·  MEINE AUFTRÄGE ({n})"] = "YOUR TURN  ·  MY ORDERS ({n})",
+    ["OFFENE AUFTRÄGE DER GILDE ({n})"] = "OPEN GUILD ORDERS ({n})",
+    ["LÄUFT IN DER GILDE"] = "IN PROGRESS IN THE GUILD",
+    ["LÄUFT IN DER GILDE ({n})"] = "IN PROGRESS IN THE GUILD ({n})",
+    ["ABGESCHLOSSEN ({n})"] = "COMPLETED ({n})",
+    ["{n} abgelehnt"] = "{n} declined",
+    ["{n} fertig"] = "{n} done",
+    ["Gerade läuft nichts für dich – weder als Auftraggeber noch als Hersteller."]
+        = "Nothing is running for you right now – neither as client nor as crafter.",
+    ["Zurzeit ist nichts offen."] = "Nothing is open right now.",
+    ["Sonst ist gerade nichts in Arbeit."] = "Nothing else is in progress right now.",
+    ["Noch nichts abgeschlossen."] = "Nothing completed yet.",
+    ["Nicht für mich"] = "Not for me",
+    ["Wieder einblenden"] = "Show again",
+
     -- === Teilschritt 3: statische Meldungen und Zustände ===================
     ["Abgleich mit der Gilde"] = "Guild sync",
     ["Abmeldung abgelaufen – neu eintragen oder löschen."] = "Absence expired – re-enter or delete it.",

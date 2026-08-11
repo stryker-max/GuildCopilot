@@ -7,6 +7,31 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.110 – Addon
+
+**Neu**
+
+- **Das Auftragsboard scrollt.** Jeder Abschnitt zeigt so viele Aufträge, wie
+  es gibt, statt drei – der vierte Auftrag war bisher zwar gespeichert, aber
+  mit keinem Handgriff erreichbar. Dazu ein eigener Abschnitt „Läuft in der
+  Gilde": Fremde laufende Aufträge standen bis jetzt unter „Meine Aufträge"
+  und verdrängten dort die eigenen.
+- **Aufträge ablehnen.** Der kleine „–"-Knopf blendet einen offenen Auftrag
+  aus, der nichts für einen ist. Das bleibt rein lokal: Für die Gilde ist er
+  weiter offen, niemand erfährt davon, und der Knopf „n abgelehnt" holt alles
+  jederzeit zurück.
+- **Stückzahlen werden gezählt.** Die Auftragsstatistik zeigt jetzt Stück
+  statt nur Aufträge (40 Urnen und ein Ring waren vorher beide „1 erledigt"),
+  mit Gesamtzeile über allen Herstellern.
+
+**Verbessert**
+
+- **Teilfertigung steht in der Zeile.** Ein Auftrag über zehn Stück zeigt
+  „×10 3 fertig", solange er läuft; bisher stand der Zwischenstand nur im
+  Verlaufsdialog.
+- Leere Abschnitte sagen, dass sie leer sind, statt als nackte Überschrift
+  dazustehen.
+
 ## 0.9.109 – Addon
 
 **Verbessert**

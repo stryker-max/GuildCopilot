@@ -5288,6 +5288,14 @@ function GC.UI:SetWorkshopView(view)
     end
     if page.ordersView then
         page.ordersView:SetShown(not catalog)
+        -- Frisch aufgeschlagen steht das Board oben. Nur beim Reiterwechsel,
+        -- nicht bei jeder Datenauffrischung - sonst springt die Liste beim
+        -- Stöbern unter der Hand weg (dieselbe Regel wie in der Spielerliste
+        -- der Ausrüstungsseite).
+        if not catalog and page.ordersView.scroll then
+            page.ordersView.scroll.targetScroll = nil
+            page.ordersView.scroll:SetVerticalScroll(0)
+        end
     end
     self:RefreshWorkshop()
 end
@@ -5382,8 +5390,18 @@ local function OrderRowTitle(order)
     else
         counterpart = "von " .. GC.Util.PlayerShortName(order.createdBy or "?")
     end
+    -- Teilfertigung in der Zeile: „×10 (3 fertig)". Der Stand stand bis
+    -- 0.9.109 nur im Verlaufsdialog, und die Zeile sah nach jedem
+    -- Zwischenschritt unverändert aus - aus der Gilde kam das als „die Menge
+    -- wird nicht gezählt" zurück.
+    local quantity = tonumber(order.quantity) or 1
+    local crafted = tonumber(order.craftedCount) or 0
+    local amount = "×" .. quantity
+    if quantity > 1 and crafted > 0 and crafted < quantity then
+        amount = amount .. "  |cff2ed9e6" .. GC.LFormat("{n} fertig", { n = crafted }) .. "|r"
+    end
     return (order.recipeName or order.recipeKey or "?")
-        .. " ×" .. (order.quantity or 1)
+        .. " " .. amount
         .. "  ·  " .. counterpart
         .. "  ·  " .. ColoredOrderStatus(order)
 end
@@ -5451,34 +5469,52 @@ local function OrderPriceFrameLine(order)
     return "Preisrahmen: " .. table.concat(parts, "  ·  ")
 end
 
--- Maße des Auftragsboards. Sie stehen beisammen, weil die eigenen Aufträge
--- eine Zeile mehr tragen als die offenen und sich damit alles darunter
--- verschiebt; tests/validate.mjs rechnet mit denselben Zahlen nach, dass die
--- Abschnitte einander nicht überlappen und über der Statuszeile bleiben.
+-- Maße des Auftragsboards.
+--
+-- Bis 0.9.109 standen hier drei feste Zeilen je Abschnitt in einer Ansicht
+-- ohne Bildlauf. Wer vier Aufträge hatte, sah drei - der vierte existierte,
+-- war aber mit keinem Handgriff erreichbar. Seit 0.9.110 tragen die
+-- Abschnitte einen wachsenden Zeilenvorrat in einem Bildlauf; die Zahlen
+-- beschreiben deshalb je EINE Zeile, nicht mehr die ganze Seite.
 local ORDERS_VIEW_TOP = 66
-local ORDERS_ROWS_PER_SECTION = 3
 local ORDERS_MINE_ROW_HEIGHT = 58
 local ORDERS_OPEN_ROW_HEIGHT = 44
 local ORDERS_ROW_GAP = 4
 local ORDERS_HEADER_HEIGHT = 19
--- Die Überschrift der offenen Aufträge trägt rechts den Filterknopf und
--- braucht deshalb etwas mehr Luft als die anderen beiden.
+-- Die Überschrift der offenen Aufträge trägt rechts zwei Knöpfe und braucht
+-- deshalb etwas mehr Luft als die anderen.
 local ORDERS_FILTER_HEADER_HEIGHT = 23
 local ORDERS_SECTION_GAP = 9
 local ORDERS_CLOSED_LINE_HEIGHT = 17
+-- Eine Auskunftszeile statt einer Überschrift, unter der nichts steht.
+local ORDERS_EMPTY_LINE_HEIGHT = 17
+-- Unten am Rand stehen Statuszeile, „Statistik" und „Tracker"; so viel Platz
+-- bleibt unter dem Bildlauf frei. tests/validate.mjs rechnet damit nach, dass
+-- selbst der höchste Abschnitt noch eine ganze Zeile zeigt, bevor gescrollt
+-- werden muss.
+local ORDERS_BOTTOM_BAR = 34
+-- Die Zeilen sind schmaler als die Seite (776): Rechts läuft die Spur der
+-- Bildlaufleiste mit.
+local ORDERS_ROW_WIDTH = 760
 
-local function BuildOrderRow(parent, height, withPrimary, withPrice)
+local function BuildOrderRow(parent, height, withPrimary, withPrice, withDecline)
     local row = CreatePanel(parent, THEME.card)
-    row:SetSize(776, height)
-    row.title = CreateLabel(row, "", { width = 470, height = 16 })
+    row:SetSize(ORDERS_ROW_WIDTH, height)
+    -- Was rechts an Knöpfen steht, fehlt dem Text. Ausgerechnet statt fest
+    -- eingetragen, weil die offenen Aufträge seit dem Ablehnen einen Knopf
+    -- mehr tragen als die eigenen - eine feste Zahl wäre für eine der beiden
+    -- Zeilenarten falsch.
+    local textWidth = ORDERS_ROW_WIDTH - 14 - 10 - 74 - 6 - 28 - 6
+        - (withPrimary and 174 or 0) - (withDecline and 34 or 0)
+    row.title = CreateLabel(row, "", { width = textWidth, height = 16 })
     row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -7)
-    row.detail = CreateLabel(row, "", { muted = true, width = 470, height = 15 })
+    row.detail = CreateLabel(row, "", { muted = true, width = textWidth, height = 15 })
     row.detail:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -25)
     if withPrice then
         row.price = CreateLabel(row, "", {
             muted = true,
             font = "GameFontNormalSmall",
-            width = 470,
+            width = textWidth,
             height = 14,
         })
         row.price:SetPoint("TOPLEFT", row, "TOPLEFT", 14, -42)
@@ -5496,6 +5532,46 @@ local function BuildOrderRow(parent, height, withPrimary, withPrice)
         end
     end)
     row.cancelButton:SetPoint("RIGHT", row.logButton, "LEFT", -6, 0)
+    local leftmost = row.cancelButton
+    if withDecline then
+        -- Ablehnen ist rein lokal: Es blendet den Auftrag bei einem selbst
+        -- aus und lässt ihn für die Gilde offen. Der Knopf sitzt bewusst
+        -- NICHT auf dem Platz des Abbrechen-×, obwohl die beiden sich nie
+        -- begegnen - zwei verschieden folgenreiche Aktionen dürfen sich
+        -- keinen Platz teilen.
+        row.declineButton = CreateButton(row, "–", 28, 28, function(button)
+            if row.orderID then
+                GC.Orders:SetDeclined(row.orderID, not button.declined)
+                GC.UI:RefreshOrdersBoard()
+            end
+        end)
+        row.declineButton:SetPoint("RIGHT", row.cancelButton, "LEFT", -6, 0)
+        row.declineButton:SetScript("OnEnter", function(button)
+            if not button.active then
+                SetTextureColor(button.background, THEME.cardHover)
+            end
+            if not GameTooltip then
+                return
+            end
+            GameTooltip:SetOwner(button, "ANCHOR_TOP")
+            if button.declined then
+                GameTooltip:SetText(GC.L("Wieder einblenden"))
+                GameTooltip:AddLine("Holt den Auftrag zurück in deine Liste.", 1, 1, 1, true)
+            else
+                GameTooltip:SetText(GC.L("Nicht für mich"))
+                GameTooltip:AddLine("Blendet den Auftrag nur bei dir aus. Für die Gilde"
+                    .. " bleibt er offen, und niemand erfährt davon.", 1, 1, 1, true)
+            end
+            GameTooltip:Show()
+        end)
+        row.declineButton:SetScript("OnLeave", function(button)
+            button:SetActive(button.active)
+            if GameTooltip then
+                GameTooltip:Hide()
+            end
+        end)
+        leftmost = row.declineButton
+    end
     if withPrimary then
         row.primary = CreateButton(row, "", 168, 28, function()
             if row.orderID and row.primaryHandler then
@@ -5503,10 +5579,67 @@ local function BuildOrderRow(parent, height, withPrimary, withPrice)
                 GC.UI:SetOrdersStatus(message, ok)
             end
         end, "PRIMARY")
-        row.primary:SetPoint("RIGHT", row.cancelButton, "LEFT", -6, 0)
+        row.primary:SetPoint("RIGHT", leftmost, "LEFT", -6, 0)
     end
     row:Hide()
     return row
+end
+
+-- === Abschnitte des Boards ==================================================
+--
+-- Ein Abschnitt besteht aus seiner Überschrift, einem wachsenden Zeilenvorrat
+-- und der Zeile für den leeren Fall. Eine Zeile entsteht erst, wenn es sie zu
+-- zeigen gilt, und wird danach wiederverwendet: Bei zwei Aufträgen kostet das
+-- Board zwei Zeilen, nicht sechzig.
+local function CreateOrderSection(content, headerText, emptyText, indent, factory)
+    local section = {
+        header = CreateLabel(content, headerText, { muted = true, width = 460, height = 15 }),
+        empty = CreateLabel(content, emptyText, { muted = true, width = 700, height = 15 }),
+        rows = {},
+        indent = indent,
+        factory = factory,
+    }
+    section.empty:Hide()
+    return section
+end
+
+local function OrderSectionRow(section, index)
+    local row = section.rows[index]
+    if not row then
+        row = section.factory()
+        section.rows[index] = row
+    end
+    return row
+end
+
+-- Hängt einen Abschnitt an den laufenden Abstand und liefert dessen neuen
+-- Stand zurück. Positioniert wird bei jedem Zeichnen neu, weil ein Abschnitt
+-- mit dem Inhalt wächst und schrumpft und alles darunter mitschiebt.
+local function LayoutOrderSection(section, content, cursor, entries, headerHeight, rowHeight, rowGap, fill)
+    section.header:ClearAllPoints()
+    section.header:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -cursor)
+    cursor = cursor + headerHeight
+    for index = 1, #entries do
+        local row = OrderSectionRow(section, index)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", content, "TOPLEFT", section.indent, -cursor)
+        cursor = cursor + rowHeight + rowGap
+        fill(row, entries[index])
+    end
+    for index = #entries + 1, #section.rows do
+        section.rows[index]:Hide()
+    end
+    if #entries > 0 then
+        -- Der Abstand nach der letzten Zeile gehört dem Abschnittsabstand.
+        cursor = cursor - rowGap
+        section.empty:Hide()
+    else
+        section.empty:ClearAllPoints()
+        section.empty:SetPoint("TOPLEFT", content, "TOPLEFT", 14, -cursor)
+        section.empty:Show()
+        cursor = cursor + ORDERS_EMPTY_LINE_HEIGHT
+    end
+    return cursor + ORDERS_SECTION_GAP
 end
 
 function GC.UI:BuildOrdersView(page)
@@ -5516,53 +5649,58 @@ function GC.UI:BuildOrdersView(page)
     view:Hide()
     page.ordersView = view
 
-    -- Der Aufbau läuft von oben nach unten mit einem mitlaufenden Abstand:
-    -- Eine höhere Zeile schiebt so alles Folgende mit, statt feste Zahlen an
-    -- sechs Stellen nachziehen zu müssen.
-    local cursor = 0
+    -- Alles Listenhafte liegt im Bildlauf, die Statuszeile und ihre Knöpfe
+    -- bleiben unten stehen: Wer bis zum letzten Auftrag scrollt, soll den
+    -- Tracker-Knopf nicht suchen müssen.
+    local listArea = CreateFrame("Frame", nil, view)
+    listArea:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
+    listArea:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", 0, ORDERS_BOTTOM_BAR)
+    local scroll = CreateModernScrollFrame(listArea)
+    scroll:SetPoint("TOPLEFT", listArea, "TOPLEFT", 0, 0)
+    scroll:SetPoint("BOTTOMRIGHT", listArea, "BOTTOMRIGHT", -14, 0)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetWidth(ORDERS_ROW_WIDTH)
+    content:SetHeight(1)
+    scroll:SetScrollChild(content)
+    view.scroll = scroll
+    view.content = content
 
-    view.mineHeader = CreateLabel(view, "DU BIST DRAN", { muted = true, width = 500, height = 15 })
-    view.mineHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
-    cursor = cursor + ORDERS_HEADER_HEIGHT
-    view.mineRows = {}
-    for index = 1, ORDERS_ROWS_PER_SECTION do
-        local row = BuildOrderRow(view, ORDERS_MINE_ROW_HEIGHT, true, true)
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
-        cursor = cursor + ORDERS_MINE_ROW_HEIGHT + ORDERS_ROW_GAP
-        view.mineRows[index] = row
-    end
-    cursor = cursor - ORDERS_ROW_GAP + ORDERS_SECTION_GAP
+    view.mine = CreateOrderSection(content, "DU BIST DRAN",
+        "Gerade läuft nichts für dich – weder als Auftraggeber noch als Hersteller.",
+        0, function()
+            return BuildOrderRow(content, ORDERS_MINE_ROW_HEIGHT, true, true)
+        end)
+    view.open = CreateOrderSection(content, "OFFENE AUFTRÄGE DER GILDE",
+        "Zurzeit ist nichts offen.", 0, function()
+            return BuildOrderRow(content, ORDERS_OPEN_ROW_HEIGHT, true, false, true)
+        end)
+    view.others = CreateOrderSection(content, "LÄUFT IN DER GILDE",
+        "Sonst ist gerade nichts in Arbeit.", 0, function()
+            return BuildOrderRow(content, ORDERS_OPEN_ROW_HEIGHT, false)
+        end)
+    view.closed = CreateOrderSection(content, "ABGESCHLOSSEN",
+        "Noch nichts abgeschlossen.", 14, function()
+            return CreateLabel(content, "", { muted = true, width = 700, height = 15 })
+        end)
 
-    view.openHeader = CreateLabel(view, "OFFENE AUFTRÄGE DER GILDE",
-        { muted = true, width = 500, height = 15 })
-    view.openHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
-    view.openFilter = CreateButton(view, "nur machbare", 128, 24, function()
+    -- Die beiden Knöpfe der Überschrift „offene Aufträge". Sie liegen im
+    -- Bildlauf und wandern deshalb mit ihrer Überschrift; ihre Höhe von 24
+    -- gegenüber 15 gleicht das Anheben um vier Pixel aus.
+    view.openFilter = CreateButton(content, "nur machbare", 128, 24, function()
         page.ordersShowAll = not page.ordersShowAll
         GC.UI:RefreshOrdersBoard()
     end)
-    -- Der Knopf ist höher als die Überschrift und sitzt deshalb vier Pixel
-    -- weiter oben, damit beide auf derselben Mittellinie liegen.
-    view.openFilter:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, -(cursor - 4))
-    cursor = cursor + ORDERS_FILTER_HEADER_HEIGHT
-    view.openRows = {}
-    for index = 1, ORDERS_ROWS_PER_SECTION do
-        local row = BuildOrderRow(view, ORDERS_OPEN_ROW_HEIGHT, true)
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
-        cursor = cursor + ORDERS_OPEN_ROW_HEIGHT + ORDERS_ROW_GAP
-        view.openRows[index] = row
-    end
-    cursor = cursor - ORDERS_ROW_GAP + ORDERS_SECTION_GAP
+    view.declinedToggle = CreateButton(content, "Abgelehnte", 132, 24, function()
+        page.ordersShowDeclined = not page.ordersShowDeclined
+        GC.UI:RefreshOrdersBoard()
+    end)
+    view.declinedToggle:Hide()
 
-    view.closedHeader = CreateLabel(view, "ABGESCHLOSSEN", { muted = true, width = 500, height = 15 })
-    view.closedHeader:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -cursor)
-    cursor = cursor + ORDERS_HEADER_HEIGHT
-    view.closedRows = {}
-    for index = 1, ORDERS_ROWS_PER_SECTION do
-        local row = CreateLabel(view, "", { muted = true, width = 700, height = 15 })
-        row:SetPoint("TOPLEFT", view, "TOPLEFT", 14, -cursor)
-        cursor = cursor + ORDERS_CLOSED_LINE_HEIGHT
-        view.closedRows[index] = row
-    end
+    -- Die Zeilen der einzelnen Abschnitte bleiben unter ihren gewohnten Namen
+    -- erreichbar: Der Vorrat wächst, die Zugriffe darauf ändern sich nicht.
+    view.mineRows = view.mine.rows
+    view.openRows = view.open.rows
+    view.closedRows = view.closed.rows
 
     view.trackerToggle = CreateButton(view, "Tracker", 96, 24, function()
         GC.UI:ToggleOrderTracker()
@@ -5598,6 +5736,11 @@ local function FillOrderRow(row, boardRow, isOpenSection)
     local order = boardRow.order
     row.orderID = order.id
     row.title:SetText(OrderRowTitle(order))
+    if row.declineButton then
+        row.declineButton.declined = boardRow.declined == true
+        row.declineButton:SetText(boardRow.declined and "+" or "–")
+        row.declineButton:SetActive(boardRow.declined == true)
+    end
     if isOpenSection then
         row.detail:SetText(OrderOfferLine(order))
         row.primaryHandler = function(id)
@@ -5613,6 +5756,17 @@ local function FillOrderRow(row, boardRow, isOpenSection)
             row.detail:SetText("Kein Charakter deines Accounts kann dieses Rezept  ·  "
                 .. OrderOfferLine(order))
         end
+        if boardRow.declined then
+            row.detail:SetText("|cff8f9ba8Abgelehnt – nur für dich ausgeblendet|r  ·  "
+                .. OrderOfferLine(order))
+        end
+    elseif boardRow.involved == false then
+        -- Fremde laufende Aufträge: Hier gibt es nichts zu tun, nur etwas zu
+        -- wissen. Statt der Aufforderung an den anderen steht deshalb, wer
+        -- gerade dran ist und seit wann sich nichts bewegt hat.
+        local waitingFor = boardRow.actor == "CREATOR" and order.createdBy or order.crafter
+        row.detail:SetText(GC.Util.PlayerShortName(waitingFor or order.crafter or "?")
+            .. " ist dran  ·  " .. AgeLabel(order.changedAt))
     else
         row.detail:SetText(boardRow.yourTurn and boardRow.action or OrderTermsLine(order))
         local label, handler = OrderPrimaryAction(order)
@@ -5653,45 +5807,70 @@ function GC.UI:RefreshOrdersBoard()
     end
     local board = GC.Orders:GetBoard()
 
-    view.mineHeader:SetText("DU BIST DRAN  ·  MEINE AUFTRÄGE (" .. #board.mine .. ")")
-    for index, row in ipairs(view.mineRows) do
-        local boardRow = board.mine[index]
-        if boardRow then
-            FillOrderRow(row, boardRow, false)
-        else
-            row:Hide()
-        end
-    end
-
+    -- Zwei Filter auf denselben Abschnitt: „nur machbare" wirft weg, was kein
+    -- Charakter dieses Accounts kann, das Ablehnen einzelne Zeilen. Beide
+    -- lassen sich abschalten, keiner versteckt etwas dauerhaft.
     local open = {}
+    local declinedCount = 0
     for _, boardRow in ipairs(board.open) do
-        if page.ordersShowAll or boardRow.canAccept then
+        if boardRow.declined then
+            declinedCount = declinedCount + 1
+        end
+        if (page.ordersShowAll or boardRow.canAccept)
+            and (page.ordersShowDeclined or not boardRow.declined) then
             open[#open + 1] = boardRow
         end
     end
     view.openFilter:SetActive(not page.ordersShowAll)
-    view.openHeader:SetText("OFFENE AUFTRÄGE DER GILDE (" .. #open .. ")")
-    for index, row in ipairs(view.openRows) do
-        local boardRow = open[index]
-        if boardRow then
-            FillOrderRow(row, boardRow, true)
-        else
-            row:Hide()
-        end
-    end
+    view.declinedToggle:SetText(GC.LFormat("{n} abgelehnt", { n = declinedCount }))
+    view.declinedToggle:SetActive(page.ordersShowDeclined == true)
+    view.declinedToggle:SetShown(declinedCount > 0)
 
-    view.closedHeader:SetText("ABGESCHLOSSEN (" .. #board.closed .. ")")
-    for index, label in ipairs(view.closedRows) do
-        local boardRow = board.closed[index]
-        if boardRow then
+    local cursor = 0
+    view.mine.header:SetText(GC.LFormat("DU BIST DRAN  ·  MEINE AUFTRÄGE ({n})",
+        { n = #board.mine }))
+    cursor = LayoutOrderSection(view.mine, view.content, cursor, board.mine,
+        ORDERS_HEADER_HEIGHT, ORDERS_MINE_ROW_HEIGHT, ORDERS_ROW_GAP,
+        function(row, boardRow)
+            FillOrderRow(row, boardRow, false)
+        end)
+
+    view.open.header:SetText(GC.LFormat("OFFENE AUFTRÄGE DER GILDE ({n})", { n = #open }))
+    -- Die Knöpfe hängen an der Überschrift, die gerade gesetzt wird - deshalb
+    -- vor dem Abschnitt, dessen Abstand sie schon weitergeschoben hat.
+    view.openFilter:ClearAllPoints()
+    view.openFilter:SetPoint("TOPRIGHT", view.content, "TOPRIGHT", 0, -(cursor - 4))
+    view.declinedToggle:ClearAllPoints()
+    view.declinedToggle:SetPoint("RIGHT", view.openFilter, "LEFT", -8, 0)
+    cursor = LayoutOrderSection(view.open, view.content, cursor, open,
+        ORDERS_FILTER_HEADER_HEIGHT, ORDERS_OPEN_ROW_HEIGHT, ORDERS_ROW_GAP,
+        function(row, boardRow)
+            FillOrderRow(row, boardRow, true)
+        end)
+
+    view.others.header:SetText(GC.LFormat("LÄUFT IN DER GILDE ({n})", { n = #board.others }))
+    cursor = LayoutOrderSection(view.others, view.content, cursor, board.others,
+        ORDERS_HEADER_HEIGHT, ORDERS_OPEN_ROW_HEIGHT, ORDERS_ROW_GAP,
+        function(row, boardRow)
+            FillOrderRow(row, boardRow, false)
+        end)
+
+    view.closed.header:SetText(GC.LFormat("ABGESCHLOSSEN ({n})", { n = #board.closed }))
+    cursor = LayoutOrderSection(view.closed, view.content, cursor, board.closed,
+        ORDERS_HEADER_HEIGHT, ORDERS_CLOSED_LINE_HEIGHT, 0,
+        function(label, boardRow)
             local order = boardRow.order
             label:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1)
                 .. "  ·  " .. ColoredOrderStatus(order)
                 .. "  ·  " .. GC.Util.PlayerShortName(order.createdBy or "?"))
             label:Show()
-        else
-            label:Hide()
-        end
+        end)
+
+    -- Der Bildlauf braucht die Gesamthöhe seines Inhalts; ohne sie bliebe die
+    -- Leiste stehen, egal wie viele Zeilen darunter warten.
+    view.content:SetHeight(math.max(1, cursor - ORDERS_SECTION_GAP))
+    if view.scroll.UpdateModernThumb then
+        view.scroll:UpdateModernThumb()
     end
 
     local settings = GC.DB:GetSettings().orderTracker
@@ -6177,7 +6356,7 @@ function GC.UI:OpenOrderStatsDialog()
     local function Bucket(map, field)
         for name, count in pairs(map or {}) do
             if not merged[name] then
-                merged[name] = { fulfilled = 0, created = 0 }
+                merged[name] = { fulfilled = 0, created = 0, items = 0, ordered = 0 }
                 names[#names + 1] = name
             end
             merged[name][field] = count
@@ -6185,17 +6364,41 @@ function GC.UI:OpenOrderStatsDialog()
     end
     Bucket(stats.byCrafter, "fulfilled")
     Bucket(stats.byCreator, "created")
+    Bucket(stats.itemsByCrafter, "items")
+    Bucket(stats.itemsByCreator, "ordered")
     table.sort(names, function(left, right)
+        if merged[left].items ~= merged[right].items then
+            return merged[left].items > merged[right].items
+        end
         if merged[left].fulfilled ~= merged[right].fulfilled then
             return merged[left].fulfilled > merged[right].fulfilled
         end
         return left < right
     end)
     local lines = {}
-    for index = 1, math.min(#names, 16) do
-        local name = names[index]
-        lines[#lines + 1] = name .. "  –  |cff59e695" .. merged[name].fulfilled
-            .. " erledigt|r · " .. merged[name].created .. " erstellt"
+    local totalOrders, totalItems = 0, 0
+    for index = 1, #names do
+        local entry = merged[names[index]]
+        totalOrders = totalOrders + entry.fulfilled
+        totalItems = totalItems + entry.items
+        if index <= 14 then
+            -- Stücke stehen vorn: Vierzig Urnen und ein Ring waren als
+            -- „1 erledigt" bisher nicht zu unterscheiden.
+            lines[#lines + 1] = names[index] .. "  –  |cff59e695" .. entry.items
+                .. " Stück|r · " .. entry.fulfilled .. " erledigt · "
+                .. entry.created .. " erstellt"
+        end
+    end
+    if #lines > 0 then
+        table.insert(lines, 1, "Insgesamt |cff59e695" .. totalItems .. " Stück|r aus "
+            .. totalOrders .. " abgeschlossenen Aufträgen.\n")
+        -- Ehrlich bleiben statt schön aussehen: Was vor 0.9.110 abgeschlossen
+        -- wurde, ist als Auftrag gezählt, aber nie als Stückzahl - eine 0
+        -- neben vier erledigten Aufträgen wäre sonst ein Rätsel.
+        if totalItems < totalOrders then
+            lines[#lines + 1] = "\nStückzahlen zählt Guild Copilot seit Version 0.9.110;"
+                .. " ältere Aufträge stehen nur mit ihrer Anzahl darin."
+        end
     end
     dialog.body:SetText(#lines > 0 and table.concat(lines, "\n")
         or "Noch keine abgeschlossenen Aufträge gezählt.")

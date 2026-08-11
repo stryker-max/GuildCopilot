@@ -310,6 +310,13 @@ end
 -- Zaehlt abgeschlossene Auftraege je Hersteller und Auftraggeber. Gezaehlt
 -- wird beim Uebergang auf ABGESCHLOSSEN, je Auftrag genau einmal (die Liste
 -- der bereits gezaehlten IDs verhindert Doppelzaehlung durch Kurierpakete).
+--
+-- Neben den Auftraegen zaehlen seit 0.9.110 die STUECKE mit. Vorher wog ein
+-- Auftrag ueber 40 Urnen genauso schwer wie einer ueber einen Ring, und die
+-- Statistik beantwortete die Frage "wie viel wurde eigentlich gefertigt?"
+-- nicht - genau das kam aus der Gilde als "Mengen werden nicht gezaehlt"
+-- zurueck. Die alten Tabellen bleiben, damit gesammelte Staende nicht
+-- verfallen; die neuen fangen bei null an.
 function GC.Orders:GetStats()
     local workshop = GC.DB:GetGuild().workshop
     workshop.orderStats = workshop.orderStats or {
@@ -320,6 +327,8 @@ function GC.Orders:GetStats()
     workshop.orderStats.counted = workshop.orderStats.counted or {}
     workshop.orderStats.byCrafter = workshop.orderStats.byCrafter or {}
     workshop.orderStats.byCreator = workshop.orderStats.byCreator or {}
+    workshop.orderStats.itemsByCrafter = workshop.orderStats.itemsByCrafter or {}
+    workshop.orderStats.itemsByCreator = workshop.orderStats.itemsByCreator or {}
     return workshop.orderStats
 end
 
@@ -337,13 +346,20 @@ function GC.Orders:CountCompletion(order, previousStatus)
     while #stats.counted > MAX_STATS_COUNTED do
         table.remove(stats.counted, 1)
     end
+    -- Die vereinbarte Stueckzahl, nicht die gemeldete: Ein Auftrag wird erst
+    -- abgeschlossen, wenn alle Stuecke da sind. craftedCount taugt hier nicht
+    -- als Quelle - er kommt von Altclients als 0 an und wuerde die Zahl je
+    -- nach Gegenueber verschlucken.
+    local items = math.max(1, math.floor(tonumber(order.quantity) or 1))
     local crafterKey = GC.Util.PlayerShortName(order.crafter or "")
     if crafterKey ~= "" then
         stats.byCrafter[crafterKey] = (stats.byCrafter[crafterKey] or 0) + 1
+        stats.itemsByCrafter[crafterKey] = (stats.itemsByCrafter[crafterKey] or 0) + items
     end
     local creatorKey = GC.Util.PlayerShortName(order.createdBy or "")
     if creatorKey ~= "" then
         stats.byCreator[creatorKey] = (stats.byCreator[creatorKey] or 0) + 1
+        stats.itemsByCreator[creatorKey] = (stats.itemsByCreator[creatorKey] or 0) + items
     end
     return true
 end
@@ -733,6 +749,50 @@ end
 
 local function NotifyChanged()
     GC:FireCallback("ORDERS_UPDATED")
+end
+
+-- === Ablehnen ===============================================================
+--
+-- Ein offener Auftrag, den man nicht machen will, stand bisher bis zu seinem
+-- Verfall im Weg: Annehmen war die einzige Antwort, und die Liste zeigte
+-- ohnehin nur drei Zeilen. Ablehnen blendet ihn deshalb aus - aber nur hier.
+--
+-- Der Vermerk ist bewusst LOKAL und wird nie gesendet: Der Auftrag bleibt für
+-- alle anderen unverändert offen, und niemand in der Gilde erfährt, wer ihn
+-- weggeklickt hat. Gespeichert wird kontoweit, weil auch die Annahme dem
+-- Account gehört und nicht dem Charakter.
+function GC.Orders:GetDeclined()
+    local settings = GC.DB:GetSettings()
+    settings.declinedOrders = settings.declinedOrders or {}
+    return settings.declinedOrders
+end
+
+function GC.Orders:IsDeclined(orderID)
+    return self:GetDeclined()[tostring(orderID or "")] == true
+end
+
+function GC.Orders:SetDeclined(orderID, declined)
+    orderID = tostring(orderID or "")
+    if orderID == "" then
+        return false
+    end
+    -- nil statt false eintragen: Ein zurückgenommenes Ablehnen soll die Zeile
+    -- aus den Einstellungen entfernen, nicht als "false" darin liegen bleiben.
+    self:GetDeclined()[orderID] = (declined ~= false) and true or nil
+    NotifyChanged()
+    return true
+end
+
+function GC.Orders:CountDeclined()
+    local count = 0
+    local store = self:GetStore()
+    for orderID in pairs(self:GetDeclined()) do
+        local order = store[orderID]
+        if order and order.status == "OPEN" then
+            count = count + 1
+        end
+    end
+    return count
 end
 
 function GC.Orders:Create(recipeKey, options)
@@ -1567,6 +1627,15 @@ function GC.Orders:Prune()
             store[open[index].id] = nil
         end
     end
+
+    -- Ein Ablehnen lebt nur so lange wie sein Auftrag. Ohne dieses Aufräumen
+    -- sammelte die Einstellungsdatei jede jemals weggeklickte Auftrags-ID.
+    local declined = self:GetDeclined()
+    for orderID in pairs(declined) do
+        if not store[orderID] then
+            declined[orderID] = nil
+        end
+    end
 end
 
 -- Sortierte Sichten für Board und Tracker.
@@ -1575,6 +1644,7 @@ function GC.Orders:GetBoard()
     local ownName = GC:GetPlayerFullName()
     local mine = {}
     local open = {}
+    local others = {}
     local closed = {}
     for _, order in pairs(self:GetStore()) do
         local actor, action = self:GetNextActor(order)
@@ -1584,6 +1654,9 @@ function GC.Orders:GetBoard()
         local row = {
             order = order,
             action = action,
+            -- Wer als Nächstes dran ist, brauchen auch fremde Zeilen: Dort
+            -- steht statt der Aufforderung, auf wen gewartet wird.
+            actor = actor,
             yourTurn = (actor == "CREATOR" and isCreator)
                 or (actor == "ACCEPTOR" and isAcceptor),
             involved = isCreator or isAcceptor,
@@ -1593,6 +1666,7 @@ function GC.Orders:GetBoard()
                 closed[#closed + 1] = row
             end
         elseif order.status == "OPEN" and not isCreator then
+            row.declined = self:IsDeclined(order.id)
             local candidates = self:GetOwnCrafters(order.recipeKey)
             row.canAccept = #candidates > 0
             if row.canAccept and self:IsReserved(order) then
@@ -1607,8 +1681,15 @@ function GC.Orders:GetBoard()
                 row.canAccept = mine
             end
             open[#open + 1] = row
-        else
+        elseif row.involved then
             mine[#mine + 1] = row
+        else
+            -- Laufende Aufträge, an denen dieser Account nicht beteiligt ist.
+            -- Sie standen bis 0.9.109 unter "MEINE AUFTRÄGE" und verdrängten
+            -- dort bei drei sichtbaren Zeilen die eigenen. Weggeworfen werden
+            -- sie trotzdem nicht: Wer sieht, dass sein Wunschrezept gerade
+            -- jemand anders fertigt, fragt nicht zum zweiten Mal danach.
+            others[#others + 1] = row
         end
     end
     local function ByTurnThenTime(left, right)
@@ -1624,10 +1705,12 @@ function GC.Orders:GetBoard()
         end
         return (left.order.createdAt or 0) > (right.order.createdAt or 0)
     end)
-    table.sort(closed, function(left, right)
+    local function ByChange(left, right)
         return (left.order.changedAt or 0) > (right.order.changedAt or 0)
-    end)
-    return { mine = mine, open = open, closed = closed }
+    end
+    table.sort(others, ByChange)
+    table.sort(closed, ByChange)
+    return { mine = mine, open = open, others = others, closed = closed }
 end
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Orders, function(self)

@@ -298,6 +298,60 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.110 – Drei Zeilen waren nie eine Liste
+
+Aus der Gilde kam eine Rückmeldung in fünf Punkten. Die ersten beiden betrafen dasselbe Fenster: „bei mehreren Aufträgen kann man nicht scrollen und einen expliziten Auftrag an- oder abwählen, es werden nur 3 angezeigt" und „Menge von hergestellten Items wird nicht getrackt". Beides stimmte, und beides hatte dieselbe Ursache: Das Board war als Ansicht gebaut, nicht als Liste.
+
+### Der vierte Auftrag existierte, war aber unerreichbar
+
+`ORDERS_ROWS_PER_SECTION = 3` – drei feste Zeilen je Abschnitt, gebaut beim Seitenaufbau, gefüllt beim Zeichnen. Was darüber hinausging, lag in der Datenbank, wurde synchronisiert, zählte in den Kennzahlen mit und war mit keinem Handgriff sichtbar zu machen. Kein Filter, kein Umblättern, kein Bildlauf. Der Speicher fasst sechzig Aufträge; gezeigt wurden neun.
+
+Der Umbau folgt dem Muster, das die Spielerliste der Ausrüstungsseite schon trägt: ein Bildlauf mit wachsendem Zeilenvorrat. Eine Zeile entsteht erst, wenn es sie zu zeigen gilt, und wird danach wiederverwendet – bei zwei Aufträgen kostet das Board zwei Zeilen, nicht sechzig. Positioniert wird bei jedem Zeichnen neu, weil jeder Abschnitt mit seinem Inhalt wächst und alles darunter mitschiebt.
+
+Unten bleiben Statuszeile, **Statistik** und **Tracker** stehen: Wer bis zum letzten Auftrag scrollt, soll den Tracker-Knopf nicht suchen müssen. Die beiden Knöpfe der Überschrift „offene Aufträge" liegen dagegen IM Bildlauf – sie gehören zu ihrem Abschnitt und wandern mit ihm.
+
+### „Meine Aufträge" waren nicht meine
+
+Beim Nachrechnen fiel ein Fehler auf, den niemand gemeldet hatte, der die drei Zeilen aber erst richtig eng machte: `GetBoard` schob **jeden** laufenden Auftrag in den Abschnitt „MEINE AUFTRÄGE" – auch die, an denen der eigene Account weder als Auftraggeber noch als Hersteller beteiligt war. Sortiert wurde nach „du bist dran", dann nach Änderungszeit; ein frisch bewegter fremder Auftrag verdrängte damit den eigenen, auf den man wartete.
+
+Weggeworfen werden sie trotzdem nicht: Wer sieht, dass sein Wunschrezept gerade jemand anders fertigt, fragt nicht zum zweiten Mal danach. Sie stehen jetzt in einem eigenen Abschnitt **„LÄUFT IN DER GILDE"**, mit der Angabe, auf wen gewartet wird und seit wann sich nichts bewegt hat – statt einer Handlungsaufforderung, die an jemand anderen gerichtet ist.
+
+### Ablehnen, ohne es der Gilde zu erzählen
+
+Auf einen offenen Auftrag gab es genau eine Antwort: annehmen. Wer ihn nicht wollte, sah ihn bis zum Verfall nach vierzehn Tagen. Der neue „–"-Knopf blendet ihn aus – und zwar **nur lokal**. Der Auftrag bleibt für alle anderen unverändert offen, es geht kein Paket ins Netz, und niemand erfährt, wer weggeklickt hat. Gespeichert wird kontoweit, weil auch die Annahme dem Account gehört und nicht dem Charakter.
+
+Nichts verschwindet dauerhaft: Sobald etwas abgelehnt ist, steht neben dem Filter „n abgelehnt"; ein Klick blendet alles wieder ein, ein zweiter Klick auf „+" nimmt die Ablehnung zurück. Der Vermerk lebt nur so lange wie sein Auftrag – `Prune` räumt ihn mit weg, sonst sammelte die Einstellungsdatei jede jemals weggeklickte ID.
+
+Der Ablehnen-Knopf teilt sich bewusst **nicht** den Platz mit dem Abbrechen-×, obwohl die beiden sich nie auf derselben Zeile begegnen: Zwei verschieden folgenreiche Aktionen dürfen nicht am selben Ort stehen.
+
+### Die Menge: halb da, unsichtbar, falsch gezählt
+
+Die Rückmeldung „wird nicht oder nicht richtig gezählt" traf beides. Einen Teilfertigungszähler gab es seit 0.9.63 – er wurde sogar über Feld 19 synchronisiert. Nur stand er nirgends: Die Zeile zeigte „×10", ob null oder neun Stück fertig waren; der Stand lebte allein im Verlaufsdialog. Jetzt trägt die Zeile „×10 **3 fertig**", solange etwas aussteht, und schweigt wieder, sobald alles da ist.
+
+Die Statistik zählte **Aufträge**. Vierzig Urnen und ein Ring waren beide „1 erledigt" – die Frage, wie viel eine Gilde eigentlich gefertigt hat, konnte sie nicht beantworten. Sie zählt jetzt zusätzlich Stücke, je Hersteller und je Auftraggeber, mit einer Gesamtzeile darüber.
+
+Zwei bewusste Kanten:
+
+- Gezählt wird die **vereinbarte** Menge, nicht die gemeldete. `craftedCount` kommt von Altclients als 0 an und würde die Zahl je nach Gegenüber verschlucken; ein Auftrag wird ohnehin erst abgeschlossen, wenn alle Stücke da sind.
+- Die alten Zähler bleiben stehen, damit gesammelte Stände nicht verfallen. Die neuen fangen bei null an – deshalb sagt der Dialog es dazu, solange weniger Stücke als Aufträge gezählt sind. Eine 0 neben vier erledigten Aufträgen wäre sonst ein Rätsel.
+
+Automatisch zählt weiterhin nichts: Wer im Berufsfenster fertigt, erzeugt für Guild Copilot kein Ereignis. Das gehört zum fünften Punkt der Rückmeldung („aus dem Cockpit heraus herstellen") und kommt mit ihm.
+
+### Was die Layoutprüfung jetzt prüft
+
+`tests/validate.mjs` rechnete bisher nach, ob der ganze Inhalt über der Statuszeile bleibt. Mit einem Bildlauf ist die Frage hinfällig – gescrollt wird ohnehin. Geblieben ist die Frage dahinter: Sieht man ohne Scrollen überhaupt etwas? Geprüft wird deshalb der schlechteste Fall, in dem alle vier Überschriften zugleich stehen: Darunter muss noch eine ganze Zeile der eigenen Aufträge passen, sonst begänne das Board mit einer reinen Überschriftenwand. Dazu zwei neue Prüfungen: dass die Zeilen nicht unter die Bildlaufleiste laufen und dass der Bildlauf die Höhe seines Inhalts überhaupt setzt – ohne sie bliebe die Leiste stehen, egal wie viele Zeilen darunter warten.
+
+**Der Tracker bleibt bei drei Zeilen.** Er ist als Kompakt-Anzeige gedacht und nennt im Titel die Gesamtzahl, wenn mehr anliegt; das Board daneben zeigt jetzt alles.
+
+### Geändert
+
+- `UI.lua`: Auftragsboard im Bildlauf mit wachsendem Zeilenvorrat (`CreateOrderSection`, `LayoutOrderSection`), vierter Abschnitt „Läuft in der Gilde", Ablehnen-Knopf samt Tooltip in den offenen Zeilen, Knopf „n abgelehnt" neben dem Filter, leere Abschnitte mit Auskunftszeile, Teilfertigung in der Zeilenüberschrift, Statistikdialog nach Stücken mit Gesamtzeile, Bildlauf springt beim Reiterwechsel nach oben;
+- `Orders.lua`: `GetDeclined`/`IsDeclined`/`SetDeclined`/`CountDeclined` (rein lokal, nie gesendet), `GetBoard` trennt beteiligte und fremde laufende Aufträge und meldet den nächsten Handelnden mit, `Prune` räumt Ablehnungen zu verschwundenen Aufträgen weg, `GetStats`/`CountCompletion` zählen zusätzlich Stücke;
+- `Database.lua`: `settings.declinedOrders`;
+- `Locales.lua`: die Abschnittsüberschriften laufen jetzt über `GC.LFormat` statt als zusammengesetzter deutscher Text an der Sprachschicht vorbei – dazu die neuen Leerzustände, „Nicht für mich" und die Zähler „{n} abgelehnt"/„{n} fertig";
+- `tests/smoke.lua`: fünf eigene Aufträge in einem Abschnitt, fremder laufender Auftrag im Gildenabschnitt, Höhe des Bildlaufinhalts, Ablehnen samt Zurücknehmen und Aufräumen, Teilfertigung in der Zeile, Stückzähler der Statistik;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.110.
+
 ## 0.9.109 – Der Praxistest: was der Sprachschalter noch aufdeckte
 
 Der Owner hat die Sprachwahl auf English gestellt und Screenshots aller Seiten geschickt: „da fehlt noch einiges". Der Befund zerfiel in drei Klassen, und jede hatte einen eigenen Grund:

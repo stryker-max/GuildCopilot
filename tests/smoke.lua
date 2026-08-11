@@ -5479,6 +5479,14 @@ do
     assert(orders_result.byCreator["Tester"] == 1, "Der Auftraggeber wurde nicht gezählt")
     assert(addon.Orders:CountCompletion(orders_order, "RECEIVED") == false,
         "Der Auftrag wurde doppelt gezählt")
+    -- Seit 0.9.110 zählen die Stücke mit: Vierzig Urnen und ein Ring waren
+    -- vorher beide "1 erledigt".
+    assert(orders_result.itemsByCrafter["Zwerg"] == orders_order.quantity,
+        "Die gefertigten Stücke wurden nicht gezählt: "
+            .. tostring(orders_result.itemsByCrafter["Zwerg"]))
+    assert(orders_result.itemsByCreator["Tester"] == orders_order.quantity,
+        "Die bestellten Stücke wurden nicht gezählt: "
+            .. tostring(orders_result.itemsByCreator["Tester"]))
 
     -- Vorlage: merken und wieder lesen.
     assert(addon.Orders:SaveTemplate("I90001", {
@@ -5667,6 +5675,147 @@ do
     assert(orders_page.workshopCatalogFrames[1].shown == true,
         "Der Katalog kehrt nach dem Reiterwechsel nicht zurück")
     addon.DB.data.characters["twinky-realm"] = nil
+end
+
+do
+    -- Mehr als drei Aufträge (Nutzerrückmeldung 08/2026): Bis 0.9.109 baute
+    -- das Board drei feste Zeilen je Abschnitt, alles weitere existierte nur
+    -- in der Datenbank. Zugleich landete jeder fremde laufende Auftrag unter
+    -- "MEINE AUFTRÄGE" und verdrängte dort die eigenen.
+    addon.DB:GetGuild().workshop.orders = {}
+    orders_page = addon.UI.pages.WORKSHOP
+    for orders_index = 1, 5 do
+        addon.Orders:GetStore()["viele-" .. orders_index] = {
+            id = "viele-" .. orders_index, rev = 1, status = "CRAFTED",
+            recipeKey = "I90001", recipeName = "Testring", quantity = 1,
+            createdBy = "Tester-Realm", createdByTag = addon.DB:GetAccountTag(),
+            createdAt = currentTime, changedAt = currentTime - orders_index,
+            materialModel = "A", delivery = "TRADE",
+            costLimit = 0, tip = 0, note = "",
+            acceptedByTag = "fremdfremd", acceptedAt = currentTime,
+            crafter = "Schmied-Realm", acceptedVia = "Schmied-Realm",
+            actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+            craftedCount = 1, log = {},
+        }
+    end
+    -- Ein fremder laufender Auftrag, an dem dieser Account nicht beteiligt ist.
+    addon.Orders:GetStore()["fremd-1"] = {
+        id = "fremd-1", rev = 1, status = "WORKING",
+        recipeKey = "I90002", recipeName = "Testbrenner", quantity = 1,
+        createdBy = "Heiler-Realm", createdByTag = "bbbbbbbbbb",
+        createdAt = currentTime, changedAt = currentTime,
+        materialModel = "B", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "",
+        acceptedByTag = "fremdfremd", acceptedAt = currentTime,
+        crafter = "Schmied-Realm", acceptedVia = "Schmied-Realm",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+        craftedCount = 0, log = {},
+    }
+    addon.UI:SetWorkshopView("ORDERS")
+    addon.UI:RefreshOrdersBoard()
+
+    orders_board = addon.Orders:GetBoard()
+    assert(#orders_board.mine == 5,
+        "Die eigenen Aufträge stehen nicht vollständig im eigenen Abschnitt: "
+            .. tostring(#orders_board.mine))
+    assert(#orders_board.others == 1,
+        "Der fremde laufende Auftrag steht nicht im Gildenabschnitt")
+    assert(orders_board.others[1].order.id == "fremd-1",
+        "Im Gildenabschnitt steht der falsche Auftrag")
+    assert(orders_page.ordersView.mineRows[5] ~= nil
+        and orders_page.ordersView.mineRows[5].shown == true,
+        "Der fünfte eigene Auftrag hat keine Zeile auf dem Board")
+    assert(orders_page.ordersView.others.rows[1].shown == true,
+        "Der fremde laufende Auftrag hat keine Zeile auf dem Board")
+    assert(orders_page.ordersView.others.rows[1].detail.value:find("Schmied", 1, true) ~= nil,
+        "Die fremde Zeile nennt nicht, auf wen gewartet wird: "
+            .. tostring(orders_page.ordersView.others.rows[1].detail.value))
+    -- Der Bildlauf kennt die Höhe seines Inhalts - sonst bliebe die Leiste
+    -- stehen, egal wie viele Zeilen darunter warten.
+    assert((orders_page.ordersView.content.height or 0) > 5 * 58,
+        "Die Höhe des Bildlaufinhalts wächst nicht mit den Zeilen: "
+            .. tostring(orders_page.ordersView.content.height))
+
+    -- Teilfertigung in der Zeile: Der Stand stand bis 0.9.109 nur im
+    -- Verlaufsdialog, die Zeile sah nach jedem Zwischenschritt gleich aus.
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.Orders:GetStore()["teil-1"] = {
+        id = "teil-1", rev = 1, status = "WORKING",
+        recipeKey = "I90001", recipeName = "Testring", quantity = 10,
+        createdBy = "Tester-Realm", createdByTag = addon.DB:GetAccountTag(),
+        createdAt = currentTime, changedAt = currentTime + 1,
+        materialModel = "A", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "",
+        acceptedByTag = "fremdfremd", acceptedAt = currentTime,
+        crafter = "Schmied-Realm", acceptedVia = "Schmied-Realm",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+        craftedCount = 3, log = {},
+    }
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.mineRows[1].title.value:find("3 fertig", 1, true) ~= nil,
+        "Die Zeile nennt den Stand der Teilfertigung nicht: "
+            .. tostring(orders_page.ordersView.mineRows[1].title.value))
+    addon.Orders:GetStore()["teil-1"].craftedCount = 10
+    addon.Orders:GetStore()["teil-1"].status = "CRAFTED"
+    addon.UI:RefreshOrdersBoard()
+    -- "Gefertigt" als Status darf stehen bleiben, der Zwischenstand nicht.
+    assert(orders_page.ordersView.mineRows[1].title.value:find("10 fertig", 1, true) == nil,
+        "Der vollständig gefertigte Auftrag trägt weiter einen Zwischenstand: "
+            .. tostring(orders_page.ordersView.mineRows[1].title.value))
+    addon.Orders:GetStore()["teil-1"] = nil
+
+    -- Ablehnen: blendet einen offenen Auftrag nur lokal aus, der Auftrag
+    -- selbst bleibt unberührt offen.
+    addon.Orders:GetStore()["ablehn-1"] = {
+        id = "ablehn-1", rev = 1, status = "OPEN",
+        recipeKey = "I90002", recipeName = "Testbrenner", quantity = 1,
+        createdBy = "Heiler-Realm", createdByTag = "bbbbbbbbbb",
+        createdAt = currentTime, changedAt = currentTime,
+        materialModel = "B", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "",
+        acceptedByTag = "", acceptedAt = 0, crafter = "", acceptedVia = "",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+        craftedCount = 0, log = {},
+    }
+    orders_page.ordersShowAll = true
+    orders_page.ordersShowDeclined = false
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.openRows[1].shown == true,
+        "Der offene Auftrag fehlt vor dem Ablehnen")
+    assert(orders_page.ordersView.openRows[1].declineButton ~= nil,
+        "Die offenen Zeilen haben keinen Ablehnen-Knopf")
+
+    assert(addon.Orders:SetDeclined("ablehn-1", true) == true, "Das Ablehnen scheiterte")
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.openRows[1].shown == false,
+        "Der abgelehnte Auftrag steht weiter in der offenen Liste")
+    assert(addon.Orders:GetOrder("ablehn-1").status == "OPEN",
+        "Das Ablehnen hat den Auftrag selbst verändert")
+    assert(addon.Orders:CountDeclined() == 1, "Die abgelehnten Aufträge werden nicht gezählt")
+    assert(orders_page.ordersView.declinedToggle.shown == true,
+        "Der Knopf für die abgelehnten Aufträge fehlt")
+
+    -- Wieder einblenden holt die Zeile zurück, das Zurücknehmen räumt den
+    -- Vermerk weg.
+    orders_page.ordersShowDeclined = true
+    addon.UI:RefreshOrdersBoard()
+    assert(orders_page.ordersView.openRows[1].shown == true,
+        "Abgelehnte Aufträge lassen sich nicht wieder einblenden")
+    assert(addon.Orders:SetDeclined("ablehn-1", false) == true, "Das Zurücknehmen scheiterte")
+    assert(addon.Orders:IsDeclined("ablehn-1") == false,
+        "Der Ablehnungsvermerk bleibt nach dem Zurücknehmen stehen")
+
+    -- Ein Vermerk lebt nur so lange wie sein Auftrag.
+    addon.Orders:SetDeclined("ablehn-1", true)
+    addon.Orders:GetStore()["ablehn-1"] = nil
+    addon.Orders:Prune()
+    assert(addon.Orders:IsDeclined("ablehn-1") == false,
+        "Der Ablehnungsvermerk überlebt seinen Auftrag")
+
+    orders_page.ordersShowAll = nil
+    orders_page.ordersShowDeclined = nil
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.UI:SetWorkshopView("CATALOG")
 end
 
 do

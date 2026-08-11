@@ -33,6 +33,9 @@ local DEFAULTS = {
             y = 0,
         },
         workshopFavorites = {},
+        -- Lokal weggeklickte Gildenauftraege (Orders:SetDeclined). Der
+        -- Vermerk geht nie ins Netz und verschwindet mit seinem Auftrag.
+        declinedOrders = {},
         -- Sprache der Oberflaeche: AUTO folgt der Clientsprache, DE und EN
         -- erzwingen eine. Angewandt in GC.ApplyLanguageSetting.
         language = "AUTO",
