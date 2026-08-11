@@ -298,6 +298,59 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.112 – Was der Katalog nicht kennt, und was der Client selbst tun kann
+
+Die letzten beiden Punkte der Gildenrückmeldung: „Freitext-Aufträge für nicht vorhandene Rezepte einbauen" und „Möglichkeit, aus dem Cockpit heraus Items herzustellen?". Beide sind Ja – mit Entscheidungen, die hier begründet stehen, weil der Owner den Fragedialog nicht beantwortet hat und die Arbeit weiterlaufen sollte.
+
+### Der Beruf ist der Schlüssel
+
+Ein Auftrag brauchte bisher einen Katalogeintrag: `Orders:Create` brach ohne ihn ab. Der Katalog kennt aber nur, was ein Addon-Nutzer einmal in seinem Berufsfenster hatte – was niemand gescannt hat, was ein Neuzugang mitbringt oder was der Hersteller erst lernen soll, war damit unbestellbar.
+
+Der Rezeptschlüssel trägt beim Freitext deshalb den **Beruf** statt des Rezepts: `Fschneiderei`. Das ist Absicht und keine Notlösung.
+
+- **Die Annahmeprüfung bleibt echt.** Ohne jede Prüfung wäre ein Freitext-Auftrag für jeden machbar und damit für niemanden – und der Filter „nur machbare" verlöre für diese Aufträge seine Bedeutung. So darf annehmen, wer den Beruf hat, geprüft gegen dieselbe Datenbasis wie sonst (eigene Twinks aus den SavedVariables, fremde Charaktere aus dem Gildenindex).
+- **Der Schlüssel muss nicht eindeutig sein.** Aufträge unterscheidet ihre `id`; der Rezeptschlüssel beantwortet allein die Frage „wer kann das?". Zwei Schneiderei-Wünsche teilen sich denselben Schlüssel, ohne sich in die Quere zu kommen.
+- **Kollisionsfrei.** Katalogschlüssel beginnen mit `I` (Item), `E` (Rezept-ID) oder `N` (Name). Das `F` war frei.
+
+Am Protokoll ändert sich **nichts**: Der Wunschtext reist im vorhandenen Namensfeld, ein Altclient zeigt ihn als Rezeptnamen an. Die 30 Byte dieses Feldes sind die Grenze, und das ist keine Sparsamkeit, sondern Arithmetik – die Kernnachricht liegt voll ausgereizt bei etwa 213 der 255 zulässigen Bytes. Der Dialog sagt deshalb „kurz"; Einzelheiten gehören in die Notiz.
+
+Zwei Felder fallen beim Freitext weg, weil sie ohne Rezept keine Grundlage haben: der **Wunsch-Hersteller** (es gibt keine Herstellerliste, aus der er zu wählen wäre) und die **Vorlage** (sie hängt am Rezept). Ihre Zeile im Dialog gehört jetzt Wunsch und Beruf – ein zweites Fenster wäre falsch gewesen, denn Materialmodell, Übergabeweg, Menge, Kostenrahmen, Trinkgeld und Notiz sind identisch.
+
+Der Einstieg sitzt am **Board**, nicht am Katalog: Dort gibt es nichts auszuwählen – genau das ist ja der Fall, für den es ihn gibt.
+
+### Herstellen: zwei Klicks, weil das Spiel zwei verlangt
+
+Machbar ist es, aber mit zwei Grenzen, die kein Addon umgeht:
+
+1. **Nur der eingeloggte Charakter.** Der Katalog kennt die Rezepte der ganzen Gilde; fertigen kann sie nur ihr Besitzer. Der Knopf erscheint deshalb ausschließlich, wenn `Workshop:GetOwnRecipe` das Rezept beim aktuellen Charakter findet.
+2. **Nur bei offenem Berufsfenster.** Die Rezeptlisten aller drei APIs existieren ausschließlich, solange es offen steht. Gemerkt wird deshalb **nichts** – `FindOpenRecipe` sucht bei jedem Auftrag neu, denn ein gemerkter Index wäre schon nach dem nächsten Filterwechsel falsch. Drei Wege, dieselbe Schlüsselbildung wie beim Scan: `C_TradeSkillUI.CraftRecipe` (modern), `DoCraft` (Craft-API, Verzauberkunst) und `DoTradeSkill` (klassisch).
+
+Daraus folgt der Zweischritt: Erster Klick öffnet das Fenster, zweiter fertigt. Das Öffnen ist ein Zauber, und Zauber lässt WoW nur bei einem echten Tastendruck zu – der Knopf ist deshalb ein **sicherer** Knopf (`SecureActionButtonTemplate`), wie die Berufszeilen im Einrichtungsassistenten. `CreateButton` kann das jetzt selbst; der eigene Handler hängt dort an `PostClick`, weil die Vorlage `OnClick` für sich braucht.
+
+Eine Feinheit, die im Spiel den Unterschied macht: Der Zauber hängt nur am Knopf, solange das Fenster **zu** ist. Läge er immer an, unterbräche der zweite Klick die gerade laufende Herstellung – man kann nicht zwei Zauber zugleich wirken. Beim Schreiben dieser Umschaltung fiel prompt ein Lua-Fallstrick an: `ready and nil or spell` ergibt **immer** `spell`, weil `nil` im `and`-Zweig als falsch gilt. Ein Regressionstest hält das jetzt fest.
+
+### Der Zähler zählt selbst
+
+0.9.110 hat die Menge sichtbar gemacht; gezählt wurde sie weiter von Hand. Jetzt hört ein einzelnes Ereignisabo auf den erfolgreichen Herstellungszauber (`UNIT_SPELLCAST_SUCCEEDED`, Zauber-ID an letzter Stelle – das ist über alle Classic-Fassungen hinweg richtig, die Position davor nicht). Passt die ID zum Rezept eines laufenden eigenen Auftrags, steigt ein Zähler. Das gilt für **jede** Herstellung, auch die von Hand im Berufsfenster – genau darum ging es in der Rückmeldung.
+
+Der Zähler bleibt **lokal** und geht nie ins Netz. Vierzig Urnen wären sonst vierzig Rundrufe über einen Kanal, der rund zehn Pakete je Sekunde und Absender zustellt; und ein Gildenauftrag ist eine Absprache zwischen Menschen, kein Sensor. Der Stand steht in der Auftragszeile („3 selbst gefertigt, noch nicht gemeldet") und füllt den Meldedialog vor – gemeldet wird auf Klick, so wie bisher. Über die bestellte Menge hinaus zählt er nicht: Wer nebenher für sich selbst fertigt, soll den Auftrag nicht überfüllt melden.
+
+### Was offen bleibt
+
+Der Herstellen-Knopf steht an der Rezeptkarte und im Meldedialog, **nicht** in der Auftragszeile: Dort ist zwischen Verlauf, Abbrechen und Primäraktion kein Platz, ohne den Rezeptnamen abzuschneiden. Ob er dort fehlt, zeigt der Gebrauch.
+
+Ungeprüft im Spiel ist, ob der Client nach `TRADE_SKILL_CLOSE` tatsächlich eine leere Liste meldet. Tut er es nicht, hält der Knopf ein geschlossenes Fenster für offen, und der Herstellbefehl läuft ins Leere – ohne Schaden, aber mit einem Klick zu viel.
+
+### Geändert
+
+- `Orders.lua`: `FreeRecipeKey`/`GetFreeProfessionKey`/`GetFreeProfessionName`, `Create` nimmt Freitext-Aufträge an, `GetOwnCrafters` und `IsKnownCrafter` prüfen dort den Beruf; lokaler Mitzähler (`NoteCraftedSpell`, `GetPendingCraftCount`, `ClearPendingCrafts`) samt Ereignisabo und Aufräumen in `Prune`;
+- `Workshop.lua`: `GetOwnRecipe`, `FindOpenRecipe` und `CraftOpenRecipe` für alle drei Berufsfenster-APIs, `TRADE_SKILL_CLOSE`/`CRAFT_CLOSE` frischen die Oberfläche auf;
+- `UI.lua`: `CreateButton` kann sichere Knöpfe, `ProfessionWindowSpell` als gemeinsamer Helfer (der Assistent nutzt ihn mit), Herstellen-Knopf an der Rezeptkarte und im Gefertigt-Dialog samt `RefreshCraftButton`, Freitext-Felder im Erstellen-Dialog und der Knopf „Freier Auftrag" am Board, Mitzähler in der Auftragszeile und als Vorbelegung der Meldung;
+- `Database.lua`: `settings.pendingCrafts`;
+- `Locales.lua`: die neuen Beschriftungen;
+- `tests/smoke.lua`: `SetAttribute`/`GetAttribute` im Rahmenmock, mitgeschriebene Herstellbefehle, Freitext von der Schlüsselbildung bis zur Fertigmeldung, Herstellen mit offenem und geschlossenem Fenster, im Kampf und bei fremdem Rezept, Mitzähler samt Obergrenze und Aufräumen;
+- `tests/validate.mjs`, `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.112.
+
 ## 0.9.111 – Ein Maßstab statt einer Fensterkante
 
 Punkt drei der Gildenrückmeldung: „GCP-Fenster skalieren oder verkleinern nach Bedarf, oder die Möglichkeit der Transparenz". Das Hauptfenster war seit jeher auf 1020 × 690 festgenagelt – auf 1280 × 720 füllt das den halben Bildschirm, und im Raid verdeckt es, was man sehen will.

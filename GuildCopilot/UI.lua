@@ -306,9 +306,21 @@ local function CreatePageTitle(page, title, subtitle)
     return heading, help
 end
 
-local function CreateButton(parent, text, width, height, onClick, kind)
-    local button = CreateFrame("Button", nil, parent)
+-- "secure" macht aus dem Knopf einen sicheren Knopf: Er kann einen Zauber
+-- wirken (das Berufsfenster oeffnen), was WoW nur bei einem echten Tastendruck
+-- erlaubt. Der eigene Handler haengt dann an PostClick statt an OnClick - die
+-- Vorlage belegt OnClick selbst, und wer ihn ueberschreibt, nimmt dem Knopf
+-- genau die Faehigkeit, fuer die er sicher ist.
+local function CreateButton(parent, text, width, height, onClick, kind, secure)
+    local button = CreateFrame("Button", nil, parent,
+        secure and "SecureActionButtonTemplate" or nil)
     button:SetSize(width or 130, height or 34)
+    if secure then
+        button:SetAttribute("type", "spell")
+        if button.RegisterForClicks then
+            button:RegisterForClicks("AnyDown", "AnyUp")
+        end
+    end
     button.kind = kind or "SECONDARY"
     button.background = button:CreateTexture(nil, "BACKGROUND")
     button.background:SetAllPoints()
@@ -354,7 +366,7 @@ local function CreateButton(parent, text, width, height, onClick, kind)
     button:SetScript("OnLeave", function(self)
         self:SetActive(self.active)
     end)
-    button:SetScript("OnClick", onClick)
+    button:SetScript(secure and "PostClick" or "OnClick", onClick)
     return button
 end
 
@@ -2512,6 +2524,19 @@ end
 -- aus - genau einmal je Klick, nie doppelt. Ein Knopf, der nur LeftButtonUp
 -- kennt, tut bei der verbreiteten Vorgabe "beim Druecken" schlicht nichts;
 -- genau so wurde es gemeldet ("oeffnet nicht mein Berufsfenster").
+-- Der Zauber, der das Berufsfenster oeffnet, in der Sprache, die DIESER Client
+-- versteht: CastSpellByName("Verzauberkunst") tut auf einem englischen Client
+-- schlicht nichts. Kandidaten deutsch zuerst; genommen wird der erste, den das
+-- Zauberbuch kennt.
+local function ProfessionWindowSpell(professionName)
+    for _, candidate in ipairs(GC.ProfessionWindowSpellCandidates(professionName)) do
+        if type(GetSpellInfo) ~= "function" or GetSpellInfo(candidate) then
+            return candidate
+        end
+    end
+    return professionName
+end
+
 local function CreateWizardSpellButton(parent, width, height)
     local button = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
     button:SetSize(width, height)
@@ -3131,18 +3156,7 @@ function GC.UI:RefreshWizardProfessions()
             row:Show()
             row.icon:SetTexture(GC.ProfessionIcons[name] or GC.ProfessionIcons[""])
             row.name:SetText(name)
-            -- Der Fensterzauber in der Sprache, die dieser Client versteht:
-            -- CastSpellByName("Verzauberkunst") tut auf einem englischen
-            -- Client schlicht nichts. Kandidaten deutsch zuerst; genommen
-            -- wird der erste, den das Zauberbuch kennt.
-            local windowSpell
-            for _, candidate in ipairs(GC.ProfessionWindowSpellCandidates(name)) do
-                if type(GetSpellInfo) ~= "function" or GetSpellInfo(candidate) then
-                    windowSpell = candidate
-                    break
-                end
-            end
-            windowSpell = windowSpell or name
+            local windowSpell = ProfessionWindowSpell(name)
             local isScanned = scanned[GC.CanonicalProfessionKey(name)] == true
             -- Der Fensterzauber haengt an Zeile UND Knopf; beim Sammelberuf
             -- an keinem von beiden, dort gibt es kein Fenster. Im Kampf
@@ -4728,6 +4742,23 @@ function GC.UI:BuildWorkshopPage()
     end, "PRIMARY")
     page.workshopOrderButton:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -46)
     page.workshopOrderButton:Hide()
+
+    -- Herstellen aus dem Cockpit (Nutzerrückmeldung 08/2026). Der Knopf ist
+    -- ein SICHERER Knopf: Das Berufsfenster öffnet nur ein Zauber, und den
+    -- lässt WoW ausschließlich bei einem echten Tastendruck zu. Er erscheint
+    -- nur, wenn der gerade gespielte Charakter das Rezept kann - der Katalog
+    -- kennt auch die Rezepte der Twinks, fertigen kann sie nur ihr Besitzer.
+    page.workshopCraftButton = CreateButton(detailCard, "Herstellen", 140, 30, function()
+        local recipeKey = page.selectedWorkshopRecipe
+        if not recipeKey then
+            return
+        end
+        local ok, message = GC.Workshop:CraftOpenRecipe(recipeKey, 1)
+        page.workshopStatus:SetText(message or "")
+        SetTextColor(page.workshopStatus, ok and THEME.success or THEME.danger)
+    end, nil, true)
+    page.workshopCraftButton:SetPoint("TOPRIGHT", detailCard, "TOPRIGHT", -14, -80)
+    page.workshopCraftButton:Hide()
     page.workshopFavorite.favoriteIcon = page.workshopFavorite:CreateTexture(nil, "ARTWORK")
     page.workshopFavorite.favoriteIcon:SetSize(17, 17)
     page.workshopFavorite.favoriteIcon:SetPoint("LEFT", page.workshopFavorite, "LEFT", 8, 0)
@@ -4736,8 +4767,10 @@ function GC.UI:BuildWorkshopPage()
     page.workshopFavorite.label:SetPoint("LEFT", page.workshopFavorite, "LEFT", 29, 0)
     page.workshopFavorite.label:SetPoint("RIGHT", page.workshopFavorite, "RIGHT", -7, 0)
     page.workshopFavorite.label:SetJustifyH("LEFT")
+    -- Achtzehn Pixel tiefer als bis 0.9.111: Darüber steht jetzt der dritte
+    -- Knopf („Herstellen"), und der braucht seine eigene Zeile.
     local detailBody = CreatePanel(detailCard, THEME.input)
-    detailBody:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -98)
+    detailBody:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -116)
     detailBody:SetPoint("BOTTOMRIGHT", detailCard, "BOTTOMRIGHT", -18, 16)
     page.workshopDetailScroll = CreateModernScrollFrame(detailBody)
     page.workshopDetailScroll:SetPoint("TOPLEFT", detailBody, "TOPLEFT", 8, -8)
@@ -4886,6 +4919,45 @@ function GC.UI:QueueWorkshopSearch()
     end)
 end
 
+-- Der Herstellen-Knopf hat zwei Zustände, weil das Spiel zwei Schritte
+-- verlangt: Ohne offenes Berufsfenster gibt es keine Rezeptliste, also öffnet
+-- der erste Klick das Fenster (sicherer Zauber), der zweite fertigt.
+--
+-- Der Zauber hängt nur dann am Knopf, wenn das Fenster ZU ist. Läge er immer
+-- an, würde der zweite Klick den gerade laufenden Herstellungszauber
+-- unterbrechen - man kann nicht zwei Zauber zugleich wirken. Sichere
+-- Attribute lassen sich im Kampf nicht ändern; dort bleibt der Knopf stehen,
+-- wie er ist, und der Herstellbefehl lehnt ohnehin ab.
+function GC.UI:RefreshCraftButton(button, recipeKey, count)
+    if not button then
+        return
+    end
+    local recipe, profession = GC.Workshop:GetOwnRecipe(recipeKey)
+    if not recipe then
+        button:Hide()
+        return
+    end
+    local ready = GC.Workshop:FindOpenRecipe(recipeKey) ~= nil
+    if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
+        -- Ausgeschrieben statt "ready and nil or spell": Lua wertet das zu
+        -- IMMER spell aus, weil nil im and-Zweig als falsch gilt.
+        if ready then
+            button:SetAttribute("spell", nil)
+        else
+            button:SetAttribute("spell", ProfessionWindowSpell(profession and profession.name or ""))
+        end
+    end
+    count = math.max(1, math.floor(tonumber(count) or 1))
+    if ready then
+        button:SetText(count > 1 and GC.LFormat("{n}× herstellen", { n = count })
+            or "Herstellen")
+    else
+        button:SetText(GC.L("Berufsfenster öffnen"))
+    end
+    button.craftReady = ready
+    button:Show()
+end
+
 function GC.UI:RefreshWorkshop()
     local page = self.pages.WORKSHOP
     if not page then
@@ -5014,7 +5086,9 @@ function GC.UI:RefreshWorkshop()
         page.workshopMaterialFooter:SetText(GC.L(""))
         page.workshopScrollAnchor = nil
         page.workshopDetailContent:SetHeight(220)
+        page.workshopCraftButton:Hide()
     else
+        self:RefreshCraftButton(page.workshopCraftButton, selected.key, 1)
         page.workshopFavorite:Show()
         page.workshopFavorite:SetText(GC.Workshop:IsFavorite(selected.key) and "Gemerkt" or "Merken")
         page.workshopFavorite:SetActive(GC.Workshop:IsFavorite(selected.key))
@@ -5508,12 +5582,18 @@ local function OrderRowTitle(order)
         .. "  ·  " .. ColoredOrderStatus(order)
 end
 
--- Die Bedingungen ohne Geld: Materialmodell und Übergabeweg.
+-- Die Bedingungen ohne Geld: Materialmodell und Übergabeweg. Beim Freitext
+-- steht der Beruf davor - er ist dort die einzige Auskunft darüber, wer den
+-- Auftrag überhaupt erfüllen kann.
 local function OrderTermsParts(order)
-    return {
-        GC.OrderModelLabels[order.materialModel] or "?",
-        GC.OrderDeliveryLabels[order.delivery] or "?",
-    }
+    local parts = {}
+    local freeProfession = GC.Orders:GetFreeProfessionName(order.recipeKey)
+    if freeProfession then
+        parts[#parts + 1] = "|cffe8b84bFreier Auftrag|r (" .. GC.L(freeProfession) .. ")"
+    end
+    parts[#parts + 1] = GC.OrderModelLabels[order.materialModel] or "?"
+    parts[#parts + 1] = GC.OrderDeliveryLabels[order.delivery] or "?"
+    return parts
 end
 
 -- Der Preisrahmen, den der Auftraggeber beim Erstellen gesetzt hat. Einen
@@ -5809,13 +5889,23 @@ function GC.UI:BuildOrdersView(page)
     end)
     view.trackerToggle:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", 0, 0)
 
-    view.status = CreateLabel(view, "", { muted = true, width = 640, height = 30, vertical = "TOP" })
+    -- Schmaler als bis 0.9.111 (640): Rechts steht jetzt ein dritter Knopf,
+    -- und eine Statusmeldung darf nicht unter ihm hindurchlaufen.
+    view.status = CreateLabel(view, "", { muted = true, width = 396, height = 30, vertical = "TOP" })
     view.status:SetPoint("BOTTOMLEFT", view, "BOTTOMLEFT", 0, 0)
 
     view.statsButton = CreateButton(view, "Statistik", 96, 24, function()
         GC.UI:OpenOrderStatsDialog()
     end)
     view.statsButton:SetPoint("RIGHT", view.trackerToggle, "LEFT", -8, 0)
+
+    -- Der zweite Weg in einen Auftrag: ohne Rezept, nur mit Beruf und Wunsch.
+    -- Er sitzt am Board und nicht am Katalog, weil es dort nichts auszuwählen
+    -- gibt - genau das ist ja der Fall, für den es ihn gibt.
+    view.freeOrderButton = CreateButton(view, "Freier Auftrag", 130, 24, function()
+        GC.UI:OpenOrderCreateDialog()
+    end)
+    view.freeOrderButton:SetPoint("RIGHT", view.statsButton, "LEFT", -8, 0)
 
     self:BuildOrderCreateDialog(page)
     self:BuildOrderLogDialog(page)
@@ -5855,7 +5945,9 @@ local function FillOrderRow(row, boardRow, isOpenSection)
                 .. GC.Util.PlayerShortName(order.preferredCrafter or "?")
                 .. "|r  ·  " .. OrderOfferLine(order))
         elseif not boardRow.canAccept then
-            row.detail:SetText("Kein Charakter deines Accounts kann dieses Rezept  ·  "
+            row.detail:SetText((GC.Orders:GetFreeProfessionKey(order.recipeKey)
+                and "Kein Charakter deines Accounts hat diesen Beruf  ·  "
+                or "Kein Charakter deines Accounts kann dieses Rezept  ·  ")
                 .. OrderOfferLine(order))
         end
         if boardRow.declined then
@@ -5870,7 +5962,16 @@ local function FillOrderRow(row, boardRow, isOpenSection)
         row.detail:SetText(GC.Util.PlayerShortName(waitingFor or order.crafter or "?")
             .. " ist dran  ·  " .. AgeLabel(order.changedAt))
     else
-        row.detail:SetText(boardRow.yourTurn and boardRow.action or OrderTermsLine(order))
+        local detail = boardRow.yourTurn and boardRow.action or OrderTermsLine(order)
+        -- Was der Client selbst mitgezählt hat, steht daneben - samt der
+        -- Ansage, dass es noch niemand außer einem selbst weiß.
+        local pending = GC.Orders:GetPendingCraftCount(order.id)
+        if pending > 0 then
+            detail = detail .. "  ·  |cff2ed9e6"
+                .. GC.LFormat("{n} selbst gefertigt, noch nicht gemeldet", { n = pending })
+                .. "|r"
+        end
+        row.detail:SetText(detail)
         local label, handler = OrderPrimaryAction(order)
         row.primaryHandler = handler
         if row.primary then
@@ -6118,6 +6219,38 @@ function GC.UI:BuildOrderCreateDialog(page)
         dialog.crafterList.rows[index] = rowButton
     end
     dialog.crafterList:Hide()
+
+    -- Freitext-Auftrag: Wunsch in Worten plus der Beruf, der ihn erfüllen
+    -- kann. Beide teilen sich die Zeile des Wunsch-Herstellers - der hat beim
+    -- Freitext keine Grundlage, weil es zu einem unbekannten Rezept keine
+    -- Herstellerliste gibt.
+    local freeProfessions = {}
+    for _, professionName in ipairs(GC.ProfessionOptions) do
+        if professionName ~= "" then
+            freeProfessions[#freeProfessions + 1] = professionName
+        end
+    end
+    freeProfessions[#freeProfessions + 1] = "Kochkunst"
+    freeProfessions[#freeProfessions + 1] = "Erste Hilfe"
+    dialog.freeCaption = CreateLabel(dialog, "Was brauchst du? (kurz)",
+        { muted = true, width = 232, height = 15 })
+    dialog.freeCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -258)
+    dialog.freeEdit = CreateEdit(dialog, 232, 26)
+    dialog.freeEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -275)
+    dialog.professionCaption = CreateLabel(dialog, "Beruf", { muted = true, width = 176, height = 15 })
+    dialog.professionCaption:SetPoint("TOPLEFT", dialog, "TOPLEFT", 258, -258)
+    -- Nach oben aufklappend: Die Zeile sitzt am unteren Rand des Dialogs.
+    dialog.professionDropdown = CreateChoiceDropdown(dialog, 176, freeProfessions, function(value)
+        dialog.freeProfession = value
+    end, false, "Beruf wählen", function(professionName)
+        return GC.ProfessionIcons[professionName or ""] or GC.ProfessionIcons[""]
+    end)
+    dialog.professionDropdown:SetPoint("TOPLEFT", dialog, "TOPLEFT", 258, -277)
+    dialog.freeCaption:Hide()
+    dialog.freeEdit.container:Hide()
+    dialog.professionCaption:Hide()
+    dialog.professionDropdown:Hide()
+
     dialog.templateButton = CreateButton(dialog, "Als Vorlage merken", 160, 26, function()
         local saved = GC.Orders:SaveTemplate(dialog.recipeKey, {
             quantity = tonumber(GC.Util.Trim(dialog.quantityEdit:GetText())) or 1,
@@ -6140,7 +6273,17 @@ function GC.UI:BuildOrderCreateDialog(page)
     dialog.submit = CreateButton(dialog, "Erstellen", 150, 32, function()
         local gold = tonumber(GC.Util.Trim(dialog.costEdit:GetText())) or 0
         local tip = tonumber(GC.Util.Trim(dialog.tipEdit:GetText())) or 0
-        local ok, message = GC.Orders:Create(dialog.recipeKey, {
+        local recipeKey, freeName = dialog.recipeKey, nil
+        if dialog.freeMode then
+            recipeKey = GC.Orders:FreeRecipeKey(dialog.freeProfession or "")
+            freeName = GC.Util.Trim(dialog.freeEdit:GetText())
+            if not recipeKey then
+                dialog.status:SetText(GC.L("Wähle den Beruf, der den Auftrag erfüllen kann."))
+                SetTextColor(dialog.status, THEME.danger)
+                return
+            end
+        end
+        local ok, message = GC.Orders:Create(recipeKey, {
             quantity = tonumber(GC.Util.Trim(dialog.quantityEdit:GetText())) or 1,
             materialModel = dialog.materialModel,
             delivery = dialog.delivery,
@@ -6148,6 +6291,7 @@ function GC.UI:BuildOrderCreateDialog(page)
             tip = math.floor(tip * 10000),
             note = dialog.noteEdit:GetText(),
             preferredCrafter = dialog.preferredValue,
+            freeName = freeName,
         })
         if ok then
             dialog:Hide()
@@ -6171,17 +6315,41 @@ function GC.UI:BuildOrderCreateDialog(page)
     dialog.cancel:SetPoint("LEFT", dialog.submit, "RIGHT", 10, 0)
 end
 
+-- Ohne Rezeptschlüssel öffnet derselbe Dialog den Freitext-Auftrag: Das ist
+-- kein zweites Fenster, weil bis auf Wunsch und Beruf alles identisch ist -
+-- Materialmodell, Übergabeweg, Menge, Kostenrahmen, Trinkgeld, Notiz.
 function GC.UI:OpenOrderCreateDialog(recipeKey)
     local page = self.pages.WORKSHOP
     local dialog = page and page.orderCreateDialog
     if not dialog then
         return
     end
-    local entry = GC.Workshop:GetCatalogEntry(recipeKey)
-    dialog.recipeKey = recipeKey
-    dialog.title:SetText("Gildenauftrag: " .. ((entry and entry.name) or recipeKey))
+    local freeMode = GC.Util.Trim(recipeKey or "") == ""
+    dialog.freeMode = freeMode
+    dialog.freeCaption:SetShown(freeMode)
+    dialog.freeEdit.container:SetShown(freeMode)
+    dialog.professionCaption:SetShown(freeMode)
+    dialog.professionDropdown:SetShown(freeMode)
+    -- Wunsch-Hersteller und Vorlage hängen beide am Rezept; beim Freitext
+    -- gibt es keines, und ihre Zeile gehört dort Wunsch und Beruf.
+    dialog.preferredCaption:SetShown(not freeMode)
+    dialog.preferredButton:SetShown(not freeMode)
+    dialog.templateButton:SetShown(not freeMode)
+    if freeMode then
+        dialog.crafterList:Hide()
+        dialog.recipeKey = nil
+        dialog.freeProfession = nil
+        dialog.freeEdit:SetText(GC.L(""))
+        dialog.professionDropdown:SetValue("")
+        dialog.title:SetText(GC.L("Freier Gildenauftrag"))
+    end
+    local entry = not freeMode and GC.Workshop:GetCatalogEntry(recipeKey) or nil
+    if not freeMode then
+        dialog.recipeKey = recipeKey
+        dialog.title:SetText("Gildenauftrag: " .. ((entry and entry.name) or recipeKey))
+    end
     -- Vorlage des Rezepts, falls gemerkt - sonst die Grundeinstellung.
-    local template = GC.Orders:GetTemplate(recipeKey)
+    local template = not freeMode and GC.Orders:GetTemplate(recipeKey) or nil
     dialog.materialModel = template and template.materialModel or "A"
     dialog.delivery = template and template.delivery or "TRADE"
     for _, button in ipairs(dialog.materialModelButtons or {}) do
@@ -6283,7 +6451,7 @@ function GC.UI:OpenOrderLogDialog(orderID)
 end
 
 function GC.UI:BuildOrderCostDialog(page)
-    local dialog = BuildOrderDialogFrame(page, 360, 210, "Gefertigt melden")
+    local dialog = BuildOrderDialogFrame(page, 360, 240, "Gefertigt melden")
     page.orderCostDialog = dialog
     dialog.caption = CreateLabel(dialog,
         "Tatsächliche Materialkosten in Gold (0, wenn nichts anfiel):",
@@ -6309,6 +6477,45 @@ function GC.UI:BuildOrderCostDialog(page)
         end
     end, "PRIMARY")
     dialog.submit:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 14)
+
+    -- Hier ist der Ort für das Herstellen: Der Dialog ist genau der Moment,
+    -- in dem jemand die Stücke macht. Gefertigt wird die noch offene Menge;
+    -- was der Client dabei wirklich herstellt, zählt der Mitzähler mit und
+    -- schreibt es in das Feld darüber.
+    dialog.craftButton = CreateButton(dialog, "Herstellen", 150, 30, function()
+        local order = GC.Orders:GetOrder(dialog.orderID)
+        if not order or not dialog.craftButton.craftReady then
+            GC.UI:RefreshOrderCraftButton()
+            return
+        end
+        local remaining = math.max(1, (tonumber(order.quantity) or 1)
+            - (tonumber(order.craftedCount) or 0)
+            - GC.Orders:GetPendingCraftCount(dialog.orderID))
+        local ok, message = GC.Workshop:CraftOpenRecipe(order.recipeKey, remaining)
+        dialog.status:SetText(message or "")
+        SetTextColor(dialog.status, ok and THEME.success or THEME.danger)
+    end, nil, true)
+    dialog.craftButton:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -16, 14)
+    dialog.status = CreateLabel(dialog, "", { muted = true, width = 324, height = 28, vertical = "TOP" })
+    dialog.status:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 16, 48)
+end
+
+-- Der Knopf im Gefertigt-Dialog folgt demselben Zweischritt wie der im
+-- Katalog; er kennt zusätzlich die noch offene Menge des Auftrags.
+function GC.UI:RefreshOrderCraftButton()
+    local page = self.pages.WORKSHOP
+    local dialog = page and page.orderCostDialog
+    if not dialog or not dialog.orderID then
+        return
+    end
+    local order = GC.Orders:GetOrder(dialog.orderID)
+    if not order then
+        return
+    end
+    local remaining = math.max(1, (tonumber(order.quantity) or 1)
+        - (tonumber(order.craftedCount) or 0)
+        - GC.Orders:GetPendingCraftCount(dialog.orderID))
+    self:RefreshCraftButton(dialog.craftButton, order.recipeKey, remaining)
 end
 
 function GC.UI:OpenOrderCostDialog(orderID)
@@ -6328,8 +6535,15 @@ function GC.UI:OpenOrderCostDialog(orderID)
     dialog.countEdit.container:SetShown(multi == true)
     if multi then
         dialog.countCaption:SetText("Stück insgesamt fertig (von " .. order.quantity .. "):")
-        dialog.countEdit:SetText(tostring(order.quantity))
+        -- Vorbelegt mit dem, was der Client selbst mitgezählt hat - und mit
+        -- der vollen Menge, solange nichts mitgezählt wurde. Wer von Hand
+        -- fertigt, überschreibt die Zahl wie bisher.
+        local pending = GC.Orders:GetPendingCraftCount(orderID)
+        local counted = math.min(order.quantity, (tonumber(order.craftedCount) or 0) + pending)
+        dialog.countEdit:SetText(tostring(pending > 0 and counted or order.quantity))
     end
+    dialog.status:SetText(GC.L(""))
+    self:RefreshOrderCraftButton()
     dialog:Show()
 end
 

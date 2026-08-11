@@ -132,17 +132,87 @@ local function SameCharacter(left, right)
         == GC.Util.NormalizeName(GC.Util.PlayerShortName(right))
 end
 
+-- === Freitext-Auftraege =====================================================
+--
+-- "Freitext-Auftraege fuer nicht vorhandene Rezepte einbauen" - aus der Gilde,
+-- 08/2026. Der Katalog kennt nur, was jemand mit Addon eingelesen hat; was
+-- niemand gescannt hat oder was der Hersteller erst noch lernen muss, war
+-- damit unbestellbar.
+--
+-- Ein Freitext-Auftrag traegt statt eines Rezeptschluessels den BERUF:
+-- "Fverzauberkunst". Das ist Absicht und keine Notloesung -
+--
+--   * die Annahmepruefung bleibt echt: Nur wer den Beruf hat, darf annehmen,
+--     und der Filter "nur machbare" behaelt seine Bedeutung. Ein Schluessel
+--     ohne jede Pruefung waere fuer jeden machbar und damit fuer niemanden;
+--   * er muss nicht eindeutig sein. Auftraege unterscheidet ihre id; der
+--     Rezeptschluessel beantwortet allein die Frage "wer kann das?".
+--
+-- Katalogschluessel beginnen mit I (Item), E (Rezept-ID) oder N (Name) - das
+-- F ist deshalb frei und kann nie mit einem echten Rezept kollidieren.
+local FREE_PREFIX = "F"
+
+function GC.Orders:FreeRecipeKey(professionName)
+    local key = GC.CanonicalProfessionKey(professionName or "")
+    if GC.Util.Trim(key) == "" or not GC.ProfessionByKey[key] then
+        return nil
+    end
+    return FREE_PREFIX .. key
+end
+
+-- Liefert den Berufsschluessel eines Freitext-Auftrags, sonst nil.
+function GC.Orders:GetFreeProfessionKey(recipeKey)
+    recipeKey = tostring(recipeKey or "")
+    if recipeKey:sub(1, 1) ~= FREE_PREFIX then
+        return nil
+    end
+    local key = recipeKey:sub(2)
+    return GC.ProfessionByKey[key] and key or nil
+end
+
+function GC.Orders:GetFreeProfessionName(recipeKey)
+    local key = self:GetFreeProfessionKey(recipeKey)
+    local definition = key and GC.ProfessionByKey[key]
+    return definition and definition.name or nil
+end
+
+local function HasProfession(professions, professionKey)
+    for storedKey, profession in pairs(professions or {}) do
+        -- Der Tabellenschluessel ist die verlaessliche Quelle; der Name ist es
+        -- bei Daten aus englischen Clients nicht immer, und ein Bergbau-Eintrag
+        -- heisst im Fenster "Schmelzen".
+        local name = (type(profession) == "table" and (profession.name or profession.key))
+            or storedKey
+        if GC.CanonicalProfessionKey(storedKey) == professionKey
+            or GC.CanonicalProfessionKey(name) == professionKey then
+            return true
+        end
+    end
+    return false
+end
+
 -- === Wer kann was fertigen? =================================================
 
 -- Eigene Charaktere (Account-lokal, aus den gemeinsamen SavedVariables), die
 -- das Rezept beherrschen. Grundlage der Twink-Regel auf der Annehmen-Seite.
 function GC.Orders:GetOwnCrafters(recipeKey)
     recipeKey = tostring(recipeKey or "")
+    local freeProfession = self:GetFreeProfessionKey(recipeKey)
     local candidates = {}
     local seen = {}
     for _, entry in ipairs(GC.Workshop:GetAccountProfessions()) do
-        local recipes = entry.profession and entry.profession.recipes
-        if recipes and recipes[recipeKey] then
+        local profession = entry.profession
+        local matches
+        if freeProfession then
+            -- Beim Freitext zaehlt der Beruf, nicht das einzelne Rezept.
+            matches = profession ~= nil
+                and (GC.CanonicalProfessionKey(profession.key or "") == freeProfession
+                    or GC.CanonicalProfessionKey(profession.name or "") == freeProfession)
+        else
+            matches = profession ~= nil and profession.recipes ~= nil
+                and profession.recipes[recipeKey] ~= nil
+        end
+        if matches then
             local key = GC.Util.NormalizeName(entry.crafter)
             if not seen[key] then
                 seen[key] = true
@@ -172,6 +242,10 @@ function GC.Orders:IsKnownCrafter(characterName, recipeKey)
         or crafters[GC.Util.NormalizeName(GC.Util.PlayerShortName(characterName))]
     if not entry then
         return false
+    end
+    local freeProfession = self:GetFreeProfessionKey(recipeKey)
+    if freeProfession then
+        return HasProfession(entry.professions, freeProfession)
     end
     for _, profession in pairs(entry.professions or {}) do
         if profession.recipeKeys and profession.recipeKeys[recipeKey] then
@@ -783,6 +857,69 @@ function GC.Orders:SetDeclined(orderID, declined)
     return true
 end
 
+-- === Mitgezaehlt, was wirklich gefertigt wird ===============================
+--
+-- "Tracken (Menge) von hergestellten Items ist nicht vorhanden" - der vierte
+-- Punkt der Gildenrueckmeldung. Der Zaehler im Auftrag war eine reine
+-- Handeingabe; wer im Berufsfenster fertigte, erzeugte fuer das Addon nichts.
+--
+-- Jetzt hoert der Client auf den erfolgreichen Herstellungszauber. Passt seine
+-- Zauber-ID zum Rezept eines laufenden eigenen Auftrags, steigt ein Zaehler.
+--
+-- Der bleibt bewusst LOKAL und geht nie ins Netz: Vierzig Urnen waeren sonst
+-- vierzig Rundrufe, und ein Gildenauftrag ist eine Absprache zwischen
+-- Menschen - gemeldet wird auf Klick, so wie bisher. Der Zaehler fuellt nur
+-- die Meldung vor und steht in der Zeile.
+function GC.Orders:GetPendingCrafts()
+    local settings = GC.DB:GetSettings()
+    settings.pendingCrafts = settings.pendingCrafts or {}
+    return settings.pendingCrafts
+end
+
+function GC.Orders:GetPendingCraftCount(orderID)
+    return tonumber(self:GetPendingCrafts()[tostring(orderID or "")]) or 0
+end
+
+function GC.Orders:ClearPendingCrafts(orderID)
+    self:GetPendingCrafts()[tostring(orderID or "")] = nil
+end
+
+-- Ein erfolgreicher Herstellungszauber. Sucht die eigenen laufenden Auftraege
+-- nach dem passenden Rezept ab und zaehlt hoch; liefert die Zahl der
+-- betroffenen Auftraege.
+function GC.Orders:NoteCraftedSpell(spellID)
+    spellID = tonumber(spellID)
+    if not spellID or not GC.Workshop then
+        return 0
+    end
+    local ownTag = GC.DB:GetAccountTag()
+    local pending = self:GetPendingCrafts()
+    local counted = 0
+    for orderID, order in pairs(self:GetStore()) do
+        if (order.status == "WORKING" or order.status == "ACCEPTED")
+            and GC.Util.Trim(order.acceptedByTag) ~= ""
+            and order.acceptedByTag == ownTag then
+            local recipe = GC.Workshop:GetOwnRecipe(order.recipeKey)
+            if recipe and tonumber(recipe.recipeID) == spellID then
+                local quantity = tonumber(order.quantity) or 1
+                local already = tonumber(order.craftedCount) or 0
+                -- Ueber die Bestellmenge hinaus wird nicht gezaehlt: Wer
+                -- nebenher fuer sich selbst fertigt, soll den Auftrag nicht
+                -- ueberfuellt melden.
+                local room = math.max(0, quantity - already - (tonumber(pending[orderID]) or 0))
+                if room > 0 then
+                    pending[orderID] = (tonumber(pending[orderID]) or 0) + 1
+                    counted = counted + 1
+                end
+            end
+        end
+    end
+    if counted > 0 then
+        NotifyChanged()
+    end
+    return counted
+end
+
 function GC.Orders:CountDeclined()
     local count = 0
     local store = self:GetStore()
@@ -798,12 +935,24 @@ end
 function GC.Orders:Create(recipeKey, options)
     options = options or {}
     recipeKey = tostring(recipeKey or "")
-    local entry = GC.Workshop:GetCatalogEntry(recipeKey)
-    if not entry then
-        return false, "Dieses Rezept steht nicht im Katalog der Gilde."
-    end
-    if #entry.crafters == 0 then
-        return false, "Für dieses Rezept ist kein Hersteller bekannt."
+    -- Zwei Wege in denselben Auftrag: aus dem Katalog (Rezept bekannt, samt
+    -- Herstellerliste) oder als Freitext (Beruf bekannt, Rezept nicht).
+    local freeProfession = self:GetFreeProfessionKey(recipeKey)
+    local entry
+    local wish
+    if freeProfession then
+        wish = Sanitized(options.freeName, MAX_NAME_BYTES)
+        if GC.Util.Trim(wish) == "" then
+            return false, "Schreib dazu, was du brauchst."
+        end
+    else
+        entry = GC.Workshop:GetCatalogEntry(recipeKey)
+        if not entry then
+            return false, "Dieses Rezept steht nicht im Katalog der Gilde."
+        end
+        if #entry.crafters == 0 then
+            return false, "Für dieses Rezept ist kein Hersteller bekannt."
+        end
     end
 
     local ownName = GC:GetPlayerFullName()
@@ -825,8 +974,9 @@ function GC.Orders:Create(recipeKey, options)
     local delivery = options.delivery == "MAIL" and "MAIL" or "TRADE"
 
     -- Wunsch-Hersteller (optional): muss ein bekannter Hersteller des
-    -- Rezepts sein, sonst waere die Reservierung eine Sackgasse.
-    local preferred = GC.Util.Trim(options.preferredCrafter or "")
+    -- Rezepts sein, sonst waere die Reservierung eine Sackgasse. Beim
+    -- Freitext gibt es keine Herstellerliste - dort bleibt das Feld leer.
+    local preferred = not freeProfession and GC.Util.Trim(options.preferredCrafter or "") or ""
     if preferred ~= "" then
         local valid = false
         for _, crafterName in ipairs(entry.crafters) do
@@ -848,7 +998,7 @@ function GC.Orders:Create(recipeKey, options)
         rev = 1,
         status = "OPEN",
         recipeKey = recipeKey,
-        recipeName = Sanitized(entry.name, MAX_NAME_BYTES),
+        recipeName = wish or Sanitized(entry.name, MAX_NAME_BYTES),
         quantity = math.max(1, math.min(99, math.floor(tonumber(options.quantity) or 1))),
         createdBy = ownName,
         createdByTag = ownTag,
@@ -961,6 +1111,9 @@ function GC.Orders:MarkCrafted(orderID, actualCost, note, craftedCount)
     if not ok then
         return false, message
     end
+    -- Gemeldet ist gemeldet: Der lokale Mitzaehler faengt danach bei null an,
+    -- sonst stuende dieselbe Fertigung zweimal im Vorschlag.
+    self:ClearPendingCrafts(orderID)
     self:BroadcastOrder(order)
     self:NoteStatusChanged(order, previousStatus)
     NotifyChanged()
@@ -1636,6 +1789,15 @@ function GC.Orders:Prune()
             declined[orderID] = nil
         end
     end
+
+    -- Dasselbe fuer den Mitzaehler: Er gilt nur, solange der Auftrag laeuft.
+    local pending = self:GetPendingCrafts()
+    for orderID in pairs(pending) do
+        local order = store[orderID]
+        if not order or (order.status ~= "ACCEPTED" and order.status ~= "WORKING") then
+            pending[orderID] = nil
+        end
+    end
 end
 
 -- Sortierte Sichten für Board und Tracker.
@@ -1715,4 +1877,21 @@ end
 
 GC:RegisterCallback("PLAYER_LOGIN", GC.Orders, function(self)
     self:Prune()
+end)
+
+-- Der Herstellungszauber des eigenen Charakters. Ein einzelnes Ereignisabo,
+-- das nur dann etwas tut, wenn ein laufender eigener Auftrag zum Zauber
+-- passt - in jedem anderen Fall kostet es einen Tabellenzugriff.
+local orderEvents = CreateFrame("Frame")
+orderEvents:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+orderEvents:SetScript("OnEvent", function(_, _, unit, ...)
+    if unit ~= "player" then
+        return
+    end
+    -- Die Zauber-ID steht in jeder Spielfassung an letzter Stelle: in TBC
+    -- Classic als (castGUID, spellID), in aelteren Classic-Staenden als
+    -- (spellName, rank, lineID, spellID). Das letzte Argument zu nehmen ist
+    -- deshalb richtiger als eine feste Position.
+    local last = select("#", ...)
+    GC.Orders:NoteCraftedSpell(last > 0 and tonumber((select(last, ...))) or nil)
 end)

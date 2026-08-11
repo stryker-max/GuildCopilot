@@ -7,6 +7,24 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.112 – Addon
+
+**Neu**
+
+- **Freie Aufträge für Rezepte, die der Katalog nicht kennt.** Der Knopf
+  „Freier Auftrag" unten am Auftragsboard fragt nach Beruf und Wunsch in
+  Worten – für alles, was noch niemand eingelesen hat oder was der Hersteller
+  erst lernen muss. Annehmen darf, wer den Beruf hat; ansonsten läuft der
+  Auftrag durch dieselben Schritte wie jeder andere.
+- **Herstellen aus dem Cockpit.** Beherrscht der gerade gespielte Charakter
+  ein Rezept, steht an der Rezeptkarte ein Knopf: erster Klick öffnet das
+  Berufsfenster, zweiter fertigt. Im Dialog „Gefertigt melden" fertigt er
+  gleich die noch offene Menge des Auftrags.
+- **Der Zähler zählt selbst.** Was du herstellst, zählt Guild Copilot mit –
+  egal ob über den neuen Knopf oder von Hand im Berufsfenster. Der Stand
+  steht in der Auftragszeile und füllt die Meldung vor. Er bleibt bis zum
+  Klick auf „Melden" bei dir; von allein geht nichts in die Gilde.
+
 ## 0.9.111 – Addon
 
 **Neu**

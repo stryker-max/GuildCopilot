@@ -1229,6 +1229,129 @@ function GC.Workshop:ScanOpenProfession()
     return self:FinishScan(professionName, skillLevel, maxSkillLevel, recipes, recipeCount, cooldowns)
 end
 
+-- === Herstellen aus dem Cockpit =============================================
+--
+-- "Moeglichkeit, aus dem Cockpit heraus Items herzustellen?" - aus der Gilde,
+-- 08/2026. Machbar, aber mit zwei Grenzen, die das Spiel setzt und die kein
+-- Addon umgeht:
+--
+--   1. Nur der Charakter, der GERADE spielt. Der Katalog kennt die Rezepte
+--      aller Twinks der Gilde; fertigen kann immer nur der eingeloggte.
+--   2. Nur bei offenem Berufsfenster. Die Rezeptlisten der drei APIs
+--      existieren ausschliesslich, solange es offen steht - deshalb wird hier
+--      nichts gemerkt, sondern bei jedem Auftrag neu gesucht. Ein gemerkter
+--      Index waere schon nach dem naechsten Filterwechsel falsch.
+--
+-- Geoeffnet wird das Fenster ueber einen sicheren Knopf in der Oberflaeche
+-- (Zauber, echter Tastendruck) - genau wie im Einrichtungsassistenten.
+
+-- Das Rezept des eingeloggten Charakters, oder nil.
+function GC.Workshop:GetOwnRecipe(recipeKey)
+    recipeKey = tostring(recipeKey or "")
+    if recipeKey == "" then
+        return nil
+    end
+    for _, profession in pairs(self:GetOwnData().professions) do
+        local recipe = profession.recipes and profession.recipes[recipeKey]
+        if recipe then
+            return recipe, profession
+        end
+    end
+    return nil
+end
+
+-- Sucht das Rezept im gerade offenen Berufsfenster. Liefert die Angaben, die
+-- der jeweilige Herstellbefehl braucht: "modern" die Rezept-ID, die beiden
+-- klassischen Wege ihren Listenindex.
+function GC.Workshop:FindOpenRecipe(recipeKey)
+    recipeKey = tostring(recipeKey or "")
+    if recipeKey == "" then
+        return nil
+    end
+
+    local api = C_TradeSkillUI
+    if api and type(api.GetRecipeInfo) == "function" and type(api.GetAllRecipeIDs) == "function"
+        and (type(api.IsTradeSkillReady) ~= "function" or SafeAPICall(api.IsTradeSkillReady)) then
+        for _, recipeID in ipairs(SafeAPICall(api.GetAllRecipeIDs) or {}) do
+            local info = SafeAPICall(api.GetRecipeInfo, recipeID)
+            if info and info.learned ~= false then
+                local itemID = ItemIDFromLink(SafeAPICall(api.GetRecipeItemLink, recipeID))
+                local key = itemID and ("I" .. itemID) or ("E" .. tostring(recipeID))
+                if key == recipeKey then
+                    return { kind = "MODERN", recipeID = recipeID, name = info.name }
+                end
+            end
+        end
+    end
+
+    if GetNumCrafts and GetCraftInfo and (GetNumCrafts() or 0) > 0 then
+        for index = 1, GetNumCrafts() do
+            local name, _, craftType = GetCraftInfo(index)
+            if name and craftType ~= "header" and craftType ~= "subheader" then
+                local link = GetCraftItemLink and GetCraftItemLink(index)
+                local itemID = ItemIDFromLink(link)
+                local recipeID = RecipeIDFromLink(link)
+                local key = itemID and ("I" .. itemID)
+                    or recipeID and ("E" .. recipeID)
+                    or ("N" .. NormalizeKey(name))
+                if key == recipeKey then
+                    return { kind = "CRAFT", index = index, name = name }
+                end
+            end
+        end
+    end
+
+    if GetNumTradeSkills and GetTradeSkillInfo and (GetNumTradeSkills() or 0) > 0 then
+        for index = 1, GetNumTradeSkills() do
+            local name, skillType = GetTradeSkillInfo(index)
+            if name and skillType ~= "header" and skillType ~= "subheader" then
+                local itemID = ItemIDFromLink(GetTradeSkillItemLink and GetTradeSkillItemLink(index))
+                local recipeID = RecipeIDFromLink(
+                    GetTradeSkillRecipeLink and GetTradeSkillRecipeLink(index))
+                local key = itemID and ("I" .. itemID)
+                    or recipeID and ("E" .. recipeID)
+                    or ("N" .. NormalizeKey(name))
+                if key == recipeKey then
+                    return { kind = "CLASSIC", index = index, name = name }
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Startet die Herstellung. Gibt Erfolg und eine Meldung zurueck; ausgeloest
+-- wird immer nur EIN Herstellbefehl, das Spiel wiederholt ihn selbst.
+function GC.Workshop:CraftOpenRecipe(recipeKey, count)
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        return false, "Im Kampf wird nicht gefertigt."
+    end
+    if not self:GetOwnRecipe(recipeKey) then
+        return false, "Dieser Charakter kennt das Rezept nicht."
+    end
+    local found = self:FindOpenRecipe(recipeKey)
+    if not found then
+        return false, "Öffne zuerst das Berufsfenster – der Client gibt die Rezeptliste nur dann her."
+    end
+    count = math.max(1, math.min(40, math.floor(tonumber(count) or 1)))
+
+    if found.kind == "MODERN" and C_TradeSkillUI
+        and type(C_TradeSkillUI.CraftRecipe) == "function" then
+        SafeAPICall(C_TradeSkillUI.CraftRecipe, found.recipeID, count)
+    elseif found.kind == "CRAFT" and type(DoCraft) == "function" then
+        -- Die Craft-API (Verzauberkunst in TBC) kennt keine Wiederholung:
+        -- ein Aufruf, ein Stueck.
+        SafeAPICall(DoCraft, found.index)
+        count = 1
+    elseif found.kind == "CLASSIC" and type(DoTradeSkill) == "function" then
+        SafeAPICall(DoTradeSkill, found.index, count)
+    else
+        return false, "Diese Spielfassung kennt keinen Herstellbefehl für das Rezept."
+    end
+    return true, count == 1 and ("„" .. (found.name or "?") .. "“ wird hergestellt.")
+        or ("„" .. (found.name or "?") .. "“ wird " .. count .. "× hergestellt.")
+end
+
 -- "recipeKeyFilter" schraenkt die Nutzlast auf einzelne Rezepte ein. Damit
 -- werden nachgeforderte Rezepte gezielt nachgeliefert, statt den ganzen Beruf
 -- erneut zu senden.
@@ -3727,9 +3850,16 @@ workshopEvents:RegisterEvent("TRADE_SKILL_UPDATE")
 workshopEvents:RegisterEvent("CRAFT_SHOW")
 workshopEvents:RegisterEvent("CRAFT_UPDATE")
 workshopEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+-- Das Schliessen des Berufsfensters aendert nichts an den Daten, aber alles
+-- am Herstellen-Knopf: Ohne offenes Fenster gibt es keine Rezeptliste, und der
+-- Knopf muss wieder "Berufsfenster öffnen" anbieten.
+workshopEvents:RegisterEvent("TRADE_SKILL_CLOSE")
+workshopEvents:RegisterEvent("CRAFT_CLOSE")
 workshopEvents:SetScript("OnEvent", function(_, event)
     if event == "GET_ITEM_INFO_RECEIVED" then
         GC.Workshop:ScheduleNameRefresh()
+    elseif event == "TRADE_SKILL_CLOSE" or event == "CRAFT_CLOSE" then
+        GC:FireCallback("WORKSHOP_UPDATED")
     else
         if event == "TRADE_SKILL_SHOW" then
             GC.Workshop.preparedProfession = nil

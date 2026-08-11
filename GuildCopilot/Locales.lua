@@ -304,6 +304,19 @@ local english = {
     ["Nicht für mich"] = "Not for me",
     ["Wieder einblenden"] = "Show again",
 
+    -- === Freitext-Auftraege und Herstellen (0.9.112) =======================
+    ["Freier Auftrag"] = "Custom order",
+    ["Freier Gildenauftrag"] = "Custom guild order",
+    ["Was brauchst du? (kurz)"] = "What do you need? (short)",
+    ["Beruf"] = "Profession",
+    ["Beruf wählen"] = "Choose profession",
+    ["Wähle den Beruf, der den Auftrag erfüllen kann."]
+        = "Choose the profession that can fill this order.",
+    ["Herstellen"] = "Craft",
+    ["Berufsfenster öffnen"] = "Open profession window",
+    ["{n}× herstellen"] = "Craft {n}×",
+    ["{n} selbst gefertigt, noch nicht gemeldet"] = "{n} crafted by you, not reported yet",
+
     -- === Teilschritt 3: statische Meldungen und Zustände ===================
     ["Abgleich mit der Gilde"] = "Guild sync",
     ["Abmeldung abgelaufen – neu eintragen oder löschen."] = "Absence expired – re-enter or delete it.",

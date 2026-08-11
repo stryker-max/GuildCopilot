@@ -36,6 +36,17 @@ Dummy.__index = function(self, key)
         return function(frame)
             return frame.verticalScroll or 0
         end
+    elseif key == "SetAttribute" then
+        -- Fuer den Herstellen-Knopf: Ob ein Zauber am sicheren Knopf haengt,
+        -- entscheidet, ob ein Klick das Berufsfenster oeffnet oder fertigt.
+        return function(frame, name, value)
+            frame.attributes = frame.attributes or {}
+            frame.attributes[name] = value
+        end
+    elseif key == "GetAttribute" then
+        return function(frame, name)
+            return (frame.attributes or {})[name]
+        end
     elseif key == "SetScale" then
         -- Fuer die Fensterkarte: Massstab und Deckkraft bleiben ablesbar.
         return function(frame, value)
@@ -411,6 +422,15 @@ end
 
 function GetNumCrafts()
     return 2
+end
+
+-- Herstellbefehle: Sie werden nur mitgeschrieben, nicht ausgefuehrt.
+craftCalls = {}
+function DoTradeSkill(index, count)
+    craftCalls[#craftCalls + 1] = { kind = "CLASSIC", index = index, count = count }
+end
+function DoCraft(index)
+    craftCalls[#craftCalls + 1] = { kind = "CRAFT", index = index, count = 1 }
 end
 
 function GetCraftInfo(index)
@@ -5833,6 +5853,183 @@ do
     orders_page.ordersShowDeclined = nil
     addon.DB:GetGuild().workshop.orders = {}
     addon.UI:SetWorkshopView("CATALOG")
+end
+
+do
+    -- Freitext-Aufträge (Nutzerrückmeldung 08/2026): Was im Katalog fehlt,
+    -- war unbestellbar. Der Schlüssel trägt statt des Rezepts den Beruf,
+    -- die Annahmeprüfung bleibt damit echt.
+    addon.DB:GetGuild().workshop.orders = {}
+    assert(addon.Orders:FreeRecipeKey("Schneiderei") == "Fschneiderei",
+        "Der Freitext-Schlüssel stimmt nicht: "
+            .. tostring(addon.Orders:FreeRecipeKey("Schneiderei")))
+    assert(addon.Orders:FreeRecipeKey("Tailoring") == "Fschneiderei",
+        "Der englische Berufsname ergibt keinen Freitext-Schlüssel")
+    assert(addon.Orders:FreeRecipeKey("Quatschkunde") == nil,
+        "Ein erfundener Beruf ergab einen Freitext-Schlüssel")
+    assert(addon.Orders:GetFreeProfessionName("Fschneiderei") == "Schneiderei",
+        "Der Beruf des Freitext-Auftrags ist nicht ablesbar")
+    assert(addon.Orders:GetFreeProfessionKey("I90001") == nil,
+        "Ein Katalogschlüssel gilt als Freitext")
+
+    -- Ohne Wunschtext kein Auftrag - der Text IST die Bestellung.
+    orders_result, orders_message = addon.Orders:Create("Fschneiderei", { materialModel = "A" })
+    assert(orders_result == false, "Ein Freitext-Auftrag ohne Wunsch wurde angenommen")
+
+    orders_sentBefore = #sentAddon
+    orders_result, orders_message = addon.Orders:Create("Fschneiderei", {
+        materialModel = "A", delivery = "TRADE", quantity = 2,
+        freeName = "Mondstoffbeutel 22 Slot", note = "Mats bringe ich mit",
+        -- Ein Wunsch-Hersteller hat beim Freitext keine Grundlage und wird
+        -- verworfen, statt den Auftrag scheitern zu lassen.
+        preferredCrafter = "Heiler-Realm",
+    })
+    assert(orders_result == true,
+        "Der Freitext-Auftrag wurde nicht erstellt: " .. tostring(orders_message))
+    assert(#sentAddon == orders_sentBefore + 2,
+        "Der Freitext-Auftrag hat nicht Kern und Zustand gesendet")
+
+    orders_order = nil
+    for _, entry in pairs(addon.Orders:GetStore()) do
+        if entry.recipeKey == "Fschneiderei" then
+            orders_order = entry
+        end
+    end
+    assert(orders_order ~= nil, "Der Freitext-Auftrag steht nicht im Speicher")
+    assert(orders_order.recipeName == "Mondstoffbeutel 22 Slot",
+        "Der Wunschtext wurde nicht übernommen: " .. tostring(orders_order.recipeName))
+    assert(orders_order.preferredCrafter == "",
+        "Der Wunsch-Hersteller überlebte den Freitext-Auftrag")
+    assert(#addon.Orders:BuildCoreMessage(orders_order) <= 255,
+        "Die Kernnachricht des Freitext-Auftrags sprengt das Paket")
+
+    -- Der eigene Charakter hat Schneiderei (aus dem Berufsscan oben) und
+    -- darf deshalb annehmen; ein Beruf, den niemand hat, findet niemanden.
+    assert(#addon.Orders:GetOwnCrafters("Fschneiderei") > 0,
+        "Der eigene Schneider gilt nicht als Hersteller des Freitext-Auftrags")
+    assert(addon.Orders:IsKnownCrafter("Tester-Realm", "Fschneiderei") == true,
+        "Der eigene Schneider darf den Freitext-Auftrag nicht annehmen")
+    assert(#addon.Orders:GetOwnCrafters("Fjuwelenschleifen") == 0,
+        "Ein Beruf ohne eigenen Charakter meldet trotzdem Hersteller")
+
+    -- Und der ganze Weg: annehmen, Material melden, fertigen. Ein
+    -- Freitext-Auftrag durchläuft dieselben Zustände wie jeder andere.
+    -- Den eigenen Auftrag nimmt man nicht selbst an, deshalb wechselt der
+    -- Auftraggeber für diesen Teil.
+    orders_order.createdBy = "Heiler-Realm"
+    orders_order.createdByTag = "bbbbbbbbbb"
+    orders_result, orders_message = addon.Orders:Accept(orders_order.id)
+    assert(orders_result == true,
+        "Der Freitext-Auftrag ließ sich nicht annehmen: " .. tostring(orders_message))
+    assert(orders_order.status == "ACCEPTED", "Der Freitext-Auftrag ist nicht angenommen")
+    assert(addon.Orders:MarkMaterialsComplete(orders_order.id) == true,
+        "Die Materialmeldung des Freitext-Auftrags scheiterte")
+    assert(addon.Orders:MarkCrafted(orders_order.id, 0, nil, 2) == true,
+        "Die Fertigmeldung des Freitext-Auftrags scheiterte")
+    assert(orders_order.status == "CRAFTED",
+        "Der Freitext-Auftrag wurde nicht fertig: " .. tostring(orders_order.status))
+
+    addon.DB:GetGuild().workshop.orders = {}
+end
+
+do
+    -- Herstellen aus dem Cockpit (Nutzerrückmeldung 08/2026) samt Mitzähler.
+    -- Der eigene Charakter hat Schneiderei mit "Mondstofftasche" (I14155)
+    -- aus dem Berufsscan weiter oben.
+    addon.DB:GetGuild().workshop.orders = {}
+    assert(addon.Workshop:GetOwnRecipe("I14155") ~= nil,
+        "Das eigene Rezept ist nicht auffindbar")
+    assert(addon.Workshop:GetOwnRecipe("I90001") == nil,
+        "Ein fremdes Katalogrezept gilt als eigenes")
+
+    orders_result = addon.Workshop:FindOpenRecipe("I14155")
+    assert(orders_result ~= nil and orders_result.kind == "CLASSIC" and orders_result.index == 2,
+        "Das Rezept wurde im offenen Berufsfenster nicht gefunden")
+
+    -- Der Knopf trägt den Fensterzauber nur, solange das Fenster ZU ist -
+    -- sonst unterbräche der zweite Klick die laufende Herstellung.
+    orders_page = addon.UI.pages.WORKSHOP
+    addon.UI:RefreshCraftButton(orders_page.workshopCraftButton, "I14155", 4)
+    assert(orders_page.workshopCraftButton.shown == true,
+        "Der Herstellen-Knopf bleibt beim eigenen Rezept verborgen")
+    assert(orders_page.workshopCraftButton.craftReady == true,
+        "Der Knopf hält das offene Berufsfenster für geschlossen")
+    assert((orders_page.workshopCraftButton.attributes or {}).spell == nil,
+        "Bei offenem Berufsfenster hängt weiter ein Zauber am Knopf")
+
+    -- Mit geschlossenem Fenster trägt er ihn wieder, und der Klick öffnet.
+    orders_savedTradeSkills, orders_savedCrafts = GetNumTradeSkills, GetNumCrafts
+    GetNumTradeSkills = function() return 0 end
+    GetNumCrafts = function() return 0 end
+    addon.UI:RefreshCraftButton(orders_page.workshopCraftButton, "I14155", 1)
+    assert(orders_page.workshopCraftButton.craftReady == false,
+        "Der Knopf hält das geschlossene Berufsfenster für offen")
+    assert((orders_page.workshopCraftButton.attributes or {}).spell ~= nil,
+        "Ohne offenes Berufsfenster fehlt der Zauber am Knopf")
+    assert(addon.Workshop:CraftOpenRecipe("I14155", 1) == false,
+        "Ohne offenes Berufsfenster wurde trotzdem gefertigt")
+    GetNumTradeSkills, GetNumCrafts = orders_savedTradeSkills, orders_savedCrafts
+
+    addon.UI:RefreshCraftButton(orders_page.workshopCraftButton, "I90001", 1)
+    assert(orders_page.workshopCraftButton.shown == false,
+        "Der Herstellen-Knopf erscheint bei einem fremden Rezept")
+
+    craftCalls = {}
+    orders_result, orders_message = addon.Workshop:CraftOpenRecipe("I14155", 3)
+    assert(orders_result == true, "Die Herstellung scheiterte: " .. tostring(orders_message))
+    assert(#craftCalls == 1 and craftCalls[1].index == 2 and craftCalls[1].count == 3,
+        "Der Herstellbefehl kam nicht mit Index und Menge an")
+
+    -- Im Kampf wird nicht gefertigt, und was der Charakter nicht kann, auch nicht.
+    craftCalls = {}
+    inCombat = true
+    assert(addon.Workshop:CraftOpenRecipe("I14155", 1) == false,
+        "Im Kampf wurde trotzdem gefertigt")
+    inCombat = false
+    assert(addon.Workshop:CraftOpenRecipe("I90001", 1) == false,
+        "Ein fremdes Rezept ließ sich herstellen")
+    assert(#craftCalls == 0, "Ein abgelehnter Auftrag löste trotzdem einen Herstellbefehl aus")
+
+    -- Der Mitzähler: Der Herstellungszauber des eigenen Rezepts zählt auf den
+    -- laufenden eigenen Auftrag, bleibt aber lokal.
+    addon.Orders:GetStore()["zaehl-1"] = {
+        id = "zaehl-1", rev = 1, status = "WORKING",
+        recipeKey = "I14155", recipeName = "Mondstofftasche", quantity = 3,
+        createdBy = "Heiler-Realm", createdByTag = "bbbbbbbbbb",
+        createdAt = currentTime, changedAt = currentTime,
+        materialModel = "A", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "",
+        acceptedByTag = addon.DB:GetAccountTag(), acceptedAt = currentTime,
+        crafter = "Tester-Realm", acceptedVia = "Tester-Realm",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+        craftedCount = 0, log = {},
+    }
+    orders_sentBefore = #sentAddon
+    assert(addon.Orders:NoteCraftedSpell(18445) == 1,
+        "Der Herstellungszauber zählte nicht auf den Auftrag")
+    assert(addon.Orders:GetPendingCraftCount("zaehl-1") == 1,
+        "Der Mitzähler steht nicht bei eins")
+    assert(#sentAddon == orders_sentBefore,
+        "Der Mitzähler hat etwas in die Gilde gesendet")
+    assert(addon.Orders:NoteCraftedSpell(999999) == 0,
+        "Ein fremder Zauber zählte auf den Auftrag")
+
+    -- Über die bestellte Menge hinaus wird nicht gezählt.
+    addon.Orders:NoteCraftedSpell(18445)
+    addon.Orders:NoteCraftedSpell(18445)
+    assert(addon.Orders:GetPendingCraftCount("zaehl-1") == 3,
+        "Der Mitzähler folgt der Bestellmenge nicht")
+    assert(addon.Orders:NoteCraftedSpell(18445) == 0,
+        "Der Mitzähler läuft über die Bestellmenge hinaus")
+
+    -- Gemeldet ist gemeldet: Danach fängt der Mitzähler wieder bei null an.
+    assert(addon.Orders:MarkCrafted("zaehl-1", 0, nil, 3) == true,
+        "Die Fertigmeldung scheiterte")
+    assert(addon.Orders:GetPendingCraftCount("zaehl-1") == 0,
+        "Der Mitzähler überlebt die Meldung")
+
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.Orders:Prune()
 end
 
 do

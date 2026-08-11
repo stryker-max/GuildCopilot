@@ -36,6 +36,9 @@ local DEFAULTS = {
         -- Lokal weggeklickte Gildenauftraege (Orders:SetDeclined). Der
         -- Vermerk geht nie ins Netz und verschwindet mit seinem Auftrag.
         declinedOrders = {},
+        -- Selbst mitgezaehlte Fertigungen je Auftrag, bis sie gemeldet sind.
+        -- Ebenfalls rein lokal (Orders:NoteCraftedSpell).
+        pendingCrafts = {},
         -- Sprache der Oberflaeche: AUTO folgt der Clientsprache, DE und EN
         -- erzwingen eine. Angewandt in GC.ApplyLanguageSetting.
         language = "AUTO",
