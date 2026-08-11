@@ -88,6 +88,21 @@ local MAX_BARE_ANSWER_SUMMARIES = 2
 -- naechsten Login ausgewertet und abgelegt, nicht weggeworfen.
 local MAX_RESUME_AGE = 8 * 60 * 60
 
+-- Wie viele Verbrauchseintraege je Teilnehmer aufgehoben werden - waehrend des
+-- Abends UND in der abgelegten Auswertung.
+--
+-- Die Zahl steht bewusst nur EINMAL. Bis 0.9.116 gab es zwei: hundert waehrend
+-- des Abends, vierzig beim Ablegen. Die Zaehler waren dadurch nie falsch, aber
+-- die Gegenpruefung gegen das Kampflog vom 09.08.2026 endete bei siebzehn von
+-- 175 Paaren im Ungewissen, weil das Protokoll der Vielverbraucher gekappt war.
+--
+-- 200 ist mit Reserve gewaehlt: Der hoechste je gemessene Wert liegt bei 70
+-- Eintraegen an einem Sechsstundenabend. Was darueber hinausgeht, faellt
+-- weiterhin vorn heraus und wird in consumableLogDropped ehrlich gezaehlt -
+-- ein Protokoll, das schweigend unvollstaendig ist, waere schlimmer als ein
+-- gekapptes, das es sagt.
+local CONSUMABLE_LOG_LIMIT = 200
+
 -- Der Herzschlag haelt die Sitzung im Raid zusammen: Nachzuegler und
 -- Wiedereinsteiger erfahren davon, ohne dass jemand etwas anstossen muss.
 -- Gesendet wird hoechstens alle SESSION_HEARTBEAT_INTERVAL Sekunden und immer
@@ -849,13 +864,15 @@ function GC.RaidMonitor:BuildSummary(session, endedAt)
             for _, category in ipairs(GC.ConsumableCategories) do
                 entry.consumables[category.key] = participant.consumables[category.key] or 0
             end
-            -- Das Verbrauchsprotokoll wandert gekappt in die Aufbewahrung:
-            -- die letzten 40 Einträge je Teilnehmer. Es bleibt lokal - die
-            -- Zusammenfassung wird ohne dieses Feld gesendet.
+            -- Das Verbrauchsprotokoll wandert vollständig in die Aufbewahrung:
+            -- Es steht bereits während des Abends unter derselben Obergrenze,
+            -- ein zweites Kappen hier hätte nur die Beweisführung beschnitten.
+            -- Es bleibt lokal - die Zusammenfassung wird ohne dieses Feld
+            -- gesendet.
             local log = participant.consumableLog
             if log and #log > 0 then
                 local kept = {}
-                local start = math.max(1, #log - 39)
+                local start = math.max(1, #log - (CONSUMABLE_LOG_LIMIT - 1))
                 for index = start, #log do
                     kept[#kept + 1] = log[index]
                 end
@@ -1888,7 +1905,7 @@ local function RecordConsumable(participant, category, consumable, spellID, spel
             or ("Zauber " .. tostring(spellID or "?")),
         c = category.key,
     }
-    if #log > 100 then
+    if #log > CONSUMABLE_LOG_LIMIT then
         table.remove(log, 1)
         participant.consumableLogDropped = (participant.consumableLogDropped or 0) + 1
     end

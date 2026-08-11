@@ -227,17 +227,12 @@ Der Merker sitzt jetzt am Zauber statt am Teilnehmer; der Scan darf damit bei
 jedem Anwesenheitsabgleich laufen, ohne je doppelt zu zählen. Einzelheiten im
 ROADMAP-Abschnitt 0.9.116.
 
-### Offen: Vollständigkeit des Verbrauchsprotokolls
+### Erledigt in 0.9.117: Vollständigkeit des Verbrauchsprotokolls
 
-Die Gegenprüfung gegen das Kampflog vom 09.08.2026 blieb bei 17 von 175
-Paaren ohne Beweis, weil `BuildSummary` je Teilnehmer nur die letzten **40**
-Protokolleinträge aufhebt (`consumableLogDropped` zählt die verworfenen).
-Bei Vielverbrauchern fielen bis zu 16 Einträge weg.
-
-Die **Zähler selbst sind davon unberührt** – nur die nachträgliche
-Beweisführung endet dort. Ein höheres Limit (die Laufzeitgrenze liegt bei 100)
-macht künftige Prüfungen lückenlos, kostet aber Platz in den SavedVariables:
-rund 25 Teilnehmer × 60 zusätzliche Einträge je Abend. Entscheidung des Owners.
+Beide Kappstellen rechnen jetzt mit derselben Konstante
+(`CONSUMABLE_LOG_LIMIT = 200`), und `tests/validate.mjs` hält sie darauf.
+Künftige Abende sind damit lückenlos gegenprüfbar; die 17 offenen Paare des
+09.08.2026 bleiben es, ihre Daten sind bereits gekappt abgelegt.
 
 ### Offen: weitere Abende gegenprüfen
 

@@ -7,6 +7,17 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.117 – Addon
+
+**Geändert**
+
+- **Das Verbrauchsprotokoll bleibt vollständig.** Bisher hob die abgelegte
+  Auswertung je Teilnehmer nur die letzten 40 Einträge auf, obwohl der Abend
+  100 gesammelt hatte – bei Vielverbrauchern fiel damit ein Teil des Abends
+  weg. Beide Grenzen liegen jetzt bei 200 und stehen als eine einzige Zahl im
+  Code, sodass sie nicht wieder auseinanderlaufen können. Die Zähler waren
+  davon nie betroffen; lückenlos nachprüfbar ist jetzt auch das Protokoll.
+
 ## 0.9.116 – Addon
 
 **Behoben**

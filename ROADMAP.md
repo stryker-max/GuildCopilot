@@ -298,6 +298,31 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.117 – Eine Zahl statt zweier
+
+Aus der Gegenprüfung von 0.9.116 blieb ein einziger offener Punkt: Siebzehn von 175 Paaren waren nicht beweisbar, weil das Verbrauchsprotokoll gekappt war. Der Owner hat entschieden: „Limit hoch, ich will lückenlose Prüfungen."
+
+### Der eigentliche Fehler war nicht die Höhe, sondern die Anzahl
+
+Gekappt wurde an zwei Stellen, und zwar mit zwei verschiedenen Zahlen: **hundert** während des Abends (`RecordConsumable`), **vierzig** beim Ablegen der Auswertung (`BuildSummary`). Das zweite Kappen warf sechzig Einträge weg, die der Abend bereits sauber gesammelt hatte – ohne jeden Gewinn, denn im Speicher lagen sie ohnehin schon.
+
+Beide rechnen jetzt mit **einer** Konstante, `CONSUMABLE_LOG_LIMIT = 200`. Und damit sie nicht wieder auseinanderlaufen, prüft `tests/validate.mjs` das nach: Die Konstante muss existieren, an mindestens zwei Stellen benutzt werden, und eine eingetippte Zahl an einer Kappstelle lässt den Lauf durchfallen.
+
+### Warum 200
+
+Gemessen statt geschätzt: Der höchste je gespeicherte Verbrauch eines einzelnen Teilnehmers liegt bei **70 Einträgen** an einem Sechsstundenabend (Attilus, 02.08.2026). 200 gibt also fast das Dreifache an Reserve.
+
+Der Preis ist klein, weil nur eigene Mitschnitte ein Protokoll tragen – fremde Auswertungen kommen ohne über das Netz, das Feld wird nie gesendet. Von neunzehn abgelegten Abenden haben genau drei ein Protokoll, zusammen 77 KB in einer 1,16 MB großen Datei.
+
+Was über 200 hinausgeht, fällt weiterhin vorn heraus und wird in `consumableLogDropped` gezählt. Ein Protokoll, das schweigend unvollständig ist, wäre schlimmer als ein gekapptes, das es sagt – und genau dieser Zähler hat die siebzehn Lücken in der Prüfung überhaupt erst sichtbar gemacht.
+
+### Geändert
+
+- `RaidMonitor.lua`: `CONSUMABLE_LOG_LIMIT` als einzige Quelle für beide Kappstellen, Wert 200;
+- `tests/validate.mjs`: hält beide Stellen auf der Konstante;
+- `tests/smoke.lua`: Ein Abend mit sechzig Einträgen kommt vollständig in der Auswertung an;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.117.
+
 ## 0.9.116 – Die vollständige Gegenprüfung gegen das Kampflog
 
 Der Auftrag des Owners nach dem Fläschchen-Fund: „Schau, ob GCP jetzt alles exakt und richtig erfasst. Es muss wasserdicht sein, keine Fehler erlaubt." Und, nachgeschoben: „Vor allem, dass die Anzahl exakt stimmt und nichts doppelt gezählt wird."

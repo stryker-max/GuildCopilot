@@ -6935,6 +6935,43 @@ do
     end
 end
 
+-- === Verbrauchsprotokoll: vollständig in die Ablage ========================
+do
+    -- Bis 0.9.116 wurde zweimal gekappt: hundert während des Abends, vierzig
+    -- beim Ablegen. Die Gegenprüfung gegen das Kampflog vom 09.08.2026 endete
+    -- deshalb bei siebzehn von 175 Paaren im Ungewissen. Was der Abend
+    -- gesammelt hat, muss die Auswertung auch tragen.
+    keep_session = {
+        id = "keep-1", startedAt = currentTime - 3600, pulls = {}, gaps = {},
+        participants = {}, participantOrder = { "vielverbraucher" },
+    }
+    keep_participant = {
+        name = "Vielverbraucher", classFile = "MAGE", seconds = 3600,
+        deaths = 0, resurrects = 0, interrupts = 0, dispels = 0,
+        consumables = {}, consumableLog = {},
+    }
+    for _, category in ipairs(addon.ConsumableCategories) do
+        keep_participant.consumables[category.key] = 0
+    end
+    for index = 1, 60 do
+        keep_participant.consumableLog[index] =
+            { t = currentTime - 3600 + index, n = "Hasttrank", c = "POTION" }
+    end
+    keep_participant.consumables.POTION = 60
+    keep_session.participants.vielverbraucher = keep_participant
+
+    keep_summary = addon.RaidMonitor:BuildSummary(keep_session, currentTime)
+    keep_stored = keep_summary.participants[1]
+    assert(keep_stored ~= nil, "Der Teilnehmer fehlt in der Auswertung")
+    assert(#keep_stored.consumableLog == 60,
+        "Das Verbrauchsprotokoll wurde beim Ablegen erneut gekappt: "
+            .. tostring(#keep_stored.consumableLog) .. " von 60 Einträgen")
+    assert((keep_stored.consumableLogDropped or 0) == 0,
+        "Es wurden Einträge verworfen, obwohl die Obergrenze nicht erreicht war")
+    assert(keep_stored.consumables.POTION == 60,
+        "Der Zähler stimmt nicht mit dem Protokoll überein")
+end
+
 -- === Verbrauchsprotokoll: Fenster mit drei Datenlagen =======================
 do
     -- Live-Protokoll mit Uhrzeiten und Hinweis auf Verworfenes.

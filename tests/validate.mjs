@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.116",
+  "## Version: 0.9.117",
 ];
 
 for (const entry of requiredMetadata) {
@@ -678,6 +678,31 @@ if (/HearsInboxSound\(\)[\s\S]*?\breturn\b/.test(captureLead.split("PlaySuccessS
 }
 if (!settingsPage.includes("page.inboxSoundRankToggles")) {
   throw new Error("Die Rangfreigabe für den Bewerberton fehlt auf der Einstellungsseite.");
+}
+
+// Das Verbrauchsprotokoll wird an zwei Stellen gekappt: waehrend des Abends
+// und beim Ablegen der Auswertung. Bis 0.9.116 standen dort zwei verschiedene
+// Zahlen (100 und 40), und die Gegenpruefung gegen ein Kampflog endete bei
+// siebzehn von 175 Paaren im Ungewissen. Beide Stellen muessen dieselbe
+// Konstante benutzen - eine eingetippte Zahl faellt hier durch.
+const monitorSource = fs.readFileSync(path.join(root, "RaidMonitor.lua"), "utf8");
+if (!/local CONSUMABLE_LOG_LIMIT = \d+/.test(monitorSource)) {
+  throw new Error("Die Obergrenze des Verbrauchsprotokolls fehlt in RaidMonitor.lua.");
+}
+const logLimitUses = monitorSource.match(/CONSUMABLE_LOG_LIMIT/g) || [];
+if (logLimitUses.length < 3) {
+  throw new Error(
+    `CONSUMABLE_LOG_LIMIT wird nur ${logLimitUses.length - 1}-mal benutzt: Eine der beiden ` +
+      `Kappstellen (Laufzeit, Ablage) rechnet noch mit einer eigenen Zahl.`
+  );
+}
+// "#log > 0" ist die Leerpruefung und keine Kappstelle; gemeint sind Zahlen
+// ab zwei Stellen.
+if (/#log > \d\d+/.test(monitorSource) || /#log - \d+\)/.test(monitorSource)) {
+  throw new Error(
+    "Eine Kappstelle des Verbrauchsprotokolls rechnet mit einer eingetippten Zahl " +
+      "statt mit CONSUMABLE_LOG_LIMIT."
+  );
 }
 
 // Die Einstellungsseite scrollt, ihr Inhalt muss aber hoch genug sein: eine
