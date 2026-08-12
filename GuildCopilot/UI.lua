@@ -1325,6 +1325,8 @@ function GC.UI:CreateMainFrame()
     title:SetPoint("LEFT", mark, "RIGHT", 12, 7)
     local subtitle = CreateLabel(header, "TBC Anniversary  •  v" .. GC.Constants.VERSION, { muted = true })
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
+    frame.subtitle = subtitle
+    self:RefreshUpdateHint()
 
     -- Sichtbar neben der Version: Laeuft der Abgleich mit der Gilde, und fahren
     -- alle denselben Stand? Ein Klick fragt sofort nach, statt auf den naechsten
@@ -7139,9 +7141,17 @@ function GC.UI:CreateOrderTracker()
             GC.UI:SetWorkshopView("ORDERS")
         end)
         row:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -28 - ((index - 1) * 44))
+        -- Die Beschriftung eines Knopfes ist auf ganze Knopfhöhe angelegt und
+        -- steht darin senkrecht mittig - für einen gewöhnlichen Knopf genau
+        -- richtig. Hier trägt der Knopf zwei Zeilen, und ein Anker oben allein
+        -- half nichts: Ein zweiter Anker "RIGHT" legt zusätzlich die Mitte auf
+        -- die Knopfmitte, und dorthin rutschte der Rezeptname - mitten in die
+        -- Aufgabenzeile darunter. Deshalb eigene Höhe für die obere Zeile und
+        -- beide Anker oben, damit keiner die Senkrechte zurückholt.
         row.label:ClearAllPoints()
-        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -5)
-        row.label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        row.label:SetHeight(16)
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -4)
+        row.label:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -4)
         row.label:SetJustifyH("LEFT")
         if row.label.SetWordWrap then
             row.label:SetWordWrap(false)
@@ -10191,6 +10201,24 @@ function GC.UI:RefreshSyncBadge()
     end
 end
 
+-- Der Hinweis auf eine neuere Fassung steht dort, wo ohnehin die eigene
+-- Version steht: in der Kopfzeile unter dem Namen. Die Chatzeile aus
+-- GC.Sync:NoteSeenVersion kommt einmal und scrollt weg; wer sie verpasst hat,
+-- findet die Zahl beim naechsten Blick ins Fenster wieder.
+function GC.UI:RefreshUpdateHint()
+    local frame = self.frame
+    if not frame or not frame.subtitle then
+        return
+    end
+    local update = GC.Sync and GC.Sync.GetAvailableUpdate and GC.Sync:GetAvailableUpdate()
+    local text = "TBC Anniversary  •  v" .. GC.Constants.VERSION
+    if update then
+        text = text .. "  •  |cffffb840"
+            .. GC.LFormat("Version {new} verfügbar", { new = update }) .. "|r"
+    end
+    frame.subtitle:SetText(text)
+end
+
 -- === Seiten nur zeichnen, wenn sie jemand sieht ==========================
 --
 -- Bis 0.9.41 baute jeder Aufruf alle dreizehn Seiten neu auf - bei jedem Ein-
@@ -11956,7 +11984,7 @@ function GC.UI:CreateVersionCheckFrame()
     frame.title = CreateLabel(frame, "Versionsprüfer", { title = true, width = 280 })
     frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -14)
     frame.ownVersion = CreateLabel(frame, "Deine Version: " .. GC.Constants.VERSION,
-        { muted = true, width = 280, height = 15 })
+        { muted = true, width = 380, height = 15 })
     frame.ownVersion:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
     frame.closeX = CreateButton(frame, "×", 24, 24, function()
         frame:Hide()
@@ -12088,7 +12116,11 @@ function GC.UI:GetVersionCheckTargets(mode)
     return targets
 end
 
-local VERSION_STATE_ORDER = { OLD = 1, NONE = 2, WAITING = 3, CURRENT = 4 }
+-- AHEAD ist neu und war vorher schlicht falsch: Wer eine neuere Fassung fährt
+-- als man selbst, stand rot unter „veraltet". Genau diese Zeilen sind aber die
+-- Quelle des Aktualisierungshinweises - sie zählen nicht zu den Rückständigen,
+-- sondern erklären ihn.
+local VERSION_STATE_ORDER = { OLD = 1, NONE = 2, WAITING = 3, AHEAD = 4, CURRENT = 5 }
 
 function GC.UI:RefreshVersionCheck()
     local frame = self.versionCheck
@@ -12098,9 +12130,22 @@ function GC.UI:RefreshVersionCheck()
     frame.modeGuild:SetActive(frame.mode ~= "GROUP")
     frame.modeGroup:SetActive(frame.mode == "GROUP")
 
+    -- Wer den Prüfer öffnet, fragt nach Versionen. Steht die eigene nicht mehr
+    -- ganz oben, gehört das genau hierher - und zwar bevor er in der Liste
+    -- sucht, wer denn die grüne Zahl hat.
+    local update = GC.Sync:GetAvailableUpdate()
+    if update then
+        frame.ownVersion:SetText(GC.LFormat(
+            "Deine Version: {own}  •  |cffffb840{new} ist verfügbar|r",
+            { own = GC.Constants.VERSION, new = update }))
+    else
+        frame.ownVersion:SetText(GC.LFormat("Deine Version: {own}",
+            { own = GC.Constants.VERSION }))
+    end
+
     local ownKey = GC.Util.NormalizeName(GC.Util.PlayerShortName(GC:GetPlayerFullName()))
     local ownVersion = GC.Constants.VERSION
-    local current, outdated, missing = 0, 0, 0
+    local current, outdated, missing, ahead = 0, 0, 0, 0
     local entries = {}
     for _, target in ipairs(self:GetVersionCheckTargets(frame.mode)) do
         local entry = { name = target.name, classFile = target.classFile, rank = target.rank }
@@ -12111,7 +12156,13 @@ function GC.UI:RefreshVersionCheck()
             local version, fresh = GC.Sync:GetKnownVersion(target.name, frame.requestedAt)
             if fresh or (frame.settled and version) then
                 entry.version = version
-                entry.state = version == ownVersion and "CURRENT" or "OLD"
+                if version == ownVersion then
+                    entry.state = "CURRENT"
+                elseif GC.Sync:IsNewerVersion(version, ownVersion) then
+                    entry.state = "AHEAD"
+                else
+                    entry.state = "OLD"
+                end
             elseif frame.settled then
                 entry.state = "NONE"
             else
@@ -12120,6 +12171,8 @@ function GC.UI:RefreshVersionCheck()
         end
         if entry.state == "CURRENT" then
             current = current + 1
+        elseif entry.state == "AHEAD" then
+            ahead = ahead + 1
         elseif entry.state == "OLD" then
             outdated = outdated + 1
         elseif entry.state == "NONE" then
@@ -12146,6 +12199,9 @@ function GC.UI:RefreshVersionCheck()
             if entry.state == "CURRENT" then
                 row.version:SetText(entry.version)
                 SetTextColor(row.version, THEME.success)
+            elseif entry.state == "AHEAD" then
+                row.version:SetText(entry.version)
+                SetTextColor(row.version, THEME.warning)
             elseif entry.state == "OLD" then
                 row.version:SetText(entry.version or "?")
                 SetTextColor(row.version, THEME.danger)
@@ -12160,7 +12216,8 @@ function GC.UI:RefreshVersionCheck()
     end
 
     frame.counts:SetText("|cff59e695" .. current .. " aktuell|r · |cffff6266"
-        .. outdated .. " veraltet|r · " .. missing .. " ohne Addon")
+        .. outdated .. " veraltet|r · " .. missing .. " ohne Addon"
+        .. (ahead > 0 and (" · |cffffb840" .. ahead .. " neuer|r") or ""))
     frame.content:SetHeight(math.max(280, #entries * 26))
     frame.scroll:UpdateModernThumb()
 end
@@ -12338,6 +12395,11 @@ end)
 
 -- Eintreffende Versionsantworten füllen den offenen Versionsprüfer live.
 GC:RegisterCallback("VERSION_REPLIES_UPDATED", GC.UI, function(self)
+    self:RefreshVersionCheck()
+end)
+
+GC:RegisterCallback("UPDATE_AVAILABLE", GC.UI, function(self)
+    self:RefreshUpdateHint()
     self:RefreshVersionCheck()
 end)
 

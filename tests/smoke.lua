@@ -5683,6 +5683,96 @@ do
 end
 
 do
+    -- Hinweis auf eine neuere Fassung (0.9.118): Verglichen wird zahlenweise,
+    -- gemeldet wird einmal je Fassung, und wer eine neuere faehrt, steht nicht
+    -- laenger unter "veraltet".
+    local own = addon.Constants.VERSION
+    assert(addon.Sync:IsNewerVersion("0.9.10", "0.9.9") == true,
+        "0.9.10 gilt nicht als neuer als 0.9.9")
+    assert(addon.Sync:IsNewerVersion("0.9.9", "0.9.10") == false,
+        "Der Versionsvergleich rechnet als Zeichenkette statt in Zahlen")
+    assert(addon.Sync:IsNewerVersion("1.0.0", "0.9.999") == true,
+        "Ein hoeherer Hauptstand wird nicht erkannt")
+    assert(addon.Sync:IsNewerVersion(own, own) == false,
+        "Die eigene Fassung gilt als neuer als sie selbst")
+    assert(addon.Sync:IsNewerVersion("0.9.500-beta", own) == false,
+        "Eine unsauber geformte Version wurde angenommen")
+    assert(addon.Sync:IsNewerVersion("", own) == false,
+        "Eine leere Version wurde angenommen")
+
+    addon.Sync.newestVersion = nil
+    assert(addon.Sync:GetAvailableUpdate() == nil,
+        "Ohne fremde Fassung meldet sich der Hinweis trotzdem")
+
+    -- Eine echte Versionsmeldung mit hoeherer Fassung: eine Chatzeile.
+    local before = #chatMessages
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|99.0.0|profile|0|hhhhhhhhhh", "GUILD", "Neuling-Realm")
+    assert(addon.Sync:GetAvailableUpdate() == "99.0.0",
+        "Die neuere Fassung eines Gildenmitglieds wurde nicht vermerkt")
+    assert(#chatMessages > before, "Der Aktualisierungshinweis erschien nicht im Chat")
+    assert(chatMessages[#chatMessages]:find("99.0.0", 1, true) ~= nil,
+        "Der Hinweis nennt die verfuegbare Fassung nicht")
+
+    -- Und dann Ruhe: dieselbe Fassung meldet sich kein zweites Mal.
+    before = #chatMessages
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|99.0.0|profile|0|hhhhhhhhhh", "GUILD", "Neuling-Realm")
+    assert(#chatMessages == before, "Der Hinweis wiederholt sich bei jeder Meldung")
+
+    -- Ein aelterer Stand aendert nichts, ein noch hoeherer meldet sich erneut.
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|0.1.0|profile|0|hhhhhhhhhh", "GUILD", "Neuling-Realm")
+    assert(addon.Sync:GetAvailableUpdate() == "99.0.0",
+        "Eine aeltere Meldung hat den Hinweis zurueckgesetzt")
+    assert(#chatMessages == before, "Eine aeltere Fassung loeste einen Hinweis aus")
+    addon.Sync:OnMessage("GuildCopilot",
+        "V|7|99.1.0|profile|0|hhhhhhhhhh", "GUILD", "Neuling-Realm")
+    assert(#chatMessages > before, "Eine noch neuere Fassung blieb stumm")
+    assert(addon.Sync:GetAvailableUpdate() == "99.1.0",
+        "Der Hinweis blieb auf der aelteren Fassung stehen")
+
+    -- Die Kopfzeile traegt dieselbe Zahl - die Chatzeile scrollt weg.
+    assert(addon.UI.frame.subtitle:GetText():find("99.1.0", 1, true) ~= nil,
+        "Die Kopfzeile zeigt den Aktualisierungshinweis nicht")
+
+    -- Im Versionspruefer steht der Voraus-Stand gelb und nicht rot unter
+    -- "veraltet"; die eigene Zeile nennt die verfuegbare Fassung.
+    local savedRaid = raidRoster
+    raidRoster = { { "Neuling-Realm", 0, "PRIEST" } }
+    addon.UI:ShowVersionCheck("GROUP")
+    orders_page = addon.UI.versionCheck
+    orders_page.settled = true
+    addon.UI:RefreshVersionCheck()
+    assert(orders_page.counts:GetText():find("1 neuer", 1, true) ~= nil,
+        "Der Voraus-Stand wird nicht gesondert gezaehlt")
+    assert(orders_page.counts:GetText():find("1 veraltet", 1, true) == nil,
+        "Eine neuere Fassung wurde als veraltet gezaehlt")
+    assert(orders_page.ownVersion:GetText():find("99.1.0", 1, true) ~= nil,
+        "Der Versionspruefer nennt die verfuegbare Fassung nicht")
+    orders_page:Hide()
+    raidRoster = savedRaid
+
+    -- Beim Anmelden reicht der Blick in den Bestand: Wer gestern mit der neuen
+    -- Fassung online war, steht dort - auch wenn er heute fehlt.
+    addon.Sync.newestVersion = nil
+    assert(addon.Sync:CheckKnownVersions() == true,
+        "Der gespeicherte Bestand liefert keinen Hinweis")
+    assert(addon.Sync:GetAvailableUpdate() == "99.1.0",
+        "Der Bestand lieferte nicht die hoechste bekannte Fassung")
+
+    -- Aufraeumen: Der erfundene Nutzer darf spaeteren Zaehlungen nicht in die
+    -- Quere kommen.
+    addon.DB:GetGuild().addonUsers["neuling-realm"] = nil
+    addon.DB:GetGuild().addonUsers["neuling"] = nil
+    addon.Sync.versionReplies["neuling"] = nil
+    addon.Sync.newestVersion = nil
+    addon.UI:RefreshUpdateHint()
+    assert(addon.UI.frame.subtitle:GetText():find("99.1.0", 1, true) == nil,
+        "Der Hinweis bleibt in der Kopfzeile stehen, wenn nichts Neues bekannt ist")
+end
+
+do
     -- Spalten statt Zeilen verschieben (Owner-Wunsch): Die Ordnung der
     -- Wertespalten liegt in den Einstellungen, NAME bleibt fest vorn.
     orders_page = addon.UI.pages.STATISTICS
@@ -9692,6 +9782,16 @@ do
         "Die Platzhalter-Meldung übersetzt nicht")
     assert(addon.L("Noch niemand geprüft.") == "Nobody audited yet.",
         "Der statische Resttext bleibt deutsch")
+    -- Der Aktualisierungshinweis (0.9.118) wird im Code aus zwei Zeilen
+    -- zusammengesetzt und muss als GANZER Schlüssel treffen.
+    assert(addon.LFormat("Version {new} ist verfügbar – du hast {own}."
+        .. " Aktualisieren über die CurseForge-App oder den Guild-Copilot-Installer.",
+        { new = "9.9.9", own = addon.Constants.VERSION })
+        == "Version 9.9.9 is available – you have " .. addon.Constants.VERSION
+            .. ". Update via the CurseForge app or the Guild Copilot installer.",
+        "Der Aktualisierungshinweis übersetzt nicht")
+    assert(addon.L("Version {new} verfügbar") == "Version {new} available",
+        "Der Kopfzeilen-Hinweis bleibt deutsch")
     languageSettings.language = "DE"
     addon.ApplyLanguageSetting()
     assert(addon.LocaleEnglish == false, "Die DE-Wahl schaltet nicht zurück")

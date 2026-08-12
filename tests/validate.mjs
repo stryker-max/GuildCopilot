@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.117",
+  "## Version: 0.9.118",
 ];
 
 for (const entry of requiredMetadata) {
@@ -1116,6 +1116,45 @@ if (!/BuildOrderRow\(content, ORDERS_MINE_ROW_HEIGHT, true, true\)/.test(uiSourc
 }
 if (!/row\.price:SetText\(OrderPriceFrameLine\(order\)\)/.test(uiSource)) {
   throw new Error("Der Preisrahmen wird beim Zeichnen der Auftragszeilen nicht mehr gesetzt.");
+}
+
+// Dieselbe Falle im Kompakt-Tracker, nur eine Ebene tiefer: Dort tragen die
+// Zeilen ihre zwei Texte in einem Knopf. Die Beschriftung eines Knopfes ist auf
+// ganze Knopfhoehe angelegt und steht darin senkrecht mittig. Oben anschlagen
+// allein genuegt deshalb nicht - ein zweiter Anker "RIGHT" legt zusaetzlich die
+// Mitte der Beschriftung auf die Knopfmitte und holt den Rezeptnamen genau
+// dorthin, wo die Aufgabenzeile steht. Beide Texte lagen uebereinander.
+const trackerBlock = uiSource.slice(
+  uiSource.indexOf("function GC.UI:CreateOrderTracker("),
+  uiSource.indexOf("function GC.UI:RefreshOrderTracker")
+);
+const trackerLabel = trackerBlock.match(
+  /row\.label:SetHeight\((\d+)\)\s*\n\s*row\.label:SetPoint\("TOPLEFT", row, "TOPLEFT", \d+, -(\d+)\)/
+);
+if (!trackerLabel) {
+  throw new Error(
+    "Die Rezeptzeile des Auftrags-Trackers hat keine eigene Hoehe mehr und faellt " +
+      "damit auf die volle Knopfhoehe zurueck."
+  );
+}
+if (/row\.label:SetPoint\("(LEFT|RIGHT|CENTER|BOTTOM)/.test(trackerBlock)) {
+  throw new Error(
+    "Ein Anker der Tracker-Rezeptzeile greift in die Senkrechte und zieht sie " +
+      "aus der oberen Zeile heraus."
+  );
+}
+const trackerAction = trackerBlock.match(
+  /row\.action:SetPoint\("TOPLEFT", row, "TOPLEFT", \d+, -(\d+)\)/
+);
+if (!trackerAction) {
+  throw new Error("Die Aufgabenzeile des Auftrags-Trackers ist nicht mehr oben angeschlagen.");
+}
+const trackerLabelBottom = Number(trackerLabel[2]) + Number(trackerLabel[1]);
+if (trackerLabelBottom > Number(trackerAction[1])) {
+  throw new Error(
+    `Im Auftrags-Tracker ueberlappen die beiden Zeilen: Der Rezeptname endet bei ` +
+      `${trackerLabelBottom} px, die Aufgabe beginnt bei ${trackerAction[1]} px.`
+  );
 }
 
 // Beide Detailkarten heissen intern "detailCard". Ein Suchen-und-Ersetzen ohne

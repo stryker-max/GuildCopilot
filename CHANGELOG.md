@@ -7,6 +7,27 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.118 – Addon
+
+**Behoben**
+
+- **Im Auftrags-Tracker lagen zwei Zeilen übereinander.** Rezeptname und
+  Aufgabe („Materialien beschaffen und vollständig melden") standen
+  ineinandergeschoben und waren beide kaum zu lesen. Jede Zeile hat jetzt ihren
+  eigenen Platz.
+
+**Neu**
+
+- **Hinweis auf eine neuere Version.** Ist eine neuere Fassung von Guild
+  Copilot draußen, steht das jetzt einmal je Sitzung im Chat – mit der Zahl,
+  die es zu holen gibt, und woher: CurseForge-App oder Installer. Danach steht
+  die Zahl weiter oben in der Kopfzeile des Fensters und im Versionsprüfer,
+  falls die Chatzeile durchgerutscht ist. Erfahren tut das Addon es von der
+  eigenen Gilde – ein WoW-Addon darf selbst nicht ins Netz.
+- **Der Versionsprüfer unterscheidet „älter" von „neuer".** Wer eine neuere
+  Fassung fährt als man selbst, stand bisher rot unter „veraltet". Diese
+  Zeilen sind jetzt gelb und zählen eigens.
+
 ## 0.9.117 – Addon
 
 **Geändert**

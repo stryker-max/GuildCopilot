@@ -2108,6 +2108,88 @@ function GC.Sync:GetKnownVersion(name, since)
     return nil, false
 end
 
+-- === Hinweis auf eine neuere Fassung ========================================
+--
+-- WoW laesst kein Addon ins Netz. "Gibt es etwas Neueres?" kann deshalb nur
+-- die Gilde beantworten - und sie tut es laengst, ohne dass eine einzige
+-- Nachricht dazukommt: Jede Versionsmeldung traegt in Feld 3 die Addon-Version
+-- ihres Absenders. Ist eine davon hoeher als die eigene, ist die neue Fassung
+-- draussen. Genauso macht es Details!, und aus demselben Grund.
+--
+-- Verglichen wird zahlenweise, nicht als Text: Als Zeichenkette stuende
+-- "0.9.9" hinter "0.9.10", und genau dieser Sprung steht hier staendig an.
+--
+-- Was bewusst offen bleibt: Ein manipulierter Client kann eine Fassung melden,
+-- die es nicht gibt. Der Schaden waere eine Zeile im Chat, die ins Leere
+-- zeigt; der Preis einer Absicherung ueber zwei unabhaengige Melder waere,
+-- dass der Erste mit der neuen Fassung nie einen zweiten bekommt - niemand
+-- erfuehre je von einer Neuerung. Verlangt wird deshalb nur die genaue Form
+-- "Zahl.Zahl.Zahl"; alles andere wird stumm verworfen.
+local function ParseVersion(value)
+    local major, minor, patch = tostring(value or ""):match("^%s*(%d+)%.(%d+)%.(%d+)%s*$")
+    if not major then
+        return nil
+    end
+    return tonumber(major), tonumber(minor), tonumber(patch)
+end
+
+function GC.Sync:IsNewerVersion(candidate, reference)
+    local leftMajor, leftMinor, leftPatch = ParseVersion(candidate)
+    local rightMajor, rightMinor, rightPatch = ParseVersion(reference)
+    if not leftMajor or not rightMajor then
+        return false
+    end
+    if leftMajor ~= rightMajor then
+        return leftMajor > rightMajor
+    end
+    if leftMinor ~= rightMinor then
+        return leftMinor > rightMinor
+    end
+    return leftPatch > rightPatch
+end
+
+-- Gemeldet wird einmal je Fassung und Sitzung. Wer nicht sofort aktualisieren
+-- will, soll nicht bei jeder Anmeldung eines Gildenmitglieds erneut daran
+-- erinnert werden; ein noch hoeherer Stand meldet sich dagegen noch einmal.
+function GC.Sync:NoteSeenVersion(version)
+    version = GC.Util.Trim(version)
+    if not self:IsNewerVersion(version, self.newestVersion or GC.Constants.VERSION) then
+        return false
+    end
+    self.newestVersion = version
+    GC:Print(GC.LFormat("Version {new} ist verfügbar – du hast {own}."
+        .. " Aktualisieren über die CurseForge-App oder den Guild-Copilot-Installer.",
+        { new = version, own = GC.Constants.VERSION }))
+    GC:FireCallback("UPDATE_AVAILABLE", version)
+    return true
+end
+
+-- Beim Anmelden steht die Antwort oft schon in der Datenbank: Wer gestern mit
+-- der neuen Fassung online war, ist dort vermerkt, auch wenn er heute fehlt.
+-- Ohne diesen Blick hinge der Hinweis daran, dass ausgerechnet jetzt jemand
+-- Aktualisierter online ist.
+function GC.Sync:CheckKnownVersions()
+    local newest = nil
+    for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+        local version = GC.Util.Trim(entry and entry.version)
+        if self:IsNewerVersion(version, newest or GC.Constants.VERSION) then
+            newest = version
+        end
+    end
+    if not newest then
+        return false
+    end
+    return self:NoteSeenVersion(newest)
+end
+
+-- Die verfuegbare neuere Fassung oder nil - fuer Kopfzeile und Versionspruefer.
+function GC.Sync:GetAvailableUpdate()
+    if self:IsNewerVersion(self.newestVersion, GC.Constants.VERSION) then
+        return self.newestVersion
+    end
+    return nil
+end
+
 function GC.Sync:NoteAddonUser(sender, info)
     if GC.Util.Trim(sender) == "" then
         return false
@@ -2168,6 +2250,9 @@ function GC.Sync:ReceiveVersion(fields, sender, distribution)
     end
     distribution = distribution or "GUILD"
     self:NoteVersionReply(sender, fields[3])
+    -- Auch aus der Gruppe: Wer in einer fremden Gilde die neue Fassung faehrt,
+    -- weiss davon genauso zuverlaessig wie ein Gildenmitglied.
+    self:NoteSeenVersion(fields[3])
     -- In den Gildenbestand gehoeren nur Gildenmitglieder. Ueber RAID/PARTY
     -- melden sich auch Gruppenmitglieder fremder Gilden - deren Antworten
     -- leben nur im Sitzungsspeicher des Versionspruefers.
@@ -2583,6 +2668,12 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
         if GC.WarcraftLogs then
             GC.WarcraftLogs:RequestRecruitmentData()
         end
+    end)
+    C_Timer.After(12, function()
+        -- Erst hier, nicht beim Anmelden: Die Antworten auf die eigene
+        -- Versionsanfrage (Sekunde 7, bis zu 4,5 Sekunden gestreut) sind dann
+        -- da und zaehlen mit.
+        self:CheckKnownVersions()
     end)
     C_Timer.After(13, function()
         -- Gildenaufträge abgleichen: Wer etwas kennt, liefert es nach.

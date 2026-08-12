@@ -503,6 +503,14 @@ local english = {
     ["Ein WoW-Addon darf selbst nichts aus dem Internet laden – deshalb übernimmt der Windows-Helfer den Abruf. Die hier gespeicherte Gilde erspart dir dort die Eingabe, liefert Region und Realm für die Profil-Links im Postfach und wird an alle Gildenmitglieder synchronisiert."] = "A WoW addon may not load anything from the internet itself – the Windows companion does the fetching. The guild saved here spares you the input there, provides region and realm for the profile links in the inbox, and is synchronized to all guild members.",
     ["Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ – abschalten lässt sich die Erkennung über die Schalter darüber. Diese Listen gelten nur für dich."] = "One word or phrase per line, case does not matter. An exclusion word prevents the entry even when a trigger matches. Empty trigger fields mean \"default\", not \"nothing\" – the detection is disabled via the switches above. These lists apply only to you.",
 
+    -- === Hinweis auf eine neuere Fassung (0.9.118) =========================
+    ["Version {new} ist verfügbar – du hast {own}. Aktualisieren über die CurseForge-App oder den Guild-Copilot-Installer."]
+        = "Version {new} is available – you have {own}. Update via the CurseForge app or the Guild Copilot installer.",
+    ["Version {new} verfügbar"] = "Version {new} available",
+    ["Deine Version: {own}"] = "Your version: {own}",
+    ["Deine Version: {own}  •  |cffffb840{new} ist verfügbar|r"]
+        = "Your version: {own}  •  |cffffb840{new} is available|r",
+
     -- === Teilschritt 4b: Spiel-Stammdaten ==================================
     -- Klassen, Specs (Talentbaeume) und Berufe mit ihren offiziellen
     -- englischen Namen (Wowhead-Klassen-/Talent-/Berufsseiten, TBC).

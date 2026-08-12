@@ -298,6 +298,45 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.118 – Zwei Zeilen, die sich nicht in die Quere kommen
+
+Zwei Punkte aus derselben Sitzung: ein Bildschirmfoto vom Auftrags-Tracker, auf dem zwei Zeilen übereinander lagen, und der Wunsch „bau bitte so einen Hinweis auch gleich ein" – gezeigt am Update-Hinweis von Details!.
+
+### Warum die Beschriftung nach unten rutschte
+
+Der Tracker trägt zwei Texte in einem Knopf: den Rezeptnamen oben, die Aufgabe gedämpft darunter. Der Rezeptname ist die Beschriftung des Knopfes selbst, und die legt `CreateButton` auf **die volle Knopfhöhe** an – 40 Pixel bei 40 Pixel Knopf –, senkrecht mittig. Für einen gewöhnlichen Knopf ist das genau richtig.
+
+Oben angeschlagen war sie schon. Nur half das nicht: Der zweite Anker lautete `SetPoint("RIGHT", row, "RIGHT", -8, 0)`, und `RIGHT` legt nicht nur die rechte Kante fest, sondern zugleich die **Mitte** der Beschriftung auf die Mitte des Knopfes. Zwei Anker, zwei Aussagen über die Senkrechte – der Text landete in der Knopfmitte, also genau dort, wo die Aufgabenzeile steht.
+
+Die Beschriftung hat jetzt eine eigene Höhe (16 px), und beide Anker sitzen oben (`TOPLEFT`/`TOPRIGHT`). Damit steht der Rezeptname bei 4–20 px, die Aufgabe bei 22–36 px, beide in einer 40 px hohen Zeile.
+
+`tests/validate.mjs` prüft das nach, weil ein Test im Spiel es nicht kann: Die Attrappe der Testumgebung rechnet keine Anker aus, ein Überlappen ist dort unsichtbar. Geprüft wird deshalb am Quelltext – eigene Höhe vorhanden, kein Anker in der Senkrechten, und der Rezeptname endet über dem Beginn der Aufgabenzeile. Die Gegenprobe mit dem alten Code fällt durch.
+
+### Der Hinweis auf eine neuere Fassung
+
+Ein WoW-Addon darf nicht ins Netz – „gibt es etwas Neueres?" kann deshalb nur die Gilde beantworten. Sie tut es längst: Jede Versionsmeldung (`V`, Feld 3) trägt die Addon-Version ihres Absenders, und die laufen bei jedem Login und bei jeder Versionsanfrage ohnehin über den Gildenkanal. Es kommt **keine einzige Nachricht** hinzu. Details! macht es genauso, und aus demselben Grund.
+
+Verglichen wird zahlenweise statt als Zeichenkette – sonst stünde „0.9.9" hinter „0.9.10", und genau dieser Sprung steht hier ständig an. Gemeldet wird einmal je Fassung und Sitzung: Wer nicht sofort aktualisieren will, soll nicht bei jeder Anmeldung eines Gildenmitglieds erneut erinnert werden; ein noch höherer Stand meldet sich dagegen noch einmal.
+
+Beim Anmelden steht die Antwort oft schon in der Datenbank: `addonUsers` merkt sich die Version jedes gesehenen Nutzers. Wer gestern mit der neuen Fassung online war, ist dort vermerkt, auch wenn er heute fehlt – ohne diesen Blick hinge der Hinweis daran, dass ausgerechnet jetzt jemand Aktualisierter online ist. Geprüft wird zwölf Sekunden nach dem Login, also nach den Antworten auf die eigene Anfrage aus Sekunde 7.
+
+Die Chatzeile scrollt weg; die Zahl bleibt deshalb an zwei Stellen stehen: in der Kopfzeile unter dem Namen, wo ohnehin die eigene Version steht, und im Versionsprüfer über der Liste.
+
+**Was bewusst offen bleibt:** Ein manipulierter Client kann eine Fassung melden, die es nicht gibt. Der Schaden wäre eine Chatzeile, die ins Leere zeigt. Der Preis einer Absicherung über zwei unabhängige Melder wäre höher: Der Erste mit der neuen Fassung bekäme nie einen Zweiten – niemand erführe je von einer Neuerung, und gerade in kleinen Gilden bliebe der Hinweis für immer stumm. Verlangt wird deshalb nur die genaue Form `Zahl.Zahl.Zahl`; alles andere wird still verworfen.
+
+### Nebenbefund im Versionsprüfer
+
+Der Prüfer kannte nur „gleich" und „ungleich": Wer eine **neuere** Fassung fuhr, stand rot unter „veraltet". Das sind aber genau die Zeilen, die den Aktualisierungshinweis erklären. Sie haben jetzt einen eigenen Zustand (gelb, eigene Zählung „n neuer") und fallen nicht mehr unter die Rückständigen.
+
+### Geändert
+
+- `GuildCopilot/UI.lua`: eigene Höhe und obere Anker für die Tracker-Rezeptzeile; `RefreshUpdateHint` in der Kopfzeile; Zustand `AHEAD` im Versionsprüfer;
+- `GuildCopilot/Sync.lua`: `IsNewerVersion`, `NoteSeenVersion`, `CheckKnownVersions`, `GetAvailableUpdate`; Anschluss an jede eingehende Versionsmeldung und an den Login-Ablauf;
+- `GuildCopilot/Locales.lua`: vier englische Entsprechungen für die neuen Texte;
+- `tests/validate.mjs`: hält die beiden Tracker-Zeilen auseinander;
+- `tests/smoke.lua`: Versionsvergleich, einmalige Meldung je Fassung, Bestandsprüfung beim Login, Kopfzeile und Versionsprüfer;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.118.
+
 ## 0.9.117 – Eine Zahl statt zweier
 
 Aus der Gegenprüfung von 0.9.116 blieb ein einziger offener Punkt: Siebzehn von 175 Paaren waren nicht beweisbar, weil das Verbrauchsprotokoll gekappt war. Der Owner hat entschieden: „Limit hoch, ich will lückenlose Prüfungen."
