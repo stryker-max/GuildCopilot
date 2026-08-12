@@ -7,6 +7,22 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.119 – Addon
+
+**Geändert**
+
+- **Das Mini-Fenster bleibt stehen.** Bisher zeigte es sich nur, wenn du selbst
+  am Zug warst, und verschwand sonst von allein – aus dem Spiel gemeldet: „Jetzt
+  wird mir der Tracker gar nicht mehr angezeigt", obwohl ein Auftrag lief. Er
+  wartete nur gerade auf den Auftraggeber. Jetzt steht das Fenster, bis du es
+  über das × schließt.
+- **Es zeigt jetzt alles Laufende, an dem du beteiligt bist.** Deine eigenen
+  Aufgaben stehen oben wie bisher; darunter gedämpft die Aufträge, bei denen ein
+  anderer am Zug ist, mit dem Namen dessen, auf den gewartet wird („Wartet auf
+  Buffdæddy."). Läuft gerade nichts, steht das auch da – statt eines leeren
+  Bildschirms. Der Titel nennt die Zahl deiner eigenen Aufgaben, und was nicht
+  mehr in die drei Zeilen passt, steht als „… und 2 weitere." darunter.
+
 ## 0.9.118 – Addon
 
 **Behoben**

@@ -298,6 +298,44 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.119 – Ein Fenster, das man im Blick behalten kann
+
+Direkt nach dem Zeilenfehler aus 0.9.118 die nächste Meldung aus dem Spiel: „Jetzt wird mir der Tracker gar nicht mehr angezeigt."
+
+### Es war kein Fehler, und das war das Problem
+
+Der Blick in die gespeicherten Daten des Owners zeigte: `orderTracker.hidden` stand auf `false` – weggeklickt war er nicht. Von 37 gespeicherten Aufträgen lief genau einer, und dessen Lage erklärte alles:
+
+- **11.08. 21:34** – Dæddykuhl stellt „Raketenstiefel Xtrem" ein, Materialmodell C. Der Owner nimmt an; er ist am Zug: „Materialien beschaffen und ‚vollständig' melden." Genau das zeigte das Bildschirmfoto aus 0.9.118.
+- **12.08. 14:40** – dieser Auftrag wird abgebrochen.
+- Übrig bleibt ein zweiter Auftrag, **Modell A**: Dort liefert der Auftraggeber die Materialien. Am Zug ist also der andere.
+
+Der Tracker zeigte bis dahin ausschließlich „du bist dran"-Zeilen und verbarg sich sonst. Er tat damit genau das, was er sollte – und war trotzdem falsch: Ein Auftrag lief, der Bildschirm war leer, und aus Sicht des Nutzers war das Fenster kaputt.
+
+Das ist die eigentliche Lehre: Ein Fenster, das ohne Zutun kommt und geht, behält niemand im Blick. Es beantwortet die Frage „ist da gerade was?" nur dann, wenn man ihm schon vertraut – und dieses Vertrauen entsteht nicht, solange es unangekündigt verschwindet.
+
+### Was es jetzt zeigt
+
+Owner-Entscheidung: **immer sichtbar**, weg nur über das ×.
+
+- **Deine Aufgaben** oben, unverändert in der gewohnten Farbe, mit der Aufforderung darunter.
+- **Wartezeilen** darunter, gedämpft: derselbe Auftrag, aber mit dem Namen dessen, auf den gewartet wird („Wartet auf Buffdæddy."). Ein offener Auftrag ohne Hersteller behält seine eigene Ansage.
+- **Fußzeile** für das, was die drei Plätze nicht sagen können: „Zurzeit ist nichts offen." oder „… und 2 weitere.".
+- Der **Titel** trägt die Zahl der eigenen Aufgaben („Gildenaufträge – du bist dran (2)") und fällt ohne solche auf „Gildenaufträge" zurück.
+
+Die Sortierung kommt unverändert aus `GetBoard`: „du bist dran" zuerst, danach nach Änderungszeit. Die drei Plätze zeigen damit immer das Dringendste.
+
+Ein Detail aus der Umsetzung: Die Dämpfung der Wartezeilen steht als Farbcode **im Text**, nicht an der Beschriftung. Ein Knopf setzt seine Textfarbe zurück, sobald die Maus ihn wieder verlässt – eine über `SetTextColor` gesetzte Farbe wäre nach dem ersten Überfahren weg gewesen.
+
+**Nebenwirkung, bewusst in Kauf genommen:** Das Fenster erscheint jetzt bei jedem Gildenmitglied nach dem Anmelden, auch bei denen, die nie einen Auftrag haben. Ein × genügt, und es bleibt weg.
+
+### Geändert
+
+- `GuildCopilot/UI.lua`: `RefreshOrderTracker` zeigt alle Zeilen aus `GetBoard().mine`, dazu Fußzeile, Titelzahl und die gedämpfte Wartezeile;
+- `GuildCopilot/Locales.lua`: drei neue englische Entsprechungen, der alte Titelschlüssel ohne Zahl entfällt;
+- `tests/smoke.lua`: leerer Tracker bleibt stehen und sagt es, Wartezeile trägt Dämpfung und Namen, Titel ohne eigene Aufgabe nennt kein „du bist dran";
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.119.
+
 ## 0.9.118 – Zwei Zeilen, die sich nicht in die Quere kommen
 
 Zwei Punkte aus derselben Sitzung: ein Bildschirmfoto vom Auftrags-Tracker, auf dem zwei Zeilen übereinander lagen, und der Wunsch „bau bitte so einen Hinweis auch gleich ein" – gezeigt am Update-Hinweis von Details!.

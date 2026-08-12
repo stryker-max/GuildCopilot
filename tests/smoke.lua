@@ -5857,16 +5857,57 @@ do
         "Der Tracker zeigt sich nicht trotz offener Aufgabe")
     assert(addon.UI.orderTracker.rows[1].shown == true, "Die Tracker-Zeile fehlt")
 
+    assert(addon.UI.orderTracker.rows[1].label.value:find("Testbrenner", 1, true) ~= nil,
+        "Die eigene Aufgabe steht nicht in der ersten Zeile")
+    assert(addon.UI.orderTracker.title:GetText():find("(1)", 1, true) ~= nil,
+        "Der Titel nennt die Zahl der eigenen Aufgaben nicht")
+
     -- Weggeklickt bleibt weggeklickt.
     addon.DB:GetSettings().orderTracker.hidden = true
     addon.UI:RefreshOrderTracker()
     assert(addon.UI.orderTracker.shown == false, "Der ausgeblendete Tracker erscheint trotzdem")
     addon.DB:GetSettings().orderTracker.hidden = false
 
-    -- Ohne "du bist dran"-Zeilen verschwindet er von selbst.
+    -- Ab 0.9.119 bleibt er stehen, auch wenn gerade nichts zu tun ist: Ein
+    -- Fenster, das ohne Zutun kommt und geht, behält niemand im Blick.
     addon.DB:GetGuild().workshop.orders = {}
     addon.UI:RefreshOrderTracker()
-    assert(addon.UI.orderTracker.shown == false, "Der Tracker bleibt ohne Aufgaben stehen")
+    assert(addon.UI.orderTracker.shown == true,
+        "Der Tracker verschwindet ohne Aufträge statt stehen zu bleiben")
+    assert(addon.UI.orderTracker.rows[1].shown == false,
+        "Ohne Aufträge bleibt eine Zeile stehen")
+    assert(addon.UI.orderTracker.note.shown == true
+        and addon.UI.orderTracker.note.value:find("nichts offen", 1, true) ~= nil,
+        "Die Fußzeile sagt nicht, dass nichts offen ist")
+
+    -- Ein laufender Auftrag, bei dem der andere dran ist: Er steht jetzt mit
+    -- drin - gedämpft und mit dem Namen dessen, auf den gewartet wird.
+    addon.Orders:GetStore()["warte-1"] = {
+        id = "warte-1", rev = 1, status = "ACCEPTED",
+        recipeKey = "I90001", recipeName = "Testring", quantity = 1,
+        createdBy = "Tester-Realm", createdByTag = orders_ownTag,
+        createdAt = currentTime, changedAt = currentTime,
+        -- Modell B: Nach der Annahme besorgt der Hersteller die Materialien -
+        -- dran ist also der andere, nicht man selbst.
+        materialModel = "B", delivery = "TRADE",
+        costLimit = 0, tip = 0, note = "",
+        acceptedByTag = "fremdfremd", acceptedAt = currentTime,
+        crafter = "Zwerg-Realm", acceptedVia = "Zwerg-Realm",
+        actualCost = 0, reimbursedAt = 0, reimbursedPaid = 0,
+        craftedCount = 0, log = {},
+    }
+    addon.UI:RefreshOrderTracker()
+    assert(addon.UI.orderTracker.shown == true, "Der Tracker fehlt beim Warteauftrag")
+    assert(addon.UI.orderTracker.rows[1].shown == true,
+        "Die Wartezeile fehlt im Tracker")
+    assert(addon.UI.orderTracker.rows[1].label.value:find("|cff91a3b8", 1, true) ~= nil,
+        "Die Wartezeile ist nicht gedämpft")
+    assert(addon.UI.orderTracker.rows[1].action.value:find("Zwerg", 1, true) ~= nil,
+        "Die Wartezeile nennt nicht, auf wen gewartet wird")
+    assert(addon.UI.orderTracker.title:GetText():find("du bist dran", 1, true) == nil,
+        "Der Titel meldet eine eigene Aufgabe, obwohl der andere dran ist")
+    addon.DB:GetGuild().workshop.orders = {}
+    addon.UI:RefreshOrderTracker()
 
     addon.UI:SetWorkshopView("CATALOG")
     assert(orders_page.workshopCatalogFrames[1].shown == true,

@@ -7121,7 +7121,7 @@ function GC.UI:CreateOrderTracker()
     -- darunter (12 px Rand, vorher 8) und liegt mittig zum Titel statt drei
     -- Pixel tiefer. Der Titel bekommt dafür feste Maße - ohne sie wächst er
     -- mit seinem Text („… (4)") bis unter den Knopf.
-    tracker.title = CreateLabel(tracker, "Gildenaufträge – du bist dran",
+    tracker.title = CreateLabel(tracker, "Gildenaufträge",
         { font = "GameFontNormalSmall", width = 282, height = 20 })
     tracker.title:SetPoint("TOPLEFT", tracker, "TOPLEFT", 12, -7)
     tracker.close = CreateButton(tracker, "×", 20, 20, function()
@@ -7176,25 +7176,49 @@ function GC.UI:CreateOrderTracker()
         tracker.rows[index] = row
     end
 
+    -- Eine Zeile für die beiden Fälle, in denen unter den Aufträgen noch etwas
+    -- zu sagen bleibt: gar nichts offen, oder mehr Aufträge als Plätze. Ihren
+    -- Ort bekommt sie beim Zeichnen - er hängt an der Zahl der Zeilen darüber.
+    tracker.note = CreateLabel(tracker, "", {
+        muted = true,
+        font = "GameFontNormalSmall",
+        width = 304,
+        height = 16,
+    })
+    tracker.note:Hide()
+
     self.orderTracker = tracker
     return tracker
 end
 
+-- Bis 0.9.118 zeigte sich der Tracker nur mit "du bist dran"-Zeilen und
+-- verschwand sonst. Aus dem Spiel gemeldet: Er war weg, obwohl ein Auftrag
+-- lief - er wartete nur gerade auf den Auftraggeber. Ein Fenster, das ohne
+-- Zutun kommt und geht, ist kein Fenster, das man im Blick behält.
+--
+-- Es bleibt deshalb stehen (Owner-Entscheidung) und zeigt alles Laufende, an
+-- dem dieser Account beteiligt ist: die eigenen Aufgaben oben, darunter
+-- gedämpft, worauf gewartet wird. Weg ist es nur über das ×.
 function GC.UI:RefreshOrderTracker()
     local settings = GC.DB:GetSettings().orderTracker
-    local rows = {}
-    if GC.Orders then
-        for _, boardRow in ipairs(GC.Orders:GetBoard().mine) do
-            if boardRow.yourTurn then
-                rows[#rows + 1] = boardRow
-            end
-        end
-    end
-    if settings.hidden or #rows == 0 then
+    if settings.hidden then
         if self.orderTracker then
             self.orderTracker:Hide()
         end
         return
+    end
+
+    -- GetBoard sortiert "du bist dran" bereits nach oben, danach nach
+    -- Änderungszeit - die drei Plätze zeigen also immer das Dringendste.
+    local rows = {}
+    local turns = 0
+    if GC.Orders then
+        for _, boardRow in ipairs(GC.Orders:GetBoard().mine) do
+            rows[#rows + 1] = boardRow
+            if boardRow.yourTurn then
+                turns = turns + 1
+            end
+        end
     end
 
     local tracker = self:CreateOrderTracker()
@@ -7203,22 +7227,62 @@ function GC.UI:RefreshOrderTracker()
         local boardRow = rows[index]
         if boardRow then
             local order = boardRow.order
-            row:SetText((order.recipeName or "?") .. " ×" .. (order.quantity or 1))
-            row.action:SetText(boardRow.action or "")
+            local name = (order.recipeName or "?") .. " ×" .. (order.quantity or 1)
+            if boardRow.yourTurn then
+                row:SetText(name)
+                row.action:SetText(boardRow.action or "")
+            else
+                -- Gedämpft, weil hier nichts zu tun ist. Der Farbcode steht im
+                -- Text und nicht an der Beschriftung: Ein Knopf setzt seine
+                -- Textfarbe zurück, sobald die Maus ihn wieder verlässt.
+                row:SetText("|cff91a3b8" .. name .. "|r")
+                local waitingFor = boardRow.actor == "CREATOR"
+                    and order.createdBy or order.crafter
+                if GC.Util.Trim(waitingFor) == "" then
+                    -- Ein offener Auftrag wartet auf niemand Bestimmten; die
+                    -- Ansage dafür steht schon in der Zeile selbst.
+                    row.action:SetText(boardRow.action or "")
+                else
+                    row.action:SetText(GC.LFormat("Wartet auf {name}.",
+                        { name = GC.Util.PlayerShortName(waitingFor) }))
+                end
+            end
             row:Show()
             visible = visible + 1
         else
             row:Hide()
         end
     end
-    if #rows > #tracker.rows then
-        tracker.title:SetText("Gildenaufträge – du bist dran (" .. #rows .. ")")
+
+    if turns > 0 then
+        tracker.title:SetText(GC.LFormat("Gildenaufträge – du bist dran ({n})",
+            { n = turns }))
     else
-        tracker.title:SetText(GC.L("Gildenaufträge – du bist dran"))
+        tracker.title:SetText(GC.L("Gildenaufträge"))
     end
-    -- Der Rahmen ist so hoch wie sein Inhalt: Titelzeile plus die sichtbaren
-    -- Zeilen. Drei leere Plätze vorzuhalten sah nach kaputtem Fenster aus.
-    tracker:SetHeight(34 + (visible * 44) + 4)
+
+    -- Die Fußzeile sagt, was die drei Plätze nicht zeigen können: dass gar
+    -- nichts läuft, oder dass noch etwas darunter liegt.
+    local noteShown = true
+    if #rows == 0 then
+        tracker.note:SetText(GC.L("Zurzeit ist nichts offen."))
+    elseif #rows > visible then
+        tracker.note:SetText(GC.LFormat("… und {n} weitere.", { n = #rows - visible }))
+    else
+        noteShown = false
+    end
+    tracker.note:ClearAllPoints()
+    tracker.note:SetPoint("TOPLEFT", tracker, "TOPLEFT", 20, -32 - (visible * 44))
+    if noteShown then
+        tracker.note:Show()
+    else
+        tracker.note:Hide()
+    end
+
+    -- Der Rahmen ist so hoch wie sein Inhalt: Titelzeile, sichtbare Zeilen,
+    -- gegebenenfalls die Fußzeile. Leere Plätze vorzuhalten sah nach kaputtem
+    -- Fenster aus.
+    tracker:SetHeight(34 + (visible * 44) + (noteShown and 20 or 0) + 4)
     tracker:Show()
 end
 
