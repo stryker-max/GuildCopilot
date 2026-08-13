@@ -7,6 +7,20 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.121 – Addon
+
+**Neu**
+
+- **„Rechte erneut senden".** Eine Rangfreigabe geht in dem Moment raus, in dem
+  du sie setzt – über den Gildenkanal, und der erreicht nur, wer gerade online
+  ist. Wer den Moment verpasst, holt sich den Stand beim nächsten Anmelden zwar
+  selbst ab, aber nur, wenn dann jemand mit dem neueren Stand online ist. In
+  einer frischen Gilde mit zwei Leuten ist genau das der Regelfall. Der Knopf
+  steht in den Einstellungen unter „Gildenweite Einstellungen bearbeiten" und
+  schickt den vollständigen Stand noch einmal an alle. Ein versehentlicher Druck
+  kann nichts kaputt machen: Beim Empfänger entscheidet wie immer der
+  Zeitstempel, ein älterer Stand wird verworfen.
+
 ## 0.9.120 – Addon
 
 **Behoben**

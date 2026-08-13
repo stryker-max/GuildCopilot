@@ -10179,4 +10179,43 @@ do
     grant_guild.profile.updatedAt = grant_savedUpdatedAt
 end
 
+-- === „Rechte erneut senden" =================================================
+-- Eine Rangfreigabe geht in dem Moment raus, in dem sie gesetzt wird, und der
+-- Gildenkanal erreicht nur, wer gerade online ist. Bei zwei Leuten in einer
+-- frischen Gilde ist der Regelfall, dass der andere erst Stunden spaeter
+-- einsteigt - der Knopf ist der direkte Weg, wenn er daneben steht.
+do
+    addon.UI:ShowPage("SETTINGS")
+    local push_page = addon.UI.pages.SETTINGS
+    assert(push_page.guildProfilePushButton ~= nil,
+        "Der Knopf zum erneuten Senden fehlt in den Einstellungen")
+
+    local push_sent = 0
+    local push_realSend = addon.Sync.SendGuildProfile
+    addon.Sync.SendGuildProfile = function(_, force)
+        push_sent = push_sent + 1
+        assert(force == true, "Der Knopf sendet ohne force und damit womoeglich gar nicht")
+        return true
+    end
+    push_page.guildProfilePushButton.scripts.OnClick()
+    addon.Sync.SendGuildProfile = push_realSend
+    assert(push_sent == 1, "Der Knopf hat das Gildenprofil nicht gesendet")
+    assert(tostring(push_page.settingsStatus.value or ""):find("erneut", 1, true) ~= nil,
+        "Der Knopf meldet den Versand nicht: "
+            .. tostring(push_page.settingsStatus.value))
+
+    -- Wer nicht setzen darf, darf auch nicht nachschicken.
+    local push_realCanEdit = addon.Roster.CanEditGuildProfile
+    addon.Roster.CanEditGuildProfile = function()
+        return false
+    end
+    addon.UI:RefreshSettings()
+    assert(push_page.guildProfilePushButton.disabled == true,
+        "Ohne Bearbeitungsrecht bleibt der Sendeknopf bedienbar")
+    addon.Roster.CanEditGuildProfile = push_realCanEdit
+    addon.UI:RefreshSettings()
+    assert(push_page.guildProfilePushButton.disabled ~= true,
+        "Mit Bearbeitungsrecht bleibt der Sendeknopf gesperrt")
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

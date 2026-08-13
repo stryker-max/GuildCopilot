@@ -2131,13 +2131,16 @@ function GC.UI:BuildSettingsPage()
     -- Die Karten am Seitenende sind mit der Wartezeit-Erinnerung, der
     -- Sprachwahl und zuletzt der Fensterkarte gewachsen; die Inhaltshoehe
     -- muss mitwachsen, sonst schneidet der Scroller die unterste Zeile ab.
-    content:SetHeight(2516)
+    content:SetHeight(2556)
     scroll:SetScrollChild(content)
     page.settingsScroll = scroll
 
     local function BuildRankCard(title, x, y, helpText, onChanged)
         local card = CreateCard(content, title)
-        card:SetSize(370, 240)
+        -- 280 statt 240: Unter den fuenf Rangzeilen steht in der rechten Karte
+        -- der Knopf "Rechte erneut senden". Beide Karten bleiben gleich hoch,
+        -- sonst steht die linke wie abgeschnitten daneben.
+        card:SetSize(370, 280)
         card:SetPoint("TOPLEFT", content, "TOPLEFT", x, -y)
         local help = CreateLabel(card, helpText, {
             muted = true,
@@ -2197,9 +2200,43 @@ function GC.UI:BuildSettingsPage()
         end
     )
 
+    -- === Rechte erneut senden ==============================================
+    --
+    -- Eine Rangfreigabe geht in dem Moment raus, in dem sie gesetzt wird - ueber
+    -- den Gildenkanal, und der erreicht nur, wer gerade online ist. Wer den
+    -- Moment verpasst, holt sich den Stand beim naechsten Anmelden zwar selbst
+    -- ab, aber nur, wenn dann jemand mit dem neueren Stand online ist. Bei zwei
+    -- Leuten in einer frischen Gilde ist genau das der Regelfall: Der eine
+    -- setzt die Rechte, der andere loggt sich zwei Stunden spaeter ein, wenn
+    -- der erste laengst weg ist - und wundert sich, warum nichts ankommt.
+    --
+    -- Der Knopf ist der direkte Weg fuer den Fall, dass der andere daneben
+    -- steht: einmal druecken, und der vollstaendige Stand geht noch einmal in
+    -- die Gilde. Gesendet wird dasselbe Paket wie bei jeder Aenderung, der
+    -- Zeitstempelvergleich beim Empfaenger entscheidet wie immer - ein
+    -- versehentlicher Druck kann also nichts zurueckdrehen.
+    page.guildProfilePushButton = CreateButton(page.editorRankCard,
+        "Rechte erneut senden", 200, 26, function()
+            if GC.Sync:SendGuildProfile(true) then
+                page.settingsStatus:SetText(GC.L("Rechte und Gildenprofil wurden erneut an alle gesendet."))
+                SetTextColor(page.settingsStatus, THEME.success)
+            else
+                page.settingsStatus:SetText(GC.L("Senden nicht möglich – bist du in einer Gilde?"))
+                SetTextColor(page.settingsStatus, THEME.danger)
+            end
+        end)
+    page.guildProfilePushButton:SetPoint("TOPLEFT", page.editorRankCard, "TOPLEFT", 18, -226)
+    CreateLabel(page.editorRankCard,
+        "Für alle, die beim Setzen offline waren.", {
+        muted = true,
+        width = 334,
+        height = 16,
+        vertical = "TOP",
+    }):SetPoint("TOPLEFT", page.editorRankCard, "TOPLEFT", 18, -254)
+
     local accessCard = CreateCard(content, "Mitgliederpflege öffnen")
     accessCard:SetSize(752, 180)
-    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1856)
+    accessCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1896)
     local accessHelp = CreateLabel(accessCard,
         "Nur diese Ränge sehen die Mitgliederpflege - und nur sie dürfen Raidauswertungen löschen. "
         .. "Die Freigabe wird gildenweit synchronisiert.",
@@ -2528,7 +2565,7 @@ function GC.UI:BuildSettingsPage()
     -- keine der vermessenen Karten darueber.
     local workshopCard = CreateCard(content, "Werkstatt")
     workshopCard:SetSize(752, 162)
-    workshopCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2048)
+    workshopCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2088)
     page.workshopWhisperToggle = CreateToggle(workshopCard,
         "Flüsterbefehl beantworten: „!rezept <Suche>“", function(checked)
         GC.DB:GetSettings().workshopWhisperReply = checked
@@ -2560,7 +2597,7 @@ function GC.UI:BuildSettingsPage()
     -- erst nach dem Neuladen - der Knopf daneben erledigt das sofort.
     local languageCard = CreateCard(content, "Sprache / Language")
     languageCard:SetSize(752, 108)
-    languageCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2226)
+    languageCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2266)
     CreateLabel(languageCard, "Sprache der Oberfläche:", { muted = true, width = 170, height = 28 })
         :SetPoint("TOPLEFT", languageCard, "TOPLEFT", 18, -50)
     page.languageButton = CreateButton(languageCard, "", 200, 28, function()
@@ -2595,7 +2632,7 @@ function GC.UI:BuildSettingsPage()
     -- verschieben.
     local windowCard = CreateCard(content, "Fenster")
     windowCard:SetSize(752, 150)
-    windowCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2350)
+    windowCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2390)
     CreateLabel(windowCard, "Fenstergröße:", { muted = true, width = 170, height = 28 })
         :SetPoint("TOPLEFT", windowCard, "TOPLEFT", 18, -50)
     page.windowScaleStepper = CreateStepper(windowCard, 70, 130, 5, function(value)
@@ -2655,6 +2692,10 @@ function GC.UI:RefreshSettings()
     page.windowAlphaStepper:SetValue(tonumber(window.alpha) or 100)
     local ranks = GC.Roster:GetRankDefinitions()
     local canEditGuildProfile = GC.Roster:CanEditGuildProfile()
+    -- Nachschicken darf, wer auch setzen darf. Ohne Gilde gibt es nichts zu
+    -- senden - dann bleibt der Knopf aus, statt beim Druck zu scheitern.
+    SetButtonEnabled(page.guildProfilePushButton,
+        canEditGuildProfile and IsInGuild ~= nil and IsInGuild() == true)
     for index = 1, 10 do
         local rank = ranks[index]
         local activeToggle = page.activeRankToggles[index]

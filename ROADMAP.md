@@ -298,6 +298,35 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.121 – Ein Knopf statt eines Slash-Befehls
+
+Nachtrag zu 0.9.120. Dort war der Weg, einem Kollegen ohne anwesenden Offizier Rechte zu geben, in der lokalen Rechte-Überschreibung als Slash-Befehl gelandet. Rückmeldung des Owners: „Kannst du mir statt Slash-Befehlen auch Hardbuttons geben?"
+
+### Die Knöpfe gab es schon
+
+Der Blick in `UI.lua` zeigte, dass die Frage die richtige war und die Antwort schon im Addon stand: Die Einstellungsseite trägt seit Langem vier Rangkarten mit echten Schaltern – „Aktive Raider", „Gildenweite Einstellungen bearbeiten", „Mitgliederpflege öffnen" und „Bewerberton hören". Sie hängen alle an `CanEditGuildProfile()`, und genau diese Prüfung überschreibt die lokale Datei. Für den Owner sind sie also bedienbar; ein Slash-Befehl daneben war eine zweite Bedienoberfläche für dieselbe Sache.
+
+Die Befehle sind deshalb wieder verschwunden. Die Überschreibung tut wieder genau eine Sache – die Schalter für den eigenen Charakter bedienbar machen – und sagt beim Anmelden, wo sie stehen.
+
+### Was wirklich fehlte
+
+Ein Punkt aus den Befehlen hatte kein Gegenstück in der Oberfläche, und er ist der eigentliche Grund, warum beim Kollegen nichts ankam: **das Nachschicken**.
+
+Eine Rangfreigabe geht in dem Moment raus, in dem sie gesetzt wird (`GuildProfilePermissionsChanged` → `QueueGuildProfile(true)`). Der Gildenkanal erreicht nur, wer gerade online ist. Wer den Moment verpasst, fragt beim nächsten Anmelden zwar selbst nach (`PrimeGuildProfileSync` → `GQ`), aber das hilft nur, wenn dann jemand mit dem neueren Stand online ist und antwortet. Bei zwei Leuten in einer frischen Gilde ist der Regelfall genau der andere: Der eine setzt die Rechte, der andere steigt zwei Stunden später ein, wenn der erste längst weg ist.
+
+Der Knopf „Rechte erneut senden" steht in der Karte „Gildenweite Einstellungen bearbeiten", direkt unter den Rangschaltern, und ruft `Sync:SendGuildProfile(true)`. Dieselbe Nutzlast wie bei jeder Änderung, derselbe Zeitstempelvergleich beim Empfänger – ein versehentlicher Druck kann nichts zurückdrehen. Gesperrt ist er, wenn der eigene Rang nicht setzen darf oder gar keine Gilde da ist; ein Knopf, der beim Drücken scheitert, ist schlechter als ein sichtbar gesperrter.
+
+Beide Rangkarten sind dafür von 240 auf 280 Pixel gewachsen – beide, nicht nur die rechte, sonst stünde die linke wie abgeschnitten daneben. Die vier Karten darunter und die Inhaltshöhe sind um 40 Pixel nachgezogen.
+
+### Geändert
+
+- `GuildCopilot/UI.lua`: Knopf `guildProfilePushButton` samt Sperrlogik, Rangkarten auf 280 px, Folgekarten und Inhaltshöhe nachgezogen;
+- `GuildCopilot/Locales.lua`: vier englische Entsprechungen;
+- `tests/smoke.lua`: der Knopf sendet mit `force`, meldet den Versand und ist ohne Bearbeitungsrecht gesperrt;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.121.
+
+Außerhalb des Repositories: `GuildCopilotLocalRights` ohne Slash-Befehle, mit Hinweis auf die Einstellungsseite.
+
 ## 0.9.120 – Zwei Gilden, ein Account – und ein Beitritt, den niemand bemerkte
 
 Aus dem Spiel gemeldet: „Ich bin frisch in eine Gilde gejoint mit einem Char und habe jemandem das Addon weitergereicht, aber der Abgleich findet nicht statt" – und im selben Atemzug der Verdacht: „Will der meine Account-Craft-Daten in eine andere Gilde synchronisieren? Bin mit einem Account in zwei Gilden, das muss das Addon klar trennen."
