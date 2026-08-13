@@ -10034,12 +10034,25 @@ do
         updatedAt = addon.Util.Now(),
         professions = {},
     }
+    -- Ein LEERER Vermerk ist kein Beleg fuer eine andere Gilde. Er entsteht
+    -- auch dort, wo der Client beim Anmelden noch nichts wusste; ein Bestand
+    -- darf daran nicht sterben.
+    sep_workshop.crafters[addon.Util.PlayerKey("Unbekannt-Realm")] = {
+        name = "Unbekannt-Realm",
+        sharedBy = "Tester-Realm",
+        updatedAt = addon.Util.Now(),
+        professions = {},
+    }
+    addon.DB.data.characters["unbekannt-realm"].guildKey = ""
     addon.Workshop:PruneDepartedCrafters()
     assert(sep_workshop.crafters[addon.Util.PlayerKey("Drueben-Realm")] == nil,
         "Der eigene Charakter einer anderen Gilde bleibt im Gildenkatalog stehen")
     assert(sep_workshop.crafters[addon.Util.PlayerKey("Hier-Realm")] ~= nil,
         "Der eigene Charakter DIESER Gilde wurde faelschlich aufgeraeumt")
+    assert(sep_workshop.crafters[addon.Util.PlayerKey("Unbekannt-Realm")] ~= nil,
+        "Ein leerer Gildenvermerk hat den Bestand des Charakters geloescht")
     sep_workshop.crafters[addon.Util.PlayerKey("Hier-Realm")] = nil
+    sep_workshop.crafters[addon.Util.PlayerKey("Unbekannt-Realm")] = nil
 
     addon.DB.data.characters = sep_saved
     addon.Workshop:InvalidateCatalog()
@@ -10063,10 +10076,22 @@ do
     assert(stamp_profile.guildKey == "Merkposten@Realm",
         "Ein noch unbekannter Gildenname hat den Vermerk ueberschrieben")
 
+    -- Solange der Client seinen Gildenzustand nicht kennt, wird NICHTS
+    -- geschrieben. Direkt nach dem Anmelden antwortet IsInGuild() auch fuer
+    -- ein Gildenmitglied mit "nein"; ein daraus geschriebenes "gildenlos"
+    -- blieb am Charakter haengen und entschied mit, was in die Gilde geht.
+    local stamp_wasKnown = addon.guildStateKnown
+    addon.guildStateKnown = nil
     IsInGuild = function() return false end
+    addon.Profile:Get()
+    assert(stamp_profile.guildKey == "Merkposten@Realm",
+        "Ein noch unbekannter Gildenzustand hat den Vermerk auf gildenlos gesetzt")
+
+    addon.guildStateKnown = true
     addon.Profile:Get()
     assert(stamp_profile.guildKey == "",
         "Ein gildenloser Charakter behaelt seinen alten Gildenvermerk")
+    addon.guildStateKnown = stamp_wasKnown
 
     GetGuildInfo = stamp_realGuildInfo
     IsInGuild = stamp_realIsInGuild
@@ -10217,8 +10242,32 @@ do
         seenAt = addon.Util.Now(),
         schemaVersion = 7,
         version = addon.Constants.VERSION,
+        capabilities = table.concat(addon.Capabilities, ","),
     }
     addon.Sync.responderCache = nil
+
+    -- Ein Online-Nutzer mit aelterer Fassung wird ausdruecklich NICHT gezielt
+    -- angeschrieben: Er kennt das gefluesterte Gildenprofil nicht, wuerde nie
+    -- quittieren, und jedes Teil liefe acht Mal vergeblich an - der Knopf
+    -- meldete einen Fehlschlag, den es gar nicht gab. Er bekommt den Rundruf.
+    local push_oldMember = addon.Roster:GetMember("Tester-Realm")
+    addon.DB:GetGuild().addonUsers["altfassung"] = {
+        name = "Altfassung-Realm",
+        seenAt = addon.Util.Now(),
+        schemaVersion = 7,
+        version = "0.9.89",
+        capabilities = "profile,guildprofile,workshop",
+    }
+    addon.Roster.membersByName["altfassung-realm"] = { name = "Altfassung-Realm", online = true }
+    addon.Roster.membersByName["altfassung"] = addon.Roster.membersByName["altfassung-realm"]
+    local push_peers, push_outdated = addon.Sync:GetOnlinePeerNames()
+    assert(#push_peers == 1 and push_peers[1] == "Heiler-Realm",
+        "Die Empfaengerliste enthaelt den falschen Kreis: "
+            .. table.concat(push_peers, ","))
+    assert(push_outdated == 1,
+        "Der Nutzer mit aelterer Fassung wird nicht als solcher gezaehlt: "
+            .. tostring(push_outdated))
+    local _ = push_oldMember
 
     local push_queued = {}
     local push_realQueue = addon.Sync.QueueReliable
@@ -10258,6 +10307,9 @@ do
         "Die Quittung nennt die falsche Transferart: " .. push_acks[1].payload)
 
     addon.DB:GetGuild().addonUsers["heiler"] = nil
+    addon.DB:GetGuild().addonUsers["altfassung"] = nil
+    addon.Roster.membersByName["altfassung-realm"] = nil
+    addon.Roster.membersByName["altfassung"] = nil
     push_member.online = push_wasOnline
     addon.Sync.responderCache = nil
     addon.Sync.SendGuildProfile = push_realSend

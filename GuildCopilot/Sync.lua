@@ -1664,23 +1664,53 @@ end
 -- einmal ohne Realm gemeldet wurde, hat dort zwei echte Eintraege. Ein
 -- Vergleich auf Tabellengleichheit haette ihn hier doppelt geliefert - und
 -- damit denselben Transfer zweimal losgeschickt.
+function GC.Sync:HasCapability(entry, capability)
+    local capabilities = type(entry) == "table" and GC.Util.Trim(entry.capabilities) or ""
+    return ("," .. capabilities .. ","):find("," .. capability .. ",", 1, true) ~= nil
+end
+
 function GC.Sync:GetOnlinePeerNames()
     local ownKey = GC.Util.PlayerKey(GC:GetPlayerFullName())
     local names, seen = {}, {}
+    -- Wer online ist, aber die Quittung noch nicht kennt. Er bekommt den
+    -- Rundruf wie bisher; gezaehlt wird er trotzdem, damit die Oberflaeche
+    -- "zwei von zwei bestaetigt, sechs weitere mit aelterer Fassung" sagen
+    -- kann statt "zwei von acht" - was nach Fehlschlag aussaehe, obwohl die
+    -- sechs schlicht nie gefragt wurden.
+-- Erst sammeln, dann entscheiden. Wer beide Schritte in einer Schleife macht,
+-- laesst die Tabellenreihenfolge entscheiden, WELCHER der beiden Eintraege
+-- desselben Spielers zaehlt - und nur einer von beiden traegt womoeglich die
+-- Faehigkeitsliste. Derselbe Spieler galt damit mal als quittierfaehig und mal
+-- als veraltet, von einem Aufruf zum naechsten. Gilt eine Faehigkeit an EINEM
+-- seiner Eintraege, gilt sie fuer ihn.
+    local outdated = 0
     for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
         if type(entry) == "table" then
             local key = GC.Util.PlayerKey(entry.name)
-            if key ~= "" and key ~= ownKey and not seen[key] then
+            if key ~= "" and key ~= ownKey then
                 local member = GC.Roster:GetMember(entry.name)
                 if member and member.online then
-                    seen[key] = true
-                    names[#names + 1] = entry.name
+                    local known = seen[key]
+                    if not known then
+                        known = { name = entry.name, capable = false }
+                        seen[key] = known
+                    end
+                    if self:HasCapability(entry, "guildprofile2") then
+                        known.capable = true
+                    end
                 end
             end
         end
     end
+    for _, known in pairs(seen) do
+        if known.capable then
+            names[#names + 1] = known.name
+        else
+            outdated = outdated + 1
+        end
+    end
     table.sort(names)
-    return names
+    return names, outdated
 end
 
 -- Beide Wege auf einmal: der Rundruf wie bisher fuer alle, und zusaetzlich der
@@ -1689,13 +1719,13 @@ end
 -- Client noch nicht kennt; der bestaetigte Weg sagt, ob es geklappt hat.
 function GC.Sync:PushGuildProfile(onFinished)
     local broadcast = self:SendGuildProfile(true)
-    local targets = self:GetOnlinePeerNames()
+    local targets, outdated = self:GetOnlinePeerNames()
     local open, ok, lost = #targets, 0, 0
     if open == 0 then
         if type(onFinished) == "function" then
-            onFinished(broadcast, 0, 0, 0)
+            onFinished(broadcast, 0, 0, 0, outdated)
         end
-        return broadcast, 0
+        return broadcast, 0, outdated
     end
     local function Note(success)
         if success then
@@ -1705,7 +1735,7 @@ function GC.Sync:PushGuildProfile(onFinished)
         end
         open = open - 1
         if open <= 0 and type(onFinished) == "function" then
-            onFinished(broadcast, #targets, ok, lost)
+            onFinished(broadcast, #targets, ok, lost, outdated)
         end
     end
     for _, name in ipairs(targets) do
@@ -1718,7 +1748,7 @@ function GC.Sync:PushGuildProfile(onFinished)
             Note(false)
         end
     end
-    return broadcast, #targets
+    return broadcast, #targets, outdated
 end
 
 function GC.Sync:SendGuildProfile(force)

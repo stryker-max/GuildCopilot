@@ -2222,7 +2222,7 @@ function GC.UI:BuildSettingsPage()
             -- dieser Fall. Ohne den Merker schriebe die Zwischenmeldung unten
             -- das Ergebnis wieder zu, und der Knopf staende ewig auf "warte".
             local finished = false
-            local broadcast, targets = GC.Sync:PushGuildProfile(function(_, total, ok, lost)
+            local broadcast, targets, outdated = GC.Sync:PushGuildProfile(function(_, total, ok, lost)
                 if total == 0 then
                     return
                 end
@@ -2242,6 +2242,13 @@ function GC.UI:BuildSettingsPage()
             if not broadcast then
                 page.settingsStatus:SetText(GC.L("Senden nicht möglich – bist du in einer Gilde?"))
                 SetTextColor(page.settingsStatus, THEME.danger)
+            elseif targets == 0 and (tonumber(outdated) or 0) > 0 then
+                -- Wichtig zu unterscheiden: Es ist jemand da, er kann nur nicht
+                -- quittieren. Den Rundruf hat er trotzdem bekommen.
+                page.settingsStatus:SetText(GC.LFormat(
+                    "Gesendet. {n} online mit älterer Fassung – die können den Empfang nicht bestätigen.",
+                    { n = outdated }))
+                SetTextColor(page.settingsStatus, THEME.muted)
             elseif targets == 0 then
                 page.settingsStatus:SetText(GC.L("Gesendet. Gerade ist niemand mit dem Addon online – ohne Empfänger keine Bestätigung."))
                 SetTextColor(page.settingsStatus, THEME.muted)

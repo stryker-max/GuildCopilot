@@ -210,10 +210,27 @@ end
 --     obwohl der Charakter in einer Gilde ist) -> unveraendert stehen lassen.
 -- Ein falscher Vermerk waere schlimmer als gar keiner: Er wuerde denselben
 -- Uebertritt verursachen, den er verhindern soll.
+-- Nachtrag 0.9.123: "keine Gilde" ist erst dann eine Aussage, wenn der Client
+-- sie ueberhaupt treffen kann.
+--
+-- Bis dahin genuegte hier ein `IsInGuild() == false`. Genau das antwortet der
+-- Client aber auch in den ersten Augenblicken nach dem Anmelden, wenn er die
+-- Gildendaten noch gar nicht geladen hat - und Profile:Get laeuft in dieser
+-- Zeit mehrfach (Workshop:GetOwnData und Profile:Refresh haengen beide am
+-- PLAYER_LOGIN). Ein gildenTREUER Charakter bekam so den Vermerk "gildenlos"
+-- verpasst, und der blieb an ihm haengen, bis ihn ein spaeterer Aufruf mit
+-- bekanntem Gildennamen ueberschrieb - im schlimmsten Fall bis zum naechsten
+-- Einloggen. Nachweisbar am eigenen Datenbestand des Owners.
+--
+-- Der Client meldet mit PLAYER_GUILD_UPDATE selbst, sobald sein Gildenzustand
+-- steht (GC.guildStateKnown, gesetzt in Core.lua). Vorher wird nichts
+-- geschrieben - ein Vermerk, der nur vielleicht stimmt, ist schlimmer als
+-- keiner: Er entscheidet mit, was in die Gilde geht und was beim Aufraeumen
+-- verschwindet.
 local function StampGuildKey(profile)
     if GC:GetGuildName() ~= "" then
         profile.guildKey = GC:GetGuildKey()
-    elseif type(IsInGuild) == "function" and IsInGuild() == false then
+    elseif GC.guildStateKnown and type(IsInGuild) == "function" and IsInGuild() == false then
         profile.guildKey = ""
     end
 end

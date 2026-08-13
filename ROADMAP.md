@@ -298,6 +298,77 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.123 – Was der eigene Datenbestand verriet
+
+Nach 0.9.122 kam vom Owner die richtige Frage: „Wenn er geupdatet hat, soll es funktionieren? Warum?" Und dann der Satz, der die ganze bisherige Analyse umwarf: „Und mit dem in der anderen Gilde, nicht in Aftermath."
+
+### Die falsche Gilde vermessen
+
+Die Messung aus 0.9.122 – 852 Zeichen, fünf Pakete – galt **Aftermath**. Die betroffene Gilde ist eine andere. Der Blick in die SavedVariables, diesmal über alle drei Zweige:
+
+| Gilde | Nutzlast | Pakete | `editorRanks` | Addon-Nutzer |
+|---|---|---|---|---|
+| `UNGUILDED@Thunderstrike` | 282 | 2 | – | 0 |
+| `Aftermath@Thunderstrike` | 852 | 5 | `[0,1]` | 34 (0.9.3 bis 0.9.118) |
+| `Capsule Corp@Thunderstrike` | 510 | 3 | `[0,1,2,3,4,5,6]` | 1 (Joringoh/0.9.120) |
+
+Damit steht zweierlei fest. Erstens: Die Freigabe **ist** gesetzt, alle sieben Ränge, in Capsule Corp. Zweitens: Dort ist genau ein anderer Addon-Nutzer bekannt – der Kollege. Die Diagnose aus 0.9.122 bleibt gültig, denn drei Pakete ohne Quittung sind genauso alles-oder-nichts wie fünf.
+
+Aber dieselbe Ausgabe zeigte etwas, womit nicht zu rechnen war.
+
+### Der eigene Fehler aus 0.9.120
+
+```
+Strybank-Thunderstrike   guildKey=
+```
+
+Ein leerer Vermerk am eingeloggten Charakter. Der Gildenvermerk aus 0.9.120 sah so aus:
+
+```lua
+if GC:GetGuildName() ~= "" then
+    profile.guildKey = GC:GetGuildKey()
+elseif type(IsInGuild) == "function" and IsInGuild() == false then
+    profile.guildKey = ""
+end
+```
+
+Der zweite Zweig ist falsch, und zwar aus demselben Grund, aus dem der erste vorsichtig ist: **Direkt nach dem Anmelden weiß der Client seinen Gildenzustand noch nicht.** `GetGuildInfo` liefert dann nichts – daran war gedacht –, aber `IsInGuild()` antwortet in diesem Fenster ebenfalls mit „nein", und daran war nicht gedacht. `Profile:Get` läuft in genau dieser Zeit mehrfach: `Workshop:GetOwnData` und `Profile:Refresh` hängen beide am `PLAYER_LOGIN`.
+
+Das Ergebnis war ein Gildenmitglied mit dem Vermerk „gildenlos". Und dieser Vermerk ist nicht folgenlos – er entscheidet in 0.9.120 zwei Dinge mit:
+
+- `GetPublishableProfessions` hält den Charakter zurück (harmlos, eine Lücke);
+- `PruneDepartedCrafters` zählt ihn zu den *fremden* Charakteren und **löscht seinen Bestand aus dem Gildenkatalog** (nicht harmlos).
+
+Der eingeloggte Charakter war gegen das Löschen ausdrücklich geschützt. Ein Twink mit falschem Vermerk war es nicht.
+
+Zwei Änderungen, an beiden Enden:
+
+- **Geschrieben wird erst, wenn der Client es weiß.** `PLAYER_GUILD_UPDATE` ist genau dieses Signal; es setzt `GC.guildStateKnown`, und ohne das schreibt `StampGuildKey` gar nichts. Ein Vermerk, der nur vielleicht stimmt, ist schlimmer als keiner.
+- **Ein leerer Vermerk löscht nichts.** Nur ein *namentlich anderer* Gildenschlüssel gilt beim Aufräumen als Beleg für „steht woanders". Zurückhalten reicht in jedem Zweifelsfall: Eine Lücke heilt beim nächsten Einloggen von selbst, ein gelöschter Bestand nicht.
+
+### Warum der gezielte Versand die Fähigkeit abfragt
+
+In Aftermath stehen 34 Addon-Nutzer, von 0.9.3 bis 0.9.118. Keiner von ihnen versteht ein geflüstertes Gildenprofil, keiner würde quittieren. Hätte 0.9.122 sie mit angeschrieben, wären für jeden acht vergebliche Versuche gelaufen, und der Knopf hätte am Ende „angekommen bei 1 von 8" gemeldet – ein Fehlschlag, den es nie gab.
+
+Der Handschlag trägt für solche Fälle längst eine Fähigkeitsliste (`GC.Capabilities`). Neu darin: `guildprofile2`. Gezielt gesendet wird nur an einen Empfänger, der sie meldet; alle anderen bekommen den Rundruf wie bisher, und die Oberfläche sagt, wie viele das waren.
+
+### Ein Zufallsfehler, den erst der Test sichtbar machte
+
+`GetOnlinePeerNames` fragte die Fähigkeit am jeweiligen Eintrag ab – und derselbe Spieler steht in `addonUsers` unter zwei Schlüsseln, mit und ohne Realmanteil. Das sind nicht immer zwei Verweise auf dieselbe Tabelle: Wer einmal so und einmal so gemeldet wurde, hat dort zwei echte Einträge, und nur einer trägt womöglich die Fähigkeitsliste. Welcher gewann, entschied `pairs` – also der Zufall.
+
+Aufgefallen ist es, weil derselbe Test einmal durchlief und beim nächsten Lauf nicht. Gesammelt wird jetzt erst je Spieler, entschieden danach: Gilt eine Fähigkeit an einem seiner Einträge, gilt sie für ihn. Fünf Läufe hintereinander grün.
+
+### Geändert
+
+- `GuildCopilot/Profile.lua`: `StampGuildKey` schreibt „gildenlos" erst bei bekanntem Gildenzustand;
+- `GuildCopilot/Core.lua`: `GC.guildStateKnown` am `PLAYER_GUILD_UPDATE`;
+- `GuildCopilot/Workshop.lua`: ein leerer Gildenvermerk gilt beim Aufräumen nicht mehr als fremde Gilde;
+- `GuildCopilot/Sync.lua`: `HasCapability`, Fähigkeitsprüfung und Sammeln je Spieler in `GetOnlinePeerNames`, veraltete Nutzer werden gezählt statt angeschrieben;
+- `GuildCopilot/Constants.lua`: Fähigkeit `guildprofile2`;
+- `GuildCopilot/UI.lua`, `Locales.lua`: eigene Meldung für „online, aber ältere Fassung";
+- `tests/smoke.lua`: unbekannter Gildenzustand schreibt nichts, leerer Vermerk löscht nichts, veraltete Nutzer werden gezählt statt angeschrieben;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.123.
+
 ## 0.9.122 – Der einzige Transfer ohne Quittung
 
 Aus dem Spiel, mit Bildschirmfoto von beiden Seiten: „Ich bin in seiner Gilde Social und habe die Rechte freigegeben, bei ihm kommen die aber nicht an." Und kurz darauf: „Auf jeden Fall kommen die Rechte bei ihm nicht an, warum auch immer."

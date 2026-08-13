@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.122",
+    VERSION = "0.9.123",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -91,6 +91,12 @@ GC.Capabilities = {
     -- an einen Absender mit diesem Kennzeichen wird eine adressierte Anfrage
     -- gestellt; ein aelterer Client wuerde sie stumm liegen lassen.
     "workshop6",
+    -- guildprofile2: nimmt das Gildenprofil auch per Fluestern an und quittiert
+    -- jedes Teil ("A|…|G|…"). Nur an einen Empfaenger mit diesem Kennzeichen
+    -- wird gezielt gesendet - ein aelterer Client laesst ein gefluestertes
+    -- "G|" stumm liegen, und jedes Teil liefe hier acht Mal vergeblich an,
+    -- bevor der Knopf einen Fehlschlag meldet, den es gar nicht gab.
+    "guildprofile2",
 }
 
 GC.ProfessionOptions = {

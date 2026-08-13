@@ -3735,7 +3735,13 @@ function GC.Workshop:PruneDepartedCrafters()
     for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
         local characterName = (type(character) == "table" and character.fullName) or characterKey
         local characterGuild = type(character) == "table" and character.guildKey or nil
-        if characterGuild ~= nil and characterGuild ~= guildKey then
+        -- Nur ein NAMENTLICH anderer Gildenschluessel ist ein Beleg dafuer, dass
+        -- dieser Charakter woanders steht. Ein leerer Vermerk ist keiner: Er
+        -- entsteht auch dort, wo der Client beim Anmelden noch nichts wusste,
+        -- und darf deshalb nichts loeschen. Zurueckhalten reicht - das erledigt
+        -- GetPublishableProfessions, und eine Luecke heilt beim naechsten
+        -- Einloggen von selbst. Ein geloeschter Bestand nicht.
+        if characterGuild ~= nil and characterGuild ~= "" and characterGuild ~= guildKey then
             foreignKeys[GC.Util.PlayerKey(characterName)] = true
         else
             ownKeys[GC.Util.PlayerKey(characterName)] = true

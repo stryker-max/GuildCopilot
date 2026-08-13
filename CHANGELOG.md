@@ -7,6 +7,37 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.123 – Addon
+
+**Behoben**
+
+- **Ein Charakter wurde beim Anmelden fälschlich als „gildenlos" vermerkt.**
+  Der Gildenvermerk aus 0.9.120 stützte sich auf `IsInGuild()` – und das
+  antwortet in den ersten Augenblicken nach dem Anmelden auch für ein
+  Gildenmitglied mit „nein", weil die Gildendaten noch nicht geladen sind. Der
+  falsche Vermerk blieb am Charakter hängen und entschied mit, was in die Gilde
+  geht und was beim Aufräumen verschwindet. Jetzt wird erst geschrieben, wenn
+  der Client seinen Gildenzustand wirklich kennt.
+- **Ein leerer Gildenvermerk löscht nichts mehr.** Beim Aufräumen galt „kein
+  Vermerk" als Beleg für „steht in einer anderen Gilde" – und der Bestand des
+  Charakters flog aus dem Gildenkatalog. Nur ein *namentlich anderer*
+  Gildenschlüssel zählt jetzt als solcher Beleg. Zurückhalten reicht: Eine Lücke
+  heilt beim nächsten Einloggen, ein gelöschter Bestand nicht.
+- **Derselbe Spieler zählte je nach Zufall als aktuell oder veraltet.** Ein
+  Mitglied steht intern unter zwei Schlüsseln, und nur einer der beiden trägt
+  womöglich die Fähigkeitsliste; welcher gewann, entschied die
+  Tabellenreihenfolge. Gilt eine Fähigkeit an einem seiner Einträge, gilt sie
+  jetzt für ihn.
+
+**Geändert**
+
+- **Der gezielte Versand geht nur an Clients, die ihn verstehen.** Wer eine
+  ältere Fassung fährt, kann den Empfang nicht bestätigen; ihn trotzdem
+  anzuschreiben hätte acht vergebliche Versuche und am Ende einen Fehlschlag
+  gemeldet, den es nicht gab. Er bekommt den Rundruf wie bisher, und der Knopf
+  sagt es: „Gesendet. 6 online mit älterer Fassung – die können den Empfang
+  nicht bestätigen."
+
 ## 0.9.122 – Addon
 
 **Behoben**

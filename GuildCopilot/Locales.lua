@@ -344,6 +344,7 @@ local english = {
     ["Den eigenen Rang kannst du nicht abwählen."] = "You cannot deselect your own rank.",
     ["Senden nicht möglich – bist du in einer Gilde?"] = "Cannot send – are you in a guild?",
     ["Gesendet an {n} – warte auf Bestätigung …"] = "Sent to {n} – waiting for confirmation …",
+    ["Gesendet. {n} online mit älterer Fassung – die können den Empfang nicht bestätigen."] = "Sent. {n} online with an older version – they cannot confirm receipt.",
     ["Gesendet. Gerade ist niemand mit dem Addon online – ohne Empfänger keine Bestätigung."] = "Sent. Nobody with the addon is online right now – no recipient, no confirmation.",
     ["Rechte bestätigt angekommen bei {ok} von {total}."] = "Permissions confirmed received by {ok} of {total}.",
     ["Rechte angekommen bei {ok} von {total} – bei {lost} nicht."] = "Permissions received by {ok} of {total} – not by {lost}.",

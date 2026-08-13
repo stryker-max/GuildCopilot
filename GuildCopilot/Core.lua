@@ -521,6 +521,10 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         GC:Print(GC.LFormat("v{v} geladen. Öffnen mit |cffffffff/gcp|r.",
             { v = GC.Constants.VERSION }))
     elseif event == "PLAYER_GUILD_UPDATE" then
+        -- Ab hier steht der Gildenzustand des Clients fest - auch ein "keine
+        -- Gilde" ist jetzt eine Antwort und nicht mehr bloss ein noch nicht
+        -- geladener Zustand. Profile.StampGuildKey haengt daran.
+        GC.guildStateKnown = true
         GC:RefreshGuildKey(true)
     end
 end)
