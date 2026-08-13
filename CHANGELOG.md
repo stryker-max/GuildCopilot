@@ -7,6 +7,28 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.122 – Addon
+
+**Behoben**
+
+- **Rechte kommen jetzt bestätigt an – oder du erfährst, dass sie es nicht
+  taten.** Das Gildenprofil war der einzige Transfer im Addon **ohne
+  Empfangsbestätigung**: fünf Pakete in den Gildenkanal, und niemand erfuhr je,
+  ob sie ankamen. Fällt eines aus – der eingebaute Ratenbegrenzer des Clients
+  verwirft im Anmeldegetümmel regelmäßig welche –, verwirft der Empfänger den
+  **ganzen** Transfer, weil er ihn nicht zusammensetzen kann. Nach außen sah das
+  aus wie „die Rechte kommen einfach nicht an", ohne jeden Hinweis worauf.
+  Werkstatt und Warcraft Logs haben für genau dieses Problem längst den
+  bestätigten Weg; das Gildenprofil hat ihn jetzt auch.
+
+**Geändert**
+
+- **„Rechte erneut senden" sagt, was passiert ist.** Der Knopf schickt den Stand
+  weiterhin an die ganze Gilde und zusätzlich gezielt und quittiert an jeden, von
+  dem dein Client weiß, dass er gerade online ist. Danach steht dort „Rechte
+  bestätigt angekommen bei 2 von 2" – oder eben, bei wie vielen nicht. Ist
+  niemand mit dem Addon online, sagt er auch das, statt Erfolg zu behaupten.
+
 ## 0.9.121 – Addon
 
 **Neu**

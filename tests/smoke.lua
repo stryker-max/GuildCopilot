@@ -10197,12 +10197,70 @@ do
         assert(force == true, "Der Knopf sendet ohne force und damit womoeglich gar nicht")
         return true
     end
+
+    -- Ohne erreichbaren Empfaenger: Der Rundruf geht raus, aber der Knopf
+    -- behauptet ausdruecklich KEINEN Erfolg - es gibt niemanden, der ihn
+    -- bestaetigen koennte.
     push_page.guildProfilePushButton.scripts.OnClick()
-    addon.Sync.SendGuildProfile = push_realSend
     assert(push_sent == 1, "Der Knopf hat das Gildenprofil nicht gesendet")
-    assert(tostring(push_page.settingsStatus.value or ""):find("erneut", 1, true) ~= nil,
-        "Der Knopf meldet den Versand nicht: "
+    assert(tostring(push_page.settingsStatus.value or ""):find("niemand", 1, true) ~= nil,
+        "Ohne Empfaenger meldet der Knopf trotzdem Erfolg: "
             .. tostring(push_page.settingsStatus.value))
+
+    -- Mit einem Empfaenger: gezielter, bestaetigter Transfer statt Rundruf ins
+    -- Blaue. Genau das fehlte, als die Rechte "einfach nicht ankamen".
+    local push_member = addon.Roster:GetMember("Heiler-Realm")
+    local push_wasOnline = push_member.online
+    push_member.online = true
+    addon.DB:GetGuild().addonUsers["heiler"] = {
+        name = "Heiler-Realm",
+        seenAt = addon.Util.Now(),
+        schemaVersion = 7,
+        version = addon.Constants.VERSION,
+    }
+    addon.Sync.responderCache = nil
+
+    local push_queued = {}
+    local push_realQueue = addon.Sync.QueueReliable
+    addon.Sync.QueueReliable = function(_, messages, target, kind, token, onComplete)
+        push_queued[#push_queued + 1] = { target = target, kind = kind, parts = #messages }
+        assert(token ~= nil and token ~= "", "Der Transfer laeuft ohne Kennung")
+        onComplete({})
+        return true
+    end
+    push_page.guildProfilePushButton.scripts.OnClick()
+    addon.Sync.QueueReliable = push_realQueue
+    assert(#push_queued == 1 and push_queued[1].target == "Heiler-Realm"
+        and push_queued[1].kind == "G" and push_queued[1].parts > 0,
+        "Das Gildenprofil ging nicht gezielt und bestaetigt an den Online-Nutzer")
+    assert(tostring(push_page.settingsStatus.value or ""):find("bestätigt", 1, true) ~= nil,
+        "Der Knopf meldet die Bestaetigung nicht: "
+            .. tostring(push_page.settingsStatus.value))
+
+    -- Und die Gegenrichtung: Ein gefluestertes Teil wird sofort quittiert,
+    -- sonst gilt es beim Absender als verloren und laeuft ewig erneut an.
+    local push_acks = {}
+    local push_realRawSend = addon.Sync.Send
+    addon.Sync.Send = function(_, payload, distribution, target)
+        if tostring(payload):sub(1, 2) == "A|" then
+            push_acks[#push_acks + 1] = { payload = payload, target = target,
+                distribution = distribution }
+        end
+        return true
+    end
+    local push_messages = addon.Sync:BuildGuildProfileMessages()
+    addon.Sync:ReceiveGuildProfileChunk(push_messages[1], "Heiler-Realm", "WHISPER")
+    addon.Sync.Send = push_realRawSend
+    assert(#push_acks == 1 and push_acks[1].target == "Heiler-Realm"
+        and push_acks[1].distribution == "WHISPER",
+        "Ein gefluestertes Gildenprofil-Teil wird nicht quittiert")
+    assert(push_acks[1].payload:find("|G|", 1, true) ~= nil,
+        "Die Quittung nennt die falsche Transferart: " .. push_acks[1].payload)
+
+    addon.DB:GetGuild().addonUsers["heiler"] = nil
+    push_member.online = push_wasOnline
+    addon.Sync.responderCache = nil
+    addon.Sync.SendGuildProfile = push_realSend
 
     -- Wer nicht setzen darf, darf auch nicht nachschicken.
     local push_realCanEdit = addon.Roster.CanEditGuildProfile

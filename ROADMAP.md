@@ -298,6 +298,75 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.122 – Der einzige Transfer ohne Quittung
+
+Aus dem Spiel, mit Bildschirmfoto von beiden Seiten: „Ich bin in seiner Gilde Social und habe die Rechte freigegeben, bei ihm kommen die aber nicht an." Und kurz darauf: „Auf jeden Fall kommen die Rechte bei ihm nicht an, warum auch immer."
+
+### Was die Bildschirmfotos verraten
+
+Beim Kollegen standen in **allen drei** Rangkarten genau die Auslieferungswerte: „Gildenweite Einstellungen bearbeiten" und „Mitgliederpflege öffnen" jeweils nur Guild Master und GM Twink (`rankIndex <= 1`, die Vorgabe für `configured == false`), und „Aktive Raider" alle sieben Ränge – ebenfalls die Vorgabe, wenn `rankFilterConfigured` nicht gesetzt ist.
+
+Das ist der entscheidende Hinweis, und er schließt einen halb angekommenen Stand aus: Sein Client hatte **noch nie ein einziges Gildenprofil-Paket verarbeitet**. Zum Vergleich der Stand des Owners aus denselben SavedVariables – `activeRaiderRanks = {0,1,2,3,6}`, `memberCare.accessRanks` mit `["3"] = false`, ein vollständig gepflegtes Profil mit Raidzeiten, Loot Council und Discord. Empfangen funktioniert bei ihm also; beim Kollegen kam nichts an.
+
+### Drei Vermutungen, drei Fehlschläge
+
+Der Reihe nach geprüft und jede einzelne widerlegt:
+
+- **Zu viele Pakete?** Die echte Nutzlast dieser Gilde, mit den echten SavedVariables durch `BuildGuildProfilePayload` gemessen: 852 Zeichen, fünf Pakete, 2,3 Sekunden Sendedauer. Von der Obergrenze (26.250) meilenweit entfernt.
+- **Die Antwortwahl?** `CollectResponderKeys` sammelt ausdrücklich nur Addon-Nutzer, die laut Roster **online** sind. Ein Gewählter, der offline ist, kommt gar nicht erst vor.
+- **Versionsunterschied?** Beide Kopfzeilen zeigen v0.9.120, seine sogar ausdrücklich „gleiche Version".
+
+### Was übrig blieb
+
+Übrig blieb die Eigenschaft, die dieser Transfer als einziger im Addon hat: **er wird nicht quittiert.**
+
+`SendGuildProfile` schickt seine Pakete mit `Send()` in den Gildenkanal, im Abstand von 0,45 Sekunden, und das war es. Keine Bestätigung, keine Wiederholung, kein Rückkanal. Auf der Empfangsseite steht in `ReceiveGuildProfileChunk` diese Schleife:
+
+```lua
+for chunkIndex = 1, total do
+    if incoming.chunks[chunkIndex] == nil then
+        return
+    end
+```
+
+**Ein einziges fehlendes Teil, und die ganze Übertragung wird verworfen** – stillschweigend, und nach fünf Minuten räumt `PruneIncoming` den Rest weg. Der Gildenkanal verliert Pakete: Der eingebaute Ratenbegrenzer des Clients weist Nachrichten zurück, wenn mehrere Addons gleichzeitig senden, und zur Anmeldezeit tut das jeder Client der Gilde. Die Kopfzeile des Owners sagte im selben Bildschirmfoto „Abgleich unvollständig" – in dieser Gilde gingen nachweislich Pakete verloren.
+
+Warum es den einen trifft und den anderen nicht, ist damit auch keine Frage mehr: Es ist Zufall, und wen es trifft, den trifft es **jedes Mal vollständig**. Fünf Pakete, von denen eines fehlt, sind null Rechte.
+
+Das Addon hat für genau dieses Problem längst eine Lösung – `QueueReliable`: Fluster-Transfer, jedes Teil wird mit `A|`-Paketen quittiert, Unquittiertes läuft mit wachsendem Abstand bis zu acht Mal erneut an, am Ende steht ein Erfolgs- oder ein Fehlschlag-Rückruf. Werkstatt (`W`) und Warcraft Logs (`L`) benutzen ihn seit Langem. Das Gildenprofil war der letzte Transfer ohne ihn – ausgerechnet der, bei dem ein Ausfall Rechte kostet.
+
+### Beide Wege, nicht einer statt des anderen
+
+`Sync:PushGuildProfile` schickt jetzt beides:
+
+- den **Rundruf** wie bisher – er erreicht auch die, von denen dieser Client noch gar nichts weiß;
+- zusätzlich den **quittierten Fluster-Transfer** an jeden bekannten Addon-Nutzer, der laut Roster gerade online ist.
+
+Der Rundruf bleibt, weil er das Einzige ist, was einen unbekannten Client erreicht. Der quittierte Weg kommt dazu, weil nur er eine Antwort auf „ist es angekommen?" hat.
+
+Quittiert wird **sofort und je Teil**, noch vor jeder Prüfung: Die Bestätigung sagt „angekommen", nicht „gefiel mir". Ein Teil, das erst nach dem Zeitstempelvergleich quittiert würde, liefe beim Absender ewig als verloren, obwohl der Empfänger es längst hat und bloß einen neueren Stand behält.
+
+Zwei Details aus der Umsetzung:
+
+- `GetOnlinePeerNames` zählt je **Spieler**, nicht je Tabelleneintrag. Derselbe Charakter steht in `addonUsers` unter zwei Schlüsseln, und das sind nicht immer zwei Verweise auf dieselbe Tabelle – wer einmal mit und einmal ohne Realmanteil gemeldet wurde, hat dort zwei echte Einträge. Ein Vergleich auf Tabellengleichheit hätte denselben Transfer zweimal losgeschickt; im Test ist genau das passiert.
+- Der Knopf merkt sich, ob der Rückruf schon gefeuert hat. Bei einem einzigen Empfänger mit sofortiger Quittung ist der Transfer fertig, **bevor** `PushGuildProfile` zurückkehrt – ohne den Merker hätte die Zwischenmeldung „warte auf Bestätigung" das Ergebnis wieder zugeschrieben.
+
+### Und was der Knopf jetzt sagt
+
+Statt „wurde gesendet" – was nie eine Aussage war – steht dort „Rechte bestätigt angekommen bei 2 von 2", oder bei wie vielen eben nicht. Ist niemand mit dem Addon online, sagt er auch das: ohne Empfänger keine Bestätigung, und ein Erfolg wäre gelogen.
+
+### Geändert
+
+- `GuildCopilot/Sync.lua`: `SendGuildProfileTo` (quittierter Einzeltransfer), `GetOnlinePeerNames`, `PushGuildProfile`, `BuildGuildProfileMessages` gibt die Kennung mit heraus, `G|` auch per Flüstern samt Quittung und Mitgliedersperre;
+- `GuildCopilot/UI.lua`: der Knopf meldet das Ergebnis statt den Versand;
+- `GuildCopilot/Locales.lua`: vier englische Entsprechungen;
+- `tests/smoke.lua`: ohne Empfänger keine Erfolgsmeldung, mit Empfänger gezielter Transfer der Art `G`, geflüstertes Teil wird quittiert;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.122.
+
+### Offen
+
+Der Rundruf beim Anmelden (`PrimeGuildProfileSync` → `GQ` → `ReplyToGuildProfileRequest`) läuft weiterhin unquittiert. Er erreicht die Mehrheit und ist billig; ihn ebenfalls auf den bestätigten Weg zu heben hieße, bei jedem Login an jeden einzeln zu senden. Der Knopf deckt den Fall ab, in dem es wirklich darauf ankommt.
+
 ## 0.9.121 – Ein Knopf statt eines Slash-Befehls
 
 Nachtrag zu 0.9.120. Dort war der Weg, einem Kollegen ohne anwesenden Offizier Rechte zu geben, in der lokalen Rechte-Überschreibung als Slash-Befehl gelandet. Rückmeldung des Owners: „Kannst du mir statt Slash-Befehlen auch Hardbuttons geben?"

@@ -1623,7 +1623,102 @@ function GC.Sync:BuildGuildProfileMessages()
             chunk,
         }, "|")
     end
-    return messages
+    -- Die Kennung wandert mit hinaus: Der bestaetigte Versand unten braucht
+    -- sie, um die Rueckmeldungen den Teilen zuzuordnen.
+    return messages, #payload, maximum, token
+end
+
+-- === Der bestaetigte Weg zu EINEM Spieler ==================================
+--
+-- Das Gildenprofil ging bisher ausschliesslich ueber den Gildenkanal, ohne
+-- Rueckmeldung und ohne Wiederholung: fuenf Pakete raus, und niemand erfaehrt
+-- je, ob sie angekommen sind. Faellt eines aus - der eingebaute Ratenbegrenzer
+-- des Clients verwirft im Anmeldegetuemmel regelmaessig welche -, verwirft der
+-- Empfaenger den ganzen Transfer, weil er ihn nicht zusammensetzen kann. Nach
+-- aussen sieht das aus wie "die Rechte kommen nicht an", ohne jeden Hinweis
+-- worauf.
+--
+-- Werkstatt und Warcraft Logs haben fuer genau dieses Problem laengst den
+-- bestaetigten Fluestertransfer: jedes Teil wird quittiert, unquittierte
+-- laufen mit wachsendem Abstand erneut an, und am Ende steht ein Erfolg oder
+-- eine Zahl verlorener Teile. Das Gildenprofil war der letzte Transfer ohne
+-- ihn - dabei ist es der einzige, bei dem ein Ausfall Rechte kostet.
+function GC.Sync:SendGuildProfileTo(target, onComplete, onFailure)
+    target = GC.Util.Trim(target)
+    if target == "" then
+        return false
+    end
+    local messages, _, _, token = self:BuildGuildProfileMessages()
+    if #messages == 0 then
+        return false
+    end
+    return self:QueueReliable(messages, target, "G", token, onComplete, onFailure)
+end
+
+-- Alle bekannten Addon-Nutzer der Gilde, die gerade online sind; der eigene
+-- Charakter nie.
+--
+-- Gezaehlt wird je SPIELER, nicht je Tabelleneintrag. Derselbe Charakter steht
+-- in addonUsers unter zwei Schluesseln (mit und ohne Realmanteil), und das
+-- sind nicht immer zwei Verweise auf dieselbe Tabelle: Wer einmal mit und
+-- einmal ohne Realm gemeldet wurde, hat dort zwei echte Eintraege. Ein
+-- Vergleich auf Tabellengleichheit haette ihn hier doppelt geliefert - und
+-- damit denselben Transfer zweimal losgeschickt.
+function GC.Sync:GetOnlinePeerNames()
+    local ownKey = GC.Util.PlayerKey(GC:GetPlayerFullName())
+    local names, seen = {}, {}
+    for _, entry in pairs(GC.DB:GetGuild().addonUsers or {}) do
+        if type(entry) == "table" then
+            local key = GC.Util.PlayerKey(entry.name)
+            if key ~= "" and key ~= ownKey and not seen[key] then
+                local member = GC.Roster:GetMember(entry.name)
+                if member and member.online then
+                    seen[key] = true
+                    names[#names + 1] = entry.name
+                end
+            end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+-- Beide Wege auf einmal: der Rundruf wie bisher fuer alle, und zusaetzlich der
+-- bestaetigte Transfer an jeden, von dem dieser Client weiss, dass er gerade
+-- online ist und das Addon faehrt. Der Rundruf erreicht auch die, die dieser
+-- Client noch nicht kennt; der bestaetigte Weg sagt, ob es geklappt hat.
+function GC.Sync:PushGuildProfile(onFinished)
+    local broadcast = self:SendGuildProfile(true)
+    local targets = self:GetOnlinePeerNames()
+    local open, ok, lost = #targets, 0, 0
+    if open == 0 then
+        if type(onFinished) == "function" then
+            onFinished(broadcast, 0, 0, 0)
+        end
+        return broadcast, 0
+    end
+    local function Note(success)
+        if success then
+            ok = ok + 1
+        else
+            lost = lost + 1
+        end
+        open = open - 1
+        if open <= 0 and type(onFinished) == "function" then
+            onFinished(broadcast, #targets, ok, lost)
+        end
+    end
+    for _, name in ipairs(targets) do
+        local queued = self:SendGuildProfileTo(name, function()
+            Note(true)
+        end, function()
+            Note(false)
+        end)
+        if not queued then
+            Note(false)
+        end
+    end
+    return broadcast, #targets
 end
 
 function GC.Sync:SendGuildProfile(force)
@@ -1699,7 +1794,7 @@ function GC.Sync:QueueGuildProfile(force)
     end)
 end
 
-function GC.Sync:ReceiveGuildProfileChunk(message, sender)
+function GC.Sync:ReceiveGuildProfileChunk(message, sender, distribution)
     -- Der Abgleich ist rangunabhaengig: die neuesten Daten gewinnen. Jeder
     -- Client haelt eine Kopie des Gildenprofils, also darf sie auch von einem
     -- einfachen Mitglied kommen - etwa wenn ein Offizier frisch auf einem
@@ -1721,6 +1816,15 @@ function GC.Sync:ReceiveGuildProfileChunk(message, sender)
         or total > GC.Constants.GUILD_PROFILE_MAX_CHUNKS
         or #token > 40 or #chunk > GC.Constants.GUILD_PROFILE_CHUNK_BYTES then
         return
+    end
+
+    -- Quittiert wird sofort und je Teil, noch bevor irgendetwas uebernommen
+    -- wird: Die Bestaetigung sagt "angekommen", nicht "gefiel mir". Ein Teil,
+    -- das erst nach der Zeitstempelpruefung quittiert wuerde, liefe beim
+    -- Absender ewig als verloren - obwohl der Empfaenger es hat und bloss
+    -- einen neueren Stand behaelt.
+    if distribution == "WHISPER" then
+        self:SendReliableAck("G", token, index, sender)
     end
 
     PruneIncoming(self.guildProfileIncoming)
@@ -2518,7 +2622,8 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     -- die gesamte Abendhistorie von aussen verdraengen.
     if distribution == "WHISPER" and #GC.Roster.members > 0
         and (messageType == "A" or messageType == "W" or messageType == "L"
-            or messageType == "E" or messageType == "O" or messageType == "RD")
+            or messageType == "E" or messageType == "O" or messageType == "RD"
+            or messageType == "G")
         and not GC.Roster:IsGuildMember(sender) then
         return
     end
@@ -2546,11 +2651,15 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
             GC.WarcraftLogs:ReceiveSync(fields, sender, distribution)
         end
         return
-    elseif message:sub(1, 2) == "G|" and distribution == "GUILD" then
+    elseif message:sub(1, 2) == "G|" and (distribution == "GUILD" or distribution == "WHISPER") then
         -- Hier liefert ein anderer bereits das Gildenprofil. Wer selbst noch
-        -- eine Antwort geplant hat, laesst sie damit fallen.
-        self:NotePeerAnswer("GUILDPROFILE")
-        self:ReceiveGuildProfileChunk(message, sender)
+        -- eine Antwort geplant hat, laesst sie damit fallen. Ausdruecklich nur
+        -- beim Rundruf: Ein Fluestern an MICH belegt nicht, dass die Gilde
+        -- versorgt ist.
+        if distribution == "GUILD" then
+            self:NotePeerAnswer("GUILDPROFILE")
+        end
+        self:ReceiveGuildProfileChunk(message, sender, distribution)
         return
     elseif message:sub(1, 2) == "E|" and (distribution == "GUILD" or distribution == "WHISPER") then
         if GC.GearAudit then

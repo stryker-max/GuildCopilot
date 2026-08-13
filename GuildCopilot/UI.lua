@@ -2217,12 +2217,38 @@ function GC.UI:BuildSettingsPage()
     -- versehentlicher Druck kann also nichts zurueckdrehen.
     page.guildProfilePushButton = CreateButton(page.editorRankCard,
         "Rechte erneut senden", 200, 26, function()
-            if GC.Sync:SendGuildProfile(true) then
-                page.settingsStatus:SetText(GC.L("Rechte und Gildenprofil wurden erneut an alle gesendet."))
-                SetTextColor(page.settingsStatus, THEME.success)
-            else
+            -- Der Transfer kann fertig sein, bevor dieser Aufruf zurueckkommt -
+            -- ein einziger Empfaenger, dessen Quittung sofort da ist, ist genau
+            -- dieser Fall. Ohne den Merker schriebe die Zwischenmeldung unten
+            -- das Ergebnis wieder zu, und der Knopf staende ewig auf "warte".
+            local finished = false
+            local broadcast, targets = GC.Sync:PushGuildProfile(function(_, total, ok, lost)
+                if total == 0 then
+                    return
+                end
+                finished = true
+                if lost == 0 then
+                    page.settingsStatus:SetText(GC.LFormat(
+                        "Rechte bestätigt angekommen bei {ok} von {total}.",
+                        { ok = ok, total = total }))
+                    SetTextColor(page.settingsStatus, THEME.success)
+                else
+                    page.settingsStatus:SetText(GC.LFormat(
+                        "Rechte angekommen bei {ok} von {total} – bei {lost} nicht.",
+                        { ok = ok, total = total, lost = lost }))
+                    SetTextColor(page.settingsStatus, THEME.danger)
+                end
+            end)
+            if not broadcast then
                 page.settingsStatus:SetText(GC.L("Senden nicht möglich – bist du in einer Gilde?"))
                 SetTextColor(page.settingsStatus, THEME.danger)
+            elseif targets == 0 then
+                page.settingsStatus:SetText(GC.L("Gesendet. Gerade ist niemand mit dem Addon online – ohne Empfänger keine Bestätigung."))
+                SetTextColor(page.settingsStatus, THEME.muted)
+            elseif not finished then
+                page.settingsStatus:SetText(GC.LFormat(
+                    "Gesendet an {n} – warte auf Bestätigung …", { n = targets }))
+                SetTextColor(page.settingsStatus, THEME.accent)
             end
         end)
     page.guildProfilePushButton:SetPoint("TOPLEFT", page.editorRankCard, "TOPLEFT", 18, -226)
