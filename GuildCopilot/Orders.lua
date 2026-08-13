@@ -195,12 +195,16 @@ end
 
 -- Eigene Charaktere (Account-lokal, aus den gemeinsamen SavedVariables), die
 -- das Rezept beherrschen. Grundlage der Twink-Regel auf der Annehmen-Seite.
+--
+-- Nur Charaktere DIESER Gilde: Ein Auftrag der Gilde A mit einem Twink aus
+-- Gilde B anzunehmen, traegt dessen Namen in eine Gilde, in der er nicht ist -
+-- und die Uebergabe koennte dort ohnehin niemand einfordern.
 function GC.Orders:GetOwnCrafters(recipeKey)
     recipeKey = tostring(recipeKey or "")
     local freeProfession = self:GetFreeProfessionKey(recipeKey)
     local candidates = {}
     local seen = {}
-    for _, entry in ipairs(GC.Workshop:GetAccountProfessions()) do
+    for _, entry in ipairs(GC.Workshop:GetPublishableProfessions()) do
         local profession = entry.profession
         local matches
         if freeProfession then

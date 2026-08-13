@@ -7,6 +7,33 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.120 – Addon
+
+**Behoben**
+
+- **Wer einer Gilde beitritt, während er eingeloggt ist, gleicht jetzt auch ab.**
+  Der gesamte Handschlag – Versionsansage, Gildenprofil, Werkstattmanifest,
+  Gildenaufträge – lief bisher genau einmal, in den ersten zwanzig Sekunden nach
+  dem Anmelden. Ein Beitritt danach kam zu spät: Roster und Fenster stellten
+  sich sofort um, gesendet und angefordert wurde in der neuen Gilde aber nichts,
+  bis zum nächsten `/reload`. Das Addon sah lebendig aus und war stumm. Jetzt
+  läuft dieselbe Anlaufsequenz beim Gildenwechsel noch einmal.
+- **Zwei Gilden mit einem Account bleiben getrennt.** Die Werkstatt meldete die
+  Berufe *aller* Charaktere des Accounts in die Gilde, in der man gerade
+  eingeloggt war – wer mit einem Account in zwei Gilden spielt, trug damit Namen
+  und Rezepte seines Twinks aus Gilde A nach Gilde B und umgekehrt. Die Daten
+  der Gilden selbst waren nie vermischt, die des eigenen Accounts schon. Jeder
+  Charakter hinterlässt jetzt beim Einloggen, in welcher Gilde er steht;
+  veröffentlicht wird nur, was zur aktuellen Gilde gehört. Dasselbe gilt für die
+  Twink-Regel beim Annehmen von Gildenaufträgen.
+
+**Hinweis**
+
+- Ein Twink erscheint im Gildenkatalog erst wieder, wenn er **einmal eingeloggt**
+  war – vorher weiß das Addon nicht, in welcher Gilde er steht, und hält ihn
+  bewusst zurück. Alte Einträge fremder Twinks räumt das Addon beim nächsten
+  Aufräumen von selbst weg.
+
 ## 0.9.119 – Addon
 
 **Geändert**

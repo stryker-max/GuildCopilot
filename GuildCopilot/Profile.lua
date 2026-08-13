@@ -190,6 +190,34 @@ function GC.Profile:DetectTalentSpec()
     return classFile .. ":" .. bestIndex, signature, classFile, classID
 end
 
+-- === In welcher Gilde steckt dieser Charakter? ==============================
+--
+-- WoW verraet einem Addon nie, welche Charaktere eines Accounts zusammen-
+-- gehoeren, und erst recht nicht, in welcher Gilde ein GERADE NICHT gespielter
+-- Charakter steckt. Die SavedVariables liegen aber pro Account, also kann jeder
+-- Charakter beim Einloggen selbst hinterlassen, wo er gerade Mitglied ist.
+--
+-- Ohne diesen Vermerk meldete die Werkstatt die Berufe ALLER Charaktere des
+-- Accounts in die Gilde, in der man gerade eingeloggt ist - wer mit einem
+-- Account in zwei Gilden spielt, trug damit Name und Rezepte seines Twinks aus
+-- Gilde A nach Gilde B (und umgekehrt). Die Daten der Gilden selbst waren nie
+-- vermischt, die des eigenen Accounts schon.
+--
+-- Geschrieben wird nur, was belegt ist:
+--   * ein bekannter Gildenname -> dessen Schluessel;
+--   * ein Client, der ausdruecklich "keine Gilde" sagt -> der leere Vermerk;
+--   * alles dazwischen (direkt nach dem Login liefert GetGuildInfo noch nichts,
+--     obwohl der Charakter in einer Gilde ist) -> unveraendert stehen lassen.
+-- Ein falscher Vermerk waere schlimmer als gar keiner: Er wuerde denselben
+-- Uebertritt verursachen, den er verhindern soll.
+local function StampGuildKey(profile)
+    if GC:GetGuildName() ~= "" then
+        profile.guildKey = GC:GetGuildKey()
+    elseif type(IsInGuild) == "function" and IsInGuild() == false then
+        profile.guildKey = ""
+    end
+end
+
 function GC.Profile:Get()
     local profile = GC.DB:GetCharacter()
     local _, classFile, classID = UnitClass("player")
@@ -212,6 +240,7 @@ function GC.Profile:Get()
     if profile.secondarySpecKey == profile.raidSpecKey then
         profile.secondarySpecKey = nil
     end
+    StampGuildKey(profile)
     return profile
 end
 

@@ -298,6 +298,67 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.120 – Zwei Gilden, ein Account – und ein Beitritt, den niemand bemerkte
+
+Aus dem Spiel gemeldet: „Ich bin frisch in eine Gilde gejoint mit einem Char und habe jemandem das Addon weitergereicht, aber der Abgleich findet nicht statt" – und im selben Atemzug der Verdacht: „Will der meine Account-Craft-Daten in eine andere Gilde synchronisieren? Bin mit einem Account in zwei Gilden, das muss das Addon klar trennen."
+
+Zwei Beobachtungen, zwei verschiedene Fehler. Der Verdacht war berechtigt.
+
+### Der Beitritt, der nie ankam
+
+Der gesamte Handschlag des Addons hing am `PLAYER_LOGIN`: Profil bei Sekunde 3, Gildenprofil-Anfrage bei 5, Versionsansage bei 7, Warcraft Logs bei 9, Versionsprüfung bei 12, Gildenaufträge bei 13 und 17, dazu die Werkstatt mit Bestandsanfrage bei 10 und Manifest bei 16. Einmal je Sitzung, fest verdrahtet in zwei `PLAYER_LOGIN`-Rückrufen.
+
+`PLAYER_GUILD_UPDATE` hörten nur zwei Module ab: `Roster` liest den Roster neu, `Profile` seine Berufe. Beides ist sichtbar – der Gildenname stimmt, die Mitgliederliste stimmt, das Fenster sieht vollständig aus. Gesendet und angefordert wurde in der neuen Gilde aber nichts. Wiederkehrende Zeitgeber gibt es im Addon keine (`NewTicker` kommt nirgends vor), also blieb der Client bis zum nächsten `/reload` stumm.
+
+Das ist die unangenehme Sorte Fehler: Er sieht nicht aus wie einer. Wer der Gilde im laufenden Spiel beitritt – und genau so tritt man einer Gilde bei –, hatte ein Addon, das lebendig wirkte und nichts tat.
+
+Die Anlaufsequenz ist jetzt eine eigene Funktion (`Sync:RunStartupSequence`, `Workshop:RunStartupSequence`), und `Core.lua` meldet über den neuen Rückruf `GUILD_CHANGED`, wenn sich der Gildenschlüssel wirklich ändert. Zwei Wachen halten den Rückruf sauber:
+
+- `RefreshGuildKey` meldet nur echte Wechsel. `PLAYER_GUILD_UPDATE` feuert auch bei jeder Rangänderung und mehrfach beim Anmelden; der erste gelesene Schlüssel einer Sitzung gilt ausdrücklich nicht als Wechsel.
+- Ein Mindestabstand von 30 Sekunden fängt den einen Fall ab, in dem der Rückruf nicht gemeint ist: Direkt nach dem Anmelden liefert `GetGuildInfo` noch nichts, der Schlüssel springt eine Sekunde später von `UNGUILDED` auf die echte Gilde – und die Sequenz des Logins läuft da ohnehin schon, mit dem richtigen Gildenzweig, weil jeder ihrer Schritte den Schlüssel erst beim Senden liest. Ein echter Beitritt liegt immer weit hinter diesem Fenster.
+
+Die Wartezeit-Erinnerungen der Werkstatt sind bewusst **nicht** Teil der Sequenz: Sie sind rein lokal und haben mit der Gilde nichts zu tun.
+
+### Der Verdacht, der stimmte
+
+Der Gildenzweig war immer sauber getrennt – `GuildCopilotDB.guilds["<Gilde>@<Realm>"]` hält Profil, Rechte, Postfach, Werkstattbestand, Aufträge, Raidabende und Gildenbank je Gilde, und der Gildenkanal des Spiels kann eine andere Gilde technisch gar nicht erreichen.
+
+Die Quelle der Werkstattdaten war es nicht. `Workshop:GetAccountProfessions()` lieferte **jeden** Charakter des Accounts, und `GuildCopilotDB.characters` trug nirgends einen Gildenvermerk – es gab im ganzen Addon kein Feld dafür. Diese Liste ging als Manifest (`KM`) in den Gildenkanal, dazu Schlüssellisten, Rezeptdetails auf Nachfrage, Wartezeiten und die Twink-Regel beim Annehmen von Aufträgen. Wer mit einem Account in zwei Gilden spielt, kündigte damit Name und Rezepte seines Twinks aus Gilde A in Gilde B an.
+
+Gebaut war das als Twink-Komfort – die Gilde soll sehen, dass der Zweitchar Verzauberer ist. Der Entwurf kannte den Fall „Twink ist in einer *anderen* Gilde" schlicht nicht.
+
+Jeder Charakter hinterlässt jetzt beim Einloggen seinen Gildenschlüssel (`Profile.StampGuildKey`). Geschrieben wird nur, was belegt ist: ein bekannter Gildenname ergibt den Schlüssel, ein Client, der ausdrücklich „keine Gilde" sagt, den leeren Vermerk – und alles dazwischen lässt den bestehenden Vermerk stehen. Direkt nach dem Login liefert `GetGuildInfo` noch nichts, obwohl der Charakter in einer Gilde ist; ein falscher Vermerk wäre schlimmer als gar keiner, denn er verursachte genau den Übertritt, den er verhindern soll.
+
+Getrennt wird an einer einzigen Stelle: `GetPublishableProfessions()` liefert den eingeloggten Charakter plus alle Twinks dieser Gilde. Alles, was sendet, fragt jetzt dort – Manifest, Schlüssellisten, Rezeptantworten, Wartezeiten, `Orders:GetOwnCrafters`. Alles, was nur lokal anzeigt oder erinnert, fragt weiterhin `GetAccountProfessions()`: Die eigene Berufsübersicht und die Wartezeit-Erinnerungen gehen alle eigenen Charaktere etwas an, gleich in welcher Gilde sie stehen.
+
+**Ein Charakter ohne Vermerk bleibt draußen.** Das trifft nach dem Update jeden Twink genau so lange, bis er einmal eingeloggt war, und kostet in dieser Zeit einen unvollständigen Gildenkatalog. Die Gegenrichtung wäre, im Zweifel zu senden – und damit genau den Übertritt zu wiederholen. Eine Lücke, die sich von selbst schließt, ist das kleinere Übel als ein Leck, das niemand bemerkt. `Workshop:CountUnassignedCrafters()` sagt, wie viele es gerade sind.
+
+### Die Altlast
+
+Was früher übergetreten ist, steht bereits in fremden Gildenkatalogen. `PruneDepartedCrafters` hielt es dort sogar fest: Eigene Charaktere stehen nicht im Gildenroster und waren deshalb pauschal vom Aufräumen ausgenommen, und auf fremden Clients bürgte `sharedBy` für sie. Die Ausnahme gilt jetzt nur noch für Charaktere, die **wirklich** in dieser Gilde sind; wer nachweislich woanders steht, fliegt raus – auch gegen den Bürgen.
+
+Auf dem eigenen Rechner ist die Altlast damit weg. Auf den Rechnern der anderen Gildenmitglieder läuft sie aus, weil sie nicht mehr aufgefrischt wird (`DB:Prune`, 180 Tage). Ein aktives Zurückziehen bräuchte ein neues Feld im Manifest, damit ein Empfänger ein vollständiges Manifest von einem abgeschnittenen unterscheiden kann – das steht bewusst nicht in dieser Version.
+
+### Rechte für einen Kollegen ohne Offiziersrang
+
+Aus derselben Sitzung: „Wir können darin nicht arbeiten, weil kein Offizier oder Gildenlead da ist." Die Rechte des Addons hängen am **Gildenrang** (`profilePermissions.editorRanks`, `memberCare.accessRanks`), nicht an der Person, und unkonfiguriert gelten nur Rang 0 und 1.
+
+Die lokale Rechte-Überschreibung (`GuildCopilotLocalRights`, außerhalb dieses Repositories) half dabei nicht: Sie hängt sich vor `CanEditGuildProfile` und gibt nur für den **eigenen** Charakter `true` zurück. Der Client des Kollegen fragt seine eigene Kopie und kennt diese Datei nicht.
+
+Nachgemessen im Testharness: Der Weg über die echten Einstellungen trägt bereits. Wer mit Überschreibung einen Rang einträgt, löst `GuildProfilePermissionsChanged` aus; das Gildenprofil geht mit `force` in die Gilde, und der Empfänger nimmt es an, weil es von einem Gildenmitglied kommt und neuer ist – der Rangunabhängigkeit des Abgleichs sei Dank, die seit 0.9.x ausdrücklich so gewollt ist. Sein eigener Rang entscheidet danach, ob er arbeiten darf. Das ist jetzt als Regressionstest festgehalten, damit dieser Weg nicht unbemerkt zuwächst.
+
+Die Überschreibung selbst hat dafür Befehle bekommen (`/gclr` – Rangübersicht, `rang <index>`, `alle`, `push`). Sie bleibt außerhalb des Repositories.
+
+### Geändert
+
+- `GuildCopilot/Core.lua`: `GC:RefreshGuildKey` und der Rückruf `GUILD_CHANGED`, `PLAYER_GUILD_UPDATE` im Kernrahmen;
+- `GuildCopilot/Sync.lua`: Anlaufsequenz als `RunStartupSequence`, `GUILD_CHANGED`-Rückruf mit Mindestabstand;
+- `GuildCopilot/Workshop.lua`: `GetPublishableProfessions`, `CountUnassignedCrafters`, Werkstatt-Anlaufsequenz, gefilterte Sendepfade, `PruneDepartedCrafters` räumt eigene Charaktere fremder Gilden ab;
+- `GuildCopilot/Profile.lua`: `StampGuildKey` schreibt den Gildenvermerk je Charakter;
+- `GuildCopilot/Orders.lua`: die Twink-Regel nimmt nur Charaktere dieser Gilde;
+- `tests/smoke.lua`: Trennung der Gilden im Manifest und in der Veröffentlichung, Gildenvermerk samt seiner drei Fälle, Gildenbeitritt startet die Anlaufsequenz genau einmal, gildenweite Freischaltung ohne Offiziersrang;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.120.
+
 ## 0.9.119 – Ein Fenster, das man im Blick behalten kann
 
 Direkt nach dem Zeilenfehler aus 0.9.118 die nächste Meldung aus dem Spiel: „Jetzt wird mir der Tracker gar nicht mehr angezeigt."

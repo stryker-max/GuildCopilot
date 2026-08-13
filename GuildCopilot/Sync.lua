@@ -2652,8 +2652,21 @@ bulkFrame:SetScript("OnEvent", function()
     GC.Sync:PumpBulk(slept)
 end)
 
-GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
-    self:RegisterPrefix()
+-- === Die Anlaufsequenz =====================================================
+--
+-- Alles, was ein Client beim Betreten einer Gilde einmal tun muss: sich
+-- vorstellen, den Stand erfragen und den eigenen anbieten. Sie lief frueher
+-- fest im PLAYER_LOGIN-Rueckruf und damit genau einmal je Sitzung; seit dem
+-- Gildenwechsel-Rueckruf weiter unten ist sie eine eigene Funktion und laeuft
+-- auch dann, wenn die Gilde erst im laufenden Spiel dazukommt.
+--
+-- Die Abstaende sind unveraendert: Sie entzerren den Addon-Kanal in den ersten
+-- Sekunden, in denen ohnehin jeder andere Client seine eigene Sequenz faehrt.
+function GC.Sync:RunStartupSequence()
+    self.lastPrimeAt = GC.Util.Now()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return false
+    end
     C_Timer.After(3, function()
         self:QueueProfile()
     end)
@@ -2688,6 +2701,32 @@ GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
             GC.Orders:PushOpenOrders()
         end
     end)
+    return true
+end
+
+GC:RegisterCallback("PLAYER_LOGIN", GC.Sync, function(self)
+    self:RegisterPrefix()
+    self:RunStartupSequence()
+end)
+
+-- Der Gildenwechsel im laufenden Spiel: dieselbe Sequenz noch einmal.
+--
+-- Der Mindestabstand faengt den einzigen Fall ab, in dem der Rueckruf nicht
+-- gemeint ist: Direkt nach dem Anmelden liefert GetGuildInfo noch nichts, der
+-- Schluessel springt eine Sekunde spaeter von "UNGUILDED" auf die echte Gilde -
+-- und die Sequenz des Logins laeuft da ohnehin schon, mit dem richtigen
+-- Gildenzweig, weil jeder ihrer Schritte den Schluessel erst beim Senden liest.
+-- Ein echter Beitritt liegt immer weit hinter diesem Fenster.
+local MIN_PRIME_INTERVAL = 30
+
+GC:RegisterCallback("GUILD_CHANGED", GC.Sync, function(self)
+    if not IsInGuild or not IsInGuild() then
+        return
+    end
+    if (GC.Util.Now() - (tonumber(self.lastPrimeAt) or 0)) < MIN_PRIME_INTERVAL then
+        return
+    end
+    self:RunStartupSequence()
 end)
 
 GC:RegisterCallback("PROFILE_UPDATED", GC.Sync, function(self)

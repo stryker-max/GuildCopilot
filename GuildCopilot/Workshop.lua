@@ -1560,6 +1560,11 @@ end
 -- richtigen Charakternamen. So teilt jeder eingeloggte Charakter der Gilde auch
 -- die Berufe seiner Twinks mit - das Addon kennt sie ja lokal aus der
 -- gemeinsamen SavedVariables und muss sie nicht erneut erlernen.
+--
+-- Diese Fassung liefert ALLE Charaktere und ist damit die richtige fuer alles,
+-- was den Account betrifft und nie den Rechner verlaesst: die eigene
+-- Berufsuebersicht und die Wartezeit-Erinnerungen. Was in die Gilde geht,
+-- nimmt GetPublishableProfessions.
 function GC.Workshop:GetAccountProfessions()
     local entries = {}
     local ownName = GC:GetPlayerFullName()
@@ -1576,11 +1581,62 @@ function GC.Workshop:GetAccountProfessions()
             -- worden sein; ihre Schluessel wandern beim ersten Lesen mit.
             CanonicalizeOwnProfessions(workshop)
             for _, profession in pairs(workshop.professions) do
-                entries[#entries + 1] = { crafter = characterName, profession = profession }
+                entries[#entries + 1] = {
+                    crafter = characterName,
+                    profession = profession,
+                    guildKey = type(character) == "table" and character.guildKey or nil,
+                }
             end
         end
     end
     return entries
+end
+
+-- Dieselbe Liste, aber nur die Charaktere, die in DIESER Gilde stehen.
+--
+-- Wer mit einem Account in zwei Gilden spielt, hat sonst seinen Twink aus
+-- Gilde A samt Namen und Rezepten in Gilde B angekuendigt - der Gildenkanal
+-- trennt zwar sauber, die Quelle der Daten tat es nicht. Gefragt wird deshalb
+-- der Vermerk, den jeder Charakter beim Einloggen hinterlaesst
+-- (Profile.StampGuildKey).
+--
+-- Der eingeloggte Charakter ist immer dabei: Er IST die aktuelle Gilde, dafuer
+-- braucht es keinen gespeicherten Vermerk.
+--
+-- Ein Charakter OHNE Vermerk bleibt draussen. Das trifft nach dem Update jeden
+-- Twink genau so lange, bis er einmal eingeloggt war, und kostet in dieser Zeit
+-- einen unvollstaendigen Gildenkatalog. Die Gegenrichtung waere, im Zweifel zu
+-- senden - und damit genau den Uebertritt zu wiederholen, den diese Funktion
+-- verhindern soll. Eine Luecke, die sich von selbst schliesst, ist das kleinere
+-- Uebel als ein Leck, das niemand bemerkt.
+function GC.Workshop:GetPublishableProfessions()
+    local guildKey = GC:GetGuildKey()
+    local ownKey = GC.Util.PlayerKey(GC:GetPlayerFullName())
+    local entries = {}
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        if GC.Util.PlayerKey(entry.crafter) == ownKey or entry.guildKey == guildKey then
+            entries[#entries + 1] = entry
+        end
+    end
+    return entries
+end
+
+-- Wie viele eigene Charaktere gerade zurueckgehalten werden, weil ihr
+-- Gildenvermerk fehlt. Die Werkstatt sagt es dem Besitzer, statt ihn eine
+-- Luecke suchen zu lassen, die keine ist.
+function GC.Workshop:CountUnassignedCrafters()
+    local ownKey = GC.Util.PlayerKey(GC:GetPlayerFullName())
+    local names = {}
+    for _, entry in ipairs(self:GetAccountProfessions()) do
+        if GC.Util.PlayerKey(entry.crafter) ~= ownKey and entry.guildKey == nil then
+            names[GC.Util.PlayerKey(entry.crafter)] = true
+        end
+    end
+    local count = 0
+    for _ in pairs(names) do
+        count = count + 1
+    end
+    return count
 end
 
 -- Reiht eine Schluesselliste in dieselbe Warteschlange ein wie volle Transfers.
@@ -1632,7 +1688,7 @@ function GC.Workshop:QueueAllProfessions(compact, target, reliable, fullData)
     -- Volle Daten gehen nur an gezielte Empfaenger oder solange noch ein Client
     -- ohne Schluesselliste in der Gilde ist.
     local keyListOnly = not target and compact ~= false and not fullData
-    for _, entry in ipairs(self:GetAccountProfessions()) do
+    for _, entry in ipairs(self:GetPublishableProfessions()) do
         if keyListOnly then
             self:QueueKeyList(entry.profession, entry.crafter)
         else
@@ -2043,7 +2099,7 @@ end
 function GC.Workshop:SendCooldowns(target)
     local now = GC.Util.Now()
     local lists, order = {}, {}
-    for _, entry in ipairs(self:GetAccountProfessions()) do
+    for _, entry in ipairs(self:GetPublishableProfessions()) do
         for _, recipeKey in ipairs(SortedKeys(entry.profession.cooldowns)) do
             local readyAt = tonumber(entry.profession.cooldowns[recipeKey]) or 0
             if (readyAt - now) >= MIN_COOLDOWN_SECONDS then
@@ -2571,7 +2627,7 @@ end
 -- Paket pro Login statt einer vollen Schluesselliste.
 function GC.Workshop:BuildKeyManifestMessages()
     local records = {}
-    for _, entry in ipairs(self:GetAccountProfessions()) do
+    for _, entry in ipairs(self:GetPublishableProfessions()) do
         local profession = entry.profession
         local fingerprintHash = profession.fingerprintHash
             or FingerprintHash(profession.fingerprint or RecipeFingerprint(profession))
@@ -3137,7 +3193,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             return
         end
         local ownAnswered = false
-        for _, entry in ipairs(self:GetAccountProfessions()) do
+        for _, entry in ipairs(self:GetPublishableProfessions()) do
             if GC.Util.PlayerKey(entry.crafter) == wantedKey
                 and requested[entry.profession.key] then
                 self:QueueKeyList(entry.profession, entry.crafter)
@@ -3186,7 +3242,7 @@ function GC.Workshop:ReceiveSync(fields, sender, distribution)
             filter[recipeKey] = true
         end
         local ownAnswered = false
-        for _, entry in ipairs(self:GetAccountProfessions()) do
+        for _, entry in ipairs(self:GetPublishableProfessions()) do
             if GC.Util.PlayerKey(entry.crafter) == wantedKey then
                 self:QueueProfessionSync(entry.profession, true, nil, nil, entry.crafter, filter)
                 ownAnswered = true
@@ -3669,21 +3725,38 @@ function GC.Workshop:PruneDepartedCrafters()
         return 0
     end
     local workshop = self:GetGuildWorkshop()
-    local ownKeys = {}
+    -- Eigene Charaktere stehen nicht im Gildenroster und duerfen deshalb nicht
+    -- fuer Ausgetretene gehalten werden - aber nur die, die WIRKLICH in dieser
+    -- Gilde sind. Ein Twink aus einer anderen Gilde war frueher durch dieselbe
+    -- Ausnahme geschuetzt und blieb damit dauerhaft im fremden Gildenkatalog
+    -- stehen; genau das raeumt diese Einschraenkung mit auf.
+    local guildKey = GC:GetGuildKey()
+    local ownKeys, foreignKeys = {}, {}
     for characterKey, character in pairs((GC.DB.data and GC.DB.data.characters) or {}) do
         local characterName = (type(character) == "table" and character.fullName) or characterKey
-        ownKeys[GC.Util.PlayerKey(characterName)] = true
+        local characterGuild = type(character) == "table" and character.guildKey or nil
+        if characterGuild ~= nil and characterGuild ~= guildKey then
+            foreignKeys[GC.Util.PlayerKey(characterName)] = true
+        else
+            ownKeys[GC.Util.PlayerKey(characterName)] = true
+        end
     end
     ownKeys[GC.Util.PlayerKey(GC:GetPlayerFullName())] = true
+    foreignKeys[GC.Util.PlayerKey(GC:GetPlayerFullName())] = nil
 
     local now = GC.Util.Now()
     local removed = 0
     for crafterKey, crafter in pairs(workshop.crafters) do
         local name = type(crafter) == "table" and crafter.name or crafterKey
         local sharedBy = type(crafter) == "table" and crafter.sharedBy or nil
-        local keep = ownKeys[crafterKey]
-            or GC.Roster:IsGuildMember(name)
-            or (sharedBy and GC.Roster:IsGuildMember(sharedBy))
+        -- Ein eigener Charakter, von dem wir WISSEN, dass er in einer anderen
+        -- Gilde steht, fliegt raus - auch wenn ihn ein Gildenmitglied
+        -- eingebracht hat. Genau dieser Buerge hielt die Altlast am Leben, die
+        -- der Account frueher selbst hier hineingetragen hat.
+        local keep = not foreignKeys[crafterKey]
+            and (ownKeys[crafterKey]
+                or GC.Roster:IsGuildMember(name)
+                or (sharedBy and GC.Roster:IsGuildMember(sharedBy)))
         if not keep then
             workshop.crafters[crafterKey] = nil
             removed = removed + 1
@@ -3879,35 +3952,65 @@ GC:RegisterCallback("ROSTER_UPDATED", GC.Workshop, function(self)
     self:PruneDepartedCrafters()
 end)
 
+-- Der Werkstattteil der Anlaufsequenz: Bestand erfragen, eigenen ankuendigen.
+-- Wie bei GC.Sync eine eigene Funktion, damit ein Gildenbeitritt im laufenden
+-- Spiel nicht bis zum naechsten /reload ohne Werkstattabgleich dasteht.
+local WORKSHOP_MIN_PRIME_INTERVAL = 30
+
+function GC.Workshop:RunStartupSequence()
+    self.lastPrimeAt = GC.Util.Now()
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        return false
+    end
+    C_Timer.After(10, function()
+        -- Der Abgleich ist fester Hintergrunddienst und läuft über den
+        -- schnellen, zuverlässigen Gildenkanal. Erst den Bestand der Gilde
+        -- anfragen ...
+        GC.Workshop:RequestGuildData()
+    end)
+    C_Timer.After(16, function()
+        -- ... und den eigenen Bestand ankündigen. Gesendet wird nur das
+        -- Manifest: Hersteller, Zeitstempel, Anzahl und Fingerabdruck je
+        -- Beruf. Wer davon etwas nicht hat, fordert es an - wer alles kennt,
+        -- verursacht keinen weiteren Verkehr. Ein Login ohne Änderungen
+        -- kostet damit ein Paket statt einer vollen Schlüsselliste.
+        -- Nur das Manifest, nie der volle Bestand: ein Login oder /reload
+        -- kostet damit ein Paket statt achtzig. Wer wirklich etwas nicht
+        -- hat, fordert es aus dem Manifest gezielt an, und ein Client ohne
+        -- Manifest-Verständnis bekommt beim eigenen "Q" den vollen Bestand.
+        if IsInGuild and IsInGuild() then
+            GC.Workshop:SendKeyManifest()
+        end
+    end)
+    return true
+end
+
 GC:RegisterCallback("PLAYER_LOGIN", GC.Workshop, function(self)
     self:GetOwnData()
     if C_Timer and C_Timer.After then
         -- Erst wenn Login-Rauschen und Datenbestand stehen: die seit dem
         -- letzten Spielen abgelaufenen Wartezeiten einmal gesammelt melden
-        -- und den Zeitgeber auf den naechsten Ablauf stellen.
+        -- und den Zeitgeber auf den naechsten Ablauf stellen. Rein lokal und
+        -- deshalb ausdruecklich NICHT Teil der Anlaufsequenz.
         C_Timer.After(COOLDOWN_REMINDER_LOGIN_DELAY, function()
             GC.Workshop:AnnounceDueCooldowns()
             GC.Workshop:ScheduleCooldownReminder()
         end)
-        C_Timer.After(10, function()
-            -- Der Abgleich ist fester Hintergrunddienst und läuft über den
-            -- schnellen, zuverlässigen Gildenkanal. Erst den Bestand der Gilde
-            -- anfragen ...
-            GC.Workshop:RequestGuildData()
-        end)
-        C_Timer.After(16, function()
-            -- ... und den eigenen Bestand ankündigen. Gesendet wird nur das
-            -- Manifest: Hersteller, Zeitstempel, Anzahl und Fingerabdruck je
-            -- Beruf. Wer davon etwas nicht hat, fordert es an - wer alles kennt,
-            -- verursacht keinen weiteren Verkehr. Ein Login ohne Änderungen
-            -- kostet damit ein Paket statt einer vollen Schlüsselliste.
-            -- Nur das Manifest, nie der volle Bestand: ein Login oder /reload
-            -- kostet damit ein Paket statt achtzig. Wer wirklich etwas nicht
-            -- hat, fordert es aus dem Manifest gezielt an, und ein Client ohne
-            -- Manifest-Verständnis bekommt beim eigenen "Q" den vollen Bestand.
-            if IsInGuild and IsInGuild() then
-                GC.Workshop:SendKeyManifest()
-            end
-        end)
     end
+    self:RunStartupSequence()
+end)
+
+GC:RegisterCallback("GUILD_CHANGED", GC.Workshop, function(self)
+    if not IsInGuild or not IsInGuild() then
+        return
+    end
+    if (GC.Util.Now() - (tonumber(self.lastPrimeAt) or 0)) < WORKSHOP_MIN_PRIME_INTERVAL then
+        return
+    end
+    -- Die neue Gilde hat einen eigenen, leeren Werkstattzweig - der
+    -- zwischengespeicherte Katalog gehoert noch zur alten.
+    if self.InvalidateCatalog then
+        self:InvalidateCatalog()
+    end
+    self:RunStartupSequence()
 end)

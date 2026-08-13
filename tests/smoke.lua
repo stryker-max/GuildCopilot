@@ -5253,8 +5253,11 @@ do
     assert(orders_order.status == "DONE", "Die bestätigte Erstattung schloss den Auftrag nicht ab")
 
     -- Twink-Regel: Der eigene Twink kann das zweite Rezept, der Main nicht.
+    -- Der Gildenvermerk gehoert dazu - ohne ihn gilt der Twink als "Gilde
+    -- unbekannt" und wird bewusst zurueckgehalten (eigener Block weiter unten).
     addon.DB.data.characters["twinky-realm"] = {
         fullName = "Twinky-Realm",
+        guildKey = addon:GetGuildKey(),
         workshop = { professions = { verzauberkunst = {
             key = "verzauberkunst", name = "Verzauberkunst",
             recipes = { I90002 = { name = "Testbrenner" } },
@@ -5832,6 +5835,7 @@ do
     -- Fremder Auftrag, machbar über den Twink: Annehmen-Knopf sichtbar.
     addon.DB.data.characters["twinky-realm"] = {
         fullName = "Twinky-Realm",
+        guildKey = addon:GetGuildKey(),
         workshop = { professions = { verzauberkunst = {
             key = "verzauberkunst", name = "Verzauberkunst",
             recipes = { I90002 = { name = "Testbrenner" } },
@@ -6429,6 +6433,7 @@ do
     addon.DB:GetGuild().workshop.orders = {}
     addon.DB.data.characters["twinky-realm"] = {
         fullName = "Twinky-Realm",
+        guildKey = addon:GetGuildKey(),
         workshop = { professions = { verzauberkunst = {
             key = "verzauberkunst", name = "Verzauberkunst",
             recipes = { I90002 = { name = "Testbrenner" } },
@@ -9944,6 +9949,234 @@ do
             .. tostring(healed.slots[1].reason))
     addon.GearAudit.ResolveEnchantNameByID = saved
     addon.DB:GetGuild().gearAudits.healtest = nil
+end
+
+-- === Zwei Gilden, ein Account: der Twink aus der anderen Gilde bleibt dort ===
+-- Der Gildenzweig war immer getrennt, die Quelle der Werkstattdaten nicht:
+-- GetAccountProfessions lieferte JEDEN Charakter des Accounts, und genau das
+-- ging als Manifest in die Gilde, in der man gerade eingeloggt war. Wer mit
+-- einem Account in zwei Gilden spielt, trug damit Name und Rezepte hin und her.
+do
+    local sep_guildKey = addon:GetGuildKey()
+    local sep_saved = addon.DB.data.characters
+    addon.DB.data.characters = {
+        ["hier-realm"] = {
+            fullName = "Hier-Realm",
+            guildKey = sep_guildKey,
+            workshop = { professions = { verzauberkunst = {
+                key = "verzauberkunst", name = "Verzauberkunst", updatedAt = 100,
+                recipes = { I90101 = { name = "Hierrezept" } },
+            } } },
+        },
+        ["drueben-realm"] = {
+            fullName = "Drueben-Realm",
+            guildKey = "Fremdgilde@Realm",
+            workshop = { professions = { schneiderei = {
+                key = "schneiderei", name = "Schneiderei", updatedAt = 100,
+                recipes = { I90102 = { name = "Druebenrezept" } },
+            } } },
+        },
+        ["unbekannt-realm"] = {
+            fullName = "Unbekannt-Realm",
+            workshop = { professions = { lederverarbeitung = {
+                key = "lederverarbeitung", name = "Lederverarbeitung", updatedAt = 100,
+                recipes = { I90103 = { name = "Unbekanntrezept" } },
+            } } },
+        },
+    }
+
+    local sep_all = {}
+    for _, entry in ipairs(addon.Workshop:GetAccountProfessions()) do
+        sep_all[entry.crafter] = true
+    end
+    assert(sep_all["Drueben-Realm"] and sep_all["Unbekannt-Realm"],
+        "Die eigene Uebersicht darf keinen eigenen Charakter verschweigen")
+
+    local sep_public = {}
+    for _, entry in ipairs(addon.Workshop:GetPublishableProfessions()) do
+        sep_public[entry.crafter] = true
+    end
+    assert(sep_public["Hier-Realm"] == true,
+        "Der Twink DIESER Gilde wird nicht mehr veroeffentlicht")
+    assert(sep_public["Drueben-Realm"] == nil,
+        "Der Twink einer ANDEREN Gilde wird weiterhin in diese Gilde gemeldet")
+    assert(sep_public["Unbekannt-Realm"] == nil,
+        "Ein Charakter ohne Gildenvermerk wird veroeffentlicht statt zurueckgehalten")
+    assert(sep_public[addon:GetPlayerFullName()] ~= nil
+        or #addon.Workshop:GetOwnData().professions == 0,
+        "Der eingeloggte Charakter fehlt in der Veroeffentlichung")
+    assert(addon.Workshop:CountUnassignedCrafters() == 1,
+        "Die Zahl der zurueckgehaltenen Charaktere stimmt nicht: "
+            .. tostring(addon.Workshop:CountUnassignedCrafters()))
+
+    -- Und dasselbe eine Ebene hoeher: im Manifest, das wirklich gesendet wird.
+    local sep_manifest = table.concat(addon.Workshop:BuildKeyManifestMessages(), " ")
+    assert(sep_manifest:find("Hier-Realm", 1, true) ~= nil,
+        "Das Gildenmanifest nennt den Twink dieser Gilde nicht")
+    assert(sep_manifest:find("Drueben-Realm", 1, true) == nil,
+        "Das Gildenmanifest traegt den Twink der anderen Gilde in diese Gilde")
+    assert(sep_manifest:find("Unbekannt-Realm", 1, true) == nil,
+        "Das Gildenmanifest nennt einen Charakter ohne Gildenvermerk")
+
+    -- Aufraeumen: Ein eigener Charakter aus einer anderen Gilde war bisher
+    -- durch die Eigenausnahme dauerhaft vor dem Aufraeumen geschuetzt und
+    -- blieb deshalb fuer immer im fremden Gildenkatalog stehen.
+    local sep_workshop = addon.Workshop:GetGuildWorkshop()
+    sep_workshop.crafters[addon.Util.PlayerKey("Drueben-Realm")] = {
+        name = "Drueben-Realm",
+        sharedBy = "Tester-Realm",
+        updatedAt = addon.Util.Now(),
+        professions = {},
+    }
+    sep_workshop.crafters[addon.Util.PlayerKey("Hier-Realm")] = {
+        name = "Hier-Realm",
+        sharedBy = "Tester-Realm",
+        updatedAt = addon.Util.Now(),
+        professions = {},
+    }
+    addon.Workshop:PruneDepartedCrafters()
+    assert(sep_workshop.crafters[addon.Util.PlayerKey("Drueben-Realm")] == nil,
+        "Der eigene Charakter einer anderen Gilde bleibt im Gildenkatalog stehen")
+    assert(sep_workshop.crafters[addon.Util.PlayerKey("Hier-Realm")] ~= nil,
+        "Der eigene Charakter DIESER Gilde wurde faelschlich aufgeraeumt")
+    sep_workshop.crafters[addon.Util.PlayerKey("Hier-Realm")] = nil
+
+    addon.DB.data.characters = sep_saved
+    addon.Workshop:InvalidateCatalog()
+end
+
+-- === Der Gildenvermerk entsteht beim Einloggen =============================
+-- Ohne bekannten Gildennamen darf nichts geschrieben werden: Direkt nach dem
+-- Login liefert GetGuildInfo noch nichts, obwohl der Charakter in einer Gilde
+-- ist - ein falscher Vermerk waere schlimmer als gar keiner.
+do
+    local stamp_realGuildInfo = GetGuildInfo
+    local stamp_realIsInGuild = IsInGuild
+    local stamp_profile = addon.Profile:Get()
+    assert(stamp_profile.guildKey == addon:GetGuildKey(),
+        "Der eingeloggte Charakter bekommt keinen Gildenvermerk")
+
+    stamp_profile.guildKey = "Merkposten@Realm"
+    GetGuildInfo = function() return nil end
+    IsInGuild = function() return true end
+    addon.Profile:Get()
+    assert(stamp_profile.guildKey == "Merkposten@Realm",
+        "Ein noch unbekannter Gildenname hat den Vermerk ueberschrieben")
+
+    IsInGuild = function() return false end
+    addon.Profile:Get()
+    assert(stamp_profile.guildKey == "",
+        "Ein gildenloser Charakter behaelt seinen alten Gildenvermerk")
+
+    GetGuildInfo = stamp_realGuildInfo
+    IsInGuild = stamp_realIsInGuild
+    addon.Profile:Get()
+    assert(stamp_profile.guildKey == addon:GetGuildKey(),
+        "Der Gildenvermerk kehrt nicht zurueck")
+end
+
+-- === Gildenbeitritt im laufenden Spiel ======================================
+-- Der gesamte Handschlag hing am PLAYER_LOGIN. Wer einer Gilde beitrat,
+-- WAEHREND er eingeloggt war, sendete in dieser Gilde nie etwas und fragte nie
+-- etwas an - bis zum naechsten /reload. Genau das war "der Abgleich findet
+-- nicht statt".
+do
+    local join_syncPrimes = 0
+    local join_workshopPrimes = 0
+    local join_realSync = addon.Sync.RunStartupSequence
+    local join_realWorkshop = addon.Workshop.RunStartupSequence
+    addon.Sync.RunStartupSequence = function(self)
+        join_syncPrimes = join_syncPrimes + 1
+        self.lastPrimeAt = addon.Util.Now()
+        return true
+    end
+    addon.Workshop.RunStartupSequence = function(self)
+        join_workshopPrimes = join_workshopPrimes + 1
+        self.lastPrimeAt = addon.Util.Now()
+        return true
+    end
+
+    -- Ein echter Wechsel meldet sich, ein wiederholter Aufruf derselben Gilde
+    -- nicht - PLAYER_GUILD_UPDATE feuert auch bei jeder Rangaenderung.
+    addon.lastGuildKey = nil
+    assert(addon:RefreshGuildKey(true) == false,
+        "Der erste gelesene Gildenschluessel gilt faelschlich als Wechsel")
+    assert(addon:RefreshGuildKey(true) == false,
+        "Derselbe Gildenschluessel wurde als Wechsel gemeldet")
+
+    -- Und jetzt der Beitritt: weit hinter dem Login-Fenster.
+    addon.Sync.lastPrimeAt = addon.Util.Now() - 600
+    addon.Workshop.lastPrimeAt = addon.Util.Now() - 600
+    addon.lastGuildKey = "UNGUILDED@Realm"
+    assert(addon:RefreshGuildKey(true) == true,
+        "Der Gildenbeitritt wurde nicht als Wechsel gemeldet")
+    assert(join_syncPrimes == 1,
+        "Der Gildenbeitritt hat die Anlaufsequenz nicht gestartet")
+    assert(join_workshopPrimes == 1,
+        "Der Gildenbeitritt hat den Werkstattabgleich nicht gestartet")
+
+    -- Der Mindestabstand: Direkt nach dem Login springt der Schluessel von
+    -- "UNGUILDED" auf die echte Gilde, waehrend die Sequenz des Logins ohnehin
+    -- schon laeuft. Ein zweiter Durchlauf waere reiner Kanalverkehr.
+    addon.lastGuildKey = "UNGUILDED@Realm"
+    assert(addon:RefreshGuildKey(true) == true,
+        "Der zweite Wechsel wurde nicht gemeldet")
+    assert(join_syncPrimes == 1,
+        "Die Anlaufsequenz lief trotz Mindestabstand ein zweites Mal")
+    assert(join_workshopPrimes == 1,
+        "Der Werkstattabgleich lief trotz Mindestabstand ein zweites Mal")
+
+    addon.Sync.RunStartupSequence = join_realSync
+    addon.Workshop.RunStartupSequence = join_realWorkshop
+end
+
+-- === Rechte gildenweit freischalten ohne Offiziersrang ======================
+-- Der Weg, auf den sich die lokale Rechte-Ueberschreibung stuetzt: Wer die
+-- eigene Pruefung ueberschreibt, traegt einen Rang ein - und dieser Stand geht
+-- als gewoehnliches Gildenprofil-Paket an alle. Der Empfaenger nimmt es an,
+-- weil es von einem Gildenmitglied kommt und neuer ist; sein eigener Rang
+-- entscheidet danach, ob er arbeiten darf.
+do
+    local grant_guild = addon.DB:GetGuild()
+    local grant_savedPerms = grant_guild.profilePermissions
+    local grant_savedUpdatedAt = grant_guild.profile.updatedAt
+
+    grant_guild.profilePermissions = { configured = true, editorRanks = { ["0"] = true } }
+    grant_guild.profile.updatedAt = 0
+    assert(addon.Roster:CanEditGuildProfile() == false,
+        "Testannahme falsch: der eigene Rang darf das Gildenprofil schon bearbeiten")
+    assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == false,
+        "Testannahme falsch: der Kollege darf das Gildenprofil schon bearbeiten")
+
+    -- Die Ueberschreibung, wie GuildCopilotLocalRights sie einhaengt: nur der
+    -- eigene Charakter, jede andere Frage geht unveraendert weiter.
+    local grant_original = addon.Roster.CanEditGuildProfile
+    addon.Roster.CanEditGuildProfile = function(self, playerName, ...)
+        if playerName == nil or playerName == "" then
+            return true
+        end
+        return grant_original(self, playerName, ...)
+    end
+    local grant_ok, grant_reason = addon.Roster:SetGuildProfileRankActive(5, true)
+    addon.Roster.CanEditGuildProfile = grant_original
+    assert(grant_ok == true and grant_reason == "UPDATED",
+        "Der Rang liess sich mit Ueberschreibung nicht freischalten: "
+            .. tostring(grant_reason))
+
+    local grant_messages = addon.Sync:BuildGuildProfileMessages()
+    assert(#grant_messages > 0, "Die Freischaltung erzeugt kein Gildenprofil-Paket")
+
+    -- Der Kollege: leerer Stand, empfaengt die Pakete, darf danach arbeiten.
+    grant_guild.profilePermissions = { configured = false, editorRanks = {} }
+    grant_guild.profile.updatedAt = 0
+    for _, grant_message in ipairs(grant_messages) do
+        addon.Sync:ReceiveGuildProfileChunk(grant_message, "Tester-Realm")
+    end
+    assert(addon.Roster:CanEditGuildProfile("Heiler-Realm") == true,
+        "Die gildenweit gesendete Freischaltung erreicht den Kollegen nicht")
+
+    grant_guild.profilePermissions = grant_savedPerms
+    grant_guild.profile.updatedAt = grant_savedUpdatedAt
 end
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

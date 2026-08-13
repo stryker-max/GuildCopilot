@@ -470,9 +470,41 @@ function GC:GetGuildKey()
     return guildName .. "@" .. realm
 end
 
+-- === Gildenwechsel im laufenden Spiel ======================================
+--
+-- Der gesamte Handschlag des Addons haengt am PLAYER_LOGIN: Versionsansage,
+-- Gildenprofil-Anfrage, Werkstattmanifest und Auftragsabgleich laufen einmal,
+-- in den ersten zwanzig Sekunden einer Sitzung. Wer einer Gilde beitritt,
+-- WAEHREND er eingeloggt ist, hat diesen Moment verpasst: Roster und
+-- Gildenzweig stellen sich sofort um, das Fenster sieht vollstaendig aus - und
+-- der Client hat in der neuen Gilde nie etwas gesendet und nie etwas
+-- angefordert. Bis zum naechsten /reload blieb er stumm. Genau das war der
+-- Fall, in dem ein frisch beigetretener Charakter "keinen Abgleich" hatte.
+--
+-- Gemeldet wird deshalb jeder echte Wechsel des Gildenschluessels. Nur ein
+-- echter: PLAYER_GUILD_UPDATE feuert auch bei jeder Rangaenderung und ein paar
+-- Mal beim Anmelden, waehrend GetGuildInfo noch nichts liefert.
+-- Liest den aktuellen Gildenschluessel und meldet einen Wechsel. Beim ersten
+-- Aufruf (Login) wird nur gemerkt, nicht gemeldet: Da hat sich nichts
+-- geaendert, da faengt es an.
+function GC:RefreshGuildKey(fireChange)
+    local guildKey = self:GetGuildKey()
+    if guildKey == self.lastGuildKey then
+        return false
+    end
+    local previous = self.lastGuildKey
+    self.lastGuildKey = guildKey
+    if fireChange and previous ~= nil then
+        self:FireCallback("GUILD_CHANGED", guildKey, previous)
+        return true
+    end
+    return false
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
 eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" then
         local loadedName = ...
@@ -484,8 +516,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         -- Erst ab hier gibt der Client Namen und Realm belastbar heraus; ein
         -- frueher gemerkter Stand wird deshalb verworfen.
         GC.playerFullName = nil
+        GC:RefreshGuildKey(false)
         GC:FireCallback("PLAYER_LOGIN")
         GC:Print(GC.LFormat("v{v} geladen. Öffnen mit |cffffffff/gcp|r.",
             { v = GC.Constants.VERSION }))
+    elseif event == "PLAYER_GUILD_UPDATE" then
+        GC:RefreshGuildKey(true)
     end
 end)
