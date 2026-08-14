@@ -1,0 +1,54 @@
+name: Tests
+
+# Die Tests laufen bei jedem Push und jedem Pull Request - nicht erst
+# unmittelbar vor einer Veroeffentlichung.
+#
+# Vorher hingen sie ausschliesslich im CurseForge-Workflow, und der laeuft nur
+# auf main und nur, wenn die Version neu ist. Ein Fehler auf einem
+# Arbeitsbranch fiel damit erst auf, wenn er schon in main war und gerade
+# hochgeladen werden sollte. Das ist die teuerste Stelle, an der ein Test
+# fehlschlagen kann.
+#
+# Ausgefuehrt wird derselbe Befehl wie lokal: npm test. Eine eigene
+# CI-Testlogik gibt es ausdruecklich nicht - sie waere die naechste Stelle, an
+# der Entwicklungsrechner und CI auseinanderlaufen.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      # npm ci statt npm install: Installiert genau das, was in
+      # package-lock.json steht, und scheitert, wenn beides auseinanderfaellt.
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+
+      - name: Alle Tests
+        run: npm test
+
+      # Das gebaute Paket zum Nachsehen, auch ohne Veroeffentlichung. Wer
+      # wissen will, was auf CurseForge landen WUERDE, laedt es hier herunter.
+      - name: Gebautes Paket sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curseforge-paket-${{ github.sha }}
+          path: build/*.zip
+          if-no-files-found: warn
+          retention-days: 7

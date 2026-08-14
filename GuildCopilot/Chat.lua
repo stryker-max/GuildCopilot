@@ -708,12 +708,83 @@ function GC.Chat:CaptureWhisper(message, sender, guid)
     self:CaptureLead(message, sender, guid, "WHISPER")
 end
 
+-- Die frueheste Fundstelle irgendeines der Woerter, oder nil.
+local function FirstPosition(normalizedMessage, words)
+    local earliest
+    for _, word in ipairs(words) do
+        local at = normalizedMessage:find(word, 1, true)
+        if at and (not earliest or at < earliest) then
+            earliest = at
+        end
+    end
+    return earliest
+end
+
+-- === Sucht hier jemand eine Gilde - oder sucht eine Gilde jemanden? =======
+--
+-- Die Begruendung steht bei den Wortlisten in Constants.lua. Kurz: Die
+-- Reihenfolge entscheidet.
+--
+--     "ENH sucht Anschluss an Gilde"   -> Suchwort zuerst  -> Bewerber
+--     "Gilde sucht noch aktive Raider" -> Gildenwort zuerst -> Werbung
+--
+-- Das faengt nebenbei die passive Form richtig ab, ohne eine eigene Regel:
+-- In "Raider fuer unsere Gilde gesucht" steht "gilde" vor dem "sucht" in
+-- "gesucht" - also Werbung, und das stimmt. Das ehrliche "Gilde gesucht!"
+-- eines Bewerbers faengt weiterhin die Wendungsliste ab, die vorher laeuft.
+local function LooksLikeGuildSeeker(normalizedMessage)
+    local guildAt = FirstPosition(normalizedMessage, GC.GuildSeekerGuildWords)
+    if not guildAt then
+        return false
+    end
+    -- "Anschluss", "beitreten", "Aufnahme": Die verraten den Bewerber, egal wo
+    -- sie stehen - die deutsche Verbstellung schiebt sie hinter das Objekt
+    -- ("einer Gilde beitreten").
+    if not MatchesAnyWord(normalizedMessage, GC.GuildSeekerJoinWords) then
+        local seekAt = FirstPosition(normalizedMessage, GC.GuildSeekerSeekWords)
+        if not seekAt or seekAt > guildAt then
+            return false
+        end
+    end
+    return true
+end
+
+GC.Chat.LooksLikeGuildSeeker = function(_, message)
+    return LooksLikeGuildSeeker(tostring(message or ""):lower())
+end
+
 function GC.Chat:IsRecruitmentSignal(message)
     local normalized = tostring(message or ""):lower()
     if MatchesAnyWord(normalized, self:GetRecruitmentWords("chatExclusions")) then
         return false
     end
-    return MatchesAnyWord(normalized, self:GetRecruitmentWords("chatTriggers"))
+
+    -- Die EIGENE Wendungsliste ist eine Zusage: Was du selbst eintraegst, wird
+    -- erfasst, ohne Wenn und Aber. Sie steht deshalb vor jeder Klugheit.
+    local ownTriggers = self:GetRecruitmentFilters().chatTriggers
+    if #ownTriggers > 0 and MatchesAnyWord(normalized, ownTriggers) then
+        return true
+    end
+
+    -- Ohne die freie Erkennung bleibt es beim Wortvergleich, und die eigene
+    -- Liste ersetzt die Vorgabe vollstaendig - wer sie eng haelt, bekommt
+    -- genau diese Enge.
+    if not GC.DB:GetSettings().smartRecruitmentDetection then
+        return MatchesAnyWord(normalized, self:GetRecruitmentWords("chatTriggers"))
+    end
+
+    -- Ab hier darf das Addon eigenstaendig urteilen - und ein erkennbares
+    -- Werbemerkmal wiegt schwerer als eine mitgelieferte Wendung. Sonst holt
+    -- die Vorgabe "gilde gesucht" jedes "Raider fuer unsere Gilde gesucht"
+    -- herein, also genau die Konkurrenzwerbung, die niemand im Postfach will.
+    if MatchesAnyWord(normalized, GC.GuildSeekerAdMarkers) then
+        return false
+    end
+    if MatchesAnyWord(normalized, self:GetRecruitmentWords("chatTriggers")) then
+        return true
+    end
+    -- Und zuletzt die freie Erkennung fuer alles, was niemand vorher aufschreibt.
+    return LooksLikeGuildSeeker(normalized)
 end
 
 function GC.Chat:SendReply(playerName, text)

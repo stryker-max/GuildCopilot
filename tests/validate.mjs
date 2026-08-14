@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.129",
+  "## Version: 0.9.131",
 ];
 
 for (const entry of requiredMetadata) {
@@ -325,16 +325,9 @@ const requiredImplementations = [
   ["kein Gesamtscore im Gear Audit", /keine Gesamtnote/],
   ["Ausnahmen und zurückgestellte Vorschläge", /SetMemberCareDecision/],
   ["manuelle Ausnahmeliste", /GetMemberCareDecisions/],
-  ["Ausschluss nur mit Berechtigungsprüfung", /function GC\.Roster:CanRemoveMember/],
-  ["echte Blizzard-Prüfung vor dem Ausschluss", /HasBlizzardRemovePermission/],
-  // Bis 0.9.129 stand hier /removeArmed/ - eine zweite Bestätigung im Addon.
-  // Sie ist entfallen: WoW lässt den Gildenausschluss aus einem Addon heraus
-  // nicht zu (GuildUninvite ist geschützt), also führt der Knopf ins
-  // Blizzard-Gildenfenster, und dort fragt WoW selbst nach. Eine eigene
-  // Rückfrage davor wäre die dritte für eine Sache, die hier gar nicht
-  // passiert.
-  ["Ausschluss führt ins Blizzard-Gildenfenster", /function GC\.Roster:OpenGuildRemoval/],
-  ["Mitglied wird dort vorausgewählt", /SetGuildRosterSelection/],
+  // Der Gildenausschluss ist ganz aus dem Addon verschwunden: GuildUninvite
+  // ist geschützt und aus einem Addon heraus nicht aufrufbar. Geprüft wird
+  // deshalb das Gegenteil – dass er nicht zurückkehrt (weiter unten).
   // Die Kopfzeile deckt beide Companion-Formate ab: GCPWCL aus Warcraft Logs
   // und GCPLOG aus dem Offline-Import.
   ["Nachanalyse aus Companion-Importen", /GCP%u\+%d\+/],
@@ -646,17 +639,38 @@ if (settingsPage.includes("page.templateEdits")) {
   throw new Error("Die Antwortvorlagen stehen wieder in den Einstellungen.");
 }
 
+// === Der Gildenausschluss bleibt draußen ===================================
+//
+// GuildUninvite ist eine geschützte Funktion („can only be called from secure
+// code"). Jeder Versuch, den Ausschluss aus dem Addon heraus zu bauen, kostet
+// nur Zeit – nachzulesen in der ROADMAP, Versionen 0.9.124 bis 0.9.129. Diese
+// Regel hält die Tür zu, damit die Runde nicht ein drittes Mal beginnt.
+const removalAttempts = [
+  "GuildUninvite",
+  "C_GuildInfo.Uninvite",
+  "SetGuildRosterSelection",
+  "OpenGuildRemoval",
+  "CanRemoveMember",
+  "CanRemoveFromGuild",
+];
+// Kommentare dürfen die Namen nennen – dort steht die Begründung. Einmal
+// gefiltert, nicht je Suchbegriff neu: `allSource` ist der gesamte Addoncode.
+const codeWithoutComments = allSource
+  .split("\n")
+  .filter((line) => !line.trim().startsWith("--"))
+  .join("\n");
+for (const forbidden of removalAttempts) {
+  if (codeWithoutComments.includes(forbidden)) {
+    throw new Error(
+      `Der Gildenausschluss ist wieder im Addon (${forbidden}). ` +
+        "GuildUninvite ist geschützt - das kann nicht funktionieren."
+    );
+  }
+}
+
 // Der Knopf IM Blizzard-Gildenfenster ist ersatzlos entfallen: Er verdeckte
 // Inhalte, ließ sich nicht verschieben und es bleiben genug Aufrufwege.
-//
-// Das Gildenfenster zu ÖFFNEN ist etwas anderes und seit 0.9.129 nötig: WoW
-// lässt den Gildenausschluss aus einem Addon heraus nicht zu, der Weg führt
-// also zwangsläufig dorthin. `ToggleGuildFrame` und `ToggleFriendsFrame` sind
-// deshalb ausgenommen – verboten bleibt, etwas an dieses Fenster zu hängen.
-const guildWindowUse = allSource
-  .replace(/ToggleGuildFrame/g, "")
-  .replace(/ToggleFriendsFrame/g, "");
-if (allSource.includes("AddGuildWindowButton") || guildWindowUse.includes("GuildFrame")) {
+if (allSource.includes("AddGuildWindowButton") || allSource.includes("GuildFrame")) {
   throw new Error("Der Knopf im Blizzard-Gildenfenster ist wieder vorhanden.");
 }
 if (readme.includes("Button im Blizzard-Gildenfenster")) {

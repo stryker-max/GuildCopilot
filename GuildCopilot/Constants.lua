@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.129",
+    VERSION = "0.9.131",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -302,6 +302,90 @@ GC.DefaultWhisperTriggers = {
 -- eigene Realm. Eine mitgelieferte Liste wuerde Eintraege verhindern, die
 -- jemand anders ausdruecklich haben will.
 GC.MaxRecruitmentFilterWords = 40
+
+-- === Freie Formulierungen erkennen ========================================
+--
+-- Die Wendungsliste oben ist genau und deshalb eng. Sie kennt "suche Gilde",
+-- aber nicht "ENH sucht Anschluss an Gilde zum Raiden" - und genau so schreibt
+-- der halbe Kanal. Jede fehlende Wendung von Hand nachzutragen ist ein Spiel
+-- ohne Ende: "sucht Gilde", "sucht eine Gilde", "sucht raidende Gilde", "suche
+-- Anschluss an eine Gilde", ...
+--
+-- Der naheliegende Ausweg - einfach "gilde" als Trigger - ist gemessen der
+-- schlechteste: Von fuenf typischen Gildenwerbungen im Kanal landen VIER im
+-- Postfach. Das sind Konkurrenten, keine Bewerber, und sie kommen im Minutentakt.
+--
+-- Was beide Faelle zuverlaessig trennt, ist nicht die Wortwahl, sondern die
+-- REIHENFOLGE:
+--
+--     Bewerber nennt zuerst sich:   "ENH  sucht  Anschluss an  GILDE"
+--     Gilde wirbt, nennt sich zuerst: "GILDE  sucht  noch aktive Raider"
+--
+-- Steht das Suchwort VOR dem Gildenwort, sucht jemand eine Gilde. Steht das
+-- Gildenwort davor, sucht eine Gilde jemanden. Das ist im Deutschen wie im
+-- Englischen stabil und braucht keine einzige neue Wendung.
+GC.GuildSeekerGuildWords = {
+    "gilde",
+    "guild",
+}
+
+-- Suchwoerter, bei denen die Reihenfolge zaehlt. Kurzformen genuegen, weil
+-- verglichen wird, ob sie IRGENDWO vorkommen: "suche" steckt auch in "suchen",
+-- "sucht" auch in "gesucht" - Letzteres ist Absicht, siehe unten.
+GC.GuildSeekerSeekWords = {
+    "suche",
+    "sucht",
+    "lfg",
+    "lf ",
+    "looking for",
+}
+
+-- Woerter, die den Bewerber unabhaengig von der Reihenfolge verraten.
+--
+-- Noetig wegen der deutschen Verbstellung: In "moechte einer GILDE BEITRETEN"
+-- steht das Verb hinter dem Objekt, die Reihenfolgeregel wuerde daraus eine
+-- Werbung machen. Diese Woerter benutzt umgekehrt keine werbende Gilde ueber
+-- sich selbst - "wir suchen Anschluss" sagt niemand. Das werbende "Tritt uns
+-- bei!" faengt weiterhin die Merkmalsliste unten ab.
+GC.GuildSeekerJoinWords = {
+    "anschluss",
+    "beitreten",
+    "aufnahme",
+    "aufgenommen",
+}
+
+-- Merkmale, die eine Gildenwerbung auch dann verraten, wenn die Reihenfolge
+-- nach Bewerber aussieht - etwa "<Aftermath> sucht dich! Wir sind eine Gilde
+-- fuer Raider". Sie schlagen die Reihenfolge.
+--
+-- Aufgenommen wird nur, was EINDEUTIG ist. "sucht noch" steht bewusst NICHT
+-- hier: "ENH sucht noch eine Gilde" waere damit verloren.
+GC.GuildSeekerAdMarkers = {
+    -- "unsere Gilde" sagt nur, wer selbst darin ist. Faengt unter anderem
+    -- "Raider fuer unsere Gilde gesucht" ab, das sonst ueber die Vorgabe-
+    -- wendung "gilde gesucht" hereinkaeme.
+    "unsere gilde",
+    "unserer gilde",
+    "our guild",
+    "sucht dich",
+    "sucht euch",
+    "suchen dich",
+    "suchen euch",
+    "wir suchen",
+    "wir sind eine",
+    "verstärkung",
+    "verstaerkung",
+    "meldet euch",
+    "bewerbt",
+    "rekrutier",
+    "neue mitglieder",
+    "mitglieder gesucht",
+    "member gesucht",
+    "tritt uns bei",
+    "werde teil",
+    "we are recruiting",
+    "is recruiting",
+}
 
 -- Verbrauchsgegenstände werden nach Spell-ID gezählt. Gezählt wird der
 -- VERBRAUCH, nicht der Besitz: Wer dreimal Buffood isst, steht mit drei

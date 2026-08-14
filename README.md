@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.129
+# Guild Copilot 0.9.131
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -42,7 +42,16 @@ Der Ablauf geht von oben nach unten: Gildenprofil ausfüllen, Vorschläge ansehe
 
 ## Postfach
 
-Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten landen automatisch als Interessent im Postfach — mit Klassenfarbe, Level und Empfangszeit.
+Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten landen automatisch als Interessent im Postfach — mit Klassenfarbe, Level und Empfangszeit. Mitgelesen wird in **jedem** Kanal, dem du beigetreten bist: SucheNachGruppe, Allgemein, Handel, Gildenrekrutierung.
+
+**Freie Formulierungen werden erkannt.** Eine feste Wendungsliste kennt „suche Gilde“, aber nicht „ENH sucht Anschluss an Gilde zum Raiden“ — und so schreibt der halbe Kanal. Guild Copilot geht deshalb nicht nach Wendungen allein, sondern nach der **Wortreihenfolge**:
+
+| Nachricht | |
+|---|---|
+| „ENH **sucht** … an **Gilde**“ | Suchwort zuerst → Bewerber, kommt ins Postfach |
+| „**Gilde sucht** noch aktive Raider“ | Gildenwort zuerst → Werbung einer anderen Gilde, bleibt draußen |
+
+Das trennt Bewerber von Konkurrenzwerbung, ohne dass du eine einzige Wendung nachtragen musst. Abschaltbar über **Einstellungen → Auch freie Formulierungen erkennen**; deine eigenen Trigger-Wörter gelten unabhängig davon immer.
 
 - **Antworten** mit drei Knöpfen: Danke, Gildeninfos, Discord. Die Vorlagen dahinter pflegst du direkt im Postfach, sie gelten gildenweit und kennen Platzhalter wie `{name}`, `{raidzeiten}` oder `{discord}`.
 - Jeder **Entwurf gehört zu seinem Interessenten** und bleibt beim Wechsel erhalten — auch wenn währenddessen eine neue Nachricht eintrifft und die Liste sich verschiebt.
@@ -59,9 +68,9 @@ Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten la
 
 **Erste Schritte.** Beim ersten Login je Charakter öffnet sich ein Einrichtungsassistent: eine kurze Funktionstour entlang der Seitenleiste (was kann das Addon, und wo finde ich es), dann die drei Schritte — Raidprofil mit erkannter Spec per Klick bestätigen, Berufsfenster direkt aus dem Assistenten öffnen (die Rezepte liest Guild Copilot dabei selbst), die Ausrüstungsprüfung läuft ohnehin automatisch. Jederzeit abbrechbar über ×, Escape oder „Später“, jeder Schritt einzeln überspringbar. Wer den Assistenten zuklappt, verliert nichts: Dieselben Schritte stehen als Checkliste oben im Profil, die echte Aktion schiebt sie weiter, und ein Punkt am Minimap-Symbol erinnert an den Rest. Der Knopf **Einrichtung** im Fensterkopf und `/gcp welcome` holen den Assistenten jederzeit zurück.
 
-**Mitgliederpflege** (ranggeschützt). Aktive Abmeldungen und nach Inaktivität sortierte Prüfvorschläge. Jeder Vorschlag lässt sich als **Ausnahme**, **zurückgestellt** oder **erledigt** ablegen — gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten. Unsichere Main/Twink-Fälle werden als „Prüfen“ gekennzeichnet, nicht als Entfernungsvorschlag.
+**Mitgliederpflege** (ranggeschützt). Aktive Abmeldungen und nach Inaktivität sortierte Prüfvorschläge — alle, mit Scrollen, nicht die ersten neun. Twinks, aktiv Abgemeldete und geschützte Ränge bleiben ausgeblendet, unsichere Main/Twink-Fälle stehen als „Prüfen“ da. Jeder Vorschlag lässt sich als **Ausnahme** dauerhaft aus der Liste nehmen; der Vermerk wird gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten.
 
-> Ein Gildenausschluss ist immer eine Einzelentscheidung: zweite ausdrückliche Bestätigung, echte WoW-Berechtigung, nur gegen einen niedrigeren und ungeschützten Rang. Nichts davon läuft automatisch oder in Serie.
+> **Die Seite schlägt vor, sie handelt nicht.** Einen Gildenausschluss gibt es hier nicht und kann es nicht geben: `GuildUninvite` ist in WoW geschützt und aus einem Addon heraus nicht aufrufbar — über keinen Umweg. Entfernt wird ausschließlich in WoW selbst. Was das Addon beantwortet, ist die Frage davor: **wen sollte man sich ansehen?**
 
 ## Gildenwerkstatt
 
@@ -128,9 +137,33 @@ Alle sollten dieselbe Version fahren. Sie steht im Fenstertitel, Abweichungen we
 
 ---
 
+## Zwei Fassungen — welche habe ich?
+
+Guild Copilot gibt es in zwei Zuschnitten. Sie unterscheiden sich **nur** darin, was mitgeliefert wird; das Addon selbst ist dasselbe, und beide Fassungen synchronisieren untereinander ohne Einschränkung.
+
+| | **Vollständige Fassung**<br>(dieses Repository, Installer, `Install.cmd`) | **CurseForge-Fassung**<br>(CurseForge-App) |
+|---|---|---|
+| Alle Addon-Funktionen | ✅ | ✅ |
+| Gildenweiter Sync | ✅ | ✅ |
+| Windows-Installer | ✅ | — |
+| Warcraft-Logs-Companion | ✅ | — |
+| Seite **Warcraft Logs** im Addon | ✅ | — (Navigationspunkt erscheint nicht) |
+
+**Warum die CurseForge-Fassung weniger enthält:** CurseForge nimmt keine Archive mit ausführbaren Dateien an. Installer (`.exe`) und Companion (`.cmd`, `.mjs`) dürfen also nicht ins Paket — und der Warcraft-Logs-Import im Addon braucht genau diese Helfer, weil ein WoW-Addon selbst nichts aus dem Internet laden darf. Eine Importseite ohne den Helfer wäre eine Seite, die zum Einfügen von etwas auffordert, das man sich nirgends holen kann. Sie erscheint dort deshalb gar nicht erst.
+
+**Was das praktisch heißt:**
+
+- Wer Warcraft Logs auswerten will, nimmt die vollständige Fassung — Installer oder `Install.cmd`.
+- Wer aus CurseForge installiert hat, sieht **alle** Auswertungen trotzdem, sobald **ein** Gildenmitglied mit der vollständigen Fassung importiert: Die Ergebnisse kommen über den normalen Gildensync herein. Nur das Importieren selbst geht dort nicht.
+- Ein Wechsel in beide Richtungen ist gefahrlos. Gespeicherte Daten bleiben erhalten, auch die aus Warcraft-Logs-Importen — es wird nichts gelöscht und nichts umgeschrieben.
+
+---
+
 ## Installation
 
 **Der einfachste Weg unter Windows:** [`GuildCopilot-Installer.exe`](Installer/dist) starten. Sie erkennt die vorhandenen Spielversionen selbst, lädt das Addon direkt aus diesem Repository, aktualisiert eine vorhandene Fassung und hält sich auch selbst aktuell.
+
+**Über CurseForge:** in der CurseForge-App nach *Guild Copilot* suchen und installieren. Das ist der bequemste Weg für automatische Updates — und der Weg zur reduzierten Fassung aus der Tabelle oben.
 
 **Ohne die .exe:** `Install.cmd` doppelt anklicken. Das Skript sucht die WoW-Installation und kopiert die neue Fassung über eine vorhandene, ohne den funktionierenden Ordner vorher zu löschen.
 
@@ -148,7 +181,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.129.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.131.
 
 ### Warum Windows beim Herunterladen warnt
 
@@ -202,8 +235,34 @@ Einstellungen und Gildendaten liegen in `GuildCopilotDB` (SavedVariables). Über
 
 Nicht gesendet werden: deine Taschen- und Bankbestände, Combat-Log-Rohdaten, Tooltiptexte und fertige Bewertungen.
 
+## Entwickeln und testen
+
+Gebraucht wird nur Node.js — **kein installiertes Lua**. Die Lua-Tests laufen über [fengari](https://fengari.io/), festgeschrieben in `package-lock.json`.
+
+```bash
+npm ci && npm test
+```
+
+Das prüft in fünf Schritten und bricht beim ersten Fehler ab:
+
+1. `tests/validate.mjs` — statische Regeln über den ganzen Addoncode, Versionsangaben, TOC-Struktur;
+2. `tests/companion.mjs` — der Warcraft-Logs-Companion;
+3. `tools/release-decision.test.mjs` — die Tag-Entscheidung der Veröffentlichung;
+4. `tools/check-package.mjs` — baut das CurseForge-Paket und prüft Staging **und** Archiv an ihrer tatsächlichen Dateiliste samt der TOC darin;
+5. `tools/run-lua-tests.mjs` — `tests/smoke.lua` (vollständige Fassung) und `tests/reduced.lua` (reduziertes Paket).
+
+Geprüft werden also **beide** Fassungen aus der Tabelle oben. Dieselben Schritte laufen in GitHub Actions bei jedem Push und jedem Pull Request; der Veröffentlichungs-Workflow ruft denselben Befehl auf.
+
+Nur das Paket bauen, ohne Tests:
+
+```bash
+npm run package
+```
+
+Ergebnis liegt unter `build/` — Staging in `build/stage/GuildCopilot`, Archiv daneben. Beides ist nicht im Repository (`.gitignore`) und entsteht bei jedem Lauf neu. Was hinein- und was herausgehört, steht an genau einer Stelle: `tools/curseforge-package.mjs`.
+
 ## Weiteres
 
 Der Verlauf aller Versionen steht in [ROADMAP.md](ROADMAP.md), offene Punkte und bewusst nicht umgesetzte Befunde in [docs/TODO-naechste-sitzung.md](docs/TODO-naechste-sitzung.md).
 
-Der ältere Weg für den Warcraft-Logs-Abruf über `GuildCopilot/Companion/Start-WCL-Import.cmd` funktioniert unverändert weiter und braucht Node.js; er bleibt als Rückfallebene erhalten. Einzelheiten in [Companion/README.md](GuildCopilot/Companion/README.md). Im ausgelieferten Addon-Paket ist der Companion nicht enthalten.
+Der ältere Weg für den Warcraft-Logs-Abruf über `GuildCopilot/Companion/Start-WCL-Import.cmd` funktioniert unverändert weiter und braucht Node.js; er bleibt als Rückfallebene erhalten. Einzelheiten in [Companion/README.md](GuildCopilot/Companion/README.md). Im ausgelieferten CurseForge-Paket ist der Companion nicht enthalten — siehe [Zwei Fassungen](#zwei-fassungen--welche-habe-ich).

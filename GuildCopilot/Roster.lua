@@ -131,10 +131,6 @@ function GC.Roster:ScanNow()
                 online = online == true,
                 status = status,
                 guid = guid,
-                -- Die Stelle im Blizzard-Roster. Nur darueber laesst sich ein
-                -- Mitglied in Blizzards eigenem Gildenfenster auswaehlen, und
-                -- nur dort ist der Ausschluss ueberhaupt moeglich.
-                rosterIndex = rosterIndex,
             }
             if not online and GetGuildRosterLastOnline then
                 local ok, years, months, days, hours = pcall(GetGuildRosterLastOnline, rosterIndex)
@@ -707,110 +703,24 @@ function GC.Roster:GetMemberCareDecisions()
     return entries
 end
 
--- === Einzelner Gildenausschluss =============================================
+-- === Gildenausschluss: aus einem Addon heraus nicht moeglich ==============
 --
--- Kurz und unerfreulich: **Ein Addon kann niemanden aus der Gilde entfernen.**
---  ist eine geschuetzte Funktion - "This can only be called from
--- secure code" -, und dasselbe gilt fuer jeden Umweg darueber: den
--- Slash-Befehl, Blizzards eigenen Dialog per StaticPopup_Show, alles. Aus
--- tainted Code heraus passiert schlicht nichts, ohne Rueckgabewert und ohne
--- Fehler.
+-- Hier stand eine ganze Maschinerie: Berechtigungspruefungen, Namensformen,
+-- Slash-Handler, Bestaetigungsdialog, Nachpruefung im Gildenroster. Sie ist
+-- ersatzlos entfallen.
 --
--- Der Weg dorthin war lang und steht in der Roadmap 0.9.124 bis 0.9.128: erst
--- ein , das Erfolg meldete, wo keiner war; dann eine Nachpruefung im
--- Roster; dann geratene Slash-Befehle, die ein deutscher Client gar nicht
--- kennt. Jede Runde hat die Diagnose geschaerft und keine hat den Ausschluss
--- naeher gebracht - weil er von hier aus nicht erreichbar IST.
+-- GuildUninvite ist eine geschuetzte Funktion ("can only be called from
+-- secure code"). Ein Addon kann niemanden aus der Gilde entfernen, ueber
+-- keinen Umweg: nicht per API, nicht ueber den Slash-Befehl, nicht ueber
+-- Blizzards eigenen Dialog. Was zuletzt blieb, war ein Knopf, der bloss das
+-- Gildenfenster oeffnete - ein Umweg, der aussah wie eine Funktion und keine
+-- war. Owner-Entscheidung: weg damit.
 --
--- Was das Addon stattdessen tut, ist das, was es kann: die Frage "wen sollte
--- man sich ansehen?" beantworten und dann Blizzards Gildenfenster oeffnen.
--- Dort steht derselbe Knopf, dort kommt Blizzards eigene Rueckfrage, und dort
--- passiert es. Eine zweite Bestaetigung im Addon waere damit ueberfluessig -
--- Blizzard fragt ohnehin - und ist ersatzlos entfallen.
+-- Die Mitgliederpflege beantwortet damit genau eine Frage, und die
+-- beantwortet sie gut: WEN sollte man sich ansehen? Gehandelt wird in WoW.
+--
+-- Quelle: https://warcraft.wiki.gg/wiki/API_GuildUninvite
 
-local function HasBlizzardRemovePermission()
-    if type(CanGuildRemove) ~= "function" then
-        return false
-    end
-    local success, allowed = pcall(CanGuildRemove)
-    return success and allowed == true
-end
-
--- Darf dieser Charakter in WoW ueberhaupt jemanden entfernen? Die Oberflaeche
--- braucht das, um einen ausgegrauten Knopf zu erklaeren.
-function GC.Roster:CanRemoveFromGuild()
-    return HasBlizzardRemovePermission()
-end
-
-function GC.Roster:CanRemoveMember(name)
-    if not self:CanAccessMemberCare() then
-        return false, "Für deinen Gildenrang ist die Mitgliederpflege nicht freigeschaltet."
-    end
-    if not HasBlizzardRemovePermission() then
-        return false, "WoW erlaubt deinem Gildenrang kein Entfernen."
-    end
-
-    local target = self:GetMember(name)
-    if not target then
-        return false, "Der Spieler steht nicht im Gildenroster."
-    end
-    local ownName = GC:GetPlayerFullName()
-    if DecisionKey(target.name) == DecisionKey(ownName) then
-        return false, "Du kannst dich nicht selbst entfernen."
-    end
-
-    local own = self:GetMember(ownName)
-    local ownRankIndex = own and tonumber(own.rankIndex)
-    local targetRankIndex = tonumber(target.rankIndex)
-    if ownRankIndex == nil or targetRankIndex == nil or targetRankIndex <= ownRankIndex then
-        return false, "Nur ein höherer Gildenrang darf diesen Spieler entfernen."
-    end
-    if self:IsMemberCareRankProtected(targetRankIndex) then
-        return false, "Dieser Gildenrang ist ausdrücklich geschützt."
-    end
-    return true, "Entfernen ist möglich."
-end
-
--- Oeffnet Blizzards Gildenfenster und sagt, wer gemeint ist. Mehr ist von
--- einem Addon aus nicht moeglich - und weniger waere gelogen.
-function GC.Roster:OpenGuildRemoval(name)
-    local allowed, reason = self:CanRemoveMember(name)
-    if not allowed then
-        return false, reason
-    end
-    local target = self:GetMember(name)
-    local shortName = GC.Util.PlayerShortName(target.name)
-
-    -- Die Verknuepfung zum echten Ausschluss, soweit sie moeglich ist: Der
-    -- Spieler wird in Blizzards Gildenroster ausgewaehlt, bevor das Fenster
-    -- aufgeht. Blizzards "Entfernen" bezieht sich immer auf die Auswahl - der
-    -- Nutzer muss dort also niemanden mehr suchen, sondern nur noch klicken
-    -- und WoWs Rueckfrage bestaetigen.
-    local selected = false
-    local rosterIndex = tonumber(target.rosterIndex)
-    if rosterIndex and type(SetGuildRosterSelection) == "function" then
-        selected = pcall(SetGuildRosterSelection, rosterIndex) == true
-    end
-
-    local opened = false
-    for _, opener in ipairs({ "ToggleGuildFrame", "ToggleFriendsFrame" }) do
-        local fn = _G[opener]
-        if not opened and type(fn) == "function" then
-            opened = pcall(fn) == true
-        end
-    end
-
-    if not opened then
-        return true, shortName .. ": WoW lässt das Entfernen nur im eigenen "
-            .. "Gildenfenster zu – bitte von Hand öffnen."
-    end
-    if selected then
-        return true, shortName .. " ist im Gildenfenster ausgewählt. Dort auf "
-            .. "„Entfernen“ klicken – die Rückfrage kommt von WoW selbst."
-    end
-    return true, "Gildenfenster geöffnet. WoW lässt das Entfernen nur dort zu: "
-        .. shortName .. " auswählen und „Entfernen“ klicken."
-end
 function GC.Roster:GetGuildAbsences()
     local absences = {}
     local today = GC.Util.TodayISO()
@@ -866,11 +776,18 @@ function GC.Roster:GetMemberCareCandidates()
             and not rankProtected
             and not decided then
             local knownMain = profile and profile.confirmed and profile.mainStatus == "MAIN"
+            -- "Main/Twink prüfen" stand hier in JEDER Zeile, in der niemand ein
+            -- bestätigtes Profil hat - also fast immer. Eine Angabe, die auf
+            -- alle zutrifft, unterscheidet nichts und kostet nur Platz; der
+            -- Zustand steht ohnehin schon in der Statusspalte ("PRÜFEN").
+            -- Genannt wird deshalb nur noch, was wirklich etwas aussagt.
             local reasons = {
                 offlineDays .. " Tage offline",
-                knownMain and "Main bestätigt" or "Main/Twink prüfen",
                 "nicht abgemeldet",
             }
+            if knownMain then
+                reasons[#reasons + 1] = "Main bestätigt"
+            end
             candidates[#candidates + 1] = {
                 member = member,
                 profile = profile,

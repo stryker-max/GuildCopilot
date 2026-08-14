@@ -1,788 +1,13 @@
-local Dummy = {}
--- WoW-Widgetmethoden beginnen mit einem Großbuchstaben, vom Addon gesetzte
--- Datenfelder (scripts, choiceIcon, label, ...) mit einem Kleinbuchstaben.
--- Nur Methoden dürfen ersatzweise als Funktion zurückkommen; unbelegte
--- Datenfelder müssen wie in WoW nil bleiben, damit Prüfungen der Form
--- "if widget.choiceIcon then" nicht fälschlich zutreffen.
-Dummy.__index = function(self, key)
-    if key == "GetText" then
-        return function(frame)
-            return frame.value or ""
-        end
-    elseif key == "SetText" then
-        return function(frame, value)
-            frame.value = tostring(value or "")
-            if frame.scripts and frame.scripts.OnTextChanged then
-                frame.scripts.OnTextChanged(frame)
-            end
-        end
-    elseif key == "GetChecked" then
-        return function(frame)
-            return frame.checked == true
-        end
-    elseif key == "SetChecked" then
-        return function(frame, value)
-            frame.checked = value == true
-        end
-    elseif key == "IsShown" then
-        return function(frame)
-            return frame.shown == true
-        end
-    elseif key == "SetVerticalScroll" then
-        return function(frame, value)
-            frame.verticalScroll = tonumber(value) or 0
-        end
-    elseif key == "GetVerticalScroll" then
-        return function(frame)
-            return frame.verticalScroll or 0
-        end
-    elseif key == "SetAttribute" then
-        -- Fuer den Herstellen-Knopf: Ob ein Zauber am sicheren Knopf haengt,
-        -- entscheidet, ob ein Klick das Berufsfenster oeffnet oder fertigt.
-        return function(frame, name, value)
-            frame.attributes = frame.attributes or {}
-            frame.attributes[name] = value
-        end
-    elseif key == "GetAttribute" then
-        return function(frame, name)
-            return (frame.attributes or {})[name]
-        end
-    elseif key == "SetScale" then
-        -- Fuer die Fensterkarte: Massstab und Deckkraft bleiben ablesbar.
-        return function(frame, value)
-            frame.scale = tonumber(value)
-        end
-    elseif key == "GetScale" then
-        return function(frame)
-            return frame.scale or 1
-        end
-    elseif key == "SetAlpha" then
-        return function(frame, value)
-            frame.alpha = tonumber(value)
-        end
-    elseif key == "GetAlpha" then
-        return function(frame)
-            return frame.alpha or 1
-        end
-    elseif key == "SetHeight" then
-        -- Fuer Layouttests: die gesetzte Hoehe bleibt ablesbar.
-        return function(frame, value)
-            frame.height = tonumber(value)
-        end
-    elseif key == "GetHeight" then
-        return function(frame)
-            return frame.height
-        end
-    elseif key == "SetWidth" then
-        -- Ebenso die Breite. Ohne sie waechst eine Beschriftung in WoW ueber
-        -- ihre Karte hinaus, und genau das laesst sich nur hier pruefen.
-        return function(frame, value)
-            frame.width = tonumber(value)
-        end
-    elseif key == "SetSize" then
-        -- Karten und Knoepfe werden am Stueck bemasst. Ohne diesen Zweig
-        -- blieben genau ihre Masse als einzige unlesbar - also ausgerechnet
-        -- die, um die es in einem Layouttest geht.
-        return function(frame, width, height)
-            frame.width = tonumber(width)
-            frame.height = tonumber(height)
-        end
-    elseif key == "GetWidth" then
-        return function(frame)
-            return frame.width
-        end
-    elseif key == "SetShown" then
-        return function(frame, value)
-            frame.shown = value == true
-        end
-    elseif key == "Show" then
-        return function(frame)
-            frame.shown = true
-        end
-    elseif key == "Hide" then
-        return function(frame)
-            frame.shown = false
-        end
-    elseif key == "HasFocus" then
-        return function()
-            return false
-        end
-    elseif key == "Enable" then
-        -- Fuer Layouttests: ob ein Knopf bedienbar ist, bleibt ablesbar.
-        return function(frame)
-            frame.disabled = false
-        end
-    elseif key == "Disable" then
-        return function(frame)
-            frame.disabled = true
-        end
-    elseif key == "IsEnabled" then
-        return function(frame)
-            return frame.disabled ~= true
-        end
-    elseif key == "SetScript" then
-        return function(frame, event, callback)
-            frame.scripts = frame.scripts or {}
-            frame.scripts[event] = callback
-        end
-    elseif key == "CreateFontString" then
-        return function()
-            return setmetatable({}, Dummy)
-        end
-    elseif key == "CreateTexture" then
-        return function()
-            return setmetatable({}, Dummy)
-        end
-    -- Elternrahmen und Rahmenebene bleiben ablesbar. Ohne sie liesse sich nicht
-    -- pruefen, ob ein Knopf IM Eingabefeld ueber dessen EditBox liegt - und
-    -- genau daran scheiterte das Kalendersymbol der Abmeldung: gleiche Ebene,
-    -- also fing die EditBox den Klick ab.
-    elseif key == "SetParent" then
-        return function(frame, parent)
-            frame.parent = parent
-        end
-    elseif key == "SetFrameLevel" then
-        return function(frame, level)
-            frame.frameLevel = tonumber(level)
-        end
-    elseif key == "GetFrameLevel" then
-        -- Wie in WoW: Ohne eigene Ebene liegt ein Rahmen eine ueber seinem
-        -- Elternteil. Ohne diese Vererbung liesse sich nicht pruefen, ob ein
-        -- Aufklappmenue ueber seinem Dialog liegt - und genau daran scheiterte
-        -- die Berufswahl im Freitext-Auftrag.
-        return function(frame)
-            if frame.frameLevel then
-                return frame.frameLevel
-            end
-            local parent = frame.parent
-            if parent and parent.GetFrameLevel then
-                return (parent:GetFrameLevel() or 0) + 1
-            end
-            return 1
-        end
-    end
-    if type(key) ~= "string" or not key:match("^%u") then
-        return nil
-    end
-    return function()
-    end
-end
-
--- Ein Bildschirm mit Massen: Aufklappmenues entscheiden anhand der Hoehe von
--- UIParent, ob sie nach oben oder nach unten aufgehen.
-UIParent = setmetatable({ width = 1920, height = 1080 }, Dummy)
-Minimap = setmetatable({}, Dummy)
-function Minimap:GetCenter()
-    return 0, 0
-end
-function Minimap:GetEffectiveScale()
-    return 1
-end
--- Stellbarer Mauszeiger, damit sich das Ziehen des Minimap-Symbols pruefen
--- laesst: nah an der Minimap faehrt es auf dem Ring, weit weg loest es sich.
-cursorX = 0
-cursorY = 0
-function GetCursorPosition()
-    return cursorX, cursorY
-end
-UISpecialFrames = {}
-SlashCmdList = {}
-SOUNDKIT = { READY_CHECK = 8960 }
-EMPTY_SOCKET_RED = "Roter Sockel"
-EMPTY_SOCKET_YELLOW = "Gelber Sockel"
-EMPTY_SOCKET_BLUE = "Blauer Sockel"
-local optionsCategory
-function InterfaceOptions_AddCategory(panel)
-    optionsCategory = panel
-end
-chatMessages = {}
--- Die Eingabezeile des Chats. Ueber sie fuehrt das Addon Chatbefehle aus;
--- gemerkt wird, was tatsaechlich abgeschickt wurde.
-sentSlashCommands = {}
-local chatEditBox = {
-    text = "",
-    SetText = function(self, value)
-        self.text = tostring(value or "")
-    end,
-    GetText = function(self)
-        return self.text
-    end,
-}
-function ChatEdit_SendText(editBox, _)
-    local text = editBox and editBox:GetText() or ""
-    if text ~= "" then
-        sentSlashCommands[#sentSlashCommands + 1] = text
-    end
-end
-DEFAULT_CHAT_FRAME = {
-    editBox = chatEditBox,
-    AddMessage = function(_, message)
-        chatMessages[#chatMessages + 1] = tostring(message)
-    end,
-}
-
--- Tooltipzeilen je Item-Link, damit die Verzauberungsaufloesung pruefbar ist.
-tooltipLines = {}
-
-function CreateFrame(_, name, parent)
-    local frame = setmetatable({ shown = false, scripts = {}, parent = parent }, Dummy)
-    if name then
-        _G[name] = frame
-    end
-    if name == "GuildCopilotScanTooltip" then
-        frame.lines = {}
-        function frame:ClearLines()
-            self.lines = {}
-        end
-        function frame:SetHyperlink(link)
-            self.lines = tooltipLines[link] or {}
-            for index = 1, 12 do
-                local text = self.lines[index]
-                _G[name .. "TextLeft" .. index] = text and {
-                    GetText = function()
-                        return text
-                    end,
-                } or nil
-            end
-        end
-        function frame:NumLines()
-            return #self.lines
-        end
-    end
-    return frame
-end
-
-function UnitFullName()
-    return "Tester", "Realm"
-end
-
-unitNames = { player = "Tester" }
-function UnitName(unit)
-    return unitNames[unit] or "Tester"
-end
-
-unitClasses = { player = "HUNTER" }
-function UnitClass(unit)
-    return "Jäger", unitClasses[unit] or "HUNTER", 3
-end
-
-function UnitLevel()
-    return 70
-end
-
-function UnitSex()
-    return 2
-end
-
-function GetNormalizedRealmName()
-    return "Realm"
-end
-
-function GetGuildInfo()
-    return "Testgilde"
-end
-
-function IsInGuild()
-    return true
-end
-
-function GetTalentTabInfo(index)
-    local points = ({ 10, 41, 0 })[index]
-    return index, "Baum " .. index, "", 0, points, ""
-end
-
-function GetNumGuildMembers()
-    return 2
-end
-
--- Der Client loest Klassen ueber die GUID auf. Direkt nach dem Login ist der
--- Cache leer, deshalb kann der Aufruf auch nichts liefern.
-playerInfoByGUID = {
-    ["Player-4"] = { "Paladin", "PALADIN" },
-}
-function GetPlayerInfoByGUID(guid)
-    local entry = playerInfoByGUID[guid or ""]
-    if not entry then
-        return nil
-    end
-    return entry[1], entry[2], "Mensch", "Human", "male", "Interessent", "Realm"
-end
-
-function GetGuildRosterInfo(index)
-    if index == 1 then
-        return "Tester-Realm", "Offizier", 1, 70, "Jäger", "Shattrath", "", "", true, 0, "HUNTER", 0, 0, false, false, 0, "Player-1"
-    end
-    return "Heiler-Realm", "Mitglied", 5, 70, "Priester", "Shattrath", "", "", false, 0, "PRIEST", 0, 0, false, false, 0, "Player-2"
-end
-
-function GetGuildRosterLastOnline(index)
-    if index == 2 then
-        return 0, 0, 10, 0
-    end
-    return 0, 0, 0, 0
-end
-
-function GetProfessions()
-    return 1, 2
-end
-
--- Faehigkeitszeilen wie im Classic-Client: Dort gibt es GetProfessions nicht,
--- die Berufe stehen unter einer Kategorie im Faehigkeitenfenster. Die
--- Kategorie ist absichtlich zugeklappt - eingeklappt zaehlt sie ihre Zeilen
--- nicht mit, und genau daran scheitert eine Erfassung, die nicht aufklappt.
-skillHeaderExpanded = false
-skillHeaderToggles = 0
-function GetNumSkillLines()
-    return skillHeaderExpanded and 3 or 1
-end
-function GetSkillLineInfo(index)
-    if index == 1 then
-        return "Berufe", true, skillHeaderExpanded
-    elseif index == 2 then
-        return "Verzauberkunst", false, false, 375, 0, 0, 375
-    elseif index == 3 then
-        return "Schneiderei", false, false, 350, 0, 0, 375
-    end
-end
-function ExpandSkillHeader()
-    skillHeaderExpanded = true
-    skillHeaderToggles = skillHeaderToggles + 1
-end
-function CollapseSkillHeader()
-    skillHeaderExpanded = false
-    skillHeaderToggles = skillHeaderToggles + 1
-end
-
-function GetProfessionInfo(index)
-    if index == 1 then
-        return "Ingenieurskunst", "", 375, 375, 0, 0, 202
-    elseif index == 2 then
-        return "Bergbau", "", 360, 375, 0, 0, 186
-    end
-end
-
-function GetTradeSkillLine()
-    return "Schneiderei", 375, 375
-end
-
-local tradeSkillExpanded = false
-local tradeSkillFilterResets = 0
-
-function ExpandTradeSkillSubClass(index)
-    if index == 1 then
-        tradeSkillExpanded = true
-    end
-end
-
-function SetTradeSkillInvSlotFilter()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function SetTradeSkillSubClassFilter()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function SetTradeSkillItemNameFilter()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function SetTradeSkillItemLevelFilter()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function TradeSkillOnlyShowSkillUps()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function TradeSkillOnlyShowMakeable()
-    tradeSkillFilterResets = tradeSkillFilterResets + 1
-end
-
-function GetNumTradeSkills()
-    return tradeSkillExpanded and 3 or 1
-end
-
-function GetTradeSkillInfo(index)
-    if index == 1 then
-        return "Taschen", "header", nil, tradeSkillExpanded
-    elseif index == 2 then
-        return "Mondstofftasche", "optimal"
-    elseif index == 3 then
-        return "Runenstoffballen", "trivial"
-    end
-end
-
-function GetTradeSkillItemLink(index)
-    if index == 2 then
-        return "|cffffffff|Hitem:14155:0:0:0:0:0:0:0|h[Mondstofftasche]|h|r"
-    elseif index == 3 then
-        return "|cffffffff|Hitem:14048:0:0:0:0:0:0:0|h[Runenstoffballen]|h|r"
-    end
-end
-
-function GetTradeSkillRecipeLink(index)
-    return index == 2 and "|Henchant:18445|h[Mondstofftasche]|h" or "|Henchant:18401|h[Runenstoffballen]|h"
-end
-
-function GetTradeSkillNumReagents(index)
-    return index == 2 and 2 or 1
-end
-
-function GetTradeSkillReagentInfo(index, reagentIndex)
-    if index == 2 and reagentIndex == 1 then
-        return "Runenstoffballen", "", 4, 20
-    elseif index == 2 and reagentIndex == 2 then
-        return "Mondstoff", "", 2, 4
-    end
-    return "Runenstoff", "", 5, 40
-end
-
-function GetTradeSkillReagentItemLink(index, reagentIndex)
-    if index == 2 and reagentIndex == 1 then
-        return "|Hitem:14048|h[Runenstoffballen]|h"
-    elseif index == 2 and reagentIndex == 2 then
-        return "|Hitem:14342|h[Mondstoff]|h"
-    end
-    return "|Hitem:14047|h[Runenstoff]|h"
-end
-
-function GetCraftSkillLine()
-    return "Verzauberkunst", 375, 375
-end
-
-function GetCraftDisplaySkillLine()
-    return "Verzauberkunst"
-end
-
-function GetNumCrafts()
-    return 2
-end
-
--- Herstellbefehle: Sie werden nur mitgeschrieben, nicht ausgefuehrt.
-craftCalls = {}
-function DoTradeSkill(index, count)
-    craftCalls[#craftCalls + 1] = { kind = "CLASSIC", index = index, count = count }
-end
-function DoCraft(index)
-    craftCalls[#craftCalls + 1] = { kind = "CRAFT", index = index, count = 1 }
-end
-
-function GetCraftInfo(index)
-    if index == 1 then
-        return "Ringverzauberungen", "", "header"
-    end
-    return "Ring - Heilkraft", "", "optimal"
-end
-
-function GetCraftItemLink(index)
-    if index == 2 then
-        return "|Henchant:27926|h[Ring - Heilkraft]|h"
-    end
-end
-
-function GetCraftNumReagents(index)
-    return index == 2 and 1 or 0
-end
-
-function GetCraftReagentInfo(index, reagentIndex)
-    if index == 2 and reagentIndex == 1 then
-        return "Großer prismatischer Splitter", "", 2, 8
-    end
-end
-
-function GetCraftReagentItemLink(index, reagentIndex)
-    if index == 2 and reagentIndex == 1 then
-        return "|Hitem:22449|h[Großer prismatischer Splitter]|h"
-    end
-end
-
-function GetItemInfo(itemID)
-    local names = {
-        [14047] = "Runenstoff",
-        [14048] = "Runenstoffballen",
-        [14155] = "Mondstofftasche",
-        [14342] = "Mondstoff",
-        [22449] = "Großer prismatischer Splitter",
-    }
-    return names[tonumber(itemID)]
-end
-
-raidRoster = {}
-
-function IsInRaid()
-    return #raidRoster > 0
-end
-
-function IsInGroup()
-    return #raidRoster > 0 or #partyRoster > 0
-end
-
-partyRoster = {}
-
-function GetNumGroupMembers()
-    if #raidRoster > 0 then
-        return #raidRoster
-    end
-    return #partyRoster
-end
-
--- name, rank, subgroup, level, class, fileName
-function GetRaidRosterInfo(index)
-    local member = raidRoster[index]
-    if not member then
-        return nil
-    end
-    return member[1], member[2], 1, 70, "", member[3]
-end
-
-function GetRealZoneText()
-    return "Karazhan"
-end
-
-local combatLogEvent = {}
-function CombatLogGetCurrentEventInfo()
-    return unpack(combatLogEvent)
-end
-
--- Baut ein Combat-Log-Ereignis in der Reihenfolge des echten Clients auf.
-function FireCombatLog(subevent, sourceName, destName, spellID, destGUID)
-    combatLogEvent = {
-        1000, subevent, false,
-        "Player-" .. tostring(sourceName), sourceName, 0, 0,
-        destGUID or ("Player-" .. tostring(destName)), destName, 0, 0,
-        spellID,
-    }
-    GuildCopilot.RaidMonitor:OnCombatLogEvent()
-end
-
--- Ausrüstung je Slot-ID und Einheit für den Gear Audit.
-inspectGear = {}
-inspectGearItemIDs = {}
-
-function GetInventoryItemLink(unit, slotID)
-    return (inspectGear[unit] or {})[slotID]
-end
-
-function GetInventoryItemID(unit, slotID)
-    local explicit = (inspectGearItemIDs[unit] or {})[slotID]
-    if explicit then
-        return explicit
-    end
-    return tonumber(tostring(GetInventoryItemLink(unit, slotID) or ""):match("item:(%d+)"))
-end
-
-function GetItemStats(link)
-    local sockets = tonumber(tostring(link or ""):match("SOCKETS(%d)"))
-    if not sockets then
-        return {}
-    end
-    return { EMPTY_SOCKET_RED = sockets }
-end
-
-function UnitExists(unit)
-    return (inspectGear[unit] ~= nil) or (unitNames[unit] ~= nil) or unit == "player"
-end
-
-function UnitIsUnit(left, right)
-    return left == right
-end
-
-function UnitGUID(unit)
-    return "GUID-" .. tostring(unit)
-end
-
-inspectableUnits = {}
-function CanInspect(unit)
-    return inspectableUnits[unit] ~= false
-end
-
-function NotifyInspect()
-end
-
-canRemoveFromGuild = true
-function CanGuildRemove()
-    return canRemoveFromGuild
-end
-
-uninvitedPlayers = {}
-function GuildUninvite(name)
-    uninvitedPlayers[#uninvitedPlayers + 1] = name
-end
-
-function ClearInspectPlayer()
-end
-
-function GetChannelList()
-    return 1, "Allgemein", false, 2, "Handel", false, 4, "SucheNachGruppe", false, 5, "Gildenrekrutierung", false
-end
-
-local playedSoundID
-function PlaySound(soundID)
-    playedSoundID = soundID
-end
-
--- Stellbarer Kampfzustand: Grosse Uebertragungen pausieren im Kampf.
-inCombat = false
-function InCombatLockdown()
-    return inCombat == true
-end
-function UnitAffectingCombat(unit)
-    return unit == "player" and inCombat == true
-end
-
--- Der Zeitgeber der Messung. In WoW zaehlt debugprofilestop Millisekunden seit
--- Profilstart; hier reicht eine monoton steigende Zahl.
-local profileClock = 0
-function debugprofilestop()
-    profileClock = profileClock + 1
-    return profileClock
-end
-
--- Stellbare Uhr, damit Mindestabstände und Cooldowns prüfbar sind.
-currentTime = 1000
-function time()
-    return currentTime
-end
-
--- WoWs date() entspricht os.date. Die Testuhr steht fest auf dem 27.07.2026
--- (12:00 UTC, damit keine Zeitzone den Tag kippt): Aufrufe ohne Zeitpunkt
--- bekommen den eingefrorenen Tag. Kleine Zeitpunkte stammen von der
--- stellbaren time()-Uhr (startet bei 1000) und werden relativ auf den
--- eingefrorenen Tag gelegt - so rechnet AddDaysISO wie erwartet in die
--- Zukunft. Nur echte Epochenwerte werden unverändert formatiert.
-function date(format, value)
-    if format == nil then
-        return "2026-07-27"
-    end
-    if value == nil then
-        return os.date(format, 1785153600)
-    end
-    value = tonumber(value) or 0
-    if value < 100000000 then
-        return os.date(format, 1785153600 + value - currentTime)
-    end
-    return os.date(format, value)
-end
-
--- Zeitgeber laufen sofort. Wer eine echte Verzoegerung braucht, setzt
--- timerDelayThreshold: alles darueber wandert in pendingTimers statt zu feuern.
-timerDelayThreshold = math.huge
-pendingTimers = {}
-C_Timer = {
-    After = function(delay, callback)
-        if (tonumber(delay) or 0) > timerDelayThreshold then
-            pendingTimers[#pendingTimers + 1] = callback
-            return
-        end
-        callback()
-    end,
-}
-
-local sentChat = {}
-local sentAddon = {}
-local addonSendFailures = 0
-C_ChatInfo = {
-    RegisterAddonMessagePrefix = function()
-        return true
-    end,
-    SendAddonMessage = function(prefix, message, distribution, target)
-        if addonSendFailures > 0 then
-            addonSendFailures = addonSendFailures - 1
-            return false
-        end
-        sentAddon[#sentAddon + 1] = { prefix, message, distribution, target }
-        return true
-    end,
-    SendChatMessage = function(message, chatType, language, target)
-        sentChat[#sentChat + 1] = { message, chatType, language, target }
-    end,
-}
-
-C_GuildInfo = {
-    GuildRoster = function()
-    end,
-    Invite = function()
-    end,
-}
-
--- Taschen, eigene Bank und Gildenbank. Der Anniversary-Client bietet nur die
--- klassischen Globalen, deshalb wird genau dieser Pfad nachgebildet.
-bagContents = {
-    [0] = { { itemID = 22445, count = 20 }, { itemID = 22446, count = 5 } },
-}
-bankContents = {
-    [-1] = { { itemID = 22446, count = 9 } },
-}
-guildBankContents = {
-    [1] = { { itemID = 22446, count = 32 }, { itemID = 22447, count = 4 } },
-}
-guildBankTabCount = 1
-guildBankTabViewable = true
-function GetContainerNumSlots(container)
-    local source = bagContents[container] or bankContents[container]
-    return source and #source or 0
-end
-function GetContainerItemLink(container, slot)
-    local source = bagContents[container] or bankContents[container]
-    local entry = source and source[slot]
-    return entry and ("|cffffffff|Hitem:" .. entry.itemID .. "::::::::70|h[Material]|h|r") or nil
-end
-function GetContainerItemInfo(container, slot)
-    local source = bagContents[container] or bankContents[container]
-    local entry = source and source[slot]
-    if not entry then
-        return nil
-    end
-    return "texture", entry.count
-end
-function GetNumGuildBankTabs()
-    return guildBankTabCount
-end
-function GetGuildBankTabInfo(tabIndex)
-    return "Mats " .. tabIndex, "icon", guildBankTabViewable, true
-end
-function QueryGuildBankTab()
-end
-function GetCurrentGuildBankTab()
-    return 1
-end
-function GetGuildBankItemLink(tabIndex, slot)
-    local entry = (guildBankContents[tabIndex] or {})[slot]
-    return entry and ("|cffffffff|Hitem:" .. entry.itemID .. "::::::::70|h[Material]|h|r") or nil
-end
-function GetGuildBankItemInfo(tabIndex, slot)
-    local entry = (guildBankContents[tabIndex] or {})[slot]
-    if not entry then
-        return nil
-    end
-    return "texture", entry.count
-end
-
-local addon = {}
-local files = {
-    "Constants.lua",
-    "Locales.lua",
-    "Core.lua",
-    "Database.lua",
-    "Profile.lua",
-    "WarcraftLogs.lua",
-    "Roster.lua",
-    "Inventory.lua",
-    "Workshop.lua",
-    "RaidMonitor.lua",
-    "GearAudit.lua",
-    "Sync.lua",
-    "Orders.lua",
-    "Recruitment.lua",
-    "Chat.lua",
-    "Onboarding.lua",
-    "UI.lua",
-}
-
-for _, file in ipairs(files) do
-    local chunk = assert(loadfile("GuildCopilot/" .. file))
-    chunk("GuildCopilot", addon)
-end
+-- Die WoW-Stellvertreter stehen in einer eigenen Datei, weil tests/reduced.lua
+-- dieselben braucht. Geladen wird ueber den Pfad vom Repository-Wurzelver-
+-- zeichnis aus - von dort laufen beide Tests.
+dofile("tests/wow-stubs.lua")
+
+-- Die vollstaendige Fassung aus dem Repository, in der Reihenfolge ihrer TOC.
+-- Das reduzierte CurseForge-Paket prueft tests/reduced.lua.
+local addon = LoadAddonFrom("GuildCopilot")
+assert(addon.WarcraftLogs ~= nil,
+    "Die vollstaendige Fassung hat Warcraft Logs verloren - hier gehoert es dazu")
 
 addon:FireCallback("ADDON_LOADED")
 addon:FireCallback("PLAYER_LOGIN")
@@ -1500,6 +725,13 @@ do
     assert(addon.Chat:IsRecruitmentSignal("Wer verzaubert meine Waffe?") == false,
         "Eine beliebige Handelsnachricht gilt als Gildensuche")
 
+    -- Ab hier geht es um den reinen Wortvergleich: Die eigene Liste ERSETZT
+    -- die Vorgabe. Die freie Erkennung ist dafuer aus - sie ist eine zweite,
+    -- eigenstaendige Schicht mit eigenem Schalter und wird weiter unten
+    -- gepruoft. Beides gleichzeitig zu messen hiesse, keines von beidem zu
+    -- messen.
+    addon.DB:GetSettings().smartRecruitmentDetection = false
+
     addon.Chat:SetRecruitmentWordText("chatTriggers", "  Sucht MICH  \n\n sucht mich \nzweitgilde\n")
     local storedTriggers = addon.Chat:GetRecruitmentFilters().chatTriggers
     assert(#storedTriggers == 2, "Leerzeilen oder doppelte Einträge wurden nicht verworfen")
@@ -1509,6 +741,12 @@ do
         "Ein eigenes Trigger-Wort greift nicht")
     assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == false,
         "Die Vorgabe greift weiter, obwohl eine eigene Liste gesetzt ist")
+    -- Und mit der freien Erkennung greift derselbe Satz wieder - das ist
+    -- genau der Unterschied, den der Schalter macht.
+    addon.DB:GetSettings().smartRecruitmentDetection = true
+    assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == true,
+        "Die freie Erkennung findet eine offensichtliche Gildensuche nicht")
+    addon.DB:GetSettings().smartRecruitmentDetection = false
 
     addon.Chat:SetRecruitmentWordText("chatExclusions", "gold")
     assert(addon.Chat:IsRecruitmentSignal("Sucht mich jemand? Gold gegen Rüstung!") == false,
@@ -1527,6 +765,8 @@ do
         "Die Wiederherstellung hat die Ausschlussliste nicht geleert")
     assert(addon.Chat:GetRecruitmentWordText("chatTriggers") == "",
         "Nach der Wiederherstellung steht eine eigene Kopie der Vorgabe im Feld")
+    -- Der Schalter steht ab Werk auf an; der Rest des Laufs erwartet das.
+    addon.DB:GetSettings().smartRecruitmentDetection = true
 end
 
 -- Dasselbe fuer Fluesternachrichten. Zusaetzlich: Ein Ausschlusswort holt
@@ -2617,17 +1857,145 @@ addon.Sync:OnMessage("GuildCopilot", "B|7|BM|2,999,123", "GUILD", "Synkos-Realm"
 assert(addon.DB:GetGuild().guildBank.tabs[1] ~= nil,
     "Ein Manifest ohne den Tab hat den gespeicherten Tab gelöscht")
 
--- Private Bestände dürfen in keinem gesendeten Paket auftauchen.
-privateLeakBefore = #sentAddon
-addon.Inventory:SendManifest()
-addon.Inventory:SendTab(1)
-addon.Sync:PumpBulk(10)
-for leakIndex = 1, #sentAddon do
-    leakMessage = sentAddon[leakIndex][2]
-    if leakMessage:sub(1, 2) == "B|" then
-        assert(leakMessage:find("114", 1, true) == nil,
-            "Ein privater Gesamtbestand steckt in einem gesendeten Paket: " .. leakMessage)
+-- === Private Bestände dürfen kein Paket verlassen ===========================
+--
+-- Hier stand eine Textsuche nach "114" im GANZEN Paket - 114 ist der private
+-- Gesamtbestand aus Taschen, Bank und Twink. Ein Gildenbank-Paket traegt aber
+-- noch ganz andere Ziffern: einen Token aus Zeitstempel und Zufallszahl
+-- ("1541146" enthaelt "114"), den Aenderungszeitpunkt des Tabs, den
+-- Fingerabdruck. Der Test haette also jederzeit anschlagen koennen, ohne dass
+-- ein einziges Byte privater Daten das Haus verlaesst - und wer ihn dann
+-- "repariert", indem er die Zahl lockert, hat die Pruefung abgeschafft.
+--
+-- Zerlegt wird deshalb mit demselben Splitter, den das Addon selbst benutzt,
+-- und geprueft wird nur das Feld, das ueberhaupt Bestaende tragen KANN: die
+-- Nutzlast eines BT-Pakets (Feld 12). Token, Zeitstempel, Tabname, Einleser
+-- und Fingerabdruck duerfen jede Ziffernfolge der Welt enthalten.
+do
+    local bank_PAYLOAD_FIELD = 12
+    -- Zahlen, die es nur im privaten Bestand gibt: 114 ist die Summe aus
+    -- Taschen (5), Bank (9) und Twink (100), 100 der Twink allein. In der
+    -- Gildenbank liegen 32.
+    local bank_privateAmounts = { [114] = "Gesamtbestand", [100] = "Twink-Bestand" }
+
+    -- Nutzlast je Token wieder zusammensetzen: Ein Tab geht als eine Folge von
+    -- Teilstuecken raus, und ein halbierter Datensatz decodiert zu nichts. Je
+    -- Token entsteht genau eine Momentaufnahme eines Tabs - zusammenzaehlen
+    -- ueber Token hinweg waere falsch, das waeren zwei verschiedene Staende.
+    local function bank_Snapshots(messages)
+        local chunks, tabs, tokens = {}, {}, {}
+        for _, message in ipairs(messages) do
+            local fields = addon.Util.SplitFields(message)
+            if fields[1] == "B" and fields[3] == "BT" then
+                local token = fields[4]
+                if not chunks[token] then
+                    chunks[token] = {}
+                    tokens[#tokens + 1] = token
+                end
+                chunks[token][tonumber(fields[5]) or 0] = fields[bank_PAYLOAD_FIELD] or ""
+                tabs[token] = tonumber(fields[7])
+            end
+        end
+        local snapshots = {}
+        for _, token in ipairs(tokens) do
+            local parts, index = {}, 1
+            while chunks[token][index] do
+                parts[#parts + 1] = chunks[token][index]
+                index = index + 1
+            end
+            snapshots[#snapshots + 1] = {
+                tabIndex = tabs[token],
+                counts = addon.Inventory:DecodeCounts(table.concat(parts)),
+            }
+        end
+        return snapshots
     end
+
+    -- Zwei Netze: Die Nutzlast muss genau dem gespeicherten Gildenbank-Tab
+    -- entsprechen, den sie zu tragen behauptet (jede fremde Zahl faellt auf),
+    -- und keine der rein privaten Mengen darf darin vorkommen - das war die
+    -- urspruengliche Aussage dieser Pruefung.
+    local function bank_Leaks(messages, expectedByTab)
+        local complaints = {}
+        for _, snapshot in ipairs(bank_Snapshots(messages)) do
+            local expected = expectedByTab and expectedByTab[snapshot.tabIndex]
+            for itemID, amount in pairs(snapshot.counts) do
+                if bank_privateAmounts[amount] then
+                    complaints[#complaints + 1] = bank_privateAmounts[amount] .. " " .. amount
+                        .. " (Item " .. itemID .. ", Tab " .. tostring(snapshot.tabIndex) .. ")"
+                end
+                if expected and expected[itemID] ~= amount then
+                    complaints[#complaints + 1] = "Item " .. itemID .. " wird mit " .. amount
+                        .. " gesendet, in Tab " .. tostring(snapshot.tabIndex) .. " stehen "
+                        .. tostring(expected[itemID])
+                end
+            end
+        end
+        return complaints
+    end
+
+    local function bank_SentSince(from)
+        local messages = {}
+        for index = from + 1, #sentAddon do
+            messages[#messages + 1] = sentAddon[index][2]
+        end
+        return messages
+    end
+
+    local bank_before = #sentAddon
+    addon.Inventory:SendManifest()
+    addon.Inventory:SendTab(1)
+    addon.Sync:PumpBulk(10)
+    local bank_stored = addon.DB:GetGuild().guildBank.tabs[1].counts
+    -- Ohne diesen Satz koennte der Vergleichsmassstab leer sein und die
+    -- Pruefung nur noch so tun, als arbeite sie.
+    assert(bank_stored and bank_stored[22446] == 1,
+        "Testaufbau: der Gildenbank-Tab traegt nicht den erwarteten Bestand")
+    local bank_sent = bank_SentSince(bank_before)
+    assert(#bank_sent > 0, "Testaufbau: es wurde gar kein Gildenbank-Paket gesendet")
+    local bank_found = bank_Leaks(bank_sent, { [1] = bank_stored })
+    assert(#bank_found == 0,
+        "Privater Bestand in einem gesendeten Gildenbank-Paket: "
+            .. table.concat(bank_found, "; "))
+
+    -- === Gegenprobe 1: "114" an einer harmlosen Stelle ======================
+    --
+    -- Genau der Fall, der die alte Textsuche zu Fall brachte: Der Tab traegt
+    -- einen Zeitstempel, einen Namen und einen Einleser, in denen die Ziffern
+    -- 114 vorkommen. Das ist kein Datenleck und darf keines sein.
+    local bank_tab = addon.DB:GetGuild().guildBank.tabs[1]
+    local bank_wasAt, bank_wasName = bank_tab.updatedAt, bank_tab.name
+    local bank_wasSeenBy, bank_wasPrint = bank_tab.seenBy, bank_tab.fingerprint
+    bank_tab.updatedAt = 1541146
+    bank_tab.name = "Fach 114"
+    bank_tab.seenBy = "Tester114"
+    bank_tab.fingerprint = "114114"
+    local bank_noisy = addon.Inventory:BuildTabMessages(1)
+    local bank_sawNoise = false
+    for _, message in ipairs(bank_noisy) do
+        if message:find("114", 1, true) then
+            bank_sawNoise = true
+        end
+    end
+    assert(bank_sawNoise,
+        "Testaufbau: die Ziffernfolge 114 steht gar nicht im Paket – die Gegenprobe liefe leer")
+    assert(#bank_Leaks(bank_noisy, { [1] = bank_tab.counts }) == 0,
+        "Ein Zeitstempel mit den Ziffern 114 wurde als privater Bestand gemeldet")
+    bank_tab.updatedAt, bank_tab.name = bank_wasAt, bank_wasName
+    bank_tab.seenBy, bank_tab.fingerprint = bank_wasSeenBy, bank_wasPrint
+
+    -- === Gegenprobe 2: ein echtes Leck muss auffallen =======================
+    --
+    -- Dieselbe Pruefung, dieselbe Paketform - nur steht der private
+    -- Gesamtbestand diesmal wirklich in der Nutzlast. Ohne diesen Fall waere
+    -- oben nicht zu unterscheiden, ob die Pruefung schweigt oder schlaeft.
+    local bank_leakPayload = addon.Inventory:EncodeCounts({ [22446] = 114 })
+    local bank_leaked = {
+        table.concat({ "B", tostring(addon.Constants.SCHEMA_VERSION), "BT", "tok", "1", "1",
+            "1", "Fach 1", "1541146", "Tester", "abc", bank_leakPayload }, "|"),
+    }
+    assert(#bank_Leaks(bank_leaked, { [1] = bank_stored }) > 0,
+        "Ein echter privater Bestand in der Nutzlast wurde nicht erkannt")
 end
 
 -- Werkstatt-Login: Manifest statt voller Schlüssellisten. Ein unveränderter
@@ -3273,6 +2641,52 @@ do
     assert(addon.Perf.samples.Test ~= nil and addon.Perf.samples.Test.count == 1,
         "Die Messung hat nichts aufgezeichnet")
     assert(#addon.Perf:Report() > 0, "Der Messbericht ist leer")
+
+    -- === Die Rueckgabe bleibt die Rueckgabe ================================
+    --
+    -- "/gcp debug" darf beobachten, nicht veraendern. Der Fallstrick sind
+    -- nil-Werte: Wer die Rueckgabe in eine Tabelle steckt und mit "#" wieder
+    -- auspackt, verliert ein nachgestelltes nil ({ 1, 2, nil } hat die Laenge
+    -- 2) und darf bei einer Luecke ({ 1, nil, 3 }) gar nichts erwarten - die
+    -- Laenge einer Tabelle mit Loechern ist in Lua undefiniert. Gemessen und
+    -- ungemessen muessen dasselbe liefern, Wert fuer Wert und in derselben
+    -- Anzahl.
+    local perf_cases = {
+        { name = "nur nil", values = { n = 1, nil } },
+        { name = "nachgestelltes nil", values = { n = 3, "a", 2, nil } },
+        { name = "zwei nachgestellte nil", values = { n = 4, "a", nil, nil, nil } },
+        { name = "nil-Luecke in der Mitte", values = { n = 3, "a", nil, "c" } },
+        { name = "gar keine Rueckgabe", values = { n = 0 } },
+        { name = "false ist kein nil", values = { n = 2, false, nil } },
+    }
+    for _, perf_case in ipairs(perf_cases) do
+        local perf_source = perf_case.values
+        local perf_fn = function()
+            return unpack(perf_source, 1, perf_source.n)
+        end
+        for _, perf_enabled in ipairs({ false, true }) do
+            addon.Perf.enabled = perf_enabled
+            local perf_count = select("#", addon.Perf:Measure("R", perf_fn))
+            local perf_got = { addon.Perf:Measure("R", perf_fn) }
+            local perf_where = perf_case.name .. (perf_enabled and " (gemessen)" or " (aus)")
+            assert(perf_count == perf_source.n,
+                "Perf:Measure liefert " .. perf_count .. " statt " .. perf_source.n
+                    .. " Werten – " .. perf_where)
+            for perf_index = 1, perf_source.n do
+                assert(perf_got[perf_index] == perf_source[perf_index],
+                    "Perf:Measure hat Wert " .. perf_index .. " verändert – " .. perf_where)
+            end
+        end
+    end
+
+    -- Und die Argumente kommen ebenso vollstaendig an, nachgestelltes nil
+    -- eingeschlossen.
+    addon.Perf.enabled = true
+    local perf_argCount
+    addon.Perf:Measure("A", function(...) perf_argCount = select("#", ...) end, 1, nil, nil)
+    assert(perf_argCount == 3,
+        "Perf:Measure reicht " .. tostring(perf_argCount) .. " statt 3 Argumenten durch")
+
     addon.Perf.enabled = false
     addon.Perf:Reset()
 end
@@ -3674,75 +3088,22 @@ end
 assert(addon.DB:GetGuild().profile.description == "Neuer Stand",
     "Ein Gildenprofil von einem Nicht-Gildenmitglied wurde übernommen")
 
--- Ausschluss: jede einzelne Sperre muss halten.
-canRemoveFromGuild = false
-local blockedByBlizzard, blockedReason = addon.Roster:CanRemoveMember("Heiler-Realm")
-assert(blockedByBlizzard == false and blockedReason:find("WoW erlaubt", 1, true),
-    "Ohne echte WoW-Berechtigung wurde das Entfernen erlaubt")
-
-canRemoveFromGuild = true
-local selfRemoval, selfReason = addon.Roster:CanRemoveMember("Tester-Realm")
-assert(selfRemoval == false and selfReason:find("selbst", 1, true),
-    "Der eigene Charakter ließ sich entfernen")
-
-assert(addon.Roster:SetMemberCareRankProtected(5, true) == true, "Rangschutz ließ sich nicht setzen")
-local protectedRemoval, protectedReason = addon.Roster:CanRemoveMember("Heiler-Realm")
-assert(protectedRemoval == false and protectedReason:find("geschützt", 1, true),
-    "Ein geschützter Rang ließ sich entfernen")
-addon.Roster:SetMemberCareRankProtected(5, false)
-
-local allowedRemoval = addon.Roster:CanRemoveMember("Heiler-Realm")
-assert(allowedRemoval == true, "Ein zulässiger Ausschluss wurde abgelehnt")
-
-do
-    -- WoW laesst den Gildenausschluss aus einem Addon heraus NICHT zu:
-    -- GuildUninvite ist geschuetzt ("can only be called from secure code").
-    -- Der Knopf waehlt den Spieler deshalb in Blizzards Gildenfenster aus und
-    -- oeffnet es - geklickt wird dort. Alles andere waere gelogen.
-    local savedSelection = SetGuildRosterSelection
-    local savedToggle = ToggleGuildFrame
-    local selectedIndex, opened = nil, 0
-    SetGuildRosterSelection = function(index)
-        selectedIndex = index
-    end
-    ToggleGuildFrame = function()
-        opened = opened + 1
-    end
-
-    local openOk, openMessage = addon.Roster:OpenGuildRemoval("Heiler-Realm")
-    assert(openOk == true, "Der Weg ins Gildenfenster wurde abgelehnt: " .. tostring(openMessage))
-    assert(opened == 1, "Blizzards Gildenfenster wurde nicht geoeffnet")
-    assert(selectedIndex == 2,
-        "Der Spieler wurde im Gildenroster nicht ausgewaehlt: " .. tostring(selectedIndex))
-    assert(tostring(openMessage):find("ausgewählt", 1, true),
-        "Die Meldung sagt nicht, dass der Spieler ausgewaehlt ist: " .. tostring(openMessage))
-
-    -- Und nichts davon behauptet einen Ausschluss: Der Fall bleibt offen.
-    assert(addon.Roster:GetMemberCareDecision("Heiler") == nil
-        or addon.Roster:GetMemberCareDecision("Heiler").status ~= "DONE",
-        "Das Oeffnen des Gildenfensters wurde als erledigter Ausschluss vermerkt")
-    assert(#uninvitedPlayers == 0,
-        "Es wurde doch ein geschuetzter Ausschluss versucht: " .. table.concat(uninvitedPlayers, ", "))
-
-    -- Ohne Berechtigung fuehrt der Knopf nirgendwohin.
-    canRemoveFromGuild = false
-    local blockedOk = addon.Roster:OpenGuildRemoval("Heiler-Realm")
-    assert(blockedOk == false, "Ohne WoW-Berechtigung ging das Gildenfenster trotzdem auf")
-    assert(addon.Roster:CanRemoveFromGuild() == false,
-        "CanRemoveFromGuild meldet eine Berechtigung, die es nicht gibt")
-    canRemoveFromGuild = true
-
-    SetGuildRosterSelection = savedSelection
-    ToggleGuildFrame = savedToggle
-end
+-- Der Gildenausschluss ist aus dem Addon verschwunden: GuildUninvite ist
+-- geschuetzt, und ein Knopf, der bloss Blizzards Gildenfenster oeffnet, war
+-- ein Umweg ohne Funktion. Die Mitgliederpflege schlaegt vor, sie handelt
+-- nicht - einzige Ausnahme ist der Vermerk "Ausnahme", der nur in der
+-- Addon-Datenbank landet.
+assert(addon.Roster.RemoveMember == nil and addon.Roster.OpenGuildRemoval == nil
+    and addon.Roster.CanRemoveMember == nil and addon.Roster.CanRemoveFromGuild == nil,
+    "Der Gildenausschluss ist wieder im Addon gelandet - er kann dort nicht funktionieren")
+assert(#uninvitedPlayers == 0,
+    "Das Addon hat GuildUninvite aufgerufen: " .. table.concat(uninvitedPlayers, ", "))
 
 -- Ein Rang ohne Mitgliederpflege darf gar nichts davon.
 addon.DB:GetGuild().memberCare.accessRanks = { ["9"] = true }
 addon.DB:GetGuild().memberCare.accessRanksConfigured = true
 assert(addon.Roster:SetMemberCareDecision("Heiler-Realm", "IGNORED") == false,
     "Ein unberechtigter Rang konnte eine Ausnahme setzen")
-assert(addon.Roster:CanRemoveMember("Heiler-Realm") == false,
-    "Ein unberechtigter Rang durfte entfernen")
 addon.DB:GetGuild().memberCare.accessRanks = { ["1"] = true, ["5"] = true }
 addon.DB:GetGuild().memberCare.decisions = {}
 healerMember.lastOnlineHours = 0
@@ -10438,5 +9799,231 @@ do
     spec_guild.remoteProfiles["heiler"] = spec_saved
     spec_guild.remoteProfiles["heiler-realm"] = spec_savedFull
 end
+
+-- === Mitgliederpflege: ein Knopf, und der wirkt ============================
+-- Von vier Knöpfen je Zeile ist einer übrig. Der Ausschluss konnte nie
+-- funktionieren (GuildUninvite ist geschützt); „Ausnahme“ dagegen schon, und
+-- der Vermerk wird gildenweit geteilt.
+do
+    addon.UI:ShowPage("MEMBERCARE")
+    local care_page = addon.UI.pages.MEMBERCARE
+
+    -- Die Begründung nennt „Main/Twink prüfen“ nicht mehr: Das galt für fast
+    -- jede Zeile und unterschied damit nichts.
+    local care_saved = addon.DB:GetGuild().memberCare.decisions
+    addon.DB:GetGuild().memberCare.decisions = {}
+    local care_healer = addon.Roster:GetMember("Heiler-Realm")
+    local care_wasOnline, care_wasHours = care_healer.online, care_healer.lastOnlineHours
+    care_healer.online = false
+    care_healer.lastOnlineHours = 24 * 400
+
+    -- Zeilen entstehen erst beim Zeichnen: Die Liste hat keinen festen Vorrat
+    -- mehr, sondern so viele Zeilen wie Vorschläge.
+    addon.UI:RefreshMemberCare()
+    local care_row = care_page.memberCareSuggestionRows[1]
+    assert(care_row ~= nil, "Die Mitgliederpflege hat keine Vorschlagszeilen")
+    assert(care_row.ignoreButton ~= nil, "Der Ausnahme-Knopf fehlt")
+    assert(care_row.actionDropdown == nil and care_row.removeButton == nil
+        and care_row.postponeButton == nil and care_row.doneButton == nil,
+        "Es stehen wieder mehrere Knöpfe auf der Zeile")
+    -- Genau der Fall, um den es geht: KEIN bestätigtes Hauptcharakter-Profil.
+    -- Mit einem bestätigten Profil lautete die Begründung ohnehin „Main
+    -- bestätigt“ – der Test hätte am eigentlichen Zweig vorbeigeprüft.
+    local care_profile = addon.Roster:GetProfile("Heiler-Realm")
+    local care_wasConfirmed = care_profile and care_profile.confirmed
+    if care_profile then
+        care_profile.confirmed = false
+    end
+    local care_candidates = addon.Roster:GetMemberCareCandidates()
+    assert(#care_candidates > 0, "Testaufbau: kein Pflegevorschlag vorhanden")
+    local care_unconfirmed = false
+    for _, candidate in ipairs(care_candidates) do
+        assert(tostring(candidate.reason):find("Main/Twink", 1, true) == nil,
+            "Die Begründung nennt weiterhin „Main/Twink prüfen“: " .. tostring(candidate.reason))
+        if candidate.status == "PRÜFEN" then
+            care_unconfirmed = true
+        end
+    end
+    assert(care_unconfirmed,
+        "Testaufbau: kein Vorschlag ohne bestätigtes Profil – der geprüfte Zweig lief nie")
+    if care_profile then
+        care_profile.confirmed = care_wasConfirmed
+    end
+
+    -- Jeder Vorschlag bekommt eine eigene Zeile. Früher waren es neun feste,
+    -- und der Rest stand nur als „Weitere 5 Vorschläge sind vorhanden.“ da –
+    -- eine Liste, die ihren eigenen Inhalt verschweigt.
+    do
+        local care_realCount = GetNumGuildMembers
+        local care_realInfo = GetGuildRosterInfo
+        local care_realOnline = GetGuildRosterLastOnline
+        GetNumGuildMembers = function()
+            return 14
+        end
+        GetGuildRosterInfo = function(index)
+            if index == 1 then
+                return "Tester-Realm", "Offizier", 1, 70, "Jäger", "Shattrath", "", "",
+                    true, 0, "HUNTER", 0, 0, false, false, 0, "Player-1"
+            end
+            return "Karteileiche" .. index .. "-Realm", "Mitglied", 5, 70, "Priester",
+                "Shattrath", "", "", false, 0, "PRIEST", 0, 0, false, false, 0, "Player-" .. index
+        end
+        GetGuildRosterLastOnline = function()
+            return 0, 0, 400, 0
+        end
+        addon.Roster:Scan()
+        addon.UI:RefreshMemberCare()
+        local care_many = addon.Roster:GetMemberCareCandidates()
+        assert(#care_many > 9,
+            "Testaufbau: zu wenige Vorschläge für den Mengentest (" .. #care_many .. ")")
+        local care_shown = 0
+        for _, row in ipairs(care_page.memberCareSuggestionRows) do
+            if row.shown then
+                care_shown = care_shown + 1
+            end
+        end
+        assert(care_shown == #care_many,
+            "Es werden " .. care_shown .. " von " .. #care_many .. " Vorschlägen gezeigt")
+        assert(tostring(care_page.memberCareSuggestionNotice.value or ""):find("Weitere", 1, true) == nil,
+            "Die Liste verschweigt weiterhin einen Teil ihres Inhalts: "
+                .. tostring(care_page.memberCareSuggestionNotice.value))
+        -- Und die Karte ist mitgewachsen, statt die Zeilen unter der nächsten
+        -- Karte verschwinden zu lassen.
+        assert(care_page.memberCareSuggestionCard.height
+            >= care_page.memberCareSuggestionTop + (#care_many * care_page.memberCareSuggestionStep),
+            "Die Vorschlagskarte ist nicht mit der Liste gewachsen: "
+                .. tostring(care_page.memberCareSuggestionCard.height))
+
+        GetNumGuildMembers = care_realCount
+        GetGuildRosterInfo = care_realInfo
+        GetGuildRosterLastOnline = care_realOnline
+        addon.Roster:Scan()
+        -- Der Scan baut die Mitgliedertabellen neu auf; die alte Referenz zeigt
+        -- danach auf ein Objekt, das im Roster nicht mehr vorkommt.
+        care_healer = addon.Roster:GetMember("Heiler-Realm")
+        care_healer.online = false
+        care_healer.lastOnlineHours = 24 * 400
+    end
+
+    -- Und der Knopf legt die Ausnahme wirklich ab.
+    addon.UI:RefreshMemberCare()
+    local care_target = care_page.memberCareSuggestionRows[1].playerName
+    assert(care_target ~= nil, "Testaufbau: die erste Zeile trägt keinen Spieler")
+    care_page.memberCareSuggestionRows[1].ignoreButton.scripts.OnClick()
+    local care_decision = addon.Roster:GetMemberCareDecision(care_target)
+    assert(care_decision ~= nil and care_decision.status == "IGNORED",
+        "Der Ausnahme-Knopf hat nichts abgelegt für " .. tostring(care_target))
+
+    addon.DB:GetGuild().memberCare.decisions = care_saved
+    care_healer.online = care_wasOnline
+    care_healer.lastOnlineHours = care_wasHours
+end
+
+-- === Bewerber erkennen, Gildenwerbung nicht ================================
+--
+-- Ausloeser war eine echte Zeile aus dem SucheNachGruppe-Kanal: "ENH sucht
+-- Anschluss an Gilde zum Raiden" landete nicht im Postfach, weil die
+-- Wendungsliste nur die Ich-Form kannte ("suche Gilde").
+--
+-- Die naheliegende Reparatur - "gilde" als Trigger - war gemessen die
+-- schlechteste: vier von fuenf Gildenwerbungen im Postfach. Entschieden wird
+-- deshalb ueber die Wortreihenfolge (Begruendung in Constants.lua).
+--
+-- Dieser Block ist die Messung dazu und haelt sie fest. Er laeuft gegen die
+-- VORGABE, nicht gegen eine eigene Liste - sonst pruefte er die Einstellung
+-- des Entwicklers statt das ausgelieferte Verhalten.
+do
+    local chat_saved = addon.Chat:GetRecruitmentWordText("chatTriggers")
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "")
+
+    -- Wer eine Gilde sucht. Muss erkannt werden.
+    local chat_seekers = {
+        "ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was so dazu gehört^^",
+        "Enhancer sucht Gilde",
+        "Sucht eine Gilde für Kara",
+        "Hunter sucht raidende Gilde",
+        "Suche Anschluss an eine Gilde",
+        "Suche eine Gilde ich spiele ein Hexenmeister",
+        "suche gilde fuer raids",
+        "Krieger auf Gildensuche",
+        "Gilde gesucht!",
+        "LF guild for raiding",
+        "70er Schurke sucht nette Gilde zum Raiden",
+        "Möchte einer Gilde beitreten, bin 70 Schamane",
+        "lfg gilde",
+        "Suche noch eine Gilde die Kara raidet",
+        "Tauren Krieger sucht Anschluss an eine Raidgilde",
+    }
+    -- Werbung anderer Gilden. Das sind Konkurrenten, keine Bewerber, und sie
+    -- kommen im Minutentakt - jeder Treffer hier macht das Postfach unbrauchbar.
+    local chat_ads = {
+        "<Aftermath> sucht noch Heiler und DDs für Kara! Whisper me",
+        "Gilde sucht noch aktive Raider für SSC",
+        "Unsere Gilde sucht dich! Meldet euch bei mir",
+        "Raidgilde sucht Verstärkung, Invite über /w",
+        "Wir sind eine neue Gilde und suchen Mitglieder",
+        "<Nachtwache> sucht dich! Wir sind eine Gilde für entspanntes Raiden",
+        "Gilde <Eclipse> rekrutiert alle Klassen",
+        "Raider für unsere Gilde gesucht",
+        "Neue Mitglieder gesucht - Gilde Sturmwind",
+        "Our guild is recruiting for Karazhan",
+        "Tritt uns bei! Gilde mit Raidplatz",
+    }
+    -- Alltag im Kanal, der mit Rekrutierung nichts zu tun hat.
+    local chat_noise = {
+        "LF TANK MARAUDON",
+        "Suche Gruppe für Sklavenunterkünfte",
+        "WTS Adamantiterz 5g das Stück",
+        "Wer hat noch Mats für Verzauberungen?",
+        "suche port nach shattrath",
+        "Suche noch 2 DDs für HdW hc",
+    }
+
+    for _, text in ipairs(chat_seekers) do
+        assert(addon.Chat:IsRecruitmentSignal(text) == true,
+            "Ein Bewerber wird nicht erkannt: " .. text)
+    end
+    for _, text in ipairs(chat_ads) do
+        assert(addon.Chat:IsRecruitmentSignal(text) == false,
+            "Gildenwerbung landet im Postfach: " .. text)
+    end
+    for _, text in ipairs(chat_noise) do
+        assert(addon.Chat:IsRecruitmentSignal(text) == false,
+            "Normaler Kanalverkehr landet im Postfach: " .. text)
+    end
+
+    -- Die eigene Liste ist eine Zusage: Was dort steht, wird erfasst, auch
+    -- wenn die freie Erkennung anderer Meinung waere.
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "wts adamantiterz")
+    assert(addon.Chat:IsRecruitmentSignal("WTS Adamantiterz 5g das Stück") == true,
+        "Eine selbst eingetragene Wendung wurde übergangen")
+
+    -- Und das Ausschlussfeld schlaegt weiterhin alles.
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "")
+    addon.Chat:SetRecruitmentWordText("chatExclusions", "zum raiden")
+    assert(addon.Chat:IsRecruitmentSignal(
+        "ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was so dazu gehört^^") == false,
+        "Ein Ausschlusswort hat die freie Erkennung nicht gestoppt")
+    addon.Chat:SetRecruitmentWordText("chatExclusions", "")
+
+    -- Der ganze Weg, nicht nur die Entscheidung: vom Kanalereignis ins Postfach.
+    addon.DB:GetGuild().inbox = {}
+    addon.DB:GetSettings().watchRecruitmentTriggers = true
+    addon.Chat:CaptureLead(
+        "ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was so dazu gehört^^",
+        "Gronntal-Realm", "Player-6409-0FFFFFFF", "SucheNachGruppe")
+    assert(#addon.DB:GetGuild().inbox == 1,
+        "Der erkannte Bewerber kam nicht im Postfach an")
+    assert(addon.DB:GetGuild().inbox[1].source == "SucheNachGruppe",
+        "Der Herkunftskanal wurde nicht vermerkt")
+    addon.DB:GetGuild().inbox = {}
+
+    addon.Chat:SetRecruitmentWordText("chatTriggers", chat_saved)
+end
+
+-- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den
+-- geschuetzten Gildenausschluss versucht.
+assert(#uninvitedPlayers == 0,
+    "Das Addon hat GuildUninvite aufgerufen: " .. table.concat(uninvitedPlayers, ", "))
 
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

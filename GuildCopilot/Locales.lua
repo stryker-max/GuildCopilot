@@ -61,11 +61,10 @@ local english = {
     ["|cff2ec7dbNach zuletzt online sortiert|r – bis zu {n} Level-70-Spieler aus den gewählten Raider-Rängen, mit Rang, Raidprofil und Berufen."]
         = "|cff2ec7dbSorted by last seen online|r – up to {n} level 70 players from the selected raider ranks, with rank, raid profile and professions.",
     ["ZULETZT ONLINE"] = "LAST ONLINE",
-    ["Entscheiden"] = "Decide",
-    ["Entfernen nicht möglich: "] = "Cannot remove: ",
-    ["In WoW entfernen"] = "Remove in WoW",
-    ["Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.\n„In WoW entfernen“ wählt den Spieler in Blizzards Gildenfenster aus – geklickt wird dort, WoW lässt es aus einem Addon heraus nicht zu."]
-        = "Alts, players on leave and protected ranks are hidden. „Check“ means: main/alt status is unconfirmed.\n„Remove in WoW“ selects the player in Blizzard's guild window – click it there, WoW does not allow it from an addon.",
+    -- Die Mitgliederpflege ist rein informativ; die Beschriftungen des
+    -- Aufklappmenues und des Ausschlussknopfes sind mit ihnen entfallen.
+    ["Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Ausnahme“ nimmt jemanden dauerhaft aus der Liste. Entfernt wird in WoW selbst – das lässt WoW aus einem Addon heraus nicht zu."]
+        = "Alts, players on leave and protected ranks are hidden. „Exempt“ removes somebody from the list for good. Removing happens in WoW itself – an addon is not allowed to do it.",
     ["erkannt"] = "detected",
     ["Spec aus dem Talentbaum gelesen, als dieser Spieler für den Ausrüstungsabgleich inspiziert wurde. Main/Twink und Zweitspec kennt nur der Spieler selbst."]
         = "Spec read from the talent tree while inspecting this player for the gear audit. Only the player knows main/alt and off-spec.",
@@ -361,7 +360,6 @@ local english = {
     ["Dein Rang darf dieses gildenweite Profil bearbeiten."] = "Your rank may edit this guild-wide profile.",
     ["Dein eigener Rang wurde einmalig wieder freigeschaltet."] = "Your own rank has been unlocked once.",
     ["Den eigenen Rang kannst du nicht abwählen."] = "You cannot deselect your own rank.",
-    ["Entfernen ist ausgegraut: Dein Gildenrang hat in WoW keine Berechtigung zum Entfernen von Mitgliedern. Das kann nur der Gildenleiter in den Gildenrängen ändern."] = "Remove is greyed out: your guild rank has no WoW permission to remove members. Only the guild leader can change that in the guild ranks.",
     ["Senden nicht möglich – bist du in einer Gilde?"] = "Cannot send – are you in a guild?",
     ["Gesendet an {n} – warte auf Bestätigung …"] = "Sent to {n} – waiting for confirmation …",
     ["Gesendet. {n} online mit älterer Fassung – die können den Empfang nicht bestätigen."] = "Sent. {n} online with an older version – they cannot confirm receipt.",

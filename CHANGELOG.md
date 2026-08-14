@@ -7,6 +7,101 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.131 – Addon
+
+**Geändert**
+
+- **Bewerber werden jetzt auch dann erkannt, wenn sie frei formulieren.** Aus der
+  Gilde gemeldet: „ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was
+  so dazu gehört^^" landete nicht im Postfach. Die Wendungsliste kannte nur die
+  Ich-Form („suche Gilde"), die Nachricht stand in der Er-Form.
+- **Entschieden wird über die Wortreihenfolge, nicht über die Wortwahl.** Steht
+  das Suchwort **vor** dem Gildenwort, sucht jemand eine Gilde („ENH **sucht** …
+  an **Gilde**"). Steht das Gildenwort davor, sucht eine Gilde jemanden
+  („**Gilde sucht** noch aktive Raider"). Das ist der Unterschied zwischen einem
+  Bewerber und der Werbung einer anderen Gilde — und er hält im Deutschen wie im
+  Englischen, ohne dass je wieder eine Wendung nachgetragen werden muss.
+- **Der naheliegende Weg wäre der schlechteste gewesen.** Einfach „gilde" als
+  Trigger einzutragen holt gemessen **vier von fünf** Gildenwerbungen ins
+  Postfach — Konkurrenten im Minutentakt. Gegen einen Testbestand aus 32 echten
+  Kanalzeilen erkennt die neue Regel 15 von 15 Bewerbern und weist alle 11
+  Werbungen und alle 6 sonstigen Nachrichten ab.
+- **Mitgelesen wird in jedem beigetretenen Kanal** — SucheNachGruppe, Allgemein,
+  Handel, Gildenrekrutierung. Das war schon vorher so und ist jetzt in der README
+  auch beschrieben.
+- **Neuer Schalter „Auch freie Formulierungen erkennen"** in den Einstellungen,
+  ab Werk an. Er ist bewusst getrennt vom bestehenden Schalter: Der eine
+  entscheidet **ob** öffentliche Kanäle mitgelesen werden, der neue **wie genau**
+  hingesehen wird. Wer seine Wendungsliste bewusst eng hält, schaltet nur den
+  neuen aus und bekommt exakt diese Enge zurück.
+- **Deine eigenen Trigger-Wörter bleiben eine Zusage.** Was du selbst einträgst,
+  wird erfasst — vor jeder Eigenintelligenz des Addons. Ausschlusswörter schlagen
+  weiterhin alles.
+
+**Behoben**
+
+- **Die README beschrieb noch den entfernten Gildenausschluss.** Der Absatz über
+  „zweite ausdrückliche Bestätigung" und „echte WoW-Berechtigung" stammte aus der
+  Zeit vor 0.9.130 und ist mit der Funktion selbst entfallen.
+
+## 0.9.130 – Addon
+
+**Geändert**
+
+- **Die Mitgliederpflege schlägt vor, sie handelt nicht.** Der Knopf „In WoW
+  entfernen" ist ersatzlos entfallen – samt der Berechtigungsprüfungen, die nur
+  ihn bedient haben. Er hat nie jemanden aus der Gilde entfernt und konnte es
+  nie: `GuildUninvite` ist geschützt. Zuletzt öffnete er bloß Blizzards
+  Gildenfenster, sah dabei aus wie eine Funktion und war keine. Was bleibt, ist
+  die Frage, die das Addon beantworten kann: **wen sollte man sich ansehen?**
+  Der Vermerk „Ausnahme" bleibt, er wird weiterhin gildenweit geteilt.
+- **Das CurseForge-Paket ist ab jetzt eine reine Standalone-Fassung.** Ohne
+  Installer, ohne Companion und ohne `WarcraftLogs.lua`. Grund: CurseForge
+  lehnt Archive mit ausführbaren Dateien ab, und ein Warcraft-Logs-Import ohne
+  den Windows-Helfer wäre eine Seite, die zum Einfügen von etwas auffordert,
+  das man sich nirgends holen kann. Wer aus CurseForge installiert, sieht den
+  Punkt „Warcraft Logs" deshalb gar nicht erst – statt eines Knopfes, der ins
+  Leere führt.
+- **Die vollständige Fassung bleibt vollständig.** Im Repository und in der
+  lokalen Entwicklungsinstallation ändert sich nichts: Installer, Companion und
+  Warcraft Logs sind da und funktionieren wie bisher. Reduziert wird
+  ausschließlich beim Paketbau.
+- **Der Sync bleibt in beide Richtungen verträglich.** Ein Client ohne das
+  Warcraft-Logs-Modul nimmt Pakete von einem Client mit Modul weiterhin an,
+  reicht die gespeicherte Gildenquelle unverändert weiter und sendet selbst wie
+  bisher. Vorhandene gespeicherte Daten bleiben liegen; gelöscht wird nichts.
+
+**Behoben**
+
+- **`/gcp debug` veränderte das Ergebnis der gemessenen Funktion.**
+  `GC.Perf:Measure` hat die Rückgabewerte über eine Zwischentabelle gereicht und
+  deren Länge geraten – ein nachgestelltes `nil` ging dabei verloren, bei einer
+  Lücke mitten in der Rückgabe war das Ergebnis sogar undefiniert. Eine Messung,
+  die das Gemessene verändert, ist wertlos. Gezählt wird jetzt mit, statt
+  hinterher zu raten.
+- **Ein Test schlug am Sekundenzeiger an.** Die Prüfung „private Bestände
+  dürfen kein Paket verlassen" suchte die Zeichenfolge `114` im **ganzen**
+  Gildenbank-Paket. Darin steht aber auch ein Zeitstempel – `1541146` enthält
+  `114`. Das Paket wird jetzt in seine Protokollfelder zerlegt und nur die
+  Nutzlast geprüft; ein echtes Datenleck fällt weiterhin auf, ein Zeitstempel
+  nicht mehr.
+- **Ein erzwungener erneuter Upload endete rot, obwohl er geklappt hatte.** Der
+  CurseForge-Workflow ließ `force=true` trotz vorhandenem Tag zu und versuchte
+  danach, denselben Tag noch einmal anzulegen. Ein bereits veröffentlichter Tag
+  wird jetzt nie mehr angefasst – nicht gelöscht, nicht verschoben, nicht neu
+  gesetzt –, und die Zusammenfassung sagt, was tatsächlich passiert ist.
+
+**Für Entwickler**
+
+- **Ein Befehl für alle Tests: `npm ci && npm test`.** Ein installiertes Lua ist
+  dafür nicht mehr nötig – die Lua-Tests laufen über fengari, festgeschrieben in
+  `package-lock.json`. Geprüft werden beide Fassungen: die vollständige aus dem
+  Repository und die reduzierte, die auf CurseForge geht, samt ihrer
+  tatsächlichen Dateiliste und der TOC im fertigen Archiv.
+- **Die Tests laufen bei jedem Push und jedem Pull Request**, nicht mehr erst
+  unmittelbar vor einer Veröffentlichung. Der CurseForge-Workflow benutzt
+  denselben Befehl – eine zweite Testlogik gibt es nicht mehr.
+
 ## 0.9.129 – Addon
 
 **Geändert**

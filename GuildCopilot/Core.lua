@@ -59,6 +59,20 @@ end
 -- Lua 5.1 (WoW) kennt unpack global, spaetere Fassungen nur table.unpack.
 local unpackValues = unpack or table.unpack
 
+-- Die Anzahl der Rueckgabewerte MIT zaehlen, statt sie spaeter aus der Tabelle
+-- zu erraten.
+--
+-- "#t" ist keine Antwort auf "wie viele Werte waren es?": Bei { 1, 2, nil }
+-- liefert die Laenge 2, das nachgestellte nil geht verloren, und bei einer
+-- Luecke wie { 1, nil, 3 } darf Lua sich zwischen 1 und 3 frei entscheiden -
+-- die Laenge einer Tabelle mit Loechern ist ausdruecklich undefiniert. Genau
+-- deshalb gibt es table.pack in spaeteren Fassungen; WoWs Lua 5.1 hat es
+-- nicht, also hier von Hand. select("#", ...) zaehlt die Werte, nicht die
+-- belegten Tabellenplaetze.
+local function PackResults(...)
+    return select("#", ...), { ... }
+end
+
 function GC.Perf:Measure(label, fn, ...)
     if type(fn) ~= "function" then
         return
@@ -76,10 +90,10 @@ function GC.Perf:Measure(label, fn, ...)
     -- Belegung je Aufruf; das ist genau dann hinnehmbar, wenn ohnehin gemessen
     -- wird, und im Regelfall (aus) wird sie nie angelegt.
     local started = self:Clock()
-    local results = { fn(...) }
+    local count, results = PackResults(fn(...))
     local finished = self:Clock()
     if not started or not finished then
-        return unpackValues(results)
+        return unpackValues(results, 1, count)
     end
     local elapsed = finished - started
     local sample = self.samples[label]
@@ -92,7 +106,7 @@ function GC.Perf:Measure(label, fn, ...)
     if elapsed > sample.worst then
         sample.worst = elapsed
     end
-    return unpackValues(results)
+    return unpackValues(results, 1, count)
 end
 
 function GC.Perf:Reset()

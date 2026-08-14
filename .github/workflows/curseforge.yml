@@ -68,6 +68,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       - name: Version und Spielfassung bestimmen
         id: version
@@ -216,111 +217,78 @@ jobs:
             echo "names=Token: ${token_key:-nichts gefunden} / Projektnummer: ${project_key:-nichts gefunden}"
           } >> "$GITHUB_OUTPUT"
 
-      # Der Tag ist das Gedaechtnis: Steht er, war diese Version schon oben.
-      # Das haelt auch einem erneuten Lauf, einem Force-Push oder einem
-      # nachgereichten Commit stand.
-      - name: Ist die Version neu?
-        id: check
-        env:
-          HAS_TOKEN: ${{ steps.creds.outputs.hasToken }}
-          HAS_PROJECT: ${{ steps.creds.outputs.hasProject }}
-          FOUND_NAMES: ${{ steps.creds.outputs.names }}
+      # Steht der Tag zu dieser Version schon?
+      #
+      # Nur die Tatsache wird hier ermittelt, entschieden wird sie im naechsten
+      # Schritt - von tools/release-decision.mjs, das dafuer eigene Tests hat.
+      - name: Steht der Tag schon?
+        id: tag
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
-          # Solange Token oder Projektnummer fehlen, ist nichts einzurichten
-          # vergessen worden - es ist schlicht noch nicht eingerichtet. Der Lauf
-          # sagt das und endet gruen; ein dauerhaft rotes Repository waere nur
-          # Laerm, den man nach zwei Tagen ignoriert.
-          #
-          # Gesagt wird aber, WAS genau fehlt, und zwar auch in der
-          # Zusammenfassung des Laufs: Eine Notiz an einem gruenen Haken sieht
-          # niemand, der nicht ohnehin schon sucht.
-          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
-            missing=""
-            if [ "$HAS_TOKEN" != "true" ]; then
-              missing="der API-Token"
-            fi
-            if [ "$HAS_PROJECT" != "true" ]; then
-              if [ -n "$missing" ]; then
-                missing="$missing und die Projektnummer"
-              else
-                missing="die Projektnummer"
-              fi
-            fi
-            echo "::notice::CurseForge ist nicht eingerichtet - es fehlt $missing. Version $tag wurde NICHT veroeffentlicht."
-            {
-              echo "## CurseForge: $tag wurde nicht veroeffentlicht"
-              echo
-              echo "Es fehlt **$missing**."
-              echo
-              # Was tatsaechlich im Repository steht, gehoert in die Meldung.
-              # Ohne das raet man weiter am Namen herum - genau die Schleife,
-              # aus der dieser Schritt herausfuehren soll.
-              echo "Gefunden wurde: \`$FOUND_NAMES\`"
-              echo
-              echo "Der Name ist frei: Gesucht wird ueber alle Secrets UND Variables,"
-              echo "die Projektnummer an ihrer Gestalt (reine Ziffern), der Token an seiner."
-              echo "Nicht gefunden heisst also: Es ist wirklich keiner da - oder der Wert"
-              echo "sieht nicht aus wie erwartet (Leerzeichen? halb eingefuegt?)."
-              echo
-              echo "Einzutragen unter *Settings -> Secrets and variables -> Actions*,"
-              echo "empfohlene Namen:"
-              echo
-              echo "| Reiter | Name | Wert |"
-              echo "| --- | --- | --- |"
-              echo "| Secrets | \`CURSEFORGE_TOKEN\` | API-Token aus dem CurseForge-Konto |"
-              echo "| Variables | \`CURSEFORGE_PROJECT_ID\` | Projektnummer von der Projektseite |"
-              echo
-              echo "Danach genuegt *Actions -> CurseForge -> Run workflow*;"
-              echo "\`$tag\` geht dann nachtraeglich raus, ohne neuen Push."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "${{ inputs.force }}" = "true" ]; then
-            echo "Erzwungen - der vorhandene Tag $tag wird ignoriert."
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "$tag steht bereits - diese Version ist veroeffentlicht. Nichts zu tun."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag steht bereits."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "$tag fehlt - Version ist neu."
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "$tag fehlt."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Erst pruefen, dann veroeffentlichen. validate.mjs haelt unter anderem
-      # die Versionsangaben im Repository zusammen.
-      - name: Pruefen
-        if: steps.check.outputs.publish == 'true'
-        run: node tests/validate.mjs
+      # Die Entscheidung selbst: hochladen ja/nein, Tag setzen ja/nein.
+      #
+      # Der wichtigste Fall ist force=true bei vorhandenem Tag: Dann wird
+      # hochgeladen, aber der Tag NICHT angefasst. Frueher versuchte der Lauf
+      # danach, denselben Tag noch einmal anzulegen, und endete rot - nach
+      # erfolgreichem Upload. Ein bereits veroeffentlichter Tag wird nie
+      # geloescht, verschoben oder neu gesetzt.
+      #
+      # Solange Token oder Projektnummer fehlen, ist nichts vergessen worden -
+      # es ist schlicht noch nicht eingerichtet. Der Lauf sagt das in der
+      # Zusammenfassung und endet gruen; ein dauerhaft rotes Repository waere
+      # nur Laerm, den man nach zwei Tagen ignoriert.
+      - name: Veroeffentlichen?
+        id: check
+        env:
+          ADDON_VERSION: ${{ steps.version.outputs.version }}
+          TAG_EXISTS: ${{ steps.tag.outputs.exists }}
+          FORCE: ${{ inputs.force }}
+          HAS_TOKEN: ${{ steps.creds.outputs.hasToken }}
+          HAS_PROJECT: ${{ steps.creds.outputs.hasProject }}
+          FOUND_NAMES: ${{ steps.creds.outputs.names }}
+        run: node tools/release-decision.mjs
 
-      # Oberste Ebene ist der Ordner GuildCopilot. Der Companion-Ordner bleibt
-      # draussen: CurseForge lehnt Archive mit ausfuehrbaren Dateien ab, und
-      # dort liegen eine .cmd und eine .mjs.
-      - name: Paket bauen
+      # Genau derselbe Befehl wie auf dem Entwicklungsrechner und im
+      # Test-Workflow: npm test. Er prueft die vollstaendige Fassung, baut das
+      # reduzierte CurseForge-Paket und prueft dessen tatsaechlichen Inhalt
+      # samt der TOC darin. Eine zweite Testlogik gibt es hier bewusst nicht.
+      #
+      # Schlaegt irgendetwas davon fehl, endet der Lauf hier - und es wird
+      # nichts veroeffentlicht.
+      - name: Abhaengigkeiten installieren
+        if: steps.check.outputs.publish == 'true'
+        run: npm ci
+
+      - name: Alle Tests und Paketpruefung
+        if: steps.check.outputs.publish == 'true'
+        run: npm test
+
+      # Das Paket, das gleich hochgeht. Gebaut hat es bereits der Testlauf; hier
+      # wird nur noch sein Pfad festgehalten - und noch einmal geprueft, dass es
+      # wirklich da ist und wirklich das Erwartete enthaelt.
+      - name: Paketpfad bestimmen
         id: package
         if: steps.check.outputs.publish == 'true'
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
-          zip_name="GuildCopilot-Addon-${version}.zip"
-          rm -rf build && mkdir -p build/stage
-          cp -r GuildCopilot build/stage/GuildCopilot
-          rm -rf build/stage/GuildCopilot/Companion
-          (cd build/stage && zip -r -X "../${zip_name}" GuildCopilot >/dev/null)
-          echo "zip=build/${zip_name}" >> "$GITHUB_OUTPUT"
-
+          zip="build/GuildCopilot-Addon-${version}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "Das Paket $zip fehlt - hat der Testlauf es gebaut?" >&2
+            exit 1
+          fi
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
           echo "Inhalt:"
-          unzip -Z1 "build/${zip_name}"
-          if unzip -Z1 "build/${zip_name}" | grep -Eiq '\.(cmd|exe|mjs|bat|ps1|sh)$'; then
-            echo "Das Archiv enthaelt ausfuehrbare Dateien - CurseForge lehnt das ab." >&2
-            exit 1
-          fi
-          if unzip -Z1 "build/${zip_name}" | grep -qv '^GuildCopilot/'; then
-            echo "Auf oberster Ebene steht mehr als der Ordner GuildCopilot." >&2
-            exit 1
-          fi
+          unzip -Z1 "$zip"
 
       - name: Hochladen
         if: steps.check.outputs.publish == 'true'
@@ -336,20 +304,46 @@ jobs:
 
       # Erst nach dem Upload. Ein Tag auf eine Version, die es nicht auf
       # CurseForge geschafft hat, wuerde jeden weiteren Versuch blockieren.
+      #
+      # Und nur, wenn es ihn noch nicht gibt: Bei einem erzwungenen erneuten
+      # Upload steht der Tag laengst und bleibt unangetastet.
       - name: Version als veroeffentlicht markieren
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.publish == 'true' && steps.check.outputs.createTag == 'true'
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$tag" -m "Auf CurseForge veroeffentlicht"
-          git push origin "$tag"
+          git tag -a "$TAG" -m "Auf CurseForge veroeffentlicht"
+          git push origin "$TAG"
+
+      # Die Zusammenfassung sagt, was wirklich passiert ist - "neu erstellt"
+      # oder "beibehalten". Sie steht bewusst NACH dem Upload und nach dem
+      # Tag-Schritt: Vorher waere sie eine Ankuendigung, keine Auskunft.
+      - name: Zusammenfassung
+        if: steps.check.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+          TAG_OUTCOME: ${{ steps.check.outputs.tagOutcome }}
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          set -euo pipefail
           {
-            echo "## Auf CurseForge veroeffentlicht: $tag"
+            echo "## Auf CurseForge veroeffentlicht: $TAG"
             echo
-            echo "Spielfassung ${{ steps.version.outputs.gameVersion }}, Tag \`$tag\` gesetzt."
-            echo "Ein weiterer Push zu dieser Version laedt nichts mehr hoch."
+            echo "Spielfassung ${{ steps.version.outputs.gameVersion }}."
+            echo
+            echo "$TAG_OUTCOME"
+            echo
+            if [ "$REASON" = "FORCED_REUPLOAD" ]; then
+              echo "Erzwungener erneuter Upload derselben Version."
+            else
+              echo "Ein weiterer Push zu dieser Version laedt nichts mehr hoch."
+            fi
+            echo
+            echo "Das Paket ist die reduzierte Standalone-Fassung:"
+            echo "ohne Installer, ohne Companion und ohne \`WarcraftLogs.lua\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Auch nach einem gescheiterten Upload: Dann ist das fertige Archiv genau

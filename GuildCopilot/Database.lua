@@ -10,6 +10,13 @@ local DEFAULTS = {
         profileSoundKey = "LEVEL_UP",
         captureOnlyDuringSearch = true,
         watchRecruitmentTriggers = true,
+        -- Freie Erkennung: Bewerber auch dann finden, wenn ihre Formulierung
+        -- in keiner Wendungsliste steht ("ENH sucht Anschluss an Gilde").
+        -- Unterschieden wird ueber die Wortreihenfolge; Einzelheiten in
+        -- Constants.lua. Eigener Schalter, weil die Wendungslisten ihre Zusage
+        -- behalten sollen: Wer seine Liste bewusst eng haelt, bekommt mit
+        -- diesem Schalter aus auch genau das - und nichts darueber hinaus.
+        smartRecruitmentDetection = true,
         -- Trigger- und Ausschlusswoerter fuers Postfach. Bewusst lokal und
         -- nicht gildenweit: Sie aendern nur, was im eigenen Postfach landet,
         -- genau wie die beiden Schalter darueber. Eine leere Triggerliste

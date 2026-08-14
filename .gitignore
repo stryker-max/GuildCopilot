@@ -4,6 +4,14 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Abhaengigkeiten der Testwerkzeuge. Festgeschrieben wird in package-lock.json,
+# installiert mit "npm ci" - der Ordner selbst gehoert nicht ins Repository.
+node_modules/
+
+# Staging und Archiv des CurseForge-Pakets. Beides entsteht bei jedem Testlauf
+# neu aus dem Ordner GuildCopilot; abgelegt wird nichts davon.
+build/
+
 
 # Build-Ausgabe des Installers
 Installer/bin/

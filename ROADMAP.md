@@ -298,6 +298,173 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.131 – Die Reihenfolge verrät, wer sucht
+
+Aus dem Spiel gemeldet, mit Screenshot aus dem SucheNachGruppe-Kanal:
+
+> ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was so dazu gehört^^
+
+Nicht im Postfach. Kein Fehler im Erfassungsweg — über denselben Kanal lag ein Hexenmeister mit „Suche eine Gilde" ordentlich drin. Es lag an der Wendungsliste: Sie kannte nur die **Ich-Form**.
+
+```
+suche eine gilde · suche gilde · gilde gesucht · gildensuche · lf guild · looking for (a) guild
+```
+
+Die Nachricht steht in der **Er-Form** — „sucht **Anschluss an** Gilde". Verglichen wird auf zusammenhängende Zeichenketten, und „suche gilde" steht dort nicht, weil „Anschluss an" dazwischenliegt. Gegen die Vorgabe gemessen fielen außerdem durch: „Enhancer sucht Gilde", „Sucht eine Gilde für Kara", „Hunter sucht raidende Gilde", „Suche Anschluss an eine Gilde". Die dritte Person fehlte komplett — eine der häufigsten Formulierungen im Kanal überhaupt.
+
+### Warum nicht einfach „gilde" als Trigger
+
+Weil das gemessen die schlechteste Lösung ist. Mit „gilde" als Trigger gegen fünf typische Gildenwerbungen:
+
+| Nachricht | mit Trigger „gilde" |
+| --- | --- |
+| Gilde sucht noch aktive Raider für SSC | ❌ im Postfach |
+| Unsere Gilde sucht dich! Meldet euch bei mir | ❌ im Postfach |
+| Raidgilde sucht Verstärkung, Invite über /w | ❌ im Postfach |
+| Wir sind eine neue Gilde und suchen Mitglieder | ❌ im Postfach |
+
+Vier von fünf. Das sind Konkurrenten, keine Bewerber, und sie kommen im Minutentakt — genau der „Müll aus dem ganzen Realm", vor dem der Kommentar über der Wendungsliste seit jeher warnt. Jede fehlende Wendung einzeln nachzutragen ist dagegen ein Spiel ohne Ende.
+
+### Die Reihenfolge ist das Unterscheidungsmerkmal
+
+Beide Fälle benutzen dieselben Wörter. Was sie trennt, ist die Stellung:
+
+```
+Bewerber:   "ENH   sucht  Anschluss an  GILDE"     Suchwort zuerst
+Werbung:    "GILDE sucht  noch aktive Raider"      Gildenwort zuerst
+```
+
+Das ist keine Heuristik über Wortfelder, sondern die Satzstellung selbst, und sie hält im Deutschen wie im Englischen. Umgesetzt als `LooksLikeGuildSeeker` in `Chat.lua`, die Wortlisten in `Constants.lua`.
+
+Drei Feinheiten, alle aus dem Testbestand entstanden:
+
+- **Die passive Form fällt nebenbei richtig heraus.** In „Raider für unsere Gilde gesucht" steht „gilde" vor dem „sucht" in „ge**sucht**" — also Werbung, und das stimmt. Es brauchte dafür keine eigene Regel.
+- **Deutsche Verbstellung.** „Möchte einer **Gilde beitreten**" setzt das Verb hinter das Objekt; die Reihenfolgeregel hätte daraus Werbung gemacht. `anschluss`, `beitreten`, `aufnahme`, `aufgenommen` gelten deshalb unabhängig von der Stellung — eine werbende Gilde sagt über sich selbst nicht „wir suchen Anschluss".
+- **Werbemerkmale schlagen die Reihenfolge.** „<Nachtwache> sucht dich! Wir sind eine Gilde für entspanntes Raiden" sieht der Stellung nach wie ein Bewerber aus. `sucht dich`, `wir suchen`, `wir sind eine`, `verstärkung`, `rekrutier`, `unsere gilde` und ein Dutzend weitere heben das auf. Aufgenommen wurde nur, was eindeutig ist: `sucht noch` steht bewusst **nicht** dabei, sonst wäre „ENH sucht noch eine Gilde" verloren.
+
+Ein Nebeneffekt der Werbemerkmale: Sie räumen eine alte Schwäche der **Vorgabe** mit weg. „Raider für unsere Gilde gesucht" enthält die Vorgabewendung „gilde gesucht" und kam bis hierher herein; jetzt sticht `unsere gilde` sie aus.
+
+### Was unangetastet bleibt
+
+Die eigene Wendungsliste ist eine **Zusage** und steht deshalb vor jeder Eigenintelligenz: Was der Nutzer selbst einträgt, wird erfasst, ohne Wenn und Aber — auch „wts adamantiterz", wenn er das so will. Ausschlusswörter schlagen weiterhin alles, auch die freie Erkennung.
+
+Und die freie Erkennung bekam einen **eigenen Schalter** (`smartRecruitmentDetection`, ab Werk an). Das war keine Vorsicht, sondern die Folge eines Tests, der sofort ansprang: Ein bestehender Fall sicherte die Zusage „deine eigene Liste ERSETZT die Vorgabe" — mit immer laufender Freierkennung galt sie nicht mehr. Zwei verschiedene Versprechen gehören an zwei Schalter. Der bestehende entscheidet **ob** öffentliche Kanäle mitgelesen werden, der neue **wie genau** hingesehen wird; ohne den ersten wird der zweite abgeblendet.
+
+### Kanäle
+
+Geprüft, weil danach gefragt wurde: Es gibt **keinen** Kanalfilter. `CHAT_MSG_CHANNEL` wird für jeden Kanal ausgewertet, dem der Spieler beigetreten ist — SucheNachGruppe, Allgemein, Handel, Gildenrekrutierung inbegriffen. Der Herkunftskanal wird am Eintrag vermerkt (`source`). Das war schon vorher so, stand aber nirgends; jetzt steht es in der README.
+
+### Gemessen statt vermutet
+
+Der Regressionstest in `tests/smoke.lua` führt 32 echte Kanalzeilen in drei Gruppen: 15 Bewerber, 11 Gildenwerbungen, 6 Zeilen sonstiger Kanalverkehr („LF TANK MARAUDON", „WTS Adamantiterz 5g das Stück"). Alle 32 werden richtig eingeordnet. Er läuft gegen die **Vorgabe**, nicht gegen eine eigene Liste — sonst prüfte er die Einstellung des Entwicklers statt das ausgelieferte Verhalten. Dazu der ganze Weg vom Kanalereignis bis zum Eintrag im Postfach, die Zusage der eigenen Liste, und dass ein Ausschlusswort die freie Erkennung stoppt.
+
+## 0.9.130 – Zwei Fassungen, ein Testweg
+
+Diese Version räumt auf: eine Funktion, die nie eine war, wird ganz entfernt; das veröffentlichte Paket wird zu dem, was es sein muss; und die Tests werden zu etwas, das man mit einem Befehl ausführen kann.
+
+### Der Gildenausschluss ist raus – ganz
+
+0.9.124 bis 0.9.129 haben an einer verschlossenen Tür gerüttelt. `GuildUninvite` ist `#protected`, ein Addon kommt nicht daran vorbei. Was in 0.9.129 blieb, war ein Knopf „In WoW entfernen", der den Spieler in Blizzards Gildenfenster auswählte und es öffnete.
+
+Owner-Entscheidung: weg damit. Ein Knopf, der aussieht wie eine Funktion und keine ist, kostet mehr, als er einbringt – er wird gesucht, gedrückt, gemeldet.
+
+Entfallen sind damit:
+
+- `Roster:OpenGuildRemoval`, `Roster:CanRemoveMember`, `Roster:CanRemoveFromGuild` und der lokale Helfer `HasBlizzardRemovePermission`;
+- das Feld `rosterIndex` am Mitglied – es existierte ausschließlich für `SetGuildRosterSelection`;
+- die Locale-Einträge zu „In WoW entfernen", „Entfernen nicht möglich: " und dem ausgegrauten Knopf;
+- die zugehörigen Testblöcke in `tests/smoke.lua` und die Regeln in `tests/validate.mjs`, die auf ihre *Anwesenheit* prüften.
+
+`CanAccessMemberCare` bleibt unverändert: An ihr hängen die Sitzungssteuerung des Raidmonitors und die Auftragsverwaltung, sie hat mit dem Ausschluss nichts zu tun.
+
+Statt der alten Regeln steht in `tests/validate.mjs` jetzt die umgekehrte Prüfung – eine Liste verbotener Bezeichner (`GuildUninvite`, `C_GuildInfo.Uninvite`, `SetGuildRosterSelection`, `OpenGuildRemoval`, `CanRemoveMember`, `CanRemoveFromGuild`), gesucht im Addoncode ohne Kommentarzeilen. Kommentare dürfen die Namen nennen; dort steht die Begründung. Dazu kommt in `tests/smoke.lua` eine Stolperdraht-Fassung von `GuildUninvite`: Sie vermerkt jeden Aufruf, und der Lauf beanstandet ihn am Ende. Ein `error()` an der Stelle würde in einem `pcall` des Addons verschwinden.
+
+**Was die Mitgliederpflege behält:** die Vorschlagsliste, die Prüfregeln, die Rangschutzliste – und den Knopf „Ausnahme". Der legt einen Vermerk in der Addon-Datenbank ab und teilt ihn gildenweit; er ist die einzige Aktion auf der Karte, die tatsächlich etwas bewirkt.
+
+### Das CurseForge-Paket wird Standalone
+
+CurseForge nimmt keine Archive mit ausführbaren Dateien an. Der Companion besteht aus einer `.cmd` und einer `.mjs`, der Installer aus einer `.exe`. Beides war ohnehin schon draußen bzw. nie drin – aber `WarcraftLogs.lua` war drin, und der Import dort braucht genau diese Helfer. Übrig blieb eine Seite, die zum Einfügen von etwas auffordert, das sich der Nutzer nirgends holen kann.
+
+**Die Entscheidung:** Das Repository und die lokale Entwicklungsinstallation bleiben vollständig. Reduziert wird ausschließlich beim Paketbau.
+
+Umgesetzt in `tools/curseforge-package.mjs` – der einzigen Stelle, die weiß, was ins Paket gehört:
+
+- kopiert wird erst der ganze Ordner, dann wird weggenommen (`Companion/`, `WarcraftLogs.lua`). Andersherum – eine Auswahlliste beim Kopieren – vergisst man beim nächsten neuen Ordner;
+- die reduzierte TOC wird aus der echten **abgeleitet**, nicht danebengelegt. Eine zweite gepflegte TOC-Datei wäre genau so lange richtig, bis jemand eine Lua-Datei hinzufügt und nur eine der beiden anfasst – und der Fehler fiele erst im Spiel auf;
+- das Archiv baut JSZip mit festem Zeitstempel: zweimal bauen ergibt zweimal dieselben Bytes.
+
+**Die Oberfläche wird optional.** In `UI.lua` trägt der Navigationspunkt jetzt ein Feld `requires = "WarcraftLogs"`. Die Punkte werden vor dem Zeichnen gefiltert; fehlt das Modul, entsteht weder der Reiter noch die Seite dahinter – Seiten werden in derselben Schleife angelegt. Dazu drei Absicherungen:
+
+- `BuildWarcraftLogsPage` und `RefreshWarcraftLogs` steigen still aus, wenn Seite oder Modul fehlen;
+- `SetLeadProfileLinks` (Profil-Links im Postfach) greift nicht mehr hart auf `GC.WarcraftLogs` zu – die Felder bleiben leer, der Hinweis darunter erklärt es;
+- `ShowPage` weicht auf `ROSTER` aus, wenn die verlangte Seite nicht existiert. Ohne diesen Rückfall würde die Seitenschleife alles verstecken und nichts zeigen: ein leeres Fenster ohne Fehlermeldung.
+
+`Sync.lua` musste nicht angefasst werden – dort war jeder `GC.WarcraftLogs`-Zugriff bereits geprüft. Wichtig fürs Schneeballprinzip: Die Gildenquelle von Warcraft Logs fährt in der Gildenprofil-Nutzlast mit und wird aus der **Datenbank** gelesen, nicht aus dem Modul. Ein Client ohne das Modul reicht sie also weiterhin unverändert weiter. Gespeicherte `warcraftLogs`-Zweige bleiben liegen; eine Migration gibt es bewusst nicht.
+
+### Der Test, der am Sekundenzeiger hing
+
+`tests/smoke.lua` prüfte, dass keine privaten Bestände ein Gildenbank-Paket verlassen – durch eine Textsuche nach `114` (der private Gesamtbestand: 5 Taschen + 9 Bank + 100 Twink) im **ganzen** Paket.
+
+Ein Gildenbank-Paket trägt aber noch ganz andere Ziffern: einen Token aus Zeitstempel und Zufallszahl, den Änderungszeitpunkt des Tabs, einen Fingerabdruck. `1541146` enthält `114`. Der Test hätte jederzeit anschlagen können, ohne dass ein Byte privater Daten das Haus verlässt – und wer ihn dann „repariert", indem er die Zahl lockert, hat die Prüfung abgeschafft.
+
+Jetzt wird das Paket mit `Util.SplitFields` zerlegt – demselben Splitter, den das Addon benutzt – und nur Feld 12 eines `BT`-Pakets geprüft, die Nutzlast. Sie wird je Token wieder zusammengesetzt (ein Tab geht als Folge von Teilstücken raus) und mit `DecodeCounts` decodiert. Geprüft wird dann doppelt: Die Nutzlast muss genau dem gespeicherten Tab entsprechen, den sie zu tragen behauptet, **und** keine rein private Menge darf darin vorkommen.
+
+Dazu zwei Gegenproben im Test selbst: eine mit `114` in Zeitstempel, Tabname, Einleser und Fingerabdruck – die darf nicht anschlagen; und eine mit dem privaten Gesamtbestand wirklich in der Nutzlast – die muss anschlagen. Ohne die zweite wäre nicht zu unterscheiden, ob die Prüfung schweigt oder schläft.
+
+### `GC.Perf:Measure` verändert nichts mehr
+
+`/gcp debug` soll beobachten, nicht eingreifen. Die Messung reichte die Rückgabe der gemessenen Funktion über `{ fn(...) }` durch und packte sie mit `unpack(results)` wieder aus – also über `#results`.
+
+`#` ist keine Antwort auf „wie viele Werte waren es?": `{ 1, 2, nil }` hat die Länge 2, das nachgestellte `nil` geht verloren; bei einer Lücke wie `{ 1, nil, 3 }` darf Lua sich zwischen 1 und 3 frei entscheiden – die Länge einer Tabelle mit Löchern ist ausdrücklich undefiniert. Eingeschaltete Messung, verändertes Ergebnis.
+
+Gezählt wird jetzt mit: ein kleiner `PackResults`-Helfer liefert `select("#", ...)` zusammen mit der Tabelle, ausgepackt wird mit `unpack(results, 1, count)`. `table.pack` gibt es in WoWs Lua 5.1 nicht.
+
+Der Regressionstest prüft sechs Formen – nur `nil`, nachgestelltes `nil`, zwei nachgestellte, eine Lücke in der Mitte, gar keine Rückgabe, `false` gefolgt von `nil` – jeweils mit ein- und ausgeschalteter Messung, und zusätzlich, dass die Argumente vollständig durchgereicht werden. Gegenprobe gegen die alte Fassung: schlägt fehl bei „nur nil".
+
+### Ein Befehl, alle Tests – ohne installiertes Lua
+
+Bisher lautete die Anweisung sinngemäß „installier dir LuaJIT". Das ist keine reproduzierbare Testanweisung, und auf einem CI-Läufer liegt gar nichts.
+
+Jetzt genügt:
+
+```bash
+npm ci && npm test
+```
+
+`tools/run-tests.mjs` führt fünf Schritte aus und bricht beim ersten Fehler mit Exitcode 1 ab:
+
+1. `tests/validate.mjs` – die statischen Regeln;
+2. `tests/companion.mjs` – der Warcraft-Logs-Companion;
+3. `tools/release-decision.test.mjs` – die Tag-Entscheidung (siehe unten);
+4. `tools/check-package.mjs` – baut Staging und Archiv und prüft **beide** an ihrer tatsächlichen Dateiliste;
+5. `tools/run-lua-tests.mjs` – `tests/smoke.lua` und `tests/reduced.lua`.
+
+Die Lua-Tests laufen über **fengari**, eine Lua-Implementierung in JavaScript, festgeschrieben in `package-lock.json`. `node_modules/` und `build/` sind in `.gitignore`.
+
+Zwei Unterschiede zu WoWs Lua 5.1 gleicht der Runner aus: fengari ist 5.3 und kennt `unpack` nur als `table.unpack`; und 5.3 trennt Ganzzahl und Fließkomma, sodass `tostring(1.0)` „1.0" ergäbe statt „1". Beides steht als kurzer Vorspann im Lua-Zustand. Außerdem hat fengari kein `io.open` – die Tests bekommen deshalb eine Lesefunktion `GC_ReadTextFile` gestellt; unter einem echten Lua nehmen sie weiterhin `io.open`.
+
+**Strukturell:** Der Stellvertreter-Vorspann von `tests/smoke.lua` (765 Zeilen WoW-API) steht jetzt in `tests/wow-stubs.lua`, weil `tests/reduced.lua` dieselben braucht. Die zwölf Werte auf oberster Ebene sind dabei global geworden – ein aufrufender Chunk sähe ein `local` von dort aus nicht. Das entlastet nebenbei die Lua-5.1-Grenze von 200 lokalen Variablen, an der `smoke.lua` ohnehin stand.
+
+Dazu geladen wird über `LoadAddonFrom(verzeichnis)`, das die **TOC** liest statt einer zweiten, von Hand gepflegten Dateiliste. Damit lädt derselbe Code auch die reduzierte Fassung, deren TOC eine Datei weniger nennt.
+
+`tests/reduced.lua` prüft am gebauten Staging: dass die TOC keine fehlende Datei nennt, dass `GC.WarcraftLogs` nicht existiert, dass weder Seite noch Navigationspunkt entstehen, dass alle **übrigen** zwölf Punkte da sind, dass `ShowPage("WCL")` ausweicht statt ins Leere zu laufen, dass jede Seite sich aufschlagen lässt, dass der Sync in beide Richtungen arbeitet und dass gespeicherte `warcraftLogs`-Daten einen `Prune()` überleben.
+
+### CI und die Force-Veröffentlichung
+
+**Die Tests laufen jetzt bei jedem Push und jedem Pull Request** (`.github/workflows/tests.yml`), nicht erst unmittelbar vor einer Veröffentlichung. Vorher hingen sie ausschließlich im CurseForge-Workflow, der nur auf `main` und nur bei neuer Version läuft – ein Fehler auf einem Arbeitsbranch fiel damit an der teuersten Stelle auf. Beide Workflows rufen `npm test` auf; eine zweite Testlogik gibt es nicht mehr.
+
+**Der Force-Fehler:** `force=true` durfte trotz vorhandenem Tag hochladen – und der Schritt danach versuchte, denselben Tag noch einmal anzulegen. `git tag` scheitert dann, der Lauf endete rot, **obwohl der Upload geklappt hatte**. Der naheliegende „Fix" wäre `-f` gewesen – und hätte einen bereits veröffentlichten Tag verschoben.
+
+Die Regel lautet jetzt: Ein vorhandener Tag wird nie angefasst. Die Entscheidung steht in `tools/release-decision.mjs` als reine Funktion – kein git, kein Netz, keine Dateien – und wird von `tools/release-decision.test.mjs` in sieben Fällen geprüft, darunter zwei erschöpfende Runden über alle Eingabekombinationen („bei vorhandenem Tag wird nie getaggt", „ohne vollständige Zugangsdaten wird nie veröffentlicht"). Frühere Fassungen dieser Logik standen als Shell-Schnipsel im Workflow und ließen sich nur dadurch testen, dass man veröffentlicht hat.
+
+| Tag steht | force | hochladen | Tag setzen |
+| --- | --- | --- | --- |
+| nein | – | ja | ja, neu |
+| ja | nein | nein | nein |
+| ja | ja | ja | **nein – bleibt unverändert** |
+
+Die Zusammenfassung des Laufs sagt entsprechend „neu erstellt und gepusht" oder „bestand bereits und wurde unverändert beibehalten", und sie steht **nach** dem Upload – vorher wäre sie eine Ankündigung, keine Auskunft.
+
 ## 0.9.129 – Eine verschlossene Tür, fünf Versionen lang
 
 „Vielleicht gehts auch garnicht mit einem Addon?! Google halt."

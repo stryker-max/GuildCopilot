@@ -5,29 +5,35 @@ Stand: 02.08.2026, nach Release 0.9.83 / Installer 1.0.6.
 Diese Liste ist so geschrieben, dass ein einzelner Prompt genügt:
 **„Arbeite `docs/TODO-naechste-sitzung.md` ab."**
 
-Vorher die Testbasis herstellen – beide Suiten müssen grün sein, bevor
-irgendetwas geändert wird:
+Vorher die Testbasis herstellen – alles muss grün sein, bevor irgendetwas
+geändert wird:
 
 ```bash
-node tests/validate.mjs
+npm ci && npm test
 ```
 
-`tests/smoke.lua` braucht einen Lua-Interpreter. Auf diesem Rechner ist keiner
-installiert; er läuft über **fengari** als npm-Paket (`npm install fengari` im
-Scratchpad, Runner schreiben, der `luaL_loadbuffer` mit dem Dateiinhalt als
-**Bytes** versorgt). Zwei Fallstricke, beide in 0.9.81 durchgemacht:
+Das genügt seit 0.9.130 und ersetzt die frühere Handarbeit: Ein installiertes
+Lua wird **nicht** mehr gebraucht, fengari und der Runner stehen als
+Abhängigkeit und als `tools/run-lua-tests.mjs` im Repository. Der Befehl prüft
+die statischen Regeln, die Tag-Entscheidung, baut das reduzierte
+CurseForge-Paket samt Inhaltsprüfung und führt beide Lua-Suiten aus – die
+vollständige Fassung (`tests/smoke.lua`) und das reduzierte Paket
+(`tests/reduced.lua`). Einzelheiten im README-Abschnitt „Entwickeln und
+testen".
 
-- der Runner muss **aus dem Repository-Wurzelverzeichnis** laufen, sonst findet
-  smoke.lua `GuildCopilot/Constants.lua` nicht;
-- fengari ist eine **Lua-5.3**-Implementierung, smoke.lua ist für 5.1
-  geschrieben (so läuft es im WoW-Client). Vor dem Testlauf deshalb
-  `if unpack == nil then unpack = table.unpack end` ausführen.
+*(Die frühere Anleitung an dieser Stelle – „fengari im Scratchpad installieren,
+Runner selbst schreiben, `unpack`-Shim nicht vergessen" – ist damit erledigt.
+Beide Fallstricke aus 0.9.81 sind im Runner behandelt, dazu ein dritter:
+fengari hat kein `io.open`.)*
 
 Lua bricht bei mehr als 200 lokalen Variablen je Funktion ab, und smoke.lua ist
-eine einzige – neue Testblöcke deshalb in `do ... end` kapseln.
+eine einzige – neue Testblöcke deshalb in `do ... end` kapseln. Die
+WoW-Stellvertreter stehen seit 0.9.130 in `tests/wow-stubs.lua`; ihre
+Top-Level-Werte sind global, weil beide Testdateien sie brauchen.
 
 Nach jedem fertigen Punkt: Version in `GuildCopilot.toc`, `Constants.lua`,
-`README.md`, `Installer/README.md` und `tests/validate.mjs` gleichziehen,
+`README.md` (zweimal: Überschrift und „Addon bei"), `Installer/README.md` und
+`tests/validate.mjs` gleichziehen – `npm test` beanstandet jede Abweichung –,
 **`CHANGELOG.md` und ROADMAP nachführen** (Owner-Wunsch: zu jeder Änderung
 gehört ein Changelog-Eintrag), nach `main` pushen und den Ordner
 `GuildCopilot/` in die WoW-Installation spiegeln
@@ -295,11 +301,13 @@ in der ROADMAP). Nicht umgesetzt und **bewusst so**:
   scheitert an einem offenen Explorer-Fenster, Überschreiben nicht. Der Download
   landet vorher in einem Staging-Verzeichnis, und nach dem Kopieren wird die
   `.toc` geprüft. Ein Fehlschlag ist durch erneutes Ausführen behebbar;
-- **Ausschluss meldet Erfolg zu früh.** `GuildUninvite` und `C_GuildInfo.Uninvite`
-  liefern in WoW kein Ergebnis und haben keinen Callback – mehr als „der Aufruf
-  hat keinen Lua-Fehler geworfen" ist nicht zu haben. `Roster:Request()` holt den
-  Roster ohnehin neu. Denkbar wäre, `DONE` erst zu setzen, wenn der Spieler im
-  nächsten Roster fehlt;
+- ~~**Ausschluss meldet Erfolg zu früh.**~~ **Hinfällig seit 0.9.130.** Der
+  Punkt hat sich anders erledigt als gedacht: `GuildUninvite` ist `#protected`
+  und aus einem Addon heraus überhaupt nicht aufrufbar. Der Gildenausschluss
+  ist deshalb ersatzlos aus dem Addon entfernt worden – es gibt keinen
+  Erfolgsbericht mehr, weil es keinen Versuch mehr gibt. `tests/validate.mjs`
+  hält die Tür zu (Liste verbotener Bezeichner), `tests/smoke.lua` legt einen
+  Stolperdraht aus. Hintergrund in den ROADMAP-Abschnitten 0.9.124 bis 0.9.130;
 - **Whisper-Pakete kurz nach dem Login.** Solange der Gildenroster leer ist, wird
   die Mitgliedsprüfung übersprungen (`Sync.lua`, dokumentiert). Auswirkung ist
   Datenmüll in der lokalen Addon-Datenbank, kein Accountrisiko. Sauberer wäre,

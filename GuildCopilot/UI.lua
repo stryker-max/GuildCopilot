@@ -111,7 +111,14 @@ local TAB_DEFINITIONS = {
     -- Auftraege sucht, findet sie jetzt dort, wo er alles andere auch findet.
     { key = "ORDERS", page = "WORKSHOP", view = "ORDERS", section = "GILDE",
         label = "Gildenaufträge", icon = "Interface\\Icons\\INV_Scroll_03" },
-    { key = "WCL", section = "RAID", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09" },
+    -- "requires" nennt ein Modul, ohne das dieser Punkt nicht existiert.
+    -- Warcraft Logs ist der einzige Fall: Das CurseForge-Paket liefert
+    -- WarcraftLogs.lua nicht mit, weil der Import den Windows-Helfer braucht
+    -- und CurseForge keine ausfuehrbaren Dateien im Archiv annimmt. Ohne das
+    -- Modul entsteht weder der Reiter noch die Seite dahinter - ein Knopf, der
+    -- ins Leere fuehrt, waere schlimmer als kein Knopf.
+    { key = "WCL", section = "RAID", label = "Warcraft Logs", icon = "Interface\\Icons\\INV_Misc_Book_09",
+        requires = "WarcraftLogs" },
     { key = "STATISTICS", section = "RAID", label = "Raidauswertung", icon = "Interface\\Icons\\INV_Misc_Book_11" },
     { key = "GEAR", section = "RAID", label = "Ausrüstung", icon = "Interface\\Icons\\INV_Chest_Plate06" },
     { key = "SETTINGS", section = "SYSTEM", label = "Einstellungen", icon = "Interface\\Icons\\INV_Gizmo_02" },
@@ -1507,9 +1514,19 @@ function GC.UI:CreateMainFrame()
     sidebar:SetWidth(190)
     frame.sidebar = sidebar
 
+    -- Erst aussortieren, dann zeichnen: Ein fehlendes optionales Modul darf
+    -- weder eine Luecke in der Leiste hinterlassen noch einen Abschnittskopf
+    -- ohne Inhalt. Die Abstaende rechnen sich unten aus der gefilterten Liste.
+    local navigation = {}
+    for _, definition in ipairs(TAB_DEFINITIONS) do
+        if definition.requires == nil or GC[definition.requires] ~= nil then
+            navigation[#navigation + 1] = definition
+        end
+    end
+
     local navigationY = -NAV_TOP
     local currentSection
-    for _, definition in ipairs(TAB_DEFINITIONS) do
+    for _, definition in ipairs(navigation) do
         -- Abschnitts- und Reiterbeschriftungen laufen durch GC.L; die
         -- Schluessel in TAB_DEFINITIONS bleiben deutsch und stabil.
         if definition.section ~= currentSection then
@@ -1786,6 +1803,12 @@ function GC.UI:ShowPage(pageKey)
         pageKey = "ROSTER"
         GC:Print("Mitgliederpflege ist für deinen Gildenrang gesperrt – "
             .. "berechtigte Ränge legen die Freigabe in den Einstellungen fest.")
+    end
+    -- Eine Seite, die es nicht gibt, weil ihr optionales Modul fehlt: Ohne
+    -- diesen Rueckfall wuerde die Schleife unten alles verstecken und nichts
+    -- zeigen - ein leeres Fenster ohne Fehlermeldung.
+    if self.frame and not self.pages[pageKey] then
+        pageKey = "ROSTER"
     end
     self.activePage = pageKey
     for key, page in pairs(self.pages) do
@@ -2406,6 +2429,15 @@ function GC.UI:BuildSettingsPage()
     end)
     page.watchChannelToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -105)
     page.watchChannelToggle.text:SetWidth(310)
+    -- Zweiter Schalter, nicht in den ersten hineingebaut: Der obere entscheidet
+    -- OB oeffentliche Kanaele mitgelesen werden, dieser WIE genau hingesehen
+    -- wird. Wer seine Wendungsliste bewusst eng haelt, schaltet nur diesen aus.
+    page.smartDetectionToggle = CreateToggle(notificationCard,
+        "Auch freie Formulierungen erkennen („ENH sucht Anschluss an Gilde“)", function(checked)
+        GC.DB:GetSettings().smartRecruitmentDetection = checked
+    end)
+    page.smartDetectionToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -133)
+    page.smartDetectionToggle.text:SetWidth(310)
 
     -- Minimap und Profilton betreffen nicht die Rekrutierung - sie stehen in
     -- ihrer eigenen Karte "Allgemein".
@@ -2856,6 +2888,20 @@ function GC.UI:RefreshSettings()
     SetToggle(page.successSoundToggle, settings.successSound)
     SetToggle(page.captureDuringSearchToggle, settings.captureOnlyDuringSearch)
     SetToggle(page.watchChannelToggle, settings.watchRecruitmentTriggers)
+    SetToggle(page.smartDetectionToggle, settings.smartRecruitmentDetection)
+    -- Ohne Mitlesen gibt es nichts zu erkennen - der feinere Schalter waere
+    -- dann eine Einstellung ohne Wirkung. SetButtonEnabled passt hier nicht:
+    -- Es blendet button.label ab, ein Schalter traegt seine Beschriftung aber
+    -- als .text.
+    do
+        local smartUsable = settings.watchRecruitmentTriggers == true
+        if smartUsable then
+            page.smartDetectionToggle:Enable()
+        else
+            page.smartDetectionToggle:Disable()
+        end
+        page.smartDetectionToggle.text:SetAlpha(smartUsable and 1 or 0.45)
+    end
     SetToggle(page.minimapToggle, not settings.minimap.hidden)
     -- Der Rueckholknopf hat nur einen Sinn, wenn das Symbol tatsaechlich frei
     -- steht und sichtbar ist.
@@ -4672,6 +4718,9 @@ function GC.UI:BuildMemberCarePage()
     content:SetHeight(1100)
     scroll:SetScrollChild(content)
     page.memberCareScroll = scroll
+    -- RefreshMemberCare setzt Kartenhoehe und Inhaltshoehe neu, sobald die Zahl
+    -- der Vorschlaege feststeht; dafuer braucht es den Inhaltsrahmen.
+    page.memberCareContent = content
 
     local rulesCard = CreateCard(content, "Prüfregeln")
     rulesCard:SetSize(752, 230)
@@ -4741,35 +4790,81 @@ function GC.UI:BuildMemberCarePage()
     local suggestionsCard = CreateCard(content, "Pflegevorschläge")
     suggestionsCard:SetSize(752, 368)
     suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -242)
+    -- Der Abstand vom Seitenanfang. Er bleibt fest, waehrend die Karte selbst
+    -- mit der Zahl der Vorschlaege waechst - RefreshMemberCare rechnet daraus
+    -- die Position der naechsten Karte aus.
+    page.memberCareSuggestionTopOffset = 242
     page.memberCareSuggestionsTitle = suggestionsCard.title
-    -- Der zweite Satz ist die wichtigste Auskunft dieser Karte: WoW erlaubt
-    -- einem Addon den Gildenausschluss nicht (GuildUninvite ist geschützt).
-    -- Wer das nicht weiß, hält den Knopf für kaputt - genau so gemeldet.
+    -- Der letzte Satz ist die wichtigste Auskunft dieser Karte: Die Liste
+    -- schlaegt vor, sie handelt nicht. WoW laesst einem Addon den
+    -- Gildenausschluss nicht zu (GuildUninvite ist geschuetzt), also steht
+    -- hier auch kein Knopf dafuer - wer das nicht weiss, sucht ihn.
+    -- Zwei Zeilen, nicht vier: Ein laengerer Text lief ueber die Hoehe hinaus
+    -- und endete im Spiel als "nicht bestätigt....".
     local suggestionHelp = CreateLabel(suggestionsCard,
-        "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.\n"
-        .. "„In WoW entfernen“ wählt den Spieler in Blizzards Gildenfenster aus – geklickt wird dort, WoW lässt es aus einem Addon heraus nicht zu.",
-        { muted = true, width = 716, height = 30, vertical = "TOP" })
+        "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Ausnahme“ nimmt jemanden dauerhaft aus der Liste. "
+        .. "Entfernt wird in WoW selbst – das lässt WoW aus einem Addon heraus nicht zu.",
+        { muted = true, width = 716, height = 32, vertical = "TOP" })
     suggestionHelp:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -46)
+    -- === Spaltenkoepfe ====================================================
+    --
+    -- Die Zeilen trugen ihre Bedeutung bisher nur aus sich selbst; welche
+    -- Spalte was ist, musste man raten. Dieselben Koepfe wie in der
+    -- Gildenuebersicht, an denselben x-Positionen wie die Zellen darunter.
+    local suggestionHeaders = {
+        { text = "SPIELER", x = 27, width = 104 },
+        { text = "RANG", x = 135, width = 84 },
+        { text = "STATUS", x = 223, width = 68 },
+        { text = "GRUND", x = 295, width = 340 },
+    }
+    for _, header in ipairs(suggestionHeaders) do
+        local headerLabel = CreateLabel(suggestionsCard, header.text, {
+            muted = true,
+            font = "GameFontNormalSmall",
+            width = header.width,
+        })
+        headerLabel:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", header.x, -84)
+    end
+
+    -- === Zeilenvorrat, so gross wie noetig ================================
+    --
+    -- Frueher standen hier neun feste Zeilen und darunter der Satz "Weitere 5
+    -- Vorschlaege sind vorhanden." - eine Liste, die ihren eigenen Inhalt
+    -- verschweigt. Aus dem Spiel: "ich will auch in der Liste scrollen koennen
+    -- und alle Vorschlaege sehen koennen".
+    --
+    -- Gescrollt wird ueber die Seite selbst, die ohnehin schon in einem
+    -- Scrollrahmen liegt: Die Karte waechst mit der Zahl der Vorschlaege, die
+    -- Karten darunter ruecken nach. Ein zweiter Scrollrahmen INNERHALB des
+    -- ersten waere die schlechtere Loesung - das Mausrad gehoerte dann zwei
+    -- Listen gleichzeitig, und der Nutzer trifft die falsche.
+    local SUGGESTION_ROW_STEP = 29
+    local SUGGESTION_FIRST_ROW = 105
     page.memberCareSuggestionRows = {}
-    for index = 1, 9 do
+    page.memberCareSuggestionCard = suggestionsCard
+    page.memberCareSuggestionStep = SUGGESTION_ROW_STEP
+    page.memberCareSuggestionTop = SUGGESTION_FIRST_ROW
+
+    function page:EnsureMemberCareRow(index)
+        if self.memberCareSuggestionRows[index] then
+            return self.memberCareSuggestionRows[index]
+        end
         local row = CreatePanel(suggestionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 27)
-        row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -81 - ((index - 1) * 29))
+        row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18,
+            -SUGGESTION_FIRST_ROW - ((index - 1) * SUGGESTION_ROW_STEP))
         row.name = CreateLabel(row, "", { width = 104, height = 27 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        -- Der Gildenrang stand nirgends, entscheidet aber ueber alles auf
-        -- dieser Zeile: Geschuetzte Raenge erscheinen nie als Vorschlag, und
-        -- entfernen darf man nur einen NIEDRIGEREN Rang. Ohne ihn war jeder
-        -- ausgegraute Knopf ein Raetsel.
+        -- Der Gildenrang entscheidet ueber die halbe Karte: Geschuetzte
+        -- Raenge erscheinen nie als Vorschlag.
         row.rank = CreateLabel(row, "", { width = 84, height = 27 })
         row.rank:SetPoint("LEFT", row, "LEFT", 117, 0)
         row.status = CreateLabel(row, "", { width = 68, height = 27 })
         row.status:SetPoint("LEFT", row, "LEFT", 205, 0)
-        -- Der Grund umbrach auf zwei Zeilen und lief damit ueber die 27 Pixel
-        -- Zeilenhoehe hinaus in die Nachbarzeilen. Er bleibt einzeilig - hat
-        -- aber seit dem Aufklappmenue 54 Pixel mehr Platz, weil drei Knoepfe
-        -- weggefallen sind. Vollstaendig steht er weiterhin im Tooltip.
-        row.reason = CreateLabel(row, "", { muted = true, width = 250, height = 27 })
+        -- Einzeilig: Eine umbrechende Zelle waechst ueber die 27 Pixel
+        -- Zeilenhoehe hinaus und schiebt sich in die Nachbarzeilen.
+        -- Vollstaendig steht der Grund im Tooltip.
+        row.reason = CreateLabel(row, "", { muted = true, width = 340, height = 27 })
         row.reason:SetPoint("LEFT", row, "LEFT", 277, 0)
         row:EnableMouse(true)
         row:SetScript("OnEnter", function(self)
@@ -4787,68 +4882,22 @@ function GC.UI:BuildMemberCarePage()
             end
         end)
 
-        local function DecideRow(status)
+        -- Genau ein Knopf. Von den vier frueheren konnte der Ausschluss nie
+        -- funktionieren (GuildUninvite ist geschuetzt), und "Später" wie
+        -- "Erledigt" waren Zwischenzustaende fuer genau diesen Ausschluss.
+        -- "Ausnahme" nimmt jemanden dauerhaft aus der Liste und wird
+        -- gildenweit geteilt.
+        row.ignoreButton = CreateButton(row, "Ausnahme", 80, 21, function()
             if not row.playerName then
                 return
             end
-            local ok, message = GC.Roster:SetMemberCareDecision(row.playerName, status)
-            page:SetMemberCareStatus(message, ok)
-            GC.UI:RefreshMemberCare()
-        end
-
-        -- === Ein Aufklappmenue statt vier Knoepfen =========================
-        --
-        -- Vier Knoepfe je Zeile mal neun Zeilen sind 36 Schaltflaechen auf
-        -- einer Karte, und sie frassen die Haelfte der Zeilenbreite - die
-        -- Begruendung daneben endete deshalb regelmaessig als "Main/Twink…".
-        -- Aus dem Spiel: "diese buttons eher in einem drop down machen?!"
-        --
-        -- Der Ausschluss bleibt bewusst ein EIGENER Knopf daneben. Er ist die
-        -- einzige Entscheidung hier, die sich nicht zuruecknehmen laesst; sie
-        -- gehoert nicht einen Klick tief in ein Menue, in dem der Zeiger schon
-        -- steht, weil man gerade "Später" ausgewaehlt hat. Er behaelt seine
-        -- zweistufige Bestaetigung.
-        local DECISION_ACTIONS = {
-            { label = "Ausnahme", status = "IGNORED" },
-            { label = "Später", status = "POSTPONED" },
-            { label = "Erledigt", status = "DONE" },
-        }
-        local actionLabels = {}
-        for _, action in ipairs(DECISION_ACTIONS) do
-            actionLabels[#actionLabels + 1] = GC.L(action.label)
-        end
-        row.actionDropdown = CreateChoiceDropdown(row, 104, actionLabels, function(selected)
-            for _, action in ipairs(DECISION_ACTIONS) do
-                if GC.L(action.label) == selected then
-                    DecideRow(action.status)
-                    break
-                end
-            end
-            -- Das Feld waehlt nichts aus, es loest aus. Ohne das Zuruecksetzen
-            -- traegt die Zeile danach die zuletzt getroffene Entscheidung als
-            -- Beschriftung, obwohl sie laengst ausgefuehrt ist.
-            row.actionDropdown:SetValue("")
-        end, true, GC.L("Entscheiden"), nil, 21)
-        row.actionDropdown:SetPoint("LEFT", row, "LEFT", 533, 0)
-
-        -- Ein Klick, keine zweite Bestätigung im Addon.
-        --
-        -- WoW lässt den Gildenausschluss nicht über ein Addon zu -
-        -- GuildUninvite ist geschützt. Der Knopf öffnet deshalb Blizzards
-        -- Gildenfenster, und dort fragt WoW von sich aus nach („Möchtet Ihr …
-        -- wirklich aus der Gilde entfernen?"). Eine eigene „Sicher?"-Stufe
-        -- davor wäre eine dritte Rückfrage für eine Sache, die dieses Fenster
-        -- gar nicht ausführt.
-        row.removeButton = CreateButton(row, "In WoW entfernen", 108, 21, function()
-            if not row.playerName then
-                return
-            end
-            local ok, message = GC.Roster:OpenGuildRemoval(row.playerName)
+            local ok, message = GC.Roster:SetMemberCareDecision(row.playerName, "IGNORED")
             page:SetMemberCareStatus(message, ok)
             GC.UI:RefreshMemberCare()
         end)
-        row.removeButton:SetPoint("LEFT", row, "LEFT", 643, 0)
-        page.memberCareSuggestionRows[index] = row
+        row.ignoreButton:SetPoint("LEFT", row, "LEFT", 627, 0)
+        self.memberCareSuggestionRows[index] = row
+        return row
     end
     page.memberCareSuggestionNotice = CreateLabel(suggestionsCard, "", { muted = true, width = 716 })
     page.memberCareSuggestionNotice:SetPoint("BOTTOMLEFT", suggestionsCard, "BOTTOMLEFT", 18, 10)
@@ -4856,6 +4905,10 @@ function GC.UI:BuildMemberCarePage()
     local decisionsCard = CreateCard(content, "Ausnahmen und Entscheidungen")
     decisionsCard:SetSize(752, 246)
     decisionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -622)
+    -- Diese Karte wandert: Sie haengt unter einer Vorschlagskarte, deren Hoehe
+    -- von der Zahl der Vorschlaege abhaengt.
+    page.memberCareDecisionsCard = decisionsCard
+    page.memberCareDecisionsHeight = 246
     page.memberCareDecisionsTitle = decisionsCard.title
     local decisionsHelp = CreateLabel(decisionsCard,
         "Diese Einträge werden gildenweit synchronisiert, damit nicht zwei Offiziere denselben Fall bearbeiten.",
@@ -4963,12 +5016,17 @@ function GC.UI:RefreshMemberCare()
     local candidates = GC.Roster:GetMemberCareCandidates()
     page.memberCareSuggestionsTitle:SetText(
         "Pflegevorschläge  •  ab " .. (careSettings.inactivityDays or 60) .. " Tagen  •  " .. #candidates)
+    -- Jeder Vorschlag bekommt eine Zeile. Der Vorrat waechst mit; ueberzaehlige
+    -- Zeilen aus einem frueheren, laengeren Stand werden versteckt statt
+    -- geloescht - Rahmen lassen sich in WoW ohnehin nicht freigeben.
+    for index = 1, #candidates do
+        page:EnsureMemberCareRow(index)
+    end
     for index, row in ipairs(page.memberCareSuggestionRows) do
         local candidate = candidates[index]
         row:SetShown(candidate ~= nil)
         if candidate then
             row.playerName = candidate.member.name
-            row.actionDropdown:SetValue("")
             row.name:SetText(GC.Util.PlayerShortName(candidate.member.name))
             row.name:SetTextColor(ClassColor(candidate.member.classFile))
             row.rank:SetText(candidate.member.rank or "–")
@@ -4977,18 +5035,33 @@ function GC.UI:RefreshMemberCare()
             SetTextColor(row.status, candidate.status == "VORSCHLAG" and THEME.danger or THEME.warning)
             row.reason:SetText(candidate.reason)
             row.tooltipName = GC.Util.PlayerShortName(candidate.member.name)
-            -- Der Tooltip nennt jetzt auch den Grund, WARUM "Entfernen" grau
-            -- ist. Das ist die Frage, die an dieser Zeile gestellt wird.
-            local removable, removeReason = GC.Roster:CanRemoveMember(candidate.member.name)
+            -- In der Zeile einzeilig, im Tooltip vollstaendig.
             row.tooltipText = candidate.reason
-                .. (removable and "" or ("\n\n" .. GC.L("Entfernen nicht möglich: ") .. tostring(removeReason)))
-
-            local canDecide = GC.Roster:CanAccessMemberCare()
-            SetButtonEnabled(row.actionDropdown, canDecide)
-            SetButtonEnabled(row.removeButton, removable == true)
+            SetButtonEnabled(row.ignoreButton, GC.Roster:CanAccessMemberCare())
         else
             row.playerName = nil
         end
+    end
+
+    -- === Die Karte waechst, der Rest rueckt nach ==========================
+    --
+    -- Ohne diesen Block stuenden die Zeilen ueber den Kartenrand hinaus und
+    -- unter der naechsten Karte. Gerechnet wird aus derselben Schrittweite,
+    -- mit der die Zeilen gesetzt werden - eine zweite, fest eingetippte Zahl
+    -- waere die naechste Unstimmigkeit.
+    do
+        local step = page.memberCareSuggestionStep
+        local top = page.memberCareSuggestionTop
+        local visible = math.max(1, #candidates)
+        -- Oben die Ueberschrift und die Koepfe, unten Platz fuer die
+        -- Hinweiszeile am Kartenfuss.
+        local cardHeight = top + (visible * step) + 34
+        page.memberCareSuggestionCard:SetSize(752, cardHeight)
+
+        local nextTop = page.memberCareSuggestionTopOffset + cardHeight + 24
+        page.memberCareDecisionsCard:SetPoint("TOPLEFT", page.memberCareContent,
+            "TOPLEFT", 0, -nextTop)
+        page.memberCareContent:SetHeight(nextTop + page.memberCareDecisionsHeight + 40)
     end
 
     local decisions = GC.Roster:GetMemberCareDecisions()
@@ -5018,25 +5091,11 @@ function GC.UI:RefreshMemberCare()
     page.memberCareDecisionNotice:SetText(#decisions == 0
         and "Keine Ausnahmen hinterlegt. Vorschläge lassen sich als Ausnahme, später oder erledigt ablegen."
         or "")
-    -- Ein ausgegrauter Knopf sagt "geht nicht", aber nie "warum". Beim
-    -- Entfernen ist das die haeufigste Ursache und die einzige, die das Addon
-    -- gar nicht beheben kann: WoW gibt einem Addon das Recht nur, wenn der
-    -- eigene Gildenrang die Berechtigung "Mitglied entfernen" traegt. Das
-    -- gehoert an die Oberflaeche, nicht in den Fehlerbericht des Nutzers.
-    if not GC.Roster:CanRemoveFromGuild() then
-        page.memberCareSuggestionNotice:SetText(GC.L("Entfernen ist ausgegraut: "
-            .. "Dein Gildenrang hat in WoW keine Berechtigung zum Entfernen von "
-            .. "Mitgliedern. Das kann nur der Gildenleiter in den Gildenrängen ändern."))
-        SetTextColor(page.memberCareSuggestionNotice, THEME.warning)
-        return
-    end
     SetTextColor(page.memberCareSuggestionNotice, THEME.muted)
-    SetTextColor(page.memberCareSuggestionNotice, THEME.muted)
+    -- "Weitere {n} Vorschläge sind vorhanden." ist ersatzlos entfallen: Die
+    -- Liste zeigt jetzt alle, es gibt keine weiteren mehr zu verschweigen.
     if #candidates == 0 then
         page.memberCareSuggestionNotice:SetText(GC.L("Keine Mitglieder erfüllen die aktuellen Prüfregeln."))
-    elseif #candidates > #page.memberCareSuggestionRows then
-        page.memberCareSuggestionNotice:SetText(GC.LFormat("Weitere {n} Vorschläge sind vorhanden.",
-            { n = #candidates - #page.memberCareSuggestionRows }))
     else
         page.memberCareSuggestionNotice:SetText(GC.L("Nur Vorschläge – keine automatische Entfernung."))
     end
@@ -8800,7 +8859,11 @@ function GC.UI:SetLeadProfileLinks(lead)
     if not page or not page.leadLinkEdits then
         return
     end
-    local links = lead and GC.WarcraftLogs:BuildCharacterLinks(lead.name) or {}
+    -- Die Profil-Links kommen aus der Gildenquelle von Warcraft Logs. Fehlt
+    -- das optionale Modul, gibt es keine - die Felder bleiben leer und der
+    -- Hinweis darunter erklaert es. Ein harter Zugriff waere hier ein
+    -- Lua-Fehler bei jedem Klick auf eine Bewerbung.
+    local links = (lead and GC.WarcraftLogs and GC.WarcraftLogs:BuildCharacterLinks(lead.name)) or {}
     local missing = false
     for key, edit in pairs(page.leadLinkEdits) do
         local link = links[key] or ""
@@ -8917,6 +8980,11 @@ end
 
 function GC.UI:BuildWarcraftLogsPage()
     local page = self.pages.WCL
+    -- Ohne das optionale Modul entsteht der Navigationspunkt gar nicht, und
+    -- damit auch keine Seite. Hier still aussteigen statt in ein nil greifen.
+    if not page or not GC.WarcraftLogs then
+        return
+    end
     CreatePageTitle(page, "Warcraft Logs",
         "Profile manuell eingeben oder öffentliche Reports mit dem mitgelieferten Windows-Helfer auslesen.")
 
@@ -9031,7 +9099,7 @@ end
 
 function GC.UI:RefreshWarcraftLogs()
     local page = self.pages.WCL
-    if not page then
+    if not page or not GC.WarcraftLogs then
         return
     end
     local data = GC.DB:GetGuild().warcraftLogs
