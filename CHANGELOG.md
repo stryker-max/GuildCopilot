@@ -7,6 +7,28 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.132 – Addon
+
+**Neu**
+
+- **Das Postfach wird gildenweit synchronisiert.** Bisher hatte es jeder nur für
+  sich: Wer angeflüstert wurde, sah den Bewerber — die anderen nicht. Ein
+  erfasster Bewerber geht jetzt über den Addon-Kanal an alle Gildenmitglieder,
+  mit Name, Klasse, Herkunftskanal und der Nachricht im Wortlaut, mit der er
+  aufgefallen ist. Flüsternachrichten eingeschlossen.
+- **Wer sich einloggt, bekommt den Bestand nachgereicht.** Die Anfrage läuft
+  über den Gildenkanal, die Antworten kommen gestreut und per Flüstern zurück,
+  damit ein Login nicht den halben Kanal belegt. Schneeballprinzip wie überall
+  sonst: Jeder speichert, was er kennt, und reicht es weiter.
+- **Übertragen wird nur die Ursprungsnachricht**, kein Chatverlauf. Sie ändert
+  sich nie — ein Bewerber kostet deshalb genau einmal Datenverkehr, auch wenn er
+  seinen Werbetext zum zehnten Mal in den Kanal schreibt. Lange Nachrichten
+  werden gestückelt übertragen und beim Empfänger wieder zusammengesetzt.
+- **Lokal bleibt lokal:** ob *du* einen Eintrag gelesen hast, der weitere
+  Nachrichtenverlauf und deine Ignorierliste. Ein ignorierter Spieler kommt auch
+  über den Sync nicht zurück, und der eigene Charakter landet nie im eigenen
+  Postfach.
+
 ## 0.9.131 – Addon
 
 **Geändert**

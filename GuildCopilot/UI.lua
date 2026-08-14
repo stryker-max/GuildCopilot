@@ -8781,6 +8781,9 @@ function GC.UI:RefreshInbox()
             -- Clients sie kennt.
             GC.Chat:ResolveLeadClass(lead)
             local level = tonumber(lead.level)
+            -- Wer den Fall schon hat, gehört in die ZEILE, nicht ins Detail:
+            -- Der ganze Zweck des geteilten Postfachs ist, dass man vor dem
+            -- Anklicken sieht, dass ein Kollege längst geantwortet hat.
             button:SetText((lead.unread and "•  " or "")
                 .. ClassColoredName(GC.Util.PlayerShortName(lead.name), lead.classFile)
                 .. (level and ("  |cff8b98a5" .. level .. "|r") or "")

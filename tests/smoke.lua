@@ -10021,6 +10021,190 @@ do
     addon.Chat:SetRecruitmentWordText("chatTriggers", chat_saved)
 end
 
+-- === Das Postfach faehrt durch die Gilde ===================================
+--
+-- Bis 0.9.131 hatte jeder sein eigenes: Wer gefluestert wurde, sah den
+-- Bewerber - die anderen nicht. Zwei Offiziere schrieben denselben an.
+--
+-- Uebertragen wird die Ursprungsnachricht im Wortlaut (Fluestern
+-- eingeschlossen) plus der Bearbeitungsstand. Kein Chatverlauf, und "unread"
+-- bleibt jedem selbst ueberlassen.
+do
+    local box_guild = addon.DB:GetGuild()
+    local box_savedInbox = box_guild.inbox
+    box_guild.inbox = {}
+    sentAddon = {}
+
+    -- Ein Bewerber faellt hier auf und geht in die Gilde.
+    addon.Chat:CaptureLead("Priester sucht Gilde zum Raiden", "Bewerber-Realm",
+        "Player-6409-0AAAAAAA", "SucheNachGruppe")
+    assert(#box_guild.inbox == 1, "Testaufbau: der Bewerber wurde nicht erfasst")
+
+    local box_packets = {}
+    for _, entry in ipairs(sentAddon) do
+        if tostring(entry[2]):sub(1, 2) == "I|" then
+            box_packets[#box_packets + 1] = entry[2]
+        end
+    end
+    assert(#box_packets > 0, "Ein neuer Bewerber wurde nicht in die Gilde gesendet")
+    for _, packet in ipairs(box_packets) do
+        assert(#packet <= addon.Constants.MAX_CHAT_BYTES,
+            "Ein Postfach-Paket überschreitet das Chatlimit: " .. #packet)
+    end
+
+    -- Derselbe Bewerber schreibt noch dreimal. Die Ursprungsnachricht aendert
+    -- sich dabei nicht - es darf also kein weiteres Paket kosten.
+    local box_before = #sentAddon
+    for _ = 1, 3 do
+        addon.Chat:CaptureLead("Priester sucht Gilde zum Raiden", "Bewerber-Realm",
+            "Player-6409-0AAAAAAA", "SucheNachGruppe")
+    end
+    local box_extra = 0
+    for index = box_before + 1, #sentAddon do
+        if tostring(sentAddon[index][2]):sub(1, 2) == "I|" then
+            box_extra = box_extra + 1
+        end
+    end
+    assert(box_extra == 0,
+        "Wiederholte Nachrichten desselben Bewerbers kosten " .. box_extra .. " Pakete")
+
+    -- === Die Gegenseite: ein Kollege empfaengt =============================
+    --
+    -- Nachgestellt, indem das Postfach geleert und dieselben Pakete
+    -- eingespielt werden - genau das tut ein zweiter Client.
+    -- Der eigene Eintrag traegt inzwischen vier Nachrichten (die Wiederholungen
+    -- von oben). Uebertragen wurde davon nur die erste - genau das prueft der
+    -- Empfang gleich.
+    assert(#box_guild.inbox[1].messages == 4,
+        "Testaufbau: die Wiederholungen wurden nicht lokal mitgeschrieben")
+    box_guild.inbox = {}
+    for _, packet in ipairs(box_packets) do
+        addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+    end
+    assert(#box_guild.inbox == 1,
+        "Der übertragene Bewerber kam beim Kollegen nicht an")
+    local box_lead = box_guild.inbox[1]
+    assert(addon.Util.NormalizeName(box_lead.name) == addon.Util.NormalizeName("Bewerber-Realm"),
+        "Der übertragene Eintrag trägt den falschen Namen: " .. tostring(box_lead.name))
+    assert(box_lead.messages[1].text == "Priester sucht Gilde zum Raiden",
+        "Die Ursprungsnachricht kam nicht im Wortlaut an: "
+            .. tostring(box_lead.messages[1] and box_lead.messages[1].text))
+    assert(#box_lead.messages == 1,
+        "Es wurde mehr als die Ursprungsnachricht übertragen: " .. #box_lead.messages)
+    assert(box_lead.unread == true, "Ein übernommener Bewerber gilt nicht als ungelesen")
+    assert(box_lead.source == "SucheNachGruppe", "Der Herkunftskanal ging verloren")
+
+    -- === Ein langer Text ueberlebt die Stueckelung =========================
+    do
+        local box_long = string.rep("Schamane sucht Gilde für Karazhan und mehr. ", 5)
+        box_guild.inbox = {}
+        sentAddon = {}
+        addon.Chat:CaptureLead(box_long, "Langtext-Realm", "Player-6409-0BBBBBBB", "WHISPER")
+        local box_chunks = {}
+        for _, entry in ipairs(sentAddon) do
+            if tostring(entry[2]):sub(1, 2) == "I|" then
+                box_chunks[#box_chunks + 1] = entry[2]
+                assert(#entry[2] <= addon.Constants.MAX_CHAT_BYTES,
+                    "Ein Teilstück überschreitet das Chatlimit")
+            end
+        end
+        assert(#box_chunks > 1,
+            "Testaufbau: der lange Text passte in ein Paket, die Stückelung lief nie")
+        box_guild.inbox = {}
+        for _, packet in ipairs(box_chunks) do
+            addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+        end
+        assert(#box_guild.inbox == 1, "Der gestückelte Eintrag kam nicht an")
+        assert(box_guild.inbox[1].messages[1].text == box_long,
+            "Der gestückelte Text kam nicht unverändert an")
+        -- Fluestern ausdruecklich eingeschlossen (Owner-Entscheidung).
+        assert(box_guild.inbox[1].source == "WHISPER",
+            "Eine geflüsterte Bewerbung wurde nicht als solche übertragen")
+    end
+
+    -- Geteilt wird der EINTRAG, nicht die Bearbeitung: Eine Antwort ist eine
+    -- rein lokale Angelegenheit und darf kein Paket kosten.
+    do
+        box_guild.inbox = {}
+        for _, packet in ipairs(box_packets) do
+            addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+        end
+        sentAddon = {}
+        addon.Chat:SendReply("Bewerber-Realm", "Hallo, gerne! Schreib mir.")
+        for _, entry in ipairs(sentAddon) do
+            assert(tostring(entry[2]):sub(1, 2) ~= "I|",
+                "Eine Antwort wurde in die Gilde gesendet - geteilt werden nur die Einträge")
+        end
+    end
+
+    -- === Die lokalen Sperren gelten auch fuer Fremdpakete ==================
+    do
+        -- Ein Gildenmitglied ist kein Bewerber.
+        box_guild.inbox = {}
+        sentAddon = {}
+        addon.Chat:CaptureLead("Sucht Gilde", "Fremder-Realm", "Player-6409-0CCCCCCC", "SucheNachGruppe")
+        local box_memberPackets = {}
+        for _, entry in ipairs(sentAddon) do
+            if tostring(entry[2]):sub(1, 2) == "I|" then
+                box_memberPackets[#box_memberPackets + 1] = entry[2]
+            end
+        end
+        assert(#box_memberPackets > 0, "Testaufbau: keine Pakete für die Sperrprobe")
+
+        -- Dieselben Pakete, aber der Genannte steht jetzt auf der Ignorierliste.
+        box_guild.inbox = {}
+        addon.Chat:SetInboxFilter("Fremder-Realm", 0)
+        for _, packet in ipairs(box_memberPackets) do
+            addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+        end
+        assert(#box_guild.inbox == 0,
+            "Ein ignorierter Spieler kam über den Sync zurück ins Postfach")
+        addon.Chat:ClearInboxFilter("fremder")
+
+        -- Und der eigene Charakter niemals.
+        box_guild.inbox = {}
+        local box_selfRecord = {
+            name = addon:GetPlayerFullName(), firstSeenAt = 1, lastSeenAt = 1,
+            source = "SucheNachGruppe", text = "Sucht Gilde",
+        }
+        assert(addon.Chat:MergeRemoteLead(box_selfRecord) == false,
+            "Der eigene Charakter landete über den Sync im Postfach")
+    end
+
+    -- === Eine Anfrage wird beantwortet =====================================
+    do
+        box_guild.inbox = {}
+        for _, packet in ipairs(box_packets) do
+            addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+        end
+        sentAddon = {}
+        addon.Sync:OnMessage("GuildCopilot",
+            "I|" .. addon.Constants.SCHEMA_VERSION .. "|IQ", "GUILD", "Frager-Realm")
+        addon.Sync:PumpBulk(20)
+        local box_answers = 0
+        for _, entry in ipairs(sentAddon) do
+            if tostring(entry[2]):sub(1, 2) == "I|" then
+                box_answers = box_answers + 1
+                assert(entry[3] == "WHISPER",
+                    "Die Antwort auf eine Postfachanfrage ging nicht per Flüstern")
+            end
+        end
+        assert(box_answers > 0, "Eine Postfachanfrage blieb unbeantwortet")
+
+        -- Die eigene Anfrage beantwortet man nicht selbst.
+        sentAddon = {}
+        addon.Sync:OnMessage("GuildCopilot",
+            "I|" .. addon.Constants.SCHEMA_VERSION .. "|IQ", "GUILD", "Tester-Realm")
+        addon.Sync:PumpBulk(20)
+        for _, entry in ipairs(sentAddon) do
+            assert(tostring(entry[2]):sub(1, 2) ~= "I|",
+                "Die eigene Postfachanfrage wurde selbst beantwortet")
+        end
+    end
+
+    box_guild.inbox = box_savedInbox
+end
+
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den
 -- geschuetzten Gildenausschluss versucht.
 assert(#uninvitedPlayers == 0,

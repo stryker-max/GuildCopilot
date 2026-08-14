@@ -2631,14 +2631,15 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     local messageType, messageSchema = message:match("^(%a+)|(%d+)")
     if messageType == "P" or messageType == "W" or messageType == "G"
         or messageType == "GQ" or messageType == "E" or messageType == "L"
-        or messageType == "B" or messageType == "O" then
+        or messageType == "B" or messageType == "O" or messageType == "I" then
         self:NoteAddonUser(sender, { schemaVersion = messageSchema, source = "TRAFFIC" })
     end
 
     -- Alles, was in Teilen ankommt, treibt den Fortschrittsbalken an: Erst
     -- danach weiss dieser Client ueberhaupt, dass eine Uebertragung laeuft.
     if messageType == "W" or messageType == "G" or messageType == "E"
-        or messageType == "L" or messageType == "B" or messageType == "RD" then
+        or messageType == "L" or messageType == "B" or messageType == "RD"
+        or messageType == "I" then
         self:WakeProgress()
     end
 
@@ -2653,7 +2654,7 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     if distribution == "WHISPER" and #GC.Roster.members > 0
         and (messageType == "A" or messageType == "W" or messageType == "L"
             or messageType == "E" or messageType == "O" or messageType == "RD"
-            or messageType == "G")
+            or messageType == "G" or messageType == "I")
         and not GC.Roster:IsGuildMember(sender) then
         return
     end
@@ -2694,6 +2695,13 @@ function GC.Sync:OnMessage(prefix, message, distribution, sender)
     elseif message:sub(1, 2) == "E|" and (distribution == "GUILD" or distribution == "WHISPER") then
         if GC.GearAudit then
             GC.GearAudit:ReceiveEquipmentChunk(message, sender)
+        end
+        return
+    elseif message:sub(1, 2) == "I|" and (distribution == "GUILD" or distribution == "WHISPER") then
+        -- Das Bewerber-Postfach. Die Anfrage laeuft ueber den Gildenkanal,
+        -- die Antwort gezielt per Fluestern.
+        if GC.Chat then
+            GC.Chat:ReceiveSync(message, sender, distribution)
         end
         return
     elseif distribution == "GUILD" and IsSummaryRequest(message) then
@@ -2831,6 +2839,14 @@ function GC.Sync:RunStartupSequence()
         -- Gildenaufträge abgleichen: Wer etwas kennt, liefert es nach.
         if GC.Orders then
             GC.Orders:RequestSync()
+        end
+    end)
+    C_Timer.After(15, function()
+        -- Und das Bewerber-Postfach: Was die Gilde kennt, kennt jeder. Die
+        -- Antworten kommen gestreut und per Fluestern, damit ein Login nicht
+        -- den halben Gildenkanal belegt.
+        if GC.Chat then
+            GC.Chat:RequestInbox()
         end
     end)
     C_Timer.After(17, function()

@@ -298,6 +298,47 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.132 – Das Postfach gehört der Gilde
+
+Aus dem Spiel: „Das Gildenpostfach wird aber nicht zwischen den Membern synchronisiert oder? Das sollte aber bitte so sein!"
+
+Richtig geraten, und es war kein Versehen im Sync — es war nie vorgesehen. Geteilt wurde bisher nur `inboxSound`, also die Rangliste, wer den Bewerberton hört. Der Inhalt blieb bei dem, bei dem die Nachricht ankam. Wer angeflüstert wurde, sah den Bewerber; die anderen nicht.
+
+### Was übertragen wird
+
+Owner-Entscheidung, in dieser Reihenfolge gefallen:
+
+- **Alles im Wortlaut, Flüstern eingeschlossen.** Die Alternative (Flüstern nur als Vermerk „hat geflüstert") war angeboten und wurde verworfen.
+- **Nur die Ursprungsnachricht**, kein Chatverlauf. „Priester sucht Gilde" — die Zeile, mit der jemand aufgefallen ist.
+- **Sonst nichts.** Ein erster Entwurf hatte den Bearbeitungsstand mitgesendet („Alex hat geantwortet", grün in der Zeile). Das war nicht verlangt und ist wieder entfallen: *„einfach nur so wie die nachrichten grade im postfach landen einfach synchronisieren sonst nix"*. Antworten bleibt eine lokale Angelegenheit und kostet kein Paket.
+
+Die Beschränkung auf die Ursprungsnachricht ist nebenbei die technisch angenehmste Eigenschaft der ganzen Sache: **Sie ändert sich nie.** Ein Eintrag geht genau einmal raus. Ein Bewerber, der seinen Werbetext zum zehnten Mal in den Kanal schreibt, kostet kein zehntes Paket — der Test hält das fest.
+
+Nicht übertragen werden: `unread` (ob *du* gelesen hast, ist deine Sache), der weitere Nachrichtenverlauf und die Ignorierliste.
+
+### Form
+
+Neuer Nachrichtentyp `I|`, aufgebaut wie die Gildenbank ihre Fächer verschickt:
+
+```
+I|<schema>|IL|<token>|<index>|<anzahl>|<teilstück>     ein Eintrag, gestückelt
+I|<schema>|IQ                                          "wer hat was?"
+```
+
+Die Stückelung ist nicht optional: Eine Bewerbung darf im Spiel 255 Zeichen lang sein, dazu kommen Name, GUID, Klasse und zwei Zeitstempel — ein Eintrag passt selten in ein Chatpaket. Der Datensatz wird als Ganzes serialisiert, escaped und dann in Stücke geschnitten; der Empfänger setzt über den Token wieder zusammen. Doppeltes Escaping ist dabei unkritisch, `EscapeField`/`UnescapeField` sind sauber umkehrbar (`%` → `%25` zuerst, beim Auspacken zuletzt).
+
+Die Anfrage läuft über den Gildenkanal, die Antwort **gezielt per Flüstern** und um 1–6 Sekunden gestreut. Sonst schiebt bei jedem Login die halbe Gilde denselben Bestand gleichzeitig in den Gildenkanal. Gesendet wird über `SendBulk`, pausiert also im Kampf wie alles andere.
+
+### Die lokalen Sperren gelten auch für Fremdpakete
+
+`MergeRemoteLead` wiederholt exakt die Prüfungen aus `CaptureLead`: kein eigener Charakter, kein Gildenmitglied, niemand von der Ignorierliste. Ohne das holt ein fremdes Paket zurück, was hier bewusst ausgeschlossen wurde — und die Ignorierliste, die lokal bleibt, wäre wertlos, sobald ein Kollege denselben Dauerschreiber erfasst.
+
+Beim Zusammenführen gewinnt nicht der Absender, sondern der jeweils bessere Wert: früheste Ersterfassung, späteste Sichtung, vorhandene Klasse. Der Wortlaut wird nur übernommen, wenn hier noch keiner steht — die eigene Aufzeichnung ist die genauere, sie hat den ganzen Verlauf statt nur den Anfang. Ein übernommener Eintrag gilt als **ungelesen**, aber ohne Klang: Beim Nachreichen eines ganzen Postfachs wäre das ein Trommelfeuer.
+
+### Geprüft
+
+`tests/smoke.lua` spielt den Round-Trip zwischen zwei Clients durch — senden, Postfach leeren, dieselben Pakete einspielen: Wortlaut, Herkunftskanal und `unread` kommen an, der Verlauf bleibt bei einer Nachricht. Dazu ein Text über der Paketgrenze (die Stückelung läuft wirklich, und der Text kommt unverändert an), die Sperren gegen Ignorierte und den eigenen Charakter, die Anfrage-Antwort per Flüstern, dass man die eigene Anfrage nicht selbst beantwortet — und dass eine Antwort **kein** Paket erzeugt. Gegenprobe gegen die Fassung ohne Sync: schlägt fehl.
+
 ## 0.9.131 – Die Reihenfolge verrät, wer sucht
 
 Aus dem Spiel gemeldet, mit Screenshot aus dem SucheNachGruppe-Kanal:

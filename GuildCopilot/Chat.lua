@@ -673,6 +673,13 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
         self.heardSenders[normalizedSender] = true
         self:PlaySuccessSound()
     end
+    -- Und ab damit in die Gilde. Nur beim ERSTEN Mal: Die Ursprungsnachricht
+    -- ist das, was uebertragen wird, und die aendert sich nie. Ein Bewerber,
+    -- der seinen Werbetext zum zehnten Mal in den Kanal schreibt, kostet
+    -- deshalb kein zehntes Paket.
+    if #lead.messages == 1 then
+        self:SendLead(lead)
+    end
     GC:FireCallback("INBOX_UPDATED", lead)
 end
 
@@ -839,6 +846,274 @@ function GC.Chat:ClearInbox()
     self.heardSenders = {}
     GC:FireCallback("INBOX_UPDATED")
     return true
+end
+
+-- === Das Postfach gildenweit ==============================================
+--
+-- Bis 0.9.131 war das Postfach das einzige gemeinsame Arbeitsmittel, das jeder
+-- nur fuer sich hatte: Wer geflüstert wurde, sah den Bewerber - die anderen
+-- nicht. Zwei Offiziere haben denselben Bewerber angeschrieben, ein dritter
+-- gar keinen, weil er dachte, es sei erledigt.
+--
+-- Uebertragen wird nach dem Schneeballprinzip wie alles andere: Jeder Client
+-- speichert, was er kennt, und reicht es weiter. Keine Berechtigungen, keine
+-- ausgezeichneten Absender.
+--
+-- WAS uebertragen wird (Owner-Entscheidung):
+--   * die URSPRUNGSNACHRICHT im Wortlaut - die, mit der jemand aufgefallen
+--     ist ("Priester sucht Gilde"). Kein Chatverlauf: Der ist bei hundert
+--     Eintraegen mit je zwanzig Nachrichten mehrere hundert Kilobyte, und die
+--     spaeteren Zeilen sind fast immer Wiederholungen desselben Werbetexts.
+--   * Fluesternachrichten ausdruecklich eingeschlossen.
+--
+-- Was NICHT mitfaehrt:
+--   * "unread" - ob DU den Eintrag gelesen hast, ist deine Sache;
+--   * der weitere Nachrichtenverlauf, den jeder lokal fuer sich behaelt;
+--   * der Bearbeitungsstand (wer geantwortet hat) - ausdruecklich nicht
+--     gewuenscht: Es geht darum, dass alle dieselben Bewerber SEHEN, nicht
+--     darum, die Bearbeitung im Addon zu verwalten;
+--   * die Ignorierliste - sie bleibt lokal und WIRKT auch gegen Fremdeintraege.
+--
+-- Die Ursprungsnachricht aendert sich nie. Ein Eintrag geht deshalb genau
+-- einmal raus und danach nie wieder.
+
+local INBOX_SYNC_PREFIX = "I"
+
+-- Ein Eintrag passt selten in ein Chatpaket: Eine Bewerbung darf im Spiel 255
+-- Zeichen lang sein, dazu kommen Name, GUID, Klasse und Zeitstempel. Der
+-- fertige Datensatz wird deshalb gestueckelt uebertragen, genau wie die
+-- Gildenbank ihre Faecher stueckelt, und beim Empfaenger ueber den Token
+-- wieder zusammengesetzt.
+local function BuildInboxRecord(lead)
+    local first = type(lead.messages) == "table" and lead.messages[1] or nil
+    return table.concat({
+        GC.Util.EscapeField(lead.name or ""),
+        GC.Util.EscapeField(lead.guid or ""),
+        GC.Util.EscapeField(lead.classFile or ""),
+        GC.Util.EscapeField(tostring(tonumber(lead.firstSeenAt) or 0)),
+        GC.Util.EscapeField(tostring(tonumber(lead.lastSeenAt) or 0)),
+        GC.Util.EscapeField(lead.source or ""),
+        GC.Util.EscapeField(first and first.text or ""),
+    }, "|")
+end
+
+local function ParseInboxRecord(payload)
+    local fields = GC.Util.SplitFields(payload)
+    if GC.Util.Trim(fields[1]) == "" then
+        return nil
+    end
+    return {
+        name = fields[1],
+        guid = GC.Util.Trim(fields[2]) ~= "" and fields[2] or nil,
+        classFile = GC.Util.Trim(fields[3]) ~= "" and fields[3] or nil,
+        firstSeenAt = tonumber(fields[4]) or 0,
+        lastSeenAt = tonumber(fields[5]) or 0,
+        source = fields[6] or "",
+        text = fields[7] or "",
+    }
+end
+
+function GC.Chat:BuildInboxMessages(lead)
+    if type(lead) ~= "table" or GC.Util.Trim(lead.name) == "" then
+        return {}
+    end
+    local token = tostring(GC.Util.Now()) .. tostring(math.random(100, 999))
+    local header = table.concat({
+        INBOX_SYNC_PREFIX, tostring(GC.Constants.SCHEMA_VERSION), "IL",
+        GC.Util.EscapeField(token), "000", "000", "",
+    }, "|")
+    local payload = GC.Util.EscapeField(BuildInboxRecord(lead))
+    local limit = GC.Constants.MAX_CHAT_BYTES - #header
+    if limit < 16 then
+        return {}
+    end
+
+    local chunks = {}
+    for offset = 1, math.max(1, #payload), limit do
+        chunks[#chunks + 1] = payload:sub(offset, offset + limit - 1)
+    end
+    local messages = {}
+    for index, chunk in ipairs(chunks) do
+        messages[#messages + 1] = table.concat({
+            INBOX_SYNC_PREFIX, tostring(GC.Constants.SCHEMA_VERSION), "IL",
+            GC.Util.EscapeField(token), tostring(index), tostring(#chunks), chunk,
+        }, "|")
+    end
+    return messages
+end
+
+function GC.Chat:SendLead(lead, distribution, target)
+    if not GC.Sync then
+        return false
+    end
+    local messages = self:BuildInboxMessages(lead)
+    if #messages == 0 then
+        return false
+    end
+    for _, message in ipairs(messages) do
+        GC.Sync:SendBulk(message, distribution or "GUILD", target)
+    end
+    return true
+end
+
+-- Der ganze Bestand. Geht als Antwort auf eine Anfrage gezielt per Fluestern
+-- raus, damit nicht die halbe Gilde dasselbe gleichzeitig in den Gildenkanal
+-- schiebt.
+function GC.Chat:SendInbox(distribution, target)
+    local sent = 0
+    for _, lead in ipairs(GC.DB:GetGuild().inbox) do
+        if self:SendLead(lead, distribution, target) then
+            sent = sent + 1
+        end
+    end
+    return sent
+end
+
+function GC.Chat:RequestInbox()
+    if not GC.Sync or not IsInGuild or not IsInGuild() then
+        return false
+    end
+    return GC.Sync:Send(table.concat({
+        INBOX_SYNC_PREFIX, tostring(GC.Constants.SCHEMA_VERSION), "IQ",
+    }, "|"))
+end
+
+-- Ein fremder Eintrag wird eingefuegt, nicht ueberschrieben: Der Absender
+-- kennt seinen Stand, wir unseren, und beide sind wahr.
+function GC.Chat:MergeRemoteLead(record)
+    if type(record) ~= "table" or GC.Util.Trim(record.name) == "" then
+        return false
+    end
+    -- Dieselben Sperren wie beim eigenen Erfassen. Ohne sie holt ein fremdes
+    -- Paket zurueck, was hier bewusst ausgeschlossen wurde - der eigene
+    -- Charakter, ein Gildenmitglied, ein Ignorierter.
+    if GC.Util.NormalizeName(record.name) == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
+        return false
+    end
+    if GC.Roster:IsGuildMember(record.name) then
+        return false
+    end
+    if self:IsInboxFiltered(record.name) then
+        return false
+    end
+
+    local inbox = GC.DB:GetGuild().inbox
+    local lead
+    for index = #inbox, 1, -1 do
+        local existing = inbox[index]
+        if type(existing) ~= "table" then
+            table.remove(inbox, index)
+        elseif SameLead(existing.name, existing.guid, record.name, record.guid) then
+            lead = existing
+        end
+    end
+
+    if not lead then
+        lead = {
+            name = record.name,
+            guid = record.guid,
+            firstSeenAt = record.firstSeenAt > 0 and record.firstSeenAt or GC.Util.Now(),
+            source = record.source,
+            messages = {},
+            -- Ungelesen: Ein Bewerber, den ein Kollege aufgenommen hat, ist
+            -- fuer DICH neu. Ein Klang kommt dabei nicht - beim Nachreichen
+            -- eines ganzen Postfachs waere das ein Trommelfeuer.
+            unread = true,
+        }
+        table.insert(inbox, 1, lead)
+    end
+
+    lead.guid = lead.guid or record.guid
+    lead.classFile = lead.classFile or record.classFile
+    lead.source = lead.source or record.source
+    if record.firstSeenAt > 0 and (not tonumber(lead.firstSeenAt) or record.firstSeenAt < lead.firstSeenAt) then
+        lead.firstSeenAt = record.firstSeenAt
+    end
+    if record.lastSeenAt > (tonumber(lead.lastSeenAt) or 0) then
+        lead.lastSeenAt = record.lastSeenAt
+    end
+    -- Der Wortlaut nur, wenn hier noch keiner steht: Die eigene Aufzeichnung
+    -- ist die genauere - sie hat den ganzen Verlauf, nicht nur den Anfang.
+    if type(lead.messages) ~= "table" then
+        lead.messages = {}
+    end
+    if #lead.messages == 0 and GC.Util.Trim(record.text) ~= "" then
+        lead.messages[1] = {
+            receivedAt = lead.firstSeenAt,
+            text = record.text,
+            source = record.source,
+            remote = true,
+        }
+    end
+    self:ResolveLeadClass(lead)
+    return true
+end
+
+function GC.Chat:ReceiveSync(message, sender, distribution)
+    local fields = GC.Util.SplitFields(message)
+    if tonumber(fields[2]) ~= GC.Constants.SCHEMA_VERSION then
+        return
+    end
+    local kind = fields[3]
+
+    if kind == "IQ" then
+        -- Gefragt wird in den Gildenkanal, geantwortet wird gezielt. Gestreut,
+        -- damit nicht alle gleichzeitig losschicken.
+        if distribution ~= "GUILD" or GC.Util.Trim(sender) == "" then
+            return
+        end
+        if GC.Util.NormalizeName(sender) == GC.Util.NormalizeName(GC:GetPlayerFullName()) then
+            return
+        end
+        if #GC.DB:GetGuild().inbox == 0 then
+            return
+        end
+        if C_Timer and type(C_Timer.After) == "function" then
+            C_Timer.After(1 + math.random() * 5, function()
+                GC.Chat:SendInbox("WHISPER", sender)
+            end)
+        else
+            self:SendInbox("WHISPER", sender)
+        end
+        return
+    end
+
+    if kind ~= "IL" then
+        return
+    end
+
+    local token = fields[4]
+    if GC.Util.Trim(token) == "" then
+        return
+    end
+    local index = tonumber(fields[5]) or 0
+    local count = tonumber(fields[6]) or 0
+    if index < 1 or count < 1 or index > count or count > 8 then
+        return
+    end
+
+    self.inboxIncoming = self.inboxIncoming or {}
+    local key = tostring(sender) .. "\1" .. token
+    local pending = self.inboxIncoming[key]
+    if not pending then
+        pending = { chunks = {}, count = count, at = GC.Util.Now() }
+        self.inboxIncoming[key] = pending
+    end
+    pending.chunks[index] = fields[7] or ""
+    pending.at = GC.Util.Now()
+
+    for position = 1, pending.count do
+        if pending.chunks[position] == nil then
+            return
+        end
+    end
+    self.inboxIncoming[key] = nil
+
+    local record = ParseInboxRecord(GC.Util.UnescapeField(table.concat(pending.chunks)))
+    if record and self:MergeRemoteLead(record) then
+        GC.DB:Prune()
+        GC:FireCallback("INBOX_UPDATED")
+    end
 end
 
 local chatEvents = CreateFrame("Frame")

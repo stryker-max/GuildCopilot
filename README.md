@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.131
+# Guild Copilot 0.9.132
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -52,6 +52,10 @@ Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten la
 | „**Gilde sucht** noch aktive Raider“ | Gildenwort zuerst → Werbung einer anderen Gilde, bleibt draußen |
 
 Das trennt Bewerber von Konkurrenzwerbung, ohne dass du eine einzige Wendung nachtragen musst. Abschaltbar über **Einstellungen → Auch freie Formulierungen erkennen**; deine eigenen Trigger-Wörter gelten unabhängig davon immer.
+
+**Das Postfach gilt gildenweit.** Ein erfasster Bewerber wird über den Addon-Kanal an alle Gildenmitglieder verteilt — mit Name, Klasse, Herkunftskanal und der Nachricht, mit der er aufgefallen ist, im Wortlaut. Wer sich einloggt, bekommt den Bestand nachgereicht. Damit sieht jeder dieselben Bewerber, auch wenn die Nachricht nur bei einem angekommen ist.
+
+Übertragen wird ausschließlich die **Ursprungsnachricht** — kein Chatverlauf. Ob *du* einen Eintrag gelesen hast und deine Ignorierliste bleiben lokal; ein ignorierter Spieler kommt auch über den Sync nicht zurück.
 
 - **Antworten** mit drei Knöpfen: Danke, Gildeninfos, Discord. Die Vorlagen dahinter pflegst du direkt im Postfach, sie gelten gildenweit und kennen Platzhalter wie `{name}`, `{raidzeiten}` oder `{discord}`.
 - Jeder **Entwurf gehört zu seinem Interessenten** und bleibt beim Wechsel erhalten — auch wenn währenddessen eine neue Nachricht eintrifft und die Liste sich verschiebt.
@@ -181,7 +185,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.131.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.132.
 
 ### Warum Windows beim Herunterladen warnt
 
