@@ -717,6 +717,15 @@ local function HasBlizzardRemovePermission()
     return success and allowed == true
 end
 
+-- Dieselbe Frage, aber ohne Bezug auf ein Ziel: Darf dieser Charakter in WoW
+-- ueberhaupt jemanden aus der Gilde entfernen? Die Oberflaeche braucht das, um
+-- den ausgegrauten Knopf zu erklaeren, statt ihn unkommentiert stehen zu
+-- lassen - ein Addon kann dieses Recht nicht ersetzen, auch keine
+-- Rangfreigabe im Gildenprofil.
+function GC.Roster:CanRemoveFromGuild()
+    return HasBlizzardRemovePermission()
+end
+
 function GC.Roster:CanRemoveMember(name)
     if not self:CanAccessMemberCare() then
         return false, "Für deinen Gildenrang ist die Mitgliederpflege nicht freigeschaltet."
@@ -746,7 +755,44 @@ function GC.Roster:CanRemoveMember(name)
     return true, "Entfernen ist möglich."
 end
 
-function GC.Roster:RemoveMember(name)
+-- Wie lange auf den neuen Gildenroster gewartet wird, bevor nachgesehen wird,
+-- ob der Ausschluss wirklich stattgefunden hat. GuildUninvite wirkt nicht
+-- sofort: Der Client schickt die Bitte zum Server und erfaehrt das Ergebnis
+-- erst mit dem naechsten GUILD_ROSTER_UPDATE.
+local REMOVE_VERIFY_DELAY = 2.5
+local REMOVE_VERIFY_ATTEMPTS = 3
+
+-- Der Ausschluss, und zwar nachgeprueft.
+--
+-- Hier stand frueher `local success = pcall(removeFunction, target.name)`, und
+-- daraus wurde "wurde aus der Gilde entfernt" samt Vermerk "erledigt" in der
+-- Mitgliederpflege. Das war falsch, und zwar auf die unangenehmste Art:
+-- `pcall` meldet, dass der Aufruf KEINEN LUA-FEHLER geworfen hat - nicht, dass
+-- er etwas bewirkt hat. GuildUninvite gibt nichts zurueck und wirft nichts,
+-- wenn der Server ablehnt: falsche Namensschreibweise, fehlende Berechtigung,
+-- der Spieler ist gar nicht (mehr) in der Gilde. In all diesen Faellen meldete
+-- das Addon Erfolg, strich den Mann aus der Mitgliederpflege - und in der
+-- Gilde stand er weiter. Genau so aus dem Spiel gemeldet.
+--
+-- Beantwortet wird die Frage jetzt dort, wo sie beantwortbar ist: im Roster.
+-- Ist der Spieler nach dem naechsten Einlesen weg, hat es geklappt. Steht er
+-- noch da, hat es das nicht - dann bleibt auch der Vermerk aus, damit der Fall
+-- offen bleibt, statt still zu verschwinden.
+function GC.Roster:RemoveMember(name, onResult)
+    -- Der Rueckruf meldet ausschliesslich das GEPRUEFTE Ergebnis, und genau
+    -- einmal. Alles, was schon beim Aufruf feststeht, steht im Rueckgabewert.
+    local reported = false
+    local function Report(ok, message)
+        if reported then
+            return ok, message
+        end
+        reported = true
+        if type(onResult) == "function" then
+            pcall(onResult, ok, message)
+        end
+        return ok, message
+    end
+
     local allowed, reason = self:CanRemoveMember(name)
     if not allowed then
         return false, reason
@@ -760,16 +806,49 @@ function GC.Roster:RemoveMember(name)
         removeFunction = C_GuildInfo.Uninvite
     end
     if type(removeFunction) ~= "function" then
-        return false, "Diese WoW-Version bietet kein Entfernen über Addons."
+        return Report(false, "Diese WoW-Version bietet kein Entfernen über Addons.")
     end
-    local success = pcall(removeFunction, target.name)
-    if not success then
-        return false, "WoW hat das Entfernen abgelehnt."
+    -- Der Lua-Fehler bleibt eine eigene Frage: Er heisst, dass der Aufruf gar
+    -- nicht erst zustande kam.
+    if not pcall(removeFunction, target.name) then
+        return Report(false, "WoW hat das Entfernen abgelehnt.")
     end
 
-    self:SetMemberCareDecision(target.name, "DONE")
-    self:Request()
-    return true, GC.Util.PlayerShortName(target.name) .. " wurde aus der Gilde entfernt."
+    local shortName = GC.Util.PlayerShortName(target.name)
+    local targetKey = GC.Util.NormalizeName(target.name)
+
+    -- Ohne Zeitgeber bleibt nur die alte, ungepruefte Antwort. Sie ist dann
+    -- ausdruecklich als ungeprueft formuliert.
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        self:Request()
+        return Report(true, shortName .. ": Entfernen wurde an WoW übergeben.")
+    end
+
+    local function Verify(attempt)
+        self:Request()
+        self:Scan()
+        if self:GetMember(targetKey) == nil then
+            -- Erst jetzt der Vermerk: Ein Fall gilt als erledigt, wenn er es
+            -- ist, nicht wenn wir es versucht haben.
+            self:SetMemberCareDecision(target.name, "DONE")
+            GC:FireCallback("MEMBERCARE_UPDATED")
+            return Report(true, shortName .. " wurde aus der Gilde entfernt.")
+        end
+        if attempt < REMOVE_VERIFY_ATTEMPTS then
+            C_Timer.After(REMOVE_VERIFY_DELAY, function()
+                Verify(attempt + 1)
+            end)
+            return
+        end
+        GC:FireCallback("MEMBERCARE_UPDATED")
+        Report(false, shortName .. " steht weiterhin im Gildenroster – WoW hat "
+            .. "das Entfernen nicht ausgeführt. Prüfe deine Gildenberechtigung.")
+    end
+
+    C_Timer.After(REMOVE_VERIFY_DELAY, function()
+        Verify(1)
+    end)
+    return Report(true, shortName .. " wird entfernt – wird gleich geprüft …")
 end
 
 function GC.Roster:GetGuildAbsences()

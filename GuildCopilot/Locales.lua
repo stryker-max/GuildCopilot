@@ -342,6 +342,7 @@ local english = {
     ["Dein Rang darf dieses gildenweite Profil bearbeiten."] = "Your rank may edit this guild-wide profile.",
     ["Dein eigener Rang wurde einmalig wieder freigeschaltet."] = "Your own rank has been unlocked once.",
     ["Den eigenen Rang kannst du nicht abwählen."] = "You cannot deselect your own rank.",
+    ["Entfernen ist ausgegraut: Dein Gildenrang hat in WoW keine Berechtigung zum Entfernen von Mitgliedern. Das kann nur der Gildenleiter in den Gildenrängen ändern."] = "Remove is greyed out: your guild rank has no WoW permission to remove members. Only the guild leader can change that in the guild ranks.",
     ["Senden nicht möglich – bist du in einer Gilde?"] = "Cannot send – are you in a guild?",
     ["Gesendet an {n} – warte auf Bestätigung …"] = "Sent to {n} – waiting for confirmation …",
     ["Gesendet. {n} online mit älterer Fassung – die können den Empfang nicht bestätigen."] = "Sent. {n} online with an older version – they cannot confirm receipt.",

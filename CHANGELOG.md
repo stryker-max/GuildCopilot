@@ -7,6 +7,28 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.124 – Addon
+
+**Behoben**
+
+- **„Entfernen" meldete Erfolg, obwohl der Spieler in der Gilde blieb.** Aus dem
+  Spiel gemeldet: „Er ist zwar aus der Mitgliederpflege geflogen, aber aus der
+  Gilde entfernt hat es ihn nicht." Die Ursache stand in einer Zeile: Geprüft
+  wurde, ob der Aufruf keinen Fehler *geworfen* hat – nicht, ob er etwas
+  *bewirkt* hat. WoW gibt beim Entfernen nichts zurück und wirft nichts, wenn
+  der Server ablehnt. Das Addon meldete deshalb Erfolg, strich den Fall als
+  „erledigt" aus der Mitgliederpflege – und in der Gilde stand er weiter.
+  Jetzt wird im Gildenroster nachgesehen: Ist er weg, gilt es als erledigt.
+  Steht er noch da, sagt das Addon das – und der Fall bleibt offen, statt still
+  zu verschwinden.
+
+**Neu**
+
+- **Der ausgegraute „Entfernen"-Knopf erklärt sich.** Fehlt deinem Gildenrang in
+  WoW die Berechtigung zum Entfernen von Mitgliedern, steht das jetzt als
+  Hinweis unter den Vorschlägen. Kein Addon kann dieses Recht ersetzen – auch
+  keine Rangfreigabe im Gildenprofil.
+
 ## 0.9.123 – Addon
 
 **Behoben**

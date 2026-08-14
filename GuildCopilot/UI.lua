@@ -4745,7 +4745,15 @@ function GC.UI:BuildMemberCarePage()
                 return
             end
             row.removeArmed = false
-            local ok, message = GC.Roster:RemoveMember(row.playerName)
+            -- Der Ausschluss wird nachgeprueft und meldet sich deshalb zweimal:
+            -- sofort mit "wird geprueft", danach mit dem, was der Gildenroster
+            -- tatsaechlich sagt. Bis 0.9.123 stand hier gleich "wurde
+            -- entfernt" - auch wenn er drin blieb.
+            local ok, message = GC.Roster:RemoveMember(row.playerName,
+                function(verifiedOk, verifiedMessage)
+                    page:SetMemberCareStatus(verifiedMessage, verifiedOk)
+                    GC.UI:RefreshMemberCare()
+                end)
             page:SetMemberCareStatus(message, ok)
             GC.UI:RefreshMemberCare()
         end)
@@ -4917,6 +4925,19 @@ function GC.UI:RefreshMemberCare()
     page.memberCareDecisionNotice:SetText(#decisions == 0
         and "Keine Ausnahmen hinterlegt. Vorschläge lassen sich als Ausnahme, später oder erledigt ablegen."
         or "")
+    -- Ein ausgegrauter Knopf sagt "geht nicht", aber nie "warum". Beim
+    -- Entfernen ist das die haeufigste Ursache und die einzige, die das Addon
+    -- gar nicht beheben kann: WoW gibt einem Addon das Recht nur, wenn der
+    -- eigene Gildenrang die Berechtigung "Mitglied entfernen" traegt. Das
+    -- gehoert an die Oberflaeche, nicht in den Fehlerbericht des Nutzers.
+    if not GC.Roster:CanRemoveFromGuild() then
+        page.memberCareSuggestionNotice:SetText(GC.L("Entfernen ist ausgegraut: "
+            .. "Dein Gildenrang hat in WoW keine Berechtigung zum Entfernen von "
+            .. "Mitgliedern. Das kann nur der Gildenleiter in den Gildenrängen ändern."))
+        SetTextColor(page.memberCareSuggestionNotice, THEME.warning)
+        return
+    end
+    SetTextColor(page.memberCareSuggestionNotice, THEME.muted)
     if #candidates == 0 then
         page.memberCareSuggestionNotice:SetText(GC.L("Keine Mitglieder erfüllen die aktuellen Prüfregeln."))
     elseif #candidates > #page.memberCareSuggestionRows then

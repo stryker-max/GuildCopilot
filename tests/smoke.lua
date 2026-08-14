@@ -3672,12 +3672,50 @@ addon.Roster:SetMemberCareRankProtected(5, false)
 
 local allowedRemoval = addon.Roster:CanRemoveMember("Heiler-Realm")
 assert(allowedRemoval == true, "Ein zulässiger Ausschluss wurde abgelehnt")
-local removed, removeMessage = addon.Roster:RemoveMember("Heiler-Realm")
-assert(removed == true, removeMessage or "Der Ausschluss schlug fehl")
-assert(uninvitedPlayers[1] == "Heiler-Realm", "Es wurde der falsche Spieler entfernt")
-assert(#uninvitedPlayers == 1, "Es wurde mehr als ein Spieler entfernt")
-assert(addon.Roster:GetMemberCareDecision("Heiler").status == "DONE",
-    "Der Ausschluss wurde nicht als erledigt vermerkt")
+
+do
+    -- Der Server führt den Ausschluss NICHT aus - der Roster nennt ihn weiter.
+    -- Genau das ist der gemeldete Fall: GuildUninvite gibt nichts zurück und
+    -- wirft nichts, wenn abgelehnt wird. Bis 0.9.124 wurde daraus "wurde aus
+    -- der Gilde entfernt" samt Vermerk "erledigt", während der Spieler in der
+    -- Gilde blieb.
+    local refusedOk, refusedMessage
+    addon.Roster:RemoveMember("Heiler-Realm", function(ok, message)
+        refusedOk, refusedMessage = ok, message
+    end)
+    assert(refusedOk == false and tostring(refusedMessage):find("weiterhin", 1, true),
+        "Ein nicht ausgeführter Ausschluss wurde als Erfolg gemeldet: "
+            .. tostring(refusedMessage))
+    assert(addon.Roster:GetMemberCareDecision("Heiler") == nil
+        or addon.Roster:GetMemberCareDecision("Heiler").status ~= "DONE",
+        "Ein nicht ausgeführter Ausschluss wurde als erledigt vermerkt")
+    assert(uninvitedPlayers[1] == "Heiler-Realm", "Es wurde der falsche Spieler entfernt")
+
+    -- Und derselbe Aufruf mit einem Server, der ihn ausführt.
+    local realCount = GetNumGuildMembers
+    local realUninvite = GuildUninvite
+    GuildUninvite = function(name)
+        uninvitedPlayers[#uninvitedPlayers + 1] = name
+        GetNumGuildMembers = function()
+            return 1
+        end
+    end
+    local removedOk, removedMessage
+    addon.Roster:RemoveMember("Heiler-Realm", function(ok, message)
+        removedOk, removedMessage = ok, message
+    end)
+    assert(removedOk == true and tostring(removedMessage):find("entfernt", 1, true),
+        "Der ausgeführte Ausschluss wurde nicht als Erfolg gemeldet: "
+            .. tostring(removedMessage))
+    assert(addon.Roster:GetMemberCareDecision("Heiler").status == "DONE",
+        "Der Ausschluss wurde nicht als erledigt vermerkt")
+    GuildUninvite = realUninvite
+    GetNumGuildMembers = realCount
+    uninvitedPlayers = {}
+    addon.Roster:Scan()
+    assert(addon.Roster:GetMember("Heiler-Realm") ~= nil,
+        "Testaufbau: Heiler-Realm fehlt nach dem Ausschlusstest im Roster")
+end
 
 -- Ein Rang ohne Mitgliederpflege darf gar nichts davon.
 addon.DB:GetGuild().memberCare.accessRanks = { ["9"] = true }

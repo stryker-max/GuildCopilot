@@ -298,6 +298,60 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.124 – Ein Erfolg, der keiner war
+
+Aus dem Spiel: „Bei der Mitgliederpflege hat das aus der Gilde Kicken nicht funktioniert – er ist zwar aus der Mitgliederpflege geflogen, aber durch Entfernen aus der Gilde hat es nicht funktioniert."
+
+### Eine Zeile, zwei falsche Schlüsse
+
+```lua
+local success = pcall(removeFunction, target.name)
+if not success then
+    return false, "WoW hat das Entfernen abgelehnt."
+end
+self:SetMemberCareDecision(target.name, "DONE")
+return true, GC.Util.PlayerShortName(target.name) .. " wurde aus der Gilde entfernt."
+```
+
+`pcall` beantwortet genau eine Frage: Hat der Aufruf einen **Lua-Fehler** geworfen? Er sagt nichts darüber, ob er etwas bewirkt hat. `GuildUninvite` gibt nichts zurück und wirft nichts, wenn der Server ablehnt – fehlende Gildenberechtigung, unpassende Namensschreibweise, der Spieler ist gar nicht mehr in der Gilde. In all diesen Fällen ist `success` trotzdem `true`.
+
+Daraus folgten zwei Behauptungen, die beide falsch sein konnten: die Meldung „wurde aus der Gilde entfernt" und – schlimmer – der Vermerk `DONE`. Der Fall verschwand aus der Mitgliederpflege, also aus dem Blickfeld. Der Spieler blieb in der Gilde. Genau so geschildert.
+
+Das ist die unangenehmste Sorte Fehler: Er räumt die Anzeige auf, die ihn aufdecken würde.
+
+### Beantwortet wird die Frage jetzt dort, wo sie beantwortbar ist
+
+Nicht am Rückgabewert – den gibt es nicht –, sondern am **Gildenroster**. `RemoveMember` stößt den Ausschluss an und sieht danach nach: Ist der Spieler nach dem nächsten Einlesen weg, hat es geklappt; steht er noch da, hat es das nicht.
+
+Dass das nicht sofort geht, liegt in der Sache: `GuildUninvite` schickt eine Bitte an den Server, und das Ergebnis kommt erst mit dem nächsten `GUILD_ROSTER_UPDATE`. Nachgesehen wird deshalb bis zu dreimal im Abstand von 2,5 Sekunden. Die Oberfläche meldet sich zweimal – erst „wird entfernt, wird gleich geprüft …", dann das, was der Roster sagt.
+
+Der Vermerk `DONE` fällt jetzt **nur im Erfolgsfall**. Ein Fall, der nicht durchging, bleibt offen. Das ist der eigentliche Punkt: Eine Mitgliederpflege, die Fälle wegräumt, ohne dass etwas passiert ist, ist schlechter als gar keine.
+
+### Und der ausgegraute Knopf
+
+Der Knopf war schon immer an `CanRemoveMember` gekoppelt und damit korrekt ausgegraut, wenn WoW das Recht nicht hergibt. Nur sagte er nicht, warum – und ein ausgegrauter Knopf ohne Begründung ist eine Sackgasse. `Roster:CanRemoveFromGuild()` beantwortet die Frage jetzt ohne Bezug auf ein Ziel, und die Mitgliederpflege schreibt sie als Hinweis unter die Vorschläge. Kein Addon kann dieses Recht ersetzen, auch keine Rangfreigabe im Gildenprofil; das gehört an die Oberfläche und nicht in den Fehlerbericht des Nutzers.
+
+### Der Test, der es nachstellt
+
+Der Testaufbau beantwortet beide Fälle mit demselben Aufruf:
+
+- **Server lehnt ab** – die Roster-Attrappe nennt den Spieler weiter. Erwartet: Fehlschlag, Meldung mit „weiterhin", **kein** `DONE`.
+- **Server führt aus** – die Attrappe streicht ihn beim Ausschluss aus dem Roster. Erwartet: Erfolg und `DONE`.
+
+Die Gegenprobe mit dem alten Code fällt im ersten Fall durch, und zwar genau an der Stelle, an der das Addon vorher Erfolg behauptet hat.
+
+### Geändert
+
+- `GuildCopilot/Roster.lua`: `RemoveMember` prüft den Ausschluss im Roster nach und meldet ihn über einen Rückruf, `CanRemoveFromGuild` als eigene Frage;
+- `GuildCopilot/UI.lua`: die Mitgliederpflege zeigt das geprüfte Ergebnis und erklärt den ausgegrauten Knopf;
+- `GuildCopilot/Locales.lua`: eine englische Entsprechung;
+- `tests/smoke.lua`: abgelehnter und ausgeführter Ausschluss, beide mit ihrem Vermerk;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.124.
+
+### Offen aus derselben Sitzung
+
+Vom Owner gemeldet, noch nicht umgesetzt: der Gildenrang je Mitglied in Mitgliederpflege und Übersicht, abgeschnittene Texte in der Berufs- und Begründungsspalte, die vier Zeilenknöpfe der Mitgliederpflege als Aufklappmenü, die Hervorhebung der Überschrift „zuletzt aktive Level-70-Spieler" und die Frage, ob sich die Spec eines Mitglieds ohne Addon aus Raidauswertung und Gildendaten ableiten lässt.
+
 ## 0.9.123 – Was der eigene Datenbestand verriet
 
 Nach 0.9.122 kam vom Owner die richtige Frage: „Wenn er geupdatet hat, soll es funktionieren? Warum?" Und dann der Satz, der die ganze bisherige Analyse umwarf: „Und mit dem in der anderen Gilde, nicht in Aftermath."
