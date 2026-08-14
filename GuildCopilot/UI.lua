@@ -4742,8 +4742,12 @@ function GC.UI:BuildMemberCarePage()
     suggestionsCard:SetSize(752, 368)
     suggestionsCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -242)
     page.memberCareSuggestionsTitle = suggestionsCard.title
+    -- Der zweite Satz ist die wichtigste Auskunft dieser Karte: WoW erlaubt
+    -- einem Addon den Gildenausschluss nicht (GuildUninvite ist geschützt).
+    -- Wer das nicht weiß, hält den Knopf für kaputt - genau so gemeldet.
     local suggestionHelp = CreateLabel(suggestionsCard,
-        "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.",
+        "Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.\n"
+        .. "„In WoW entfernen“ wählt den Spieler in Blizzards Gildenfenster aus – geklickt wird dort, WoW lässt es aus einem Addon heraus nicht zu.",
         { muted = true, width = 716, height = 30, vertical = "TOP" })
     suggestionHelp:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -46)
     page.memberCareSuggestionRows = {}
@@ -4827,34 +4831,19 @@ function GC.UI:BuildMemberCarePage()
         end, true, GC.L("Entscheiden"), nil, 21)
         row.actionDropdown:SetPoint("LEFT", row, "LEFT", 533, 0)
 
-        -- Entfernen verlangt einen zweiten, ausdrücklichen Klick auf derselben
-        -- Zeile. Der erste Klick bewaffnet nur und beschriftet um.
-        row.removeButton = CreateButton(row, "Entfernen", 84, 21, function()
+        -- Ein Klick, keine zweite Bestätigung im Addon.
+        --
+        -- WoW lässt den Gildenausschluss nicht über ein Addon zu -
+        -- GuildUninvite ist geschützt. Der Knopf öffnet deshalb Blizzards
+        -- Gildenfenster, und dort fragt WoW von sich aus nach („Möchtet Ihr …
+        -- wirklich aus der Gilde entfernen?"). Eine eigene „Sicher?"-Stufe
+        -- davor wäre eine dritte Rückfrage für eine Sache, die dieses Fenster
+        -- gar nicht ausführt.
+        row.removeButton = CreateButton(row, "In WoW entfernen", 108, 21, function()
             if not row.playerName then
                 return
             end
-            if not row.removeArmed then
-                local allowed, reason = GC.Roster:CanRemoveMember(row.playerName)
-                if not allowed then
-                    page:SetMemberCareStatus(reason, false)
-                    return
-                end
-                row.removeArmed = true
-                row.removeButton:SetText(GC.L("Sicher?"))
-                page:SetMemberCareStatus("Noch einmal klicken, um "
-                    .. GC.Util.PlayerShortName(row.playerName) .. " endgültig zu entfernen.", false)
-                return
-            end
-            row.removeArmed = false
-            -- Der Ausschluss wird nachgeprueft und meldet sich deshalb zweimal:
-            -- sofort mit "wird geprueft", danach mit dem, was der Gildenroster
-            -- tatsaechlich sagt. Bis 0.9.123 stand hier gleich "wurde
-            -- entfernt" - auch wenn er drin blieb.
-            local ok, message = GC.Roster:RemoveMember(row.playerName,
-                function(verifiedOk, verifiedMessage)
-                    page:SetMemberCareStatus(verifiedMessage, verifiedOk)
-                    GC.UI:RefreshMemberCare()
-                end)
+            local ok, message = GC.Roster:OpenGuildRemoval(row.playerName)
             page:SetMemberCareStatus(message, ok)
             GC.UI:RefreshMemberCare()
         end)
@@ -4979,8 +4968,6 @@ function GC.UI:RefreshMemberCare()
         row:SetShown(candidate ~= nil)
         if candidate then
             row.playerName = candidate.member.name
-            row.removeArmed = false
-            row.removeButton:SetText(GC.L("Entfernen"))
             row.actionDropdown:SetValue("")
             row.name:SetText(GC.Util.PlayerShortName(candidate.member.name))
             row.name:SetTextColor(ClassColor(candidate.member.classFile))
@@ -5043,6 +5030,7 @@ function GC.UI:RefreshMemberCare()
         SetTextColor(page.memberCareSuggestionNotice, THEME.warning)
         return
     end
+    SetTextColor(page.memberCareSuggestionNotice, THEME.muted)
     SetTextColor(page.memberCareSuggestionNotice, THEME.muted)
     if #candidates == 0 then
         page.memberCareSuggestionNotice:SetText(GC.L("Keine Mitglieder erfüllen die aktuellen Prüfregeln."))

@@ -131,6 +131,10 @@ function GC.Roster:ScanNow()
                 online = online == true,
                 status = status,
                 guid = guid,
+                -- Die Stelle im Blizzard-Roster. Nur darueber laesst sich ein
+                -- Mitglied in Blizzards eigenem Gildenfenster auswaehlen, und
+                -- nur dort ist der Ausschluss ueberhaupt moeglich.
+                rosterIndex = rosterIndex,
             }
             if not online and GetGuildRosterLastOnline then
                 local ok, years, months, days, hours = pcall(GetGuildRosterLastOnline, rosterIndex)
@@ -705,9 +709,24 @@ end
 
 -- === Einzelner Gildenausschluss =============================================
 --
--- Bewusst ohne jede Automatik: nur ein Spieler, nur mit echter
--- Blizzard-Berechtigung, nur gegen einen niedrigeren Rang und nur nach einer
--- ausdrücklichen zweiten Bestätigung in der Oberfläche.
+-- Kurz und unerfreulich: **Ein Addon kann niemanden aus der Gilde entfernen.**
+--  ist eine geschuetzte Funktion - "This can only be called from
+-- secure code" -, und dasselbe gilt fuer jeden Umweg darueber: den
+-- Slash-Befehl, Blizzards eigenen Dialog per StaticPopup_Show, alles. Aus
+-- tainted Code heraus passiert schlicht nichts, ohne Rueckgabewert und ohne
+-- Fehler.
+--
+-- Der Weg dorthin war lang und steht in der Roadmap 0.9.124 bis 0.9.128: erst
+-- ein , das Erfolg meldete, wo keiner war; dann eine Nachpruefung im
+-- Roster; dann geratene Slash-Befehle, die ein deutscher Client gar nicht
+-- kennt. Jede Runde hat die Diagnose geschaerft und keine hat den Ausschluss
+-- naeher gebracht - weil er von hier aus nicht erreichbar IST.
+--
+-- Was das Addon stattdessen tut, ist das, was es kann: die Frage "wen sollte
+-- man sich ansehen?" beantworten und dann Blizzards Gildenfenster oeffnen.
+-- Dort steht derselbe Knopf, dort kommt Blizzards eigene Rueckfrage, und dort
+-- passiert es. Eine zweite Bestaetigung im Addon waere damit ueberfluessig -
+-- Blizzard fragt ohnehin - und ist ersatzlos entfallen.
 
 local function HasBlizzardRemovePermission()
     if type(CanGuildRemove) ~= "function" then
@@ -717,11 +736,8 @@ local function HasBlizzardRemovePermission()
     return success and allowed == true
 end
 
--- Dieselbe Frage, aber ohne Bezug auf ein Ziel: Darf dieser Charakter in WoW
--- ueberhaupt jemanden aus der Gilde entfernen? Die Oberflaeche braucht das, um
--- den ausgegrauten Knopf zu erklaeren, statt ihn unkommentiert stehen zu
--- lassen - ein Addon kann dieses Recht nicht ersetzen, auch keine
--- Rangfreigabe im Gildenprofil.
+-- Darf dieser Charakter in WoW ueberhaupt jemanden entfernen? Die Oberflaeche
+-- braucht das, um einen ausgegrauten Knopf zu erklaeren.
 function GC.Roster:CanRemoveFromGuild()
     return HasBlizzardRemovePermission()
 end
@@ -755,240 +771,46 @@ function GC.Roster:CanRemoveMember(name)
     return true, "Entfernen ist möglich."
 end
 
--- Wie lange auf den neuen Gildenroster gewartet wird, bevor nachgesehen wird,
--- ob der Ausschluss wirklich stattgefunden hat. GuildUninvite wirkt nicht
--- sofort: Der Client schickt die Bitte zum Server und erfaehrt das Ergebnis
--- erst mit dem naechsten GUILD_ROSTER_UPDATE.
-local REMOVE_VERIFY_DELAY = 2.5
-local REMOVE_VERIFY_ATTEMPTS = 3
-
--- Der Ausschluss, und zwar nachgeprueft.
---
--- Hier stand frueher `local success = pcall(removeFunction, target.name)`, und
--- daraus wurde "wurde aus der Gilde entfernt" samt Vermerk "erledigt" in der
--- Mitgliederpflege. Das war falsch, und zwar auf die unangenehmste Art:
--- `pcall` meldet, dass der Aufruf KEINEN LUA-FEHLER geworfen hat - nicht, dass
--- er etwas bewirkt hat. GuildUninvite gibt nichts zurueck und wirft nichts,
--- wenn der Server ablehnt: falsche Namensschreibweise, fehlende Berechtigung,
--- der Spieler ist gar nicht (mehr) in der Gilde. In all diesen Faellen meldete
--- das Addon Erfolg, strich den Mann aus der Mitgliederpflege - und in der
--- Gilde stand er weiter. Genau so aus dem Spiel gemeldet.
---
--- Beantwortet wird die Frage jetzt dort, wo sie beantwortbar ist: im Roster.
--- Ist der Spieler nach dem naechsten Einlesen weg, hat es geklappt. Steht er
--- noch da, hat es das nicht - dann bleibt auch der Vermerk aus, damit der Fall
--- offen bleibt, statt still zu verschwinden.
-function GC.Roster:RemoveMember(name, onResult)
-    -- Der Rueckruf meldet ausschliesslich das GEPRUEFTE Ergebnis, und genau
-    -- einmal. Alles, was schon beim Aufruf feststeht, steht im Rueckgabewert
-    -- und laeuft NICHT ueber diese Funktion.
-    --
-    -- Genau daran ist 0.9.124 gescheitert: Die Zwischenmeldung "wird gleich
-    -- geprueft" lief mit durch Report, verbrauchte damit den einen Schuss, und
-    -- das spaetere Ergebnis wurde von der Sperre unten stumm geschluckt. Im
-    -- Spiel stand deshalb zweimal "wird entfernt - wird gleich geprueft" und
-    -- danach nie wieder etwas. Im Testharness feuern Zeitgeber sofort, dort
-    -- lief die Pruefung VOR der Rueckgabe - die Reihenfolge drehte sich um und
-    -- der Fehler blieb unsichtbar. Der Test stellt die echte Reihenfolge jetzt
-    -- nach.
-    local reported = false
-    local function Report(ok, message)
-        if reported then
-            return ok, message
-        end
-        reported = true
-        if type(onResult) == "function" then
-            pcall(onResult, ok, message)
-        end
-        return ok, message
-    end
-
+-- Oeffnet Blizzards Gildenfenster und sagt, wer gemeint ist. Mehr ist von
+-- einem Addon aus nicht moeglich - und weniger waere gelogen.
+function GC.Roster:OpenGuildRemoval(name)
     local allowed, reason = self:CanRemoveMember(name)
     if not allowed then
         return false, reason
     end
-
     local target = self:GetMember(name)
-    -- In TBC Classic heisst die Funktion GuildUninvite; neuere Clients bieten
-    -- C_GuildInfo.Uninvite. Beide Wege werden unterstuetzt.
-    local removeFunction = GuildUninvite
-    if C_GuildInfo and type(C_GuildInfo.Uninvite) == "function" then
-        removeFunction = C_GuildInfo.Uninvite
-    end
-    if type(removeFunction) ~= "function" then
-        return false, "Diese WoW-Version bietet kein Entfernen über Addons."
-    end
     local shortName = GC.Util.PlayerShortName(target.name)
-    local targetKey = GC.Util.NormalizeName(target.name)
 
-    -- === Die Namensform ====================================================
-    --
-    -- GetGuildRosterInfo liefert auf verbundenen Realms "Name-Realm", auf einem
-    -- einzelnen Realm nur "Name" - und welche Form GuildUninvite annimmt, haengt
-    -- an der Spielfassung. Die falsche Form ist der lautloseste aller Fehler:
-    -- kein Rueckgabewert, kein Lua-Fehler, keine Wirkung.
-    --
-    -- Versucht werden deshalb beide, aber nicht blind hintereinander: Erst die
-    -- Form aus dem Roster; erst wenn die Nachpruefung den Spieler weiterhin
-    -- findet, die andere. Ein doppelter Ausschluss ist unmoeglich - beim zweiten
-    -- Versuch ist der Spieler entweder noch da (dann hat der erste nichts
-    -- bewirkt) oder die Pruefung ist laengst als Erfolg beendet.
-    local attemptedForms = {}
-    local function TryRemove(candidate)
-        candidate = GC.Util.Trim(candidate or "")
-        if candidate == "" or attemptedForms[candidate] then
-            return false
-        end
-        attemptedForms[candidate] = true
-        -- Der Lua-Fehler bleibt eine eigene Frage: Er heisst, dass der Aufruf
-        -- gar nicht erst zustande kam.
-        return pcall(removeFunction, candidate) == true
+    -- Die Verknuepfung zum echten Ausschluss, soweit sie moeglich ist: Der
+    -- Spieler wird in Blizzards Gildenroster ausgewaehlt, bevor das Fenster
+    -- aufgeht. Blizzards "Entfernen" bezieht sich immer auf die Auswahl - der
+    -- Nutzer muss dort also niemanden mehr suchen, sondern nur noch klicken
+    -- und WoWs Rueckfrage bestaetigen.
+    local selected = false
+    local rosterIndex = tonumber(target.rosterIndex)
+    if rosterIndex and type(SetGuildRosterSelection) == "function" then
+        selected = pcall(SetGuildRosterSelection, rosterIndex) == true
     end
 
-    -- === Der Weg, den ein Mensch nehmen wuerde =============================
-    --
-    -- Aus dem Spiel, nachdem die API mehrfach lautlos nichts getan hatte: "In
-    -- Wahrheit muss es nur /gkick Rhinô ausfuehren, fertig." Der Gedanke ist
-    -- richtig - Blizzards Befehl loest den Namen gegen den Gildenroster auf,
-    -- bevor er ihn weiterreicht, waehrend ein roher API-Aufruf die
-    -- Zeichenkette nimmt, wie sie kommt.
-    --
-    -- Der erste Versuch, "/gkick <Name>" schlicht in die Eingabezeile zu
-    -- schreiben, ging trotzdem daneben, und der Client hat es selbst gesagt:
-    --
-    --     Gebt '/hilfe' ein, um eine Uebersicht ueber einige Befehle
-    --     aufzurufen.
-    --
-    -- Das ist die Antwort auf einen UNBEKANNTEN Befehl. Slash-Befehle sind
-    -- uebersetzt; ein deutscher Client kennt "/gkick" nicht. Ein geratener
-    -- Befehlsname landet damit als sichtbarer Muell im Chat und bewirkt nichts.
-    --
-    -- Geraten wird deshalb gar nicht mehr. Der Client fuehrt seine eigenen
-    -- Befehle in SlashCmdList, und zwar unter einem sprachunabhaengigen
-    -- Schluessel - der Eintrag fuer den Gildenausschluss ist genau die Funktion,
-    -- die beim Tippen des Befehls liefe. Sie laesst sich direkt aufrufen: keine
-    -- Uebersetzung, keine Eingabezeile, kein Chatfenster.
-    local SLASH_KEYS = { "GUILD_UNINVITE", "GUILDUNINVITE", "GUILD_KICK", "GUILDKICK" }
-
-    local function TrySlashHandler(candidate)
-        candidate = GC.Util.Trim(candidate or "")
-        if candidate == "" or type(SlashCmdList) ~= "table" then
-            return false
+    local opened = false
+    for _, opener in ipairs({ "ToggleGuildFrame", "ToggleFriendsFrame" }) do
+        local fn = _G[opener]
+        if not opened and type(fn) == "function" then
+            opened = pcall(fn) == true
         end
-        for _, key in ipairs(SLASH_KEYS) do
-            local handler = SlashCmdList[key]
-            local label = "Befehl " .. key .. " (" .. candidate .. ")"
-            if type(handler) == "function" and not attemptedForms[label] then
-                attemptedForms[label] = true
-                if pcall(handler, candidate) then
-                    return true
-                end
-            end
-        end
-        return false
     end
 
-    -- Und derselbe Weg ueber die Eingabezeile - aber ausschliesslich mit einem
-    -- Befehlsnamen, den DIESER Client selbst fuehrt. Die SLASH_-Globalen sind
-    -- die uebersetzten Schreibweisen; was dort nicht steht, wird auch nicht
-    -- getippt. Damit kann nie wieder ein unbekannter Befehl im Chat landen.
-    local function TryChatKick(candidate)
-        candidate = GC.Util.Trim(candidate or "")
-        if candidate == "" then
-            return false
-        end
-        local editBox = (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
-            or _G.ChatFrame1EditBox
-        if not editBox or type(ChatEdit_SendText) ~= "function" then
-            return false
-        end
-        for _, key in ipairs(SLASH_KEYS) do
-            for index = 1, 4 do
-                local command = _G["SLASH_" .. key .. index]
-                if type(command) == "string" and command:sub(1, 1) == "/" then
-                    local line = command .. " " .. candidate
-                    if not attemptedForms[line] then
-                        attemptedForms[line] = true
-                        local ok = pcall(function()
-                            editBox:SetText(line)
-                            ChatEdit_SendText(editBox, 0)
-                            editBox:SetText("")
-                        end)
-                        if ok then
-                            return true
-                        end
-                    end
-                end
-            end
-        end
-        return false
+    if not opened then
+        return true, shortName .. ": WoW lässt das Entfernen nur im eigenen "
+            .. "Gildenfenster zu – bitte von Hand öffnen."
     end
-
-    -- Erst der Befehl des Clients, dann die Eingabezeile, dann die API. Alle
-    -- Wege enden beim Server; wer zuerst durchkommt, gewinnt, und die
-    -- Nachpruefung unten entscheidet.
-    local started = TrySlashHandler(shortName)
-    started = TryChatKick(shortName) or started
-    if not TryRemove(target.name) and not started then
-        return false, "WoW hat das Entfernen abgelehnt."
+    if selected then
+        return true, shortName .. " ist im Gildenfenster ausgewählt. Dort auf "
+            .. "„Entfernen“ klicken – die Rückfrage kommt von WoW selbst."
     end
-
-    -- Ohne Zeitgeber bleibt nur die alte, ungepruefte Antwort. Sie ist dann
-    -- ausdruecklich als ungeprueft formuliert.
-    if not C_Timer or type(C_Timer.After) ~= "function" then
-        self:Request()
-        return Report(true, shortName .. ": Entfernen wurde an WoW übergeben.")
-    end
-
-    local function Verify(attempt)
-        self:Request()
-        self:Scan()
-        if self:GetMember(targetKey) == nil then
-            -- Erst jetzt der Vermerk: Ein Fall gilt als erledigt, wenn er es
-            -- ist, nicht wenn wir es versucht haben.
-            self:SetMemberCareDecision(target.name, "DONE")
-            GC:FireCallback("MEMBERCARE_UPDATED")
-            return Report(true, shortName .. " wurde aus der Gilde entfernt.")
-        end
-        if attempt < REMOVE_VERIFY_ATTEMPTS then
-            -- Beim zweiten Anlauf die andere Namensform. Steht der Spieler noch
-            -- im Roster, hat der erste Aufruf nichts bewirkt - dann ist genau
-            -- das der wahrscheinlichste Grund.
-            -- Zweiter Anlauf mit dem Kurznamen. Einen Realmanteil bastelt hier
-            -- ausdruecklich NIEMAND mehr zusammen: Der erste Entwurf haengte
-            -- den Realm an einen Namen, der ihn schon trug, und versuchte es
-            -- mit "Rhinô-Thunderstrike-Thunderstrike" - nachzulesen in der
-            -- Fehlermeldung, die der Owner geschickt hat. Der Gildenausschluss
-            -- braucht den Realm ohnehin nicht; die Gilde steht auf einem Realm.
-            if attempt == 1 then
-                TrySlashHandler(shortName)
-                TryChatKick(shortName)
-                TryRemove(shortName)
-            end
-            C_Timer.After(REMOVE_VERIFY_DELAY, function()
-                Verify(attempt + 1)
-            end)
-            return
-        end
-        GC:FireCallback("MEMBERCARE_UPDATED")
-        -- Die versuchten Namensformen gehoeren in die Meldung: Sie sind das
-        -- Einzige, woran sich ein Namensproblem ueberhaupt erkennen laesst.
-        local tried = {}
-        for form in pairs(attemptedForms) do
-            tried[#tried + 1] = form
-        end
-        table.sort(tried)
-        Report(false, shortName .. " steht weiterhin im Gildenroster – WoW hat "
-            .. "das Entfernen nicht ausgeführt (versucht als "
-            .. table.concat(tried, ", ") .. "). Prüfe deine Gildenberechtigung.")
-    end
-
-    C_Timer.After(REMOVE_VERIFY_DELAY, function()
-        Verify(1)
-    end)
-    return true, shortName .. " wird entfernt – wird gleich geprüft …"
+    return true, "Gildenfenster geöffnet. WoW lässt das Entfernen nur dort zu: "
+        .. shortName .. " auswählen und „Entfernen“ klicken."
 end
-
 function GC.Roster:GetGuildAbsences()
     local absences = {}
     local today = GC.Util.TodayISO()

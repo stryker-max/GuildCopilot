@@ -63,6 +63,9 @@ local english = {
     ["ZULETZT ONLINE"] = "LAST ONLINE",
     ["Entscheiden"] = "Decide",
     ["Entfernen nicht möglich: "] = "Cannot remove: ",
+    ["In WoW entfernen"] = "Remove in WoW",
+    ["Twinks, aktiv Abgemeldete und geschützte Ränge werden ausgeblendet. „Prüfen“ bedeutet: Main/Twink-Status ist nicht bestätigt.\n„In WoW entfernen“ wählt den Spieler in Blizzards Gildenfenster aus – geklickt wird dort, WoW lässt es aus einem Addon heraus nicht zu."]
+        = "Alts, players on leave and protected ranks are hidden. „Check“ means: main/alt status is unconfirmed.\n„Remove in WoW“ selects the player in Blizzard's guild window – click it there, WoW does not allow it from an addon.",
     ["erkannt"] = "detected",
     ["Spec aus dem Talentbaum gelesen, als dieser Spieler für den Ausrüstungsabgleich inspiziert wurde. Main/Twink und Zweitspec kennt nur der Spieler selbst."]
         = "Spec read from the talent tree while inspecting this player for the gear audit. Only the player knows main/alt and off-spec.",

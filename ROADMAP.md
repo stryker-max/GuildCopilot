@@ -298,6 +298,57 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.129 – Eine verschlossene Tür, fünf Versionen lang
+
+„Vielleicht gehts auch garnicht mit einem Addon?! Google halt."
+
+Der Owner hatte recht, und die Antwort steht seit Jahren im API-Verzeichnis. `GuildUninvite` trägt dort die Kennzeichnung `#protected`:
+
+> This can only be called from secure code.
+
+Ein Addon kann niemanden aus der Gilde entfernen. Nicht über die API, nicht über den Slash-Befehl, nicht über Blizzards eigenen Dialog per `StaticPopup_Show` – jeder dieser Wege läuft aus tainted Code heraus ins Leere, ohne Rückgabewert und ohne Fehler.
+
+### Was fünf Versionen lang passiert ist
+
+Der Weg hierher (0.9.124 bis 0.9.128) ist eine Kette von Diagnosen, die jede für sich richtig war und keine das Problem löste:
+
+- **0.9.124** – `pcall` meldete Erfolg, wo keiner war. Die Nachprüfung im Roster kam dazu. *Richtig, und die Grundlage für alles Weitere: Ohne sie hätte das Addon bis heute „wurde entfernt" behauptet.*
+- **0.9.126** – Die Nachprüfung meldete gar nichts, weil die Zwischenmeldung den einen Rückruf verbrauchte. *Richtig, und der Test hatte es verdeckt, weil Zeitgeber im Harness sofort feuern.*
+- **0.9.127** – `/gkick` als besserer Weg, weil Blizzards Befehl den Namen gegen den Roster auflöst. *Der Gedanke stimmt, nur ist der Befehl übersetzt.*
+- **0.9.128** – Nicht raten, sondern `SlashCmdList` fragen. *Sauber – und trotzdem wirkungslos, weil der Handler dieselbe geschützte Funktion aufruft.*
+
+Jede Runde hat die Fehlermeldung geschärft und keine hat den Ausschluss näher gebracht. Der Fehler in der Vorgehensweise ist gut erkennbar: Es wurde immer die nächste Ursache gesucht, statt einmal zu prüfen, **ob das Vorhaben überhaupt möglich ist**. Fünf Minuten Nachschlagen hätten vier Versionen gespart.
+
+Bemerkenswert bleibt, dass die Nachprüfung aus 0.9.124 die ganze Zeit die Wahrheit gesagt hat: „steht weiterhin im Gildenroster". Sie war die einzige Komponente, die nie gelogen hat.
+
+### Was jetzt dasteht
+
+Die gesamte Maschinerie ist gelöscht – Namensformen, Slash-Handler, Chat-Eingabezeile, Popup-Bestätigung, Nachprüfung mit Wiederholungen. Übrig bleiben zwei kleine Funktionen:
+
+- `CanRemoveMember` – die Prüfungen, die weiterhin sinnvoll sind: Mitgliederpflege freigeschaltet, echte Blizzard-Berechtigung, niedrigerer Rang, kein geschützter Rang, nicht man selbst.
+- `OpenGuildRemoval` – wählt den Spieler über `SetGuildRosterSelection` in Blizzards Gildenroster aus und öffnet das Fenster. Blizzards „Entfernen" bezieht sich immer auf die Auswahl; der Nutzer muss dort niemanden mehr suchen, sondern nur noch klicken und WoWs Rückfrage bestätigen.
+
+Das ist die „Verknüpfung zum echten Kick", nach der der Owner gefragt hat – und sie ist genau so weit belastbar, wie die API es zulässt.
+
+**Die eigene „Sicher?"-Stufe ist ersatzlos entfallen.** WoW fragt selbst nach; eine Rückfrage davor wäre die dritte für eine Sache, die dieses Fenster gar nicht ausführt.
+
+### Zwei Prüfregeln haben sich mitgeändert
+
+`tests/validate.mjs` verlangte `removeArmed` – die zweite Bestätigung. Diese Regel beschrieb einen Zustand, der nicht mehr gilt; sie ist durch zwei neue ersetzt (Ausschluss führt ins Gildenfenster, Mitglied wird dort vorausgewählt).
+
+Die zweite Regel verbot jede Erwähnung von `GuildFrame` – ein Erbe aus der Zeit, als ein Guild-Copilot-Knopf im Blizzard-Gildenfenster klebte und dort Inhalte verdeckte. Das Fenster zu **öffnen** ist etwas anderes und jetzt zwangsläufig; `ToggleGuildFrame` und `ToggleFriendsFrame` sind ausgenommen, verboten bleibt, etwas an dieses Fenster zu hängen.
+
+### Geändert
+
+- `GuildCopilot/Roster.lua`: die Ausschluss-Maschinerie gelöscht, `OpenGuildRemoval` mit Vorauswahl im Blizzard-Roster, `rosterIndex` je Mitglied;
+- `GuildCopilot/UI.lua`: ein Klick statt zweier, Knopf „In WoW entfernen", Hinweistext auf der Karte;
+- `GuildCopilot/Locales.lua`: zwei englische Entsprechungen;
+- `tests/smoke.lua`: Vorauswahl und Öffnen werden geprüft, samt Zusicherung, dass **kein** geschützter Ausschluss mehr versucht und kein Fall als erledigt vermerkt wird; die Attrappen für Popup und Slash-Befehle sind entfallen;
+- `tests/validate.mjs`: die beiden oben genannten Regeln;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`: Stand 0.9.129.
+
+Quelle: [warcraft.wiki.gg – API GuildUninvite](https://warcraft.wiki.gg/wiki/API_GuildUninvite)
+
 ## 0.9.128 – Der Client sagt selbst, wie er heißt
 
 Der Chat der Vorversion enthielt die Antwort, und zwar in einer Zeile, die auf den ersten Blick nach fremdem Rauschen aussieht:

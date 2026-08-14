@@ -7,6 +7,23 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.129 – Addon
+
+**Geändert**
+
+- **Der Ausschluss geht jetzt den einzigen Weg, den es gibt.** Nachgeschlagen und
+  bestätigt: `GuildUninvite` ist eine **geschützte** Funktion – „can only be
+  called from secure code". Kein Addon kann jemanden aus der Gilde entfernen,
+  über keinen Umweg. Fünf Versionen lang wurde an einer Tür gerüttelt, die
+  verschlossen ist.
+- **„In WoW entfernen"** wählt den Spieler in Blizzards Gildenfenster aus und
+  öffnet es. Dort steht derselbe Knopf, dort kommt WoWs eigene Rückfrage
+  („Möchtet Ihr … wirklich aus der Gilde entfernen?"), dort passiert es. Mehr
+  ist von einem Addon aus nicht möglich – und weniger wäre gelogen.
+- **Die eigene „Sicher?"-Rückfrage ist entfallen.** WoW fragt ohnehin; eine
+  zweite Bestätigung davor wäre die dritte für etwas, das dieses Fenster gar
+  nicht ausführt.
+
 ## 0.9.128 – Addon
 
 **Behoben**

@@ -196,19 +196,9 @@ function InterfaceOptions_AddCategory(panel)
     optionsCategory = panel
 end
 chatMessages = {}
--- Die Eingabezeile des Chats und Blizzards Befehlsliste. Ein deutscher Client
--- kennt "/gkick" NICHT - die Schreibweise steht uebersetzt in den
--- SLASH_-Globalen, und der Eintrag in SlashCmdList ist die Funktion, die beim
--- Tippen liefe. Beides wird hier nachgebildet, damit der Test nicht an einer
--- englischen Annahme vorbeiprueft.
+-- Die Eingabezeile des Chats. Ueber sie fuehrt das Addon Chatbefehle aus;
+-- gemerkt wird, was tatsaechlich abgeschickt wurde.
 sentSlashCommands = {}
-slashHandlerCalls = {}
-SlashCmdList = {
-    GUILD_UNINVITE = function(name)
-        slashHandlerCalls[#slashHandlerCalls + 1] = tostring(name or "")
-    end,
-}
-SLASH_GUILD_UNINVITE1 = "/grauswerfen"
 local chatEditBox = {
     text = "",
     SetText = function(self, value)
@@ -3705,106 +3695,45 @@ local allowedRemoval = addon.Roster:CanRemoveMember("Heiler-Realm")
 assert(allowedRemoval == true, "Ein zulässiger Ausschluss wurde abgelehnt")
 
 do
-    -- Zeitgeber laufen hier NICHT sofort: Die Nachprüfung wartet im Spiel auf
-    -- den nächsten Gildenroster, und genau diese Reihenfolge muss der Test
-    -- treffen. Mit sofort feuernden Zeitgebern lief die Prüfung vor der
-    -- Rückgabe der Funktion - dadurch blieb der Fehler aus 0.9.125 unsichtbar,
-    -- bei dem die Zwischenmeldung den einen Rückruf verbrauchte und das
-    -- geprüfte Ergebnis nie ankam.
-    local savedThreshold = timerDelayThreshold
-    timerDelayThreshold = 1
-    local timerStart = #pendingTimers
-    local function RunPendingTimers()
-        while #pendingTimers > timerStart do
-            local callback = table.remove(pendingTimers, timerStart + 1)
-            callback()
-        end
+    -- WoW laesst den Gildenausschluss aus einem Addon heraus NICHT zu:
+    -- GuildUninvite ist geschuetzt ("can only be called from secure code").
+    -- Der Knopf waehlt den Spieler deshalb in Blizzards Gildenfenster aus und
+    -- oeffnet es - geklickt wird dort. Alles andere waere gelogen.
+    local savedSelection = SetGuildRosterSelection
+    local savedToggle = ToggleGuildFrame
+    local selectedIndex, opened = nil, 0
+    SetGuildRosterSelection = function(index)
+        selectedIndex = index
+    end
+    ToggleGuildFrame = function()
+        opened = opened + 1
     end
 
-    -- Der Server führt den Ausschluss NICHT aus - der Roster nennt ihn weiter.
-    -- Genau das ist der gemeldete Fall: GuildUninvite gibt nichts zurück und
-    -- wirft nichts, wenn abgelehnt wird. Bis 0.9.124 wurde daraus "wurde aus
-    -- der Gilde entfernt" samt Vermerk "erledigt", während der Spieler in der
-    -- Gilde blieb.
-    local refusedOk, refusedMessage
-    sentSlashCommands = {}
-    slashHandlerCalls = {}
-    local startedOk, startedMessage = addon.Roster:RemoveMember("Heiler-Realm",
-        function(ok, message)
-            refusedOk, refusedMessage = ok, message
-        end)
-    -- Der Weg, den ein Mensch nehmen wuerde - über Blizzards eigene Funktion,
-    -- mit dem Kurznamen und OHNE Realmanteil. Die Gilde steht auf einem Realm,
-    -- und der Befehl löst den Namen selbst gegen den Roster auf.
-    assert(slashHandlerCalls[1] == "Heiler",
-        "Der Ausschluss läuft nicht über Blizzards eigenen Gildenbefehl: "
-            .. tostring(slashHandlerCalls[1]))
-    -- Getippt wird ausschließlich, was DIESER Client selbst führt. Ein
-    -- geratenes „/gkick" ist auf einem deutschen Client ein unbekannter Befehl
-    -- und landet als sichtbarer Müll im Chat.
-    for _, command in ipairs(sentSlashCommands) do
-        assert(command:sub(1, #"/grauswerfen") == "/grauswerfen",
-            "Es wurde ein Befehl getippt, den der Client gar nicht kennt: "
-                .. tostring(command))
-    end
-    assert(startedOk == true and tostring(startedMessage):find("geprüft", 1, true),
-        "Der Aufruf meldet nicht, dass geprüft wird: " .. tostring(startedMessage))
-    assert(refusedOk == nil,
-        "Der Rückruf feuerte schon vor der Prüfung – das geprüfte Ergebnis geht "
-            .. "damit verloren: " .. tostring(refusedMessage))
-    RunPendingTimers()
-    assert(refusedOk == false and tostring(refusedMessage):find("weiterhin", 1, true),
-        "Ein nicht ausgeführter Ausschluss wurde als Erfolg gemeldet: "
-            .. tostring(refusedMessage))
-    -- Bleibt der Spieler stehen, wird die zweite Namensform versucht - und die
-    -- Meldung nennt beide, sonst lässt sich ein Namensproblem nicht erkennen.
-    assert(tostring(refusedMessage):find("versucht als", 1, true),
-        "Die Fehlermeldung nennt die versuchten Namensformen nicht: "
-            .. tostring(refusedMessage))
-    assert(#uninvitedPlayers > 1,
-        "Es wurde nur eine Namensform versucht: " .. table.concat(uninvitedPlayers, ", "))
-    -- Und nirgends ein zusammengebastelter Realmanteil: Der erste Entwurf
-    -- versuchte es mit "Name-Realm-Realm".
-    for _, form in ipairs(uninvitedPlayers) do
-        assert(select(2, tostring(form):gsub("%-", "")) <= 1,
-            "Es wurde ein Name mit doppeltem Realmanteil versucht: " .. tostring(form))
-    end
-    for _, command in ipairs(sentSlashCommands) do
-        assert(tostring(command):find("%-") == nil,
-            "Der Chatbefehl trägt einen Realmanteil: " .. tostring(command))
-    end
+    local openOk, openMessage = addon.Roster:OpenGuildRemoval("Heiler-Realm")
+    assert(openOk == true, "Der Weg ins Gildenfenster wurde abgelehnt: " .. tostring(openMessage))
+    assert(opened == 1, "Blizzards Gildenfenster wurde nicht geoeffnet")
+    assert(selectedIndex == 2,
+        "Der Spieler wurde im Gildenroster nicht ausgewaehlt: " .. tostring(selectedIndex))
+    assert(tostring(openMessage):find("ausgewählt", 1, true),
+        "Die Meldung sagt nicht, dass der Spieler ausgewaehlt ist: " .. tostring(openMessage))
+
+    -- Und nichts davon behauptet einen Ausschluss: Der Fall bleibt offen.
     assert(addon.Roster:GetMemberCareDecision("Heiler") == nil
         or addon.Roster:GetMemberCareDecision("Heiler").status ~= "DONE",
-        "Ein nicht ausgeführter Ausschluss wurde als erledigt vermerkt")
-    assert(uninvitedPlayers[1] == "Heiler-Realm", "Es wurde der falsche Spieler entfernt")
+        "Das Oeffnen des Gildenfensters wurde als erledigter Ausschluss vermerkt")
+    assert(#uninvitedPlayers == 0,
+        "Es wurde doch ein geschuetzter Ausschluss versucht: " .. table.concat(uninvitedPlayers, ", "))
 
-    -- Und derselbe Aufruf mit einem Server, der ihn ausführt.
-    local realCount = GetNumGuildMembers
-    local realUninvite = GuildUninvite
-    GuildUninvite = function(name)
-        uninvitedPlayers[#uninvitedPlayers + 1] = name
-        GetNumGuildMembers = function()
-            return 1
-        end
-    end
-    local removedOk, removedMessage
-    addon.Roster:RemoveMember("Heiler-Realm", function(ok, message)
-        removedOk, removedMessage = ok, message
-    end)
-    RunPendingTimers()
-    assert(removedOk == true and tostring(removedMessage):find("entfernt", 1, true),
-        "Der ausgeführte Ausschluss wurde nicht als Erfolg gemeldet: "
-            .. tostring(removedMessage))
-    assert(addon.Roster:GetMemberCareDecision("Heiler").status == "DONE",
-        "Der Ausschluss wurde nicht als erledigt vermerkt")
-    GuildUninvite = realUninvite
-    GetNumGuildMembers = realCount
-    uninvitedPlayers = {}
-    addon.Roster:Scan()
-    assert(addon.Roster:GetMember("Heiler-Realm") ~= nil,
-        "Testaufbau: Heiler-Realm fehlt nach dem Ausschlusstest im Roster")
-    RunPendingTimers()
-    timerDelayThreshold = savedThreshold
+    -- Ohne Berechtigung fuehrt der Knopf nirgendwohin.
+    canRemoveFromGuild = false
+    local blockedOk = addon.Roster:OpenGuildRemoval("Heiler-Realm")
+    assert(blockedOk == false, "Ohne WoW-Berechtigung ging das Gildenfenster trotzdem auf")
+    assert(addon.Roster:CanRemoveFromGuild() == false,
+        "CanRemoveFromGuild meldet eine Berechtigung, die es nicht gibt")
+    canRemoveFromGuild = true
+
+    SetGuildRosterSelection = savedSelection
+    ToggleGuildFrame = savedToggle
 end
 
 -- Ein Rang ohne Mitgliederpflege darf gar nichts davon.
