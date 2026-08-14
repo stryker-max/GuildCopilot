@@ -165,6 +165,62 @@ local function ReadTalentPoints(tabIndex)
     return 0
 end
 
+-- === Die Spec eines FREMDEN Spielers ========================================
+--
+-- Aus dem Spiel gefragt: "Das Roster wird quasi nur durch Addon-Nutzer aktuell -
+-- kann das Roster selber erkennen, welche Spec das ist?" Bei 86 Mitgliedern und
+-- zwei bekannten Profilen ist das die richtige Frage.
+--
+-- Es geht, und zwar exakt statt geraten: Dieselbe Funktion, die den eigenen
+-- Talentbaum liest, liest mit gesetztem Inspect-Schalter den eines fremden
+-- Spielers - GetTalentTabInfo(tab, true). Zauber im Kampflog zu deuten waere
+-- die schlechtere Quelle: Sie taugt nur fuer die, die mit einem raiden, und
+-- ein einzelner Zauber belegt selten eine Spec.
+--
+-- Vorbedingung ist eine laufende Inspektion, und genau die faehrt der
+-- Ausruestungsabgleich (GearAudit) ohnehin ueber die halbe Gilde. Diese
+-- Funktion haengt sich dort an, statt einen zweiten Verkehr aufzumachen.
+local function ReadInspectTalentPoints(tabIndex)
+    if GetTalentTabInfo then
+        local results = { pcall(GetTalentTabInfo, tabIndex, true, false, 1) }
+        if results[1] and type(results[6]) == "number" then
+            return results[6]
+        end
+    end
+    return 0
+end
+
+function GC.Profile:DetectTalentSpecForUnit(unit)
+    if not unit or not UnitClass then
+        return nil
+    end
+    local _, classFile = UnitClass(unit)
+    local classInfo = classFile and GC.Classes[classFile]
+    if not classInfo then
+        return nil
+    end
+
+    local points = {}
+    local bestIndex, bestPoints, total = nil, -1, 0
+    for tabIndex = 1, #classInfo.specs do
+        points[tabIndex] = ReadInspectTalentPoints(tabIndex)
+        total = total + points[tabIndex]
+        if points[tabIndex] > bestPoints then
+            bestIndex = tabIndex
+            bestPoints = points[tabIndex]
+        end
+    end
+
+    -- Ein Level-70-Charakter hat rund 60 Talentpunkte verteilt. Liefert der
+    -- Client deutlich weniger, sind die Daten noch nicht da - dann lieber
+    -- nichts sagen als eine Spec erfinden, die gleich in der Gildenuebersicht
+    -- steht.
+    if bestPoints <= 0 or total < 20 then
+        return nil
+    end
+    return classFile .. ":" .. bestIndex, table.concat(points, "/"), classFile
+end
+
 function GC.Profile:DetectTalentSpec()
     local _, classFile, classID = UnitClass("player")
     local classInfo = classFile and GC.Classes[classFile]

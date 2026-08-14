@@ -1146,9 +1146,12 @@ local function CreateRaidMarkerButton(parent, markerIndex, onClick)
     return button
 end
 
-local function CreateChoiceDropdown(parent, width, options, onSelected, openBelow, emptyLabel, iconResolver)
+-- "height" ist neu und bleibt optional: Die Auswahlfelder der Einstellungen
+-- sind 32 Pixel hoch, in einer 27 Pixel hohen Listenzeile ragt das oben und
+-- unten heraus. Ohne Angabe bleibt alles wie bisher.
+local function CreateChoiceDropdown(parent, width, options, onSelected, openBelow, emptyLabel, iconResolver, height)
     local dropdown
-    dropdown = CreateButton(parent, "Nicht gesetzt", width, 32, function()
+    dropdown = CreateButton(parent, "Nicht gesetzt", width, tonumber(height) or 32, function()
         local show = not dropdown.popup:IsShown()
         if show then
             dropdown:PlacePopup()
@@ -1840,6 +1843,45 @@ local function ProfessionSummary(profile)
     return #labels > 0 and table.concat(labels, " / ") or "–"
 end
 
+-- === Berufsnamen fuer schmale Spalten ======================================
+--
+-- "Lederverarbeitung / Verzauberkunst" sind 34 Zeichen. In der Berufsspalte der
+-- Uebersicht sind gut 30 Pixel je fuenf Zeichen - der Text lief hinten aus dem
+-- Feld und endete als "Verzauberku…". Aus dem Spiel gemeldet: "das
+-- abgeschnittene mag ich auch nicht".
+--
+-- Die Spalte breiter zu machen ginge nur auf Kosten der Nachbarn, und die
+-- brauchen ihren Platz genauso. Also die Namen kuerzen - und zwar so, wie in
+-- WoW ohnehin jeder darueber redet ("Leder", "Verzauberer", "Ingi"). Der
+-- vollstaendige Name steht weiterhin im Tooltip der Zeile.
+local PROFESSION_SHORT_NAMES = {
+    ["Alchimie"] = "Alchi",
+    ["Bergbau"] = "Bergbau",
+    ["Ingenieurskunst"] = "Ingi",
+    ["Juwelenschleifen"] = "Juwelen",
+    ["Kräuterkunde"] = "Kräuter",
+    ["Kürschnerei"] = "Kürschner",
+    ["Lederverarbeitung"] = "Leder",
+    ["Schmiedekunst"] = "Schmied",
+    ["Schneiderei"] = "Schneider",
+    ["Verzauberkunst"] = "Verzauberer",
+    ["Erste Hilfe"] = "Erste Hilfe",
+    ["Kochkunst"] = "Kochen",
+    ["Angeln"] = "Angeln",
+}
+
+local function ShortProfessionSummary(profile)
+    local labels = {}
+    for slot = 1, 2 do
+        local profession = profile and profile.professions and profile.professions[slot]
+        if profession and profession.name then
+            local name = profession.name
+            labels[#labels + 1] = GC.L(PROFESSION_SHORT_NAMES[name] or name)
+        end
+    end
+    return #labels > 0 and table.concat(labels, " / ") or "–"
+end
+
 local function LastOnlineLabel(member)
     if member.online then
         return "|cff59e695online|r"
@@ -1859,8 +1901,13 @@ function GC.UI:BuildDashboardPage()
     local page = self.pages.OVERVIEW
     -- Der Untertitel traegt eine Zahl und uebersetzt sich deshalb ueber den
     -- Platzhalter-Schluessel selbst; CreatePageTitle laesst ihn durch.
+    -- "Zuletzt aktive Level-70-Spieler" stand hier in einem Satz mit drei
+    -- weiteren Bedingungen und ging darin unter - aus dem Spiel gemeldet:
+    -- "ist nicht so klar und eindeutig". Das Ordnungsprinzip der Liste steht
+    -- deshalb jetzt hervorgehoben vorn, und dieselbe Aussage wiederholt sich
+    -- in der Spaltenueberschrift "ZULETZT ONLINE".
     CreatePageTitle(page, "Gildenübersicht",
-        (GC.L("Bis zu {n} zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen.")
+        (GC.L("|cff2ec7dbNach zuletzt online sortiert|r – bis zu {n} Level-70-Spieler aus den gewählten Raider-Rängen, mit Rang, Raidprofil und Berufen.")
             :gsub("{n}", tostring(GC.Constants.ACTIVE_RAIDER_LIMIT))))
 
     page.metricCards = {}
@@ -1938,18 +1985,24 @@ function GC.UI:BuildDashboardPage()
     -- brach um und sprengte die 25 Pixel hohe Zeile. Die Spalte bekommt mehr
     -- Platz, die Berufe geben ihn ab - sie sind ohnehin selten voll.
     local headers = {
-        { text = "SPIELER", x = 18, width = 128 },
-        { text = "SPEC", x = 154, width = 164 },
-        { text = "STATUS", x = 326, width = 92 },
-        { text = "BERUFE", x = 426, width = 214 },
-        { text = "AKTIV", x = 648, width = 100 },
+        { text = "SPIELER", x = 18, width = 112 },
+        { text = "RANG", x = 136, width = 92 },
+        { text = "SPEC", x = 234, width = 150 },
+        { text = "STATUS", x = 390, width = 86 },
+        { text = "BERUFE", x = 482, width = 150 },
+        -- Der Kopf sagt jetzt selbst, wonach sortiert ist. Die Liste war immer
+        -- nach der letzten Onlinezeit geordnet, nur stand das nirgends.
+        { text = "ZULETZT ONLINE", x = 638, width = 110, highlight = true },
     }
     for _, headerDefinition in ipairs(headers) do
         local headerLabel = CreateLabel(rosterCard, headerDefinition.text, {
-            muted = true,
+            muted = not headerDefinition.highlight,
             font = "GameFontNormalSmall",
             width = headerDefinition.width,
         })
+        if headerDefinition.highlight then
+            SetTextColor(headerLabel, THEME.accent)
+        end
         headerLabel:SetPoint("TOPLEFT", rosterCard, "TOPLEFT", headerDefinition.x, -49)
     end
 
@@ -1968,11 +2021,12 @@ function GC.UI:BuildDashboardPage()
         -- Durchgehend einzeilig: Jede umbrechende Zelle waechst ueber ihre
         -- Zeile hinaus und schiebt sich optisch in die Nachbarzeilen.
         local columns = {
-            { key = "name", x = 5, width = 128 },
-            { key = "spec", x = 141, width = 164 },
-            { key = "status", x = 313, width = 92 },
-            { key = "professions", x = 413, width = 214 },
-            { key = "activity", x = 635, width = 100 },
+            { key = "name", x = 5, width = 112 },
+            { key = "rank", x = 123, width = 92 },
+            { key = "spec", x = 221, width = 150 },
+            { key = "status", x = 377, width = 86 },
+            { key = "professions", x = 469, width = 150 },
+            { key = "activity", x = 625, width = 110 },
         }
         for _, column in ipairs(columns) do
             row[column.key] = CreateLabel(row, "", {
@@ -2074,7 +2128,16 @@ function GC.UI:RefreshDashboard()
                 statusColor = THEME.muted
                 statusHint = GC.L("Dieser Spieler hat sein Raidprofil noch nie ausgefüllt.")
             else
-                if profile.source == "WARCRAFT_LOGS" then
+                if profile.source == "INSPECT" then
+                    -- Aus dem Talentbaum gelesen, nicht vom Spieler gemeldet:
+                    -- Die Spec stimmt, ueber Main/Twink und die Zweitspec sagt
+                    -- sie nichts.
+                    statusText = GC.L("erkannt")
+                    statusColor = THEME.muted
+                    statusHint = GC.L("Spec aus dem Talentbaum gelesen, als dieser Spieler "
+                        .. "für den Ausrüstungsabgleich inspiziert wurde. Main/Twink und "
+                        .. "Zweitspec kennt nur der Spieler selbst.")
+                elseif profile.source == "WARCRAFT_LOGS" then
                     statusText = "Logs"
                     statusHint = GC.L("Stammt aus einem Warcraft-Logs-Import, nicht vom Spieler selbst.")
                 elseif profile.source == "MANUAL" then
@@ -2089,23 +2152,32 @@ function GC.UI:RefreshDashboard()
                         and "Als Zweitcharakter gemeldet."
                         or "Als Hauptcharakter gemeldet.")
                 end
-                if not profile.confirmed and profile.source ~= "WARCRAFT_LOGS" then
+                -- Das Fragezeichen meint "der Spieler hat sein eigenes Profil
+                -- nicht bestaetigt". Auf eine abgeleitete Angabe passt das
+                -- nicht: Weder Logs noch Talentbaum werden je bestaetigt, und
+                -- "erkannt ?" waere schlicht falsch.
+                if not profile.confirmed and profile.source ~= "WARCRAFT_LOGS"
+                    and profile.source ~= "INSPECT" then
                     statusText = statusText .. " ?"
                     statusColor = THEME.warning
                     statusHint = statusHint .. GC.L(" Der Spieler hat das Profil noch nicht bestätigt.")
-                else
+                elseif profile.source ~= "INSPECT" then
                     statusColor = THEME.text
                 end
             end
 
-            local professionText = ProfessionSummary(profile)
+            -- In der Spalte die Kurzform, im Tooltip der volle Name.
+            local professionText = ShortProfessionSummary(profile)
             row.member = member
             row.tooltipSpec = specText
-            row.tooltipProfessions = professionText ~= "–" and professionText or ""
+            row.tooltipProfessions = ProfessionSummary(profile) ~= "–"
+                and ProfessionSummary(profile) or ""
             row.tooltipStatus = statusHint
 
             row.name:SetText(GC.Util.PlayerShortName(member.name))
             row.name:SetTextColor(ClassColor(member.classFile))
+            row.rank:SetText(member.rank or "–")
+            SetTextColor(row.rank, member.rank and THEME.text or THEME.muted)
             row.spec:SetText(specText)
             row.status:SetText(statusText)
             SetTextColor(row.status, statusColor)
@@ -4679,15 +4751,22 @@ function GC.UI:BuildMemberCarePage()
         local row = CreatePanel(suggestionsCard, index % 2 == 0 and THEME.input or THEME.cardHover)
         row:SetSize(716, 27)
         row:SetPoint("TOPLEFT", suggestionsCard, "TOPLEFT", 18, -81 - ((index - 1) * 29))
-        row.name = CreateLabel(row, "", { width = 116, height = 27 })
+        row.name = CreateLabel(row, "", { width = 104, height = 27 })
         row.name:SetPoint("LEFT", row, "LEFT", 9, 0)
-        row.status = CreateLabel(row, "", { width = 76, height = 27 })
-        row.status:SetPoint("LEFT", row, "LEFT", 129, 0)
+        -- Der Gildenrang stand nirgends, entscheidet aber ueber alles auf
+        -- dieser Zeile: Geschuetzte Raenge erscheinen nie als Vorschlag, und
+        -- entfernen darf man nur einen NIEDRIGEREN Rang. Ohne ihn war jeder
+        -- ausgegraute Knopf ein Raetsel.
+        row.rank = CreateLabel(row, "", { width = 84, height = 27 })
+        row.rank:SetPoint("LEFT", row, "LEFT", 117, 0)
+        row.status = CreateLabel(row, "", { width = 68, height = 27 })
+        row.status:SetPoint("LEFT", row, "LEFT", 205, 0)
         -- Der Grund umbrach auf zwei Zeilen und lief damit ueber die 27 Pixel
-        -- Zeilenhoehe hinaus in die Nachbarzeilen. Er bleibt jetzt einzeilig,
-        -- vollstaendig steht er im Tooltip.
-        row.reason = CreateLabel(row, "", { muted = true, width = 196, height = 27 })
-        row.reason:SetPoint("LEFT", row, "LEFT", 209, 0)
+        -- Zeilenhoehe hinaus in die Nachbarzeilen. Er bleibt einzeilig - hat
+        -- aber seit dem Aufklappmenue 54 Pixel mehr Platz, weil drei Knoepfe
+        -- weggefallen sind. Vollstaendig steht er weiterhin im Tooltip.
+        row.reason = CreateLabel(row, "", { muted = true, width = 250, height = 27 })
+        row.reason:SetPoint("LEFT", row, "LEFT", 277, 0)
         row:EnableMouse(true)
         row:SetScript("OnEnter", function(self)
             if not GameTooltip or not self.tooltipText or self.tooltipText == "" then
@@ -4713,18 +4792,40 @@ function GC.UI:BuildMemberCarePage()
             GC.UI:RefreshMemberCare()
         end
 
-        row.ignoreButton = CreateButton(row, "Ausnahme", 74, 21, function()
-            DecideRow("IGNORED")
-        end)
-        row.ignoreButton:SetPoint("LEFT", row, "LEFT", 409, 0)
-        row.postponeButton = CreateButton(row, "Später", 60, 21, function()
-            DecideRow("POSTPONED")
-        end)
-        row.postponeButton:SetPoint("LEFT", row, "LEFT", 487, 0)
-        row.doneButton = CreateButton(row, "Erledigt", 66, 21, function()
-            DecideRow("DONE")
-        end)
-        row.doneButton:SetPoint("LEFT", row, "LEFT", 551, 0)
+        -- === Ein Aufklappmenue statt vier Knoepfen =========================
+        --
+        -- Vier Knoepfe je Zeile mal neun Zeilen sind 36 Schaltflaechen auf
+        -- einer Karte, und sie frassen die Haelfte der Zeilenbreite - die
+        -- Begruendung daneben endete deshalb regelmaessig als "Main/Twink…".
+        -- Aus dem Spiel: "diese buttons eher in einem drop down machen?!"
+        --
+        -- Der Ausschluss bleibt bewusst ein EIGENER Knopf daneben. Er ist die
+        -- einzige Entscheidung hier, die sich nicht zuruecknehmen laesst; sie
+        -- gehoert nicht einen Klick tief in ein Menue, in dem der Zeiger schon
+        -- steht, weil man gerade "Später" ausgewaehlt hat. Er behaelt seine
+        -- zweistufige Bestaetigung.
+        local DECISION_ACTIONS = {
+            { label = "Ausnahme", status = "IGNORED" },
+            { label = "Später", status = "POSTPONED" },
+            { label = "Erledigt", status = "DONE" },
+        }
+        local actionLabels = {}
+        for _, action in ipairs(DECISION_ACTIONS) do
+            actionLabels[#actionLabels + 1] = GC.L(action.label)
+        end
+        row.actionDropdown = CreateChoiceDropdown(row, 104, actionLabels, function(selected)
+            for _, action in ipairs(DECISION_ACTIONS) do
+                if GC.L(action.label) == selected then
+                    DecideRow(action.status)
+                    break
+                end
+            end
+            -- Das Feld waehlt nichts aus, es loest aus. Ohne das Zuruecksetzen
+            -- traegt die Zeile danach die zuletzt getroffene Entscheidung als
+            -- Beschriftung, obwohl sie laengst ausgefuehrt ist.
+            row.actionDropdown:SetValue("")
+        end, true, GC.L("Entscheiden"), nil, 21)
+        row.actionDropdown:SetPoint("LEFT", row, "LEFT", 533, 0)
 
         -- Entfernen verlangt einen zweiten, ausdrücklichen Klick auf derselben
         -- Zeile. Der erste Klick bewaffnet nur und beschriftet um.
@@ -4757,7 +4858,7 @@ function GC.UI:BuildMemberCarePage()
             page:SetMemberCareStatus(message, ok)
             GC.UI:RefreshMemberCare()
         end)
-        row.removeButton:SetPoint("LEFT", row, "LEFT", 621, 0)
+        row.removeButton:SetPoint("LEFT", row, "LEFT", 643, 0)
         page.memberCareSuggestionRows[index] = row
     end
     page.memberCareSuggestionNotice = CreateLabel(suggestionsCard, "", { muted = true, width = 716 })
@@ -4880,19 +4981,24 @@ function GC.UI:RefreshMemberCare()
             row.playerName = candidate.member.name
             row.removeArmed = false
             row.removeButton:SetText(GC.L("Entfernen"))
+            row.actionDropdown:SetValue("")
             row.name:SetText(GC.Util.PlayerShortName(candidate.member.name))
             row.name:SetTextColor(ClassColor(candidate.member.classFile))
+            row.rank:SetText(candidate.member.rank or "–")
+            SetTextColor(row.rank, candidate.member.rank and THEME.text or THEME.muted)
             row.status:SetText(candidate.status)
             SetTextColor(row.status, candidate.status == "VORSCHLAG" and THEME.danger or THEME.warning)
             row.reason:SetText(candidate.reason)
             row.tooltipName = GC.Util.PlayerShortName(candidate.member.name)
+            -- Der Tooltip nennt jetzt auch den Grund, WARUM "Entfernen" grau
+            -- ist. Das ist die Frage, die an dieser Zeile gestellt wird.
+            local removable, removeReason = GC.Roster:CanRemoveMember(candidate.member.name)
             row.tooltipText = candidate.reason
+                .. (removable and "" or ("\n\n" .. GC.L("Entfernen nicht möglich: ") .. tostring(removeReason)))
 
             local canDecide = GC.Roster:CanAccessMemberCare()
-            SetButtonEnabled(row.ignoreButton, canDecide)
-            SetButtonEnabled(row.postponeButton, canDecide)
-            SetButtonEnabled(row.doneButton, canDecide)
-            SetButtonEnabled(row.removeButton, GC.Roster:CanRemoveMember(candidate.member.name) == true)
+            SetButtonEnabled(row.actionDropdown, canDecide)
+            SetButtonEnabled(row.removeButton, removable == true)
         else
             row.playerName = nil
         end

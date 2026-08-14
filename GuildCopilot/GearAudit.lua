@@ -2031,6 +2031,17 @@ function GC.GearAudit:OnInspectReady(guid)
     end
 
     local _, classFile = UnitClass(unit)
+    -- Die Inspektion liefert nicht nur Ausruestung: Derselbe geoeffnete Kanal
+    -- traegt auch den Talentbaum. Ein Gildenmitglied ohne Addon bekommt so
+    -- ueberhaupt erst eine Spec in der Uebersicht - bisher stand dort bei 84
+    -- von 86 Mitgliedern nur die Klasse. Kostet keine einzige zusaetzliche
+    -- Anfrage, weil der Ausruestungsabgleich ohnehin ueber die Gilde geht.
+    if GC.Profile and GC.Profile.DetectTalentSpecForUnit then
+        local specKey = GC.Profile:DetectTalentSpecForUnit(unit)
+        if specKey then
+            GC.Roster:NoteInspectedSpec(active.name or UnitName(unit), specKey, classFile)
+        end
+    end
     local audit = self:BuildAudit(active.name or UnitName(unit), classFile, function(slotID)
         return GetInventoryItemLink(unit, slotID)
     end, "INSPECT", function(slotID)

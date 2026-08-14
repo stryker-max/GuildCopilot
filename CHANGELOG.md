@@ -7,6 +7,36 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.125 – Addon
+
+**Neu**
+
+- **Die Spec von Mitgliedern ohne Addon wird erkannt.** Bei 86 Mitgliedern und
+  zwei bekannten Profilen stand in der Übersicht fast überall nur die Klasse.
+  Der Ausrüstungsabgleich inspiziert diese Leute ohnehin – derselbe geöffnete
+  Kanal trägt auch den Talentbaum. Die Spec wird daraus **gelesen, nicht
+  geraten**, und erscheint als „erkannt". Sie ist die schwächste Quelle: Ein
+  gepflegtes Profil oder ein Logs-Import bleibt unangetastet, denn über
+  Main/Twink und Zweitspec sagt ein Talentbaum nichts.
+- **Der Gildenrang steht jetzt dabei** – in der Übersicht als eigene Spalte und
+  in jeder Zeile der Mitgliederpflege. Dort entscheidet er über alles: Geschützte
+  Ränge erscheinen nie als Vorschlag, und entfernen darf man nur einen
+  niedrigeren Rang. Ohne ihn war jeder ausgegraute Knopf ein Rätsel – der
+  Tooltip nennt jetzt zusätzlich den genauen Grund.
+
+**Geändert**
+
+- **Vier Knöpfe je Zeile sind ein Aufklappmenü geworden.** „Ausnahme", „Später"
+  und „Erledigt" stecken in einem Feld; die Begründung daneben hat dadurch 54
+  Pixel mehr und wird nicht mehr abgeschnitten. „Entfernen" bleibt bewusst ein
+  eigener Knopf: Es ist die einzige Entscheidung hier, die sich nicht
+  zurücknehmen lässt, und sie gehört nicht einen Klick tief in ein Menü.
+- **Berufe werden nicht mehr abgeschnitten.** In der Übersicht stehen die
+  Kurzformen, über die in WoW ohnehin jeder redet – „Leder / Verzauberer" statt
+  „Lederverarbeitung / Verzauberku…". Vollständig steht es weiter im Tooltip.
+- **Die Übersicht sagt, wonach sie sortiert.** „Nach zuletzt online sortiert"
+  steht hervorgehoben über der Liste, und die Spalte heißt jetzt so.
+
 ## 0.9.124 – Addon
 
 **Behoben**

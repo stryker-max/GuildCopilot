@@ -298,6 +298,58 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.125 – Fünf Meldungen aus einer Sitzung
+
+Fünf Punkte in schneller Folge aus dem Spiel, alle aus derselben halben Stunde vor dem Bildschirm. Sie hängen enger zusammen, als sie klingen: Vier davon beschreiben dieselbe überfüllte Zeile, und der fünfte erklärt, warum in dieser Zeile so wenig steht.
+
+### Die Spec, die niemand gemeldet hat
+
+„Das Roster wird quasi nur durch Addon-Nutzer aktuell – kann das Roster selber erkennen anhand von Raidauswertung und Gildenzugehörigkeit, welche Spec das ist?"
+
+Der Befund dahinter steht im Bildschirmfoto: 86 Mitglieder, **2 bekannte Specs**. In der Übersicht stand bei allen anderen nur die Klasse.
+
+Der naheliegende Weg wäre die Raidauswertung: Sie sieht `SPELL_CAST_SUCCESS` samt Zauber-ID für jeden im Kampflog. Daraus ließe sich eine Spec ableiten. Nur taugt das an zwei Stellen nicht. Es erfasst ausschließlich Leute, die **mit einem raiden** – in einer Gilde mit 86 Mitgliedern und einem Stammraid ist das die kleinere Hälfte. Und es bräuchte eine gepflegte Tabelle „Zauber-ID → Spec", deren Einträge einzeln belegt sein müssten; eine falsche ID schreibt eine falsche Spec in eine gildenweit sichtbare Anzeige, die in die Rekrutierungsvorschläge einfließt.
+
+Es geht exakt und ohne jede Tabelle. Der Ausrüstungsabgleich inspiziert ohnehin die halbe Gilde (`GearAudit`, `NotifyInspect`, `INSPECT_READY`), und eine offene Inspektion liefert nicht nur die Ausrüstung, sondern auch den Talentbaum: `GetTalentTabInfo(tab, true)` – dieselbe Funktion, mit der das Addon seit jeher die **eigene** Spec bestimmt, nur mit gesetztem Inspect-Schalter. Kein einziges zusätzliches Paket, kein Raten.
+
+Zwei Vorsichtsmaßnahmen:
+
+- **Unter 20 verteilten Talentpunkten wird nichts gemeldet.** Ein Level-70-Charakter hat rund 60; deutlich weniger heißt, dass die Daten noch nicht da sind. Dann lieber nichts sagen als eine Spec erfinden.
+- **Die erkannte Spec ist die schwächste Quelle.** Ein gepflegtes Profil oder ein Warcraft-Logs-Import bleibt stehen. Ein Talentbaum weiß, wie jemand geskillt ist – nicht, ob das sein Main ist und womit er raiden will. Angezeigt wird sie deshalb als „erkannt", ohne das Fragezeichen der unbestätigten Profile: Eine abgeleitete Angabe wird nie bestätigt, „erkannt ?" wäre schlicht falsch.
+
+Gesendet wird sie nicht. Jeder Client inspiziert ohnehin selbst, und eine abgeleitete Angabe hat im gildenweiten Abgleich nichts verloren.
+
+Der Test deckte dabei einen Fehler auf, den ich in derselben Sitzung schon einmal gemacht hatte: Ein Spieler steht in `remoteProfiles` unter zwei Schlüsseln, mit und ohne Realmanteil. Wer nur einen nachsieht, übersieht ein gepflegtes Profil unter dem anderen und legt daneben einen abgeleiteten Eintrag an. Dieselbe Falle wie bei `GetOnlinePeerNames` in 0.9.123.
+
+### Die überfüllte Zeile
+
+Die übrigen vier Meldungen beschreiben dieselbe Ursache aus vier Richtungen:
+
+- „Das Abgeschnittene mag ich auch nicht" – `Lederverarbeitung / Verzauberku…` in der Übersicht, `Main/Twink…` in der Mitgliederpflege.
+- „Hier wäre hilfreich, wenn man den Rang des jeweiligen Members sieht."
+- „Diese Buttons eher in einem Dropdown machen?!"
+- „Bei der Übersicht ‚zuletzt aktive Level-70-Spieler' ist nicht so klar und eindeutig, vielleicht das hervorheben."
+
+**Platz.** In der Mitgliederpflege lagen vier Schaltflächen je Zeile, neun Zeilen – 36 Knöpfe auf einer Karte, die zusammen die halbe Zeilenbreite fraßen. Drei davon stecken jetzt in einem Aufklappmenü, und die Begründung daneben hat 54 Pixel mehr. `CreateChoiceDropdown` hat dafür einen optionalen Höhenparameter bekommen: Die Auswahlfelder der Einstellungen sind 32 Pixel hoch, in einer 27 Pixel hohen Listenzeile ragt das heraus.
+
+**„Entfernen" bleibt ein eigener Knopf.** Es ist die einzige Entscheidung dieser Zeile, die sich nicht zurücknehmen lässt, und sie gehört nicht einen Klick tief in ein Menü, in dem der Zeiger ohnehin gerade steht. Er behält seine zweistufige Bestätigung. Das ist bewusst nicht ganz das, was gewünscht war.
+
+**Die Berufsspalte** ließ sich nicht verbreitern, ohne den Nachbarn Platz zu nehmen – also wurden die Namen gekürzt, und zwar so, wie in WoW ohnehin jeder darüber redet: „Leder", „Verzauberer", „Ingi". Vollständig steht es weiter im Tooltip.
+
+**Der Rang** steht jetzt in beiden Listen. In der Mitgliederpflege ist er nicht Zierde, sondern die Erklärung: Geschützte Ränge erscheinen nie als Vorschlag, und entfernen darf man nur einen niedrigeren Rang. Der Tooltip nennt zusätzlich den genauen Grund, wenn „Entfernen" grau ist.
+
+**Die Sortierung** stand bisher als Nebensatz in einer Zeile mit drei weiteren Bedingungen. Sie steht jetzt hervorgehoben vorn und wiederholt sich in der Spaltenüberschrift „ZULETZT ONLINE". Der ursprünglich gesetzte Pfeil „↓" fiel dem projekteigenen Validator zum Opfer – die WoW-Schrift zeichnet dafür einen leeren Kasten. Ein Wort tut es auch.
+
+### Geändert
+
+- `GuildCopilot/Profile.lua`: `DetectTalentSpecForUnit` liest den Talentbaum eines inspizierten Spielers;
+- `GuildCopilot/GearAudit.lua`: der laufende Inspect meldet die Spec mit;
+- `GuildCopilot/Roster.lua`: `NoteInspectedSpec` legt sie als schwächste Quelle ab und prüft beide Namensschlüssel;
+- `GuildCopilot/UI.lua`: Rangspalten in Übersicht und Mitgliederpflege, Kurzformen der Berufe, Aufklappmenü statt drei Knöpfen, optionale Höhe für `CreateChoiceDropdown`, hervorgehobene Sortierung, Grund im Tooltip;
+- `GuildCopilot/Locales.lua`: die neuen englischen Entsprechungen;
+- `tests/smoke.lua`: erkannte Spec wird abgelegt, weicht gepflegten Profilen unter beiden Schlüsseln und rührt den eigenen Charakter nicht an;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.125.
+
 ## 0.9.124 – Ein Erfolg, der keiner war
 
 Aus dem Spiel: „Bei der Mitgliederpflege hat das aus der Gilde Kicken nicht funktioniert – er ist zwar aus der Mitgliederpflege geflogen, aber durch Entfernen aus der Gilde hat es nicht funktioniert."

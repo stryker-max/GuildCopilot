@@ -58,8 +58,24 @@ local english = {
     -- === Teilschritt 1: Untertitel der Seiten ==============================
     ["Raidprofil, Berufe und Abmeldung an einem Ort – diese Angaben werden mit Guild-Copilot-Nutzern in deiner Gilde synchronisiert."]
         = "Raid profile, professions and absences in one place – these details are synchronized with Guild Copilot users in your guild.",
-    ["Bis zu {n} zuletzt aktive Level-70-Spieler – nach gewählten Raider-Rängen, mit Raidprofil und Berufen."]
-        = "Up to {n} recently active level 70 players – filtered by the selected raider ranks, with raid profile and professions.",
+    ["|cff2ec7dbNach zuletzt online sortiert|r – bis zu {n} Level-70-Spieler aus den gewählten Raider-Rängen, mit Rang, Raidprofil und Berufen."]
+        = "|cff2ec7dbSorted by last seen online|r – up to {n} level 70 players from the selected raider ranks, with rank, raid profile and professions.",
+    ["ZULETZT ONLINE"] = "LAST ONLINE",
+    ["Entscheiden"] = "Decide",
+    ["Entfernen nicht möglich: "] = "Cannot remove: ",
+    ["erkannt"] = "detected",
+    ["Spec aus dem Talentbaum gelesen, als dieser Spieler für den Ausrüstungsabgleich inspiziert wurde. Main/Twink und Zweitspec kennt nur der Spieler selbst."]
+        = "Spec read from the talent tree while inspecting this player for the gear audit. Only the player knows main/alt and off-spec.",
+    ["Leder"] = "Leatherw.",
+    ["Verzauberer"] = "Enchanter",
+    ["Schneider"] = "Tailor",
+    ["Schmied"] = "Blacksm.",
+    ["Juwelen"] = "Jewelcr.",
+    ["Kräuter"] = "Herbal.",
+    ["Kürschner"] = "Skinner",
+    ["Alchi"] = "Alchemy",
+    ["Ingi"] = "Engineer",
+    ["Kochen"] = "Cooking",
     ["Diese Angaben werden gildenweit synchronisiert und fließen in Werbe- und Antworttexte ein."]
         = "These details are synchronized guild-wide and feed the ad and reply templates.",
     ["Gildenroster, bestätigte Profile und importierte Logs ergeben einen Vorschlag für die Rekrutierung."]

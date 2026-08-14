@@ -936,6 +936,60 @@ end
 -- "guildData" ist optional und rein fuer Schleifen gedacht: Wer ueber alle
 -- Mitglieder laeuft, holt den Gildendatensatz einmal und reicht ihn durch,
 -- statt ihn je Mitglied erneut ueber den Vorgabenbaum aufbauen zu lassen.
+-- === Beim Inspizieren erkannte Spec ========================================
+--
+-- Legt die Spec eines fremden Spielers ab, die beim Ausruestungsabgleich aus
+-- seinem Talentbaum gelesen wurde. Sie ist die SCHWAECHSTE Quelle und drueckt
+-- sich niemand vor:
+--
+--   * Wer sein Profil selbst gepflegt hat, behaelt es - der Spieler weiss
+--     besser als sein Talentbaum, womit er raiden will (Dual-Spec!).
+--   * Ein Warcraft-Logs-Import bleibt ebenfalls stehen.
+--   * Ueberschrieben wird nur ein aelterer Eintrag derselben Herkunft.
+--
+-- Gesendet wird sie nicht: Jeder Client inspiziert ohnehin selbst, und eine
+-- abgeleitete Angabe hat im gildenweiten Abgleich nichts verloren.
+function GC.Roster:NoteInspectedSpec(name, specKey, classFile)
+    if GC.Util.Trim(name) == "" or GC.Util.Trim(specKey) == "" then
+        return false
+    end
+    local key = GC.Util.PlayerKey(name)
+    if key == "" or key == GC.Util.PlayerKey(GC:GetPlayerFullName()) then
+        return false
+    end
+
+    local guildData = GC.DB:GetGuild()
+    -- Ein Spieler steht in diesen Tabellen unter zwei Schluesseln: mit und ohne
+    -- Realmanteil. Wer nur einen davon nachsieht, uebersieht ein gepflegtes
+    -- Profil unter dem anderen und legt daneben einen abgeleiteten Eintrag an -
+    -- dieselbe Falle, in der schon GetOnlinePeerNames sass.
+    local fullKey = GC.Util.NormalizeName(name)
+    local existing = guildData.remoteProfiles[key] or guildData.remoteProfiles[fullKey]
+    if existing and existing.source ~= "INSPECT" then
+        return false
+    end
+    local imported = guildData.warcraftLogs and guildData.warcraftLogs.members or {}
+    if imported[key] or imported[fullKey] then
+        return false
+    end
+
+    local entry = existing or {}
+    local changed = entry.detectedSpecKey ~= specKey
+    entry.fullName = entry.fullName or name
+    entry.detectedSpecKey = specKey
+    entry.raidSpecKey = specKey
+    entry.classFile = classFile or entry.classFile
+    entry.source = "INSPECT"
+    entry.confirmed = false
+    entry.receivedAt = GC.Util.Now()
+    entry.updatedAt = GC.Util.Now()
+    guildData.remoteProfiles[key] = entry
+    if changed then
+        GC:FireCallback("ROSTER_UPDATED")
+    end
+    return changed
+end
+
 function GC.Roster:GetProfile(name, guildData)
     local normalized = GC.Util.NormalizeName(name)
     local ownName = GC.Util.NormalizeName(GC:GetPlayerFullName())

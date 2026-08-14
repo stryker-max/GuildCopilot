@@ -10366,4 +10366,58 @@ do
         "Mit Bearbeitungsrecht bleibt der Sendeknopf gesperrt")
 end
 
+-- === Spec eines Mitglieds ohne Addon ========================================
+-- Bei 86 Mitgliedern und zwei bekannten Profilen stand in der Übersicht fast
+-- überall nur die Klasse. Der Ausrüstungsabgleich inspiziert diese Leute
+-- ohnehin; derselbe geöffnete Kanal trägt den Talentbaum.
+do
+    local spec_guild = addon.DB:GetGuild()
+    -- Beide Schlüssel abräumen: Derselbe Spieler steht mit und ohne
+    -- Realmanteil in der Tabelle.
+    local spec_saved = spec_guild.remoteProfiles["heiler"]
+    local spec_savedFull = spec_guild.remoteProfiles["heiler-realm"]
+    spec_guild.remoteProfiles["heiler"] = nil
+    spec_guild.remoteProfiles["heiler-realm"] = nil
+
+    assert(addon.Roster:NoteInspectedSpec("Heiler-Realm", "PRIEST:3", "PRIEST") == true,
+        "Die erkannte Spec wurde nicht abgelegt")
+    local spec_entry = addon.Roster:GetProfile("Heiler-Realm")
+    assert(spec_entry ~= nil and spec_entry.raidSpecKey == "PRIEST:3"
+        and spec_entry.source == "INSPECT",
+        "Die erkannte Spec steht nicht am Mitglied")
+
+    -- Ein gepflegtes Profil ist die stärkere Quelle und bleibt unangetastet -
+    -- der Spieler weiß besser als sein Talentbaum, womit er raiden will.
+    spec_guild.remoteProfiles["heiler"] = {
+        fullName = "Heiler-Realm",
+        raidSpecKey = "PRIEST:2",
+        confirmed = true,
+        receivedAt = addon.Util.Now(),
+    }
+    assert(addon.Roster:NoteInspectedSpec("Heiler-Realm", "PRIEST:3", "PRIEST") == false,
+        "Die erkannte Spec hat ein gepflegtes Profil überschrieben")
+    assert(addon.Roster:GetProfile("Heiler-Realm").raidSpecKey == "PRIEST:2",
+        "Das gepflegte Profil wurde durch die Erkennung verändert")
+
+    -- Ein gepflegtes Profil unter dem VOLLEN Schlüssel schützt genauso.
+    spec_guild.remoteProfiles["heiler"] = nil
+    spec_guild.remoteProfiles["heiler-realm"] = {
+        fullName = "Heiler-Realm",
+        raidSpecKey = "PRIEST:2",
+        confirmed = true,
+        receivedAt = addon.Util.Now(),
+    }
+    assert(addon.Roster:NoteInspectedSpec("Heiler-Realm", "PRIEST:3", "PRIEST") == false,
+        "Ein gepflegtes Profil unter dem vollen Schlüssel wurde übergangen")
+    assert(spec_guild.remoteProfiles["heiler"] == nil,
+        "Neben dem gepflegten Profil entstand ein abgeleiteter Zweiteintrag")
+
+    -- Und der eigene Charakter wird nie über diesen Weg beschrieben.
+    assert(addon.Roster:NoteInspectedSpec(addon:GetPlayerFullName(), "HUNTER:1", "HUNTER") == false,
+        "Der eigene Charakter wurde über die Inspektion beschrieben")
+
+    spec_guild.remoteProfiles["heiler"] = spec_saved
+    spec_guild.remoteProfiles["heiler-realm"] = spec_savedFull
+end
+
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")
