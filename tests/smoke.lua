@@ -196,9 +196,30 @@ function InterfaceOptions_AddCategory(panel)
     optionsCategory = panel
 end
 chatMessages = {}
-DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
-    chatMessages[#chatMessages + 1] = tostring(message)
-end }
+-- Die Eingabezeile des Chats: Ueber sie fuehrt das Addon Slash-Befehle aus
+-- (/gkick). Gemerkt wird, was tatsaechlich abgeschickt wurde.
+sentSlashCommands = {}
+local chatEditBox = {
+    text = "",
+    SetText = function(self, value)
+        self.text = tostring(value or "")
+    end,
+    GetText = function(self)
+        return self.text
+    end,
+}
+function ChatEdit_SendText(editBox, _)
+    local text = editBox and editBox:GetText() or ""
+    if text ~= "" then
+        sentSlashCommands[#sentSlashCommands + 1] = text
+    end
+end
+DEFAULT_CHAT_FRAME = {
+    editBox = chatEditBox,
+    AddMessage = function(_, message)
+        chatMessages[#chatMessages + 1] = tostring(message)
+    end,
+}
 
 -- Tooltipzeilen je Item-Link, damit die Verzauberungsaufloesung pruefbar ist.
 tooltipLines = {}
@@ -3696,10 +3717,17 @@ do
     -- der Gilde entfernt" samt Vermerk "erledigt", während der Spieler in der
     -- Gilde blieb.
     local refusedOk, refusedMessage
+    sentSlashCommands = {}
     local startedOk, startedMessage = addon.Roster:RemoveMember("Heiler-Realm",
         function(ok, message)
             refusedOk, refusedMessage = ok, message
         end)
+    -- Der Weg, den ein Mensch nehmen wuerde, und zwar OHNE Realmanteil: Die
+    -- Gilde steht auf einem Realm, und Blizzards Befehlszerleger loest den
+    -- Namen selbst gegen den Roster auf.
+    assert(sentSlashCommands[1] == "/gkick Heiler",
+        "Der Ausschluss geht nicht als /gkick mit dem Kurznamen raus: "
+            .. tostring(sentSlashCommands[1]))
     assert(startedOk == true and tostring(startedMessage):find("geprüft", 1, true),
         "Der Aufruf meldet nicht, dass geprüft wird: " .. tostring(startedMessage))
     assert(refusedOk == nil,
@@ -3716,6 +3744,16 @@ do
             .. tostring(refusedMessage))
     assert(#uninvitedPlayers > 1,
         "Es wurde nur eine Namensform versucht: " .. table.concat(uninvitedPlayers, ", "))
+    -- Und nirgends ein zusammengebastelter Realmanteil: Der erste Entwurf
+    -- versuchte es mit "Name-Realm-Realm".
+    for _, form in ipairs(uninvitedPlayers) do
+        assert(select(2, tostring(form):gsub("%-", "")) <= 1,
+            "Es wurde ein Name mit doppeltem Realmanteil versucht: " .. tostring(form))
+    end
+    for _, command in ipairs(sentSlashCommands) do
+        assert(tostring(command):find("%-") == nil,
+            "Der Chatbefehl trägt einen Realmanteil: " .. tostring(command))
+    end
     assert(addon.Roster:GetMemberCareDecision("Heiler") == nil
         or addon.Roster:GetMemberCareDecision("Heiler").status ~= "DONE",
         "Ein nicht ausgeführter Ausschluss wurde als erledigt vermerkt")

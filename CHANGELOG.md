@@ -7,6 +7,21 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.127 – Addon
+
+**Behoben**
+
+- **Der Ausschluss nimmt jetzt den Weg, den ein Mensch nehmen würde: `/gkick`.**
+  Der rohe API-Aufruf hat dreimal lautlos nichts getan. Blizzards eigener
+  Chatbefehl löst den Namen gegen den Gildenroster auf, bevor er ihn
+  weiterreicht – bei einem Namen wie „Rhinô" ist das keine akademische Frage.
+  Gesendet wird der **Kurzname ohne Realm**; die Gilde steht ohnehin auf einem
+  Realm. Die API bleibt als zweiter Weg erhalten.
+- **Kein zusammengebastelter Realmanteil mehr.** Die Fehlermeldung der Vorversion
+  verriet den Schnitzer selbst: Sie versuchte es unter anderem als
+  „Rhinô-Thunderstrike-Thunderstrike" – der Realm wurde an einen Namen gehängt,
+  der ihn schon trug. Ein Test lässt das nicht wieder durch.
+
 ## 0.9.126 – Addon
 
 **Behoben**

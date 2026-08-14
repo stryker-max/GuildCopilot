@@ -298,6 +298,50 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.127 – „In Wahrheit muss es nur /gkick ausführen"
+
+Die Nachprüfung aus 0.9.126 hat getan, wofür sie gebaut war: Sie hat geantwortet.
+
+```
+Rhinô steht weiterhin im Gildenroster – WoW hat das Entfernen nicht ausgeführt
+(versucht als Rhinô, Rhinô-Thunderstrike, Rhinô-Thunderstrike-Thunderstrike).
+Prüfe deine Gildenberechtigung.
+```
+
+Zwei Erkenntnisse in einer Zeile, und die zweite ist peinlich.
+
+### Der Schnitzer
+
+`Rhinô-Thunderstrike-Thunderstrike`. Die zweite Namensform entstand als `target.name .. "-" .. GetNormalizedRealmName()` – an einem Namen, der den Realm bereits trug. Der dritte Versuch war damit von vornherein sinnlos.
+
+Er ist ersatzlos gestrichen, und zwar nicht repariert: **Der Gildenausschluss braucht keinen Realmanteil.** Eine Gilde steht auf einem Realm; der Kurzname ist eindeutig. Der Owner hat es in einem Halbsatz gesagt – „du brauchst keinen Realm-Namen dazu" –, und er hat recht. Ein Test prüft jetzt, dass keine der versuchten Formen mehr als einen Bindestrich trägt.
+
+### Der eigentliche Hinweis
+
+„In Wahrheit muss es nur `/gkick Rhinô` ausführen, fertig."
+
+Das ist der bessere erste Versuch, und der Grund ist kein Geschmack: `/gkick` läuft durch Blizzards eigenen Befehlszerleger, und der **löst den Namen gegen den Gildenroster auf**, bevor er ihn weiterreicht. Ein roher `GuildUninvite`-Aufruf tut das nicht – er nimmt die Zeichenkette, wie sie kommt. Bei „Rhinô" ist das keine akademische Frage: Ein einziges abweichend kodiertes Zeichen, und die Anfrage läuft ins Leere, ohne Rückgabewert und ohne Fehler. Genau dieses Fehlerbild lag vor.
+
+Der Chatbefehl ist kein geschützter Aufruf und braucht kein Tastendruck-Ereignis. Ausgeführt wird er über die Eingabezeile des Chatfensters (`ChatEdit_SendText`); fehlt sie – Testumgebung, exotische Oberflächen-Addons –, fällt der Ablauf auf die API zurück.
+
+Die Reihenfolge ist jetzt: `/gkick <Kurzname>`, dann die API mit dem Rosternamen, und beim zweiten Anlauf beides noch einmal mit dem Kurznamen. Alle Wege enden beim Server; wer zuerst durchkommt, gewinnt, und die Nachprüfung im Gildenroster entscheidet wie seit 0.9.124.
+
+### Was der Test dazu sagt
+
+Der Harness hat eine Attrappe der Chat-Eingabezeile bekommen, die mitschreibt, was tatsächlich abgeschickt wird. Drei Zusicherungen:
+
+- Der erste Ausschluss geht als `/gkick Heiler` raus – Kurzname, kein Realm.
+- Keine der API-Formen trägt mehr als einen Bindestrich.
+- Kein Chatbefehl trägt einen Realmanteil.
+
+Die Gegenprobe mit dem Rosternamen statt des Kurznamens fällt an der ersten durch.
+
+### Geändert
+
+- `GuildCopilot/Roster.lua`: `/gkick` als erster Weg, die zusammengebaute Realmform ersatzlos entfernt;
+- `tests/smoke.lua`: Attrappe der Chat-Eingabezeile, Zusicherungen für Kurzname und Realmfreiheit;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.127.
+
 ## 0.9.126 – Der Test, der den Fehler versteckte
 
 „Nö, kicken hat noch immer nicht funktioniert." Dazu ein Bildschirmfoto, dessen Chatfenster die Antwort schon enthielt:

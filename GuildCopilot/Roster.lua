@@ -845,7 +845,45 @@ function GC.Roster:RemoveMember(name, onResult)
         return pcall(removeFunction, candidate) == true
     end
 
-    if not TryRemove(target.name) then
+    -- === Der Weg, den ein Mensch nehmen wuerde =============================
+    --
+    -- Aus dem Spiel, nachdem die API dreimal lautlos nichts getan hatte: "In
+    -- Wahrheit muss es nur /gkick Rhinô ausfuehren, fertig."
+    --
+    -- Das stimmt, und es ist der bessere erste Versuch. `/gkick` geht durch
+    -- Blizzards eigenen Chatbefehl-Zerleger, und der loest den Namen gegen den
+    -- Gildenroster auf, bevor er ihn weiterreicht. Genau daran scheitert ein
+    -- roher API-Aufruf: Er nimmt die Zeichenkette, wie sie kommt. Bei einem
+    -- Namen wie "Rhinô" ist das keine akademische Frage - ein einziges
+    -- abweichend kodiertes Zeichen, und die Anfrage laeuft ins Leere, ohne
+    -- Rueckgabewert und ohne Fehler.
+    --
+    -- Der Chatbefehl ist kein geschuetzter Aufruf; er braucht kein
+    -- Tastendruck-Ereignis. Fehlt die Eingabezeile (Testumgebung, exotische
+    -- Oberflaechen-Addons), faellt der Ablauf unten auf die API zurueck.
+    local function TryChatKick(candidate)
+        candidate = GC.Util.Trim(candidate or "")
+        if candidate == "" or attemptedForms["/gkick " .. candidate] then
+            return false
+        end
+        local editBox = (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
+            or _G.ChatFrame1EditBox
+        if not editBox or type(ChatEdit_SendText) ~= "function" then
+            return false
+        end
+        attemptedForms["/gkick " .. candidate] = true
+        local ok = pcall(function()
+            editBox:SetText("/gkick " .. candidate)
+            ChatEdit_SendText(editBox, 0)
+            editBox:SetText("")
+        end)
+        return ok == true
+    end
+
+    -- Erst der Chatbefehl, dann die API. Beide Wege enden beim Server; wer
+    -- zuerst durchkommt, gewinnt, und die Nachpruefung unten entscheidet.
+    local started = TryChatKick(shortName)
+    if not TryRemove(target.name) and not started then
         return false, "WoW hat das Entfernen abgelehnt."
     end
 
@@ -870,10 +908,15 @@ function GC.Roster:RemoveMember(name, onResult)
             -- Beim zweiten Anlauf die andere Namensform. Steht der Spieler noch
             -- im Roster, hat der erste Aufruf nichts bewirkt - dann ist genau
             -- das der wahrscheinlichste Grund.
+            -- Zweiter Anlauf mit dem Kurznamen. Einen Realmanteil bastelt hier
+            -- ausdruecklich NIEMAND mehr zusammen: Der erste Entwurf haengte
+            -- den Realm an einen Namen, der ihn schon trug, und versuchte es
+            -- mit "Rhinô-Thunderstrike-Thunderstrike" - nachzulesen in der
+            -- Fehlermeldung, die der Owner geschickt hat. Der Gildenausschluss
+            -- braucht den Realm ohnehin nicht; die Gilde steht auf einem Realm.
             if attempt == 1 then
+                TryChatKick(shortName)
                 TryRemove(shortName)
-                TryRemove(target.name .. "-" .. (GetNormalizedRealmName
-                    and GetNormalizedRealmName() or ""))
             end
             C_Timer.After(REMOVE_VERIFY_DELAY, function()
                 Verify(attempt + 1)
