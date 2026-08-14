@@ -847,23 +847,54 @@ function GC.Roster:RemoveMember(name, onResult)
 
     -- === Der Weg, den ein Mensch nehmen wuerde =============================
     --
-    -- Aus dem Spiel, nachdem die API dreimal lautlos nichts getan hatte: "In
-    -- Wahrheit muss es nur /gkick Rhinô ausfuehren, fertig."
+    -- Aus dem Spiel, nachdem die API mehrfach lautlos nichts getan hatte: "In
+    -- Wahrheit muss es nur /gkick Rhinô ausfuehren, fertig." Der Gedanke ist
+    -- richtig - Blizzards Befehl loest den Namen gegen den Gildenroster auf,
+    -- bevor er ihn weiterreicht, waehrend ein roher API-Aufruf die
+    -- Zeichenkette nimmt, wie sie kommt.
     --
-    -- Das stimmt, und es ist der bessere erste Versuch. `/gkick` geht durch
-    -- Blizzards eigenen Chatbefehl-Zerleger, und der loest den Namen gegen den
-    -- Gildenroster auf, bevor er ihn weiterreicht. Genau daran scheitert ein
-    -- roher API-Aufruf: Er nimmt die Zeichenkette, wie sie kommt. Bei einem
-    -- Namen wie "Rhinô" ist das keine akademische Frage - ein einziges
-    -- abweichend kodiertes Zeichen, und die Anfrage laeuft ins Leere, ohne
-    -- Rueckgabewert und ohne Fehler.
+    -- Der erste Versuch, "/gkick <Name>" schlicht in die Eingabezeile zu
+    -- schreiben, ging trotzdem daneben, und der Client hat es selbst gesagt:
     --
-    -- Der Chatbefehl ist kein geschuetzter Aufruf; er braucht kein
-    -- Tastendruck-Ereignis. Fehlt die Eingabezeile (Testumgebung, exotische
-    -- Oberflaechen-Addons), faellt der Ablauf unten auf die API zurueck.
+    --     Gebt '/hilfe' ein, um eine Uebersicht ueber einige Befehle
+    --     aufzurufen.
+    --
+    -- Das ist die Antwort auf einen UNBEKANNTEN Befehl. Slash-Befehle sind
+    -- uebersetzt; ein deutscher Client kennt "/gkick" nicht. Ein geratener
+    -- Befehlsname landet damit als sichtbarer Muell im Chat und bewirkt nichts.
+    --
+    -- Geraten wird deshalb gar nicht mehr. Der Client fuehrt seine eigenen
+    -- Befehle in SlashCmdList, und zwar unter einem sprachunabhaengigen
+    -- Schluessel - der Eintrag fuer den Gildenausschluss ist genau die Funktion,
+    -- die beim Tippen des Befehls liefe. Sie laesst sich direkt aufrufen: keine
+    -- Uebersetzung, keine Eingabezeile, kein Chatfenster.
+    local SLASH_KEYS = { "GUILD_UNINVITE", "GUILDUNINVITE", "GUILD_KICK", "GUILDKICK" }
+
+    local function TrySlashHandler(candidate)
+        candidate = GC.Util.Trim(candidate or "")
+        if candidate == "" or type(SlashCmdList) ~= "table" then
+            return false
+        end
+        for _, key in ipairs(SLASH_KEYS) do
+            local handler = SlashCmdList[key]
+            local label = "Befehl " .. key .. " (" .. candidate .. ")"
+            if type(handler) == "function" and not attemptedForms[label] then
+                attemptedForms[label] = true
+                if pcall(handler, candidate) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    -- Und derselbe Weg ueber die Eingabezeile - aber ausschliesslich mit einem
+    -- Befehlsnamen, den DIESER Client selbst fuehrt. Die SLASH_-Globalen sind
+    -- die uebersetzten Schreibweisen; was dort nicht steht, wird auch nicht
+    -- getippt. Damit kann nie wieder ein unbekannter Befehl im Chat landen.
     local function TryChatKick(candidate)
         candidate = GC.Util.Trim(candidate or "")
-        if candidate == "" or attemptedForms["/gkick " .. candidate] then
+        if candidate == "" then
             return false
         end
         local editBox = (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
@@ -871,18 +902,33 @@ function GC.Roster:RemoveMember(name, onResult)
         if not editBox or type(ChatEdit_SendText) ~= "function" then
             return false
         end
-        attemptedForms["/gkick " .. candidate] = true
-        local ok = pcall(function()
-            editBox:SetText("/gkick " .. candidate)
-            ChatEdit_SendText(editBox, 0)
-            editBox:SetText("")
-        end)
-        return ok == true
+        for _, key in ipairs(SLASH_KEYS) do
+            for index = 1, 4 do
+                local command = _G["SLASH_" .. key .. index]
+                if type(command) == "string" and command:sub(1, 1) == "/" then
+                    local line = command .. " " .. candidate
+                    if not attemptedForms[line] then
+                        attemptedForms[line] = true
+                        local ok = pcall(function()
+                            editBox:SetText(line)
+                            ChatEdit_SendText(editBox, 0)
+                            editBox:SetText("")
+                        end)
+                        if ok then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        return false
     end
 
-    -- Erst der Chatbefehl, dann die API. Beide Wege enden beim Server; wer
-    -- zuerst durchkommt, gewinnt, und die Nachpruefung unten entscheidet.
-    local started = TryChatKick(shortName)
+    -- Erst der Befehl des Clients, dann die Eingabezeile, dann die API. Alle
+    -- Wege enden beim Server; wer zuerst durchkommt, gewinnt, und die
+    -- Nachpruefung unten entscheidet.
+    local started = TrySlashHandler(shortName)
+    started = TryChatKick(shortName) or started
     if not TryRemove(target.name) and not started then
         return false, "WoW hat das Entfernen abgelehnt."
     end
@@ -915,6 +961,7 @@ function GC.Roster:RemoveMember(name, onResult)
             -- Fehlermeldung, die der Owner geschickt hat. Der Gildenausschluss
             -- braucht den Realm ohnehin nicht; die Gilde steht auf einem Realm.
             if attempt == 1 then
+                TrySlashHandler(shortName)
                 TryChatKick(shortName)
                 TryRemove(shortName)
             end

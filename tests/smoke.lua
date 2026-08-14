@@ -196,9 +196,19 @@ function InterfaceOptions_AddCategory(panel)
     optionsCategory = panel
 end
 chatMessages = {}
--- Die Eingabezeile des Chats: Ueber sie fuehrt das Addon Slash-Befehle aus
--- (/gkick). Gemerkt wird, was tatsaechlich abgeschickt wurde.
+-- Die Eingabezeile des Chats und Blizzards Befehlsliste. Ein deutscher Client
+-- kennt "/gkick" NICHT - die Schreibweise steht uebersetzt in den
+-- SLASH_-Globalen, und der Eintrag in SlashCmdList ist die Funktion, die beim
+-- Tippen liefe. Beides wird hier nachgebildet, damit der Test nicht an einer
+-- englischen Annahme vorbeiprueft.
 sentSlashCommands = {}
+slashHandlerCalls = {}
+SlashCmdList = {
+    GUILD_UNINVITE = function(name)
+        slashHandlerCalls[#slashHandlerCalls + 1] = tostring(name or "")
+    end,
+}
+SLASH_GUILD_UNINVITE1 = "/grauswerfen"
 local chatEditBox = {
     text = "",
     SetText = function(self, value)
@@ -3718,16 +3728,25 @@ do
     -- Gilde blieb.
     local refusedOk, refusedMessage
     sentSlashCommands = {}
+    slashHandlerCalls = {}
     local startedOk, startedMessage = addon.Roster:RemoveMember("Heiler-Realm",
         function(ok, message)
             refusedOk, refusedMessage = ok, message
         end)
-    -- Der Weg, den ein Mensch nehmen wuerde, und zwar OHNE Realmanteil: Die
-    -- Gilde steht auf einem Realm, und Blizzards Befehlszerleger loest den
-    -- Namen selbst gegen den Roster auf.
-    assert(sentSlashCommands[1] == "/gkick Heiler",
-        "Der Ausschluss geht nicht als /gkick mit dem Kurznamen raus: "
-            .. tostring(sentSlashCommands[1]))
+    -- Der Weg, den ein Mensch nehmen wuerde - über Blizzards eigene Funktion,
+    -- mit dem Kurznamen und OHNE Realmanteil. Die Gilde steht auf einem Realm,
+    -- und der Befehl löst den Namen selbst gegen den Roster auf.
+    assert(slashHandlerCalls[1] == "Heiler",
+        "Der Ausschluss läuft nicht über Blizzards eigenen Gildenbefehl: "
+            .. tostring(slashHandlerCalls[1]))
+    -- Getippt wird ausschließlich, was DIESER Client selbst führt. Ein
+    -- geratenes „/gkick" ist auf einem deutschen Client ein unbekannter Befehl
+    -- und landet als sichtbarer Müll im Chat.
+    for _, command in ipairs(sentSlashCommands) do
+        assert(command:sub(1, #"/grauswerfen") == "/grauswerfen",
+            "Es wurde ein Befehl getippt, den der Client gar nicht kennt: "
+                .. tostring(command))
+    end
     assert(startedOk == true and tostring(startedMessage):find("geprüft", 1, true),
         "Der Aufruf meldet nicht, dass geprüft wird: " .. tostring(startedMessage))
     assert(refusedOk == nil,

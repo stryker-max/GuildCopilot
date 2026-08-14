@@ -7,6 +7,21 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.128 – Addon
+
+**Behoben**
+
+- **`/gkick` gibt es auf einem deutschen Client nicht.** Der Chat hat es selbst
+  verraten: „Gebt '/hilfe' ein, um eine Übersicht über einige Befehle
+  aufzurufen." – die Antwort auf einen **unbekannten** Befehl. Slash-Befehle
+  sind übersetzt; der geratene englische Name landete als sichtbarer Müll im
+  Chat und bewirkte nichts.
+- **Geraten wird jetzt gar nicht mehr.** Das Addon ruft die Funktion auf, die
+  WoW selbst hinter dem Gildenausschluss führt – sprachunabhängig, ohne
+  Eingabezeile, ohne Chatfenster. Muss doch getippt werden, dann ausschließlich
+  in der Schreibweise, die **dieser** Client selbst kennt. Ein unbekannter
+  Befehl kann damit nie wieder im Chat landen.
+
 ## 0.9.127 – Addon
 
 **Behoben**

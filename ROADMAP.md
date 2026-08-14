@@ -298,6 +298,48 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.128 – Der Client sagt selbst, wie er heißt
+
+Der Chat der Vorversion enthielt die Antwort, und zwar in einer Zeile, die auf den ersten Blick nach fremdem Rauschen aussieht:
+
+```
+(02:36) Guild Copilot: Noch einmal klicken, um Rhinô endgültig zu entfernen.
+(02:36) Gebt '/hilfe' ein, um eine Übersicht über einige Befehle aufzurufen.
+(02:36) Guild Copilot: Rhinô wird entfernt – wird gleich geprüft …
+(02:36) Guild Copilot: Rhinô steht weiterhin im Gildenroster …
+```
+
+Die mittlere Zeile stammt nicht vom Addon. Es ist WoWs Antwort auf einen **unbekannten Befehl** – ausgelöst von genau dem `/gkick`, das 0.9.127 in die Eingabezeile geschrieben hat.
+
+### Slash-Befehle sind übersetzt
+
+Ein deutscher Client kennt `/gkick` nicht. Das war die stillschweigende Annahme hinter 0.9.127, und sie war falsch: Der Befehlsname ist lokalisiert wie jeder andere Text im Spiel. Ein geratener Name bewirkt nichts, ist aber nicht folgenlos – er landet als sichtbare Zeile im Chat jedes Nutzers und erzeugt ein Fehlerbild, das es ohne das Addon nicht gäbe.
+
+Bemerkenswert ist, wo der Hinweis herkam: aus derselben Nachprüfung, die 0.9.124 eingeführt hat. Ohne sie stünde dort weiterhin „wurde entfernt", der Spieler bliebe in der Gilde, und niemand hätte je auf die `/hilfe`-Zeile geschaut.
+
+### Nicht raten, sondern fragen
+
+Der Client führt seine eigenen Befehle in `SlashCmdList`, und zwar unter einem **sprachunabhängigen Schlüssel**. Der Eintrag für den Gildenausschluss ist genau die Funktion, die beim Tippen des Befehls liefe – sie lässt sich direkt aufrufen. Keine Übersetzung, keine Eingabezeile, kein Chatfenster, keine sichtbare Zeile.
+
+Muss es doch über die Eingabezeile gehen, dann ausschließlich mit einer Schreibweise aus den `SLASH_…`-Globalen dieses Clients. Was dort nicht steht, wird nicht getippt. Damit ist der Fehler dieser Version strukturell ausgeschlossen und nicht bloß für Deutsch behoben.
+
+Die Reihenfolge: Blizzards eigene Funktion, dann die Eingabezeile mit der Schreibweise des Clients, dann die API mit Roster- und Kurznamen. Alle Wege enden beim Server; die Nachprüfung im Gildenroster entscheidet wie seit 0.9.124.
+
+### Der Harness sprach Englisch
+
+Der Test aus 0.9.127 prüfte auf `"/gkick Heiler"` – er hat die falsche Annahme mitgetragen, statt sie zu prüfen. Die Attrappe führt jetzt eine `SlashCmdList` samt einer **deutschen** Schreibweise, und geprüft wird:
+
+- Der Ausschluss läuft über Blizzards eigene Funktion, mit dem Kurznamen.
+- Getippt wird ausschließlich, was der Client selbst führt.
+
+Die Gegenprobe – ein fest verdrahtetes `/gkick` statt der Client-Globalen – fällt an der zweiten Zusicherung durch, mit genau der Meldung, die das Problem beschreibt.
+
+### Geändert
+
+- `GuildCopilot/Roster.lua`: Aufruf über `SlashCmdList`, Eingabezeile nur mit Schreibweisen aus den `SLASH_…`-Globalen;
+- `tests/smoke.lua`: Attrappe von `SlashCmdList` und einer deutschen Befehlsschreibweise, Zusicherung gegen getippte Fantasiebefehle;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.128.
+
 ## 0.9.127 – „In Wahrheit muss es nur /gkick ausführen"
 
 Die Nachprüfung aus 0.9.126 hat getan, wofür sie gebaut war: Sie hat geantwortet.
