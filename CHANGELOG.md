@@ -7,6 +7,24 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.126 – Addon
+
+**Behoben**
+
+- **Das Entfernen meldete gar kein Ergebnis mehr.** Im Chat stand zweimal
+  „wird entfernt – wird gleich geprüft" und danach nie wieder etwas. Die
+  Nachprüfung aus 0.9.124 lief zwar, ihr Ergebnis wurde aber von einer eigenen
+  Sperre verschluckt: Die Zwischenmeldung verbrauchte den einen Rückruf, den es
+  je Ausschluss gibt. Jetzt meldet der Rückruf ausschließlich das geprüfte
+  Ergebnis – die Zwischenmeldung ist nur noch Rückgabewert.
+- **Der Ausschluss versucht jetzt beide Namensformen.** Der Gildenroster liefert
+  je nach Realm-Verbund „Name" oder „Name-Realm", und welche Form WoW beim
+  Entfernen annimmt, hängt an der Spielfassung. Die falsche Form ist der
+  lautloseste aller Fehler: kein Rückgabewert, kein Fehler, keine Wirkung. Steht
+  der Spieler nach dem ersten Versuch noch im Roster, wird die andere Form
+  probiert – und die Fehlermeldung nennt beide, damit sich ein Namensproblem
+  überhaupt erkennen lässt.
+
 ## 0.9.125 – Addon
 
 **Neu**

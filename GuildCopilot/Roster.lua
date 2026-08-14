@@ -780,7 +780,17 @@ local REMOVE_VERIFY_ATTEMPTS = 3
 -- offen bleibt, statt still zu verschwinden.
 function GC.Roster:RemoveMember(name, onResult)
     -- Der Rueckruf meldet ausschliesslich das GEPRUEFTE Ergebnis, und genau
-    -- einmal. Alles, was schon beim Aufruf feststeht, steht im Rueckgabewert.
+    -- einmal. Alles, was schon beim Aufruf feststeht, steht im Rueckgabewert
+    -- und laeuft NICHT ueber diese Funktion.
+    --
+    -- Genau daran ist 0.9.124 gescheitert: Die Zwischenmeldung "wird gleich
+    -- geprueft" lief mit durch Report, verbrauchte damit den einen Schuss, und
+    -- das spaetere Ergebnis wurde von der Sperre unten stumm geschluckt. Im
+    -- Spiel stand deshalb zweimal "wird entfernt - wird gleich geprueft" und
+    -- danach nie wieder etwas. Im Testharness feuern Zeitgeber sofort, dort
+    -- lief die Pruefung VOR der Rueckgabe - die Reihenfolge drehte sich um und
+    -- der Fehler blieb unsichtbar. Der Test stellt die echte Reihenfolge jetzt
+    -- nach.
     local reported = false
     local function Report(ok, message)
         if reported then
@@ -806,16 +816,38 @@ function GC.Roster:RemoveMember(name, onResult)
         removeFunction = C_GuildInfo.Uninvite
     end
     if type(removeFunction) ~= "function" then
-        return Report(false, "Diese WoW-Version bietet kein Entfernen über Addons.")
+        return false, "Diese WoW-Version bietet kein Entfernen über Addons."
     end
-    -- Der Lua-Fehler bleibt eine eigene Frage: Er heisst, dass der Aufruf gar
-    -- nicht erst zustande kam.
-    if not pcall(removeFunction, target.name) then
-        return Report(false, "WoW hat das Entfernen abgelehnt.")
-    end
-
     local shortName = GC.Util.PlayerShortName(target.name)
     local targetKey = GC.Util.NormalizeName(target.name)
+
+    -- === Die Namensform ====================================================
+    --
+    -- GetGuildRosterInfo liefert auf verbundenen Realms "Name-Realm", auf einem
+    -- einzelnen Realm nur "Name" - und welche Form GuildUninvite annimmt, haengt
+    -- an der Spielfassung. Die falsche Form ist der lautloseste aller Fehler:
+    -- kein Rueckgabewert, kein Lua-Fehler, keine Wirkung.
+    --
+    -- Versucht werden deshalb beide, aber nicht blind hintereinander: Erst die
+    -- Form aus dem Roster; erst wenn die Nachpruefung den Spieler weiterhin
+    -- findet, die andere. Ein doppelter Ausschluss ist unmoeglich - beim zweiten
+    -- Versuch ist der Spieler entweder noch da (dann hat der erste nichts
+    -- bewirkt) oder die Pruefung ist laengst als Erfolg beendet.
+    local attemptedForms = {}
+    local function TryRemove(candidate)
+        candidate = GC.Util.Trim(candidate or "")
+        if candidate == "" or attemptedForms[candidate] then
+            return false
+        end
+        attemptedForms[candidate] = true
+        -- Der Lua-Fehler bleibt eine eigene Frage: Er heisst, dass der Aufruf
+        -- gar nicht erst zustande kam.
+        return pcall(removeFunction, candidate) == true
+    end
+
+    if not TryRemove(target.name) then
+        return false, "WoW hat das Entfernen abgelehnt."
+    end
 
     -- Ohne Zeitgeber bleibt nur die alte, ungepruefte Antwort. Sie ist dann
     -- ausdruecklich als ungeprueft formuliert.
@@ -835,20 +867,36 @@ function GC.Roster:RemoveMember(name, onResult)
             return Report(true, shortName .. " wurde aus der Gilde entfernt.")
         end
         if attempt < REMOVE_VERIFY_ATTEMPTS then
+            -- Beim zweiten Anlauf die andere Namensform. Steht der Spieler noch
+            -- im Roster, hat der erste Aufruf nichts bewirkt - dann ist genau
+            -- das der wahrscheinlichste Grund.
+            if attempt == 1 then
+                TryRemove(shortName)
+                TryRemove(target.name .. "-" .. (GetNormalizedRealmName
+                    and GetNormalizedRealmName() or ""))
+            end
             C_Timer.After(REMOVE_VERIFY_DELAY, function()
                 Verify(attempt + 1)
             end)
             return
         end
         GC:FireCallback("MEMBERCARE_UPDATED")
+        -- Die versuchten Namensformen gehoeren in die Meldung: Sie sind das
+        -- Einzige, woran sich ein Namensproblem ueberhaupt erkennen laesst.
+        local tried = {}
+        for form in pairs(attemptedForms) do
+            tried[#tried + 1] = form
+        end
+        table.sort(tried)
         Report(false, shortName .. " steht weiterhin im Gildenroster – WoW hat "
-            .. "das Entfernen nicht ausgeführt. Prüfe deine Gildenberechtigung.")
+            .. "das Entfernen nicht ausgeführt (versucht als "
+            .. table.concat(tried, ", ") .. "). Prüfe deine Gildenberechtigung.")
     end
 
     C_Timer.After(REMOVE_VERIFY_DELAY, function()
         Verify(1)
     end)
-    return Report(true, shortName .. " wird entfernt – wird gleich geprüft …")
+    return true, shortName .. " wird entfernt – wird gleich geprüft …"
 end
 
 function GC.Roster:GetGuildAbsences()

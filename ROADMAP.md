@@ -298,6 +298,70 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.126 – Der Test, der den Fehler versteckte
+
+„Nö, kicken hat noch immer nicht funktioniert." Dazu ein Bildschirmfoto, dessen Chatfenster die Antwort schon enthielt:
+
+```
+Guild Copilot: Noch einmal klicken, um Rhinô endgültig zu entfernen.
+Guild Copilot: Rhinô wird entfernt – wird gleich geprüft
+Guild Copilot: Rhinô wird entfernt – wird gleich geprüft
+```
+
+Zweimal die Zwischenmeldung, danach **nichts**. Weder „wurde aus der Gilde entfernt" noch „steht weiterhin im Gildenroster". Die Nachprüfung aus 0.9.124 lief also – ihr Ergebnis kam nur nie an.
+
+### Die Sperre fraß das Ergebnis
+
+0.9.124 hatte einen Merker bekommen, damit der Rückruf genau einmal feuert:
+
+```lua
+local reported = false
+local function Report(ok, message)
+    if reported then return ok, message end
+    reported = true
+    ...
+end
+```
+
+Richtig gedacht, falsch angewandt: Die Zwischenmeldung lief **mit durch Report**.
+
+```lua
+C_Timer.After(REMOVE_VERIFY_DELAY, function() Verify(1) end)
+return Report(true, shortName .. " wird entfernt – wird gleich geprüft …")
+```
+
+Damit war `reported` gesetzt, bevor die Prüfung überhaupt anlief – und jede spätere Meldung fiel in die Sperre. Die doppelte Chatzeile ist derselbe Fehler von der anderen Seite: Rückruf und Rückgabewert trugen beide denselben Text und schrieben ihn beide in die Statuszeile.
+
+Die Regel ist jetzt hart: **Der Rückruf meldet ausschließlich das geprüfte Ergebnis. Alles, was schon beim Aufruf feststeht, ist Rückgabewert und läuft nicht über `Report`.**
+
+### Warum der Test das nicht gefunden hat
+
+Das ist der lehrreichere Teil. Der Test war da, er prüfte beide Fälle, er war grün — und er konnte den Fehler prinzipiell nicht sehen.
+
+Im Testharness feuern Zeitgeber **sofort**:
+
+```lua
+C_Timer = { After = function(delay, callback) ... callback() end }
+```
+
+`Verify(1)` lief damit vollständig durch, *bevor* die Funktion ihren Rückgabewert erreichte. Die Reihenfolge war genau umgekehrt zum Spiel: Erst das Ergebnis, dann die Zwischenmeldung — und weil `Report` das Ergebnis zuerst sah, kam es auch an. Im Spiel wartet der Zeitgeber wirklich 2,5 Sekunden, die Zwischenmeldung kommt zuerst, und ab da ist der Kanal zu.
+
+Ein Test, der die Reihenfolge nicht nachstellt, prüft eine andere Funktion als die ausgelieferte. Der Harness kann das längst — `timerDelayThreshold` schiebt Zeitgeber oberhalb einer Schwelle in `pendingTimers`, statt sie zu feuern. Der Ausschlusstest benutzt das jetzt und ruft die wartenden Rückrufe ausdrücklich selbst auf. Dazwischen steht die Zusicherung, die vorher gefehlt hat: **Vor dem Ablaufen der Zeitgeber darf der Rückruf noch nicht gefeuert haben.** Die Gegenprobe mit dem alten Code fällt genau dort durch.
+
+### Und die zweite Namensform
+
+Bleibt die Frage, warum der Ausschluss überhaupt nicht durchging. Eine Ursache lässt sich ohne Blick ins Spiel abräumen: die Namensform. `GetGuildRosterInfo` liefert je nach Realm-Verbund „Name" oder „Name-Realm", und welche Form `GuildUninvite` annimmt, hängt an der Spielfassung. Die falsche Form ist der lautloseste aller Fehler — kein Rückgabewert, kein Lua-Fehler, keine Wirkung.
+
+Versucht werden jetzt beide, aber nicht blind hintereinander: erst die Form aus dem Roster, und erst wenn die Nachprüfung den Spieler weiterhin findet, die andere. Ein doppelter Ausschluss ist dabei unmöglich — beim zweiten Versuch steht der Spieler entweder noch da (dann hat der erste nichts bewirkt), oder die Prüfung ist längst als Erfolg beendet.
+
+Die Fehlermeldung nennt am Ende die versuchten Formen. Sie sind das Einzige, woran sich ein Namensproblem von einem Rechteproblem unterscheiden lässt.
+
+### Geändert
+
+- `GuildCopilot/Roster.lua`: `Report` trägt nur noch das geprüfte Ergebnis, zweite Namensform beim zweiten Anlauf, versuchte Formen in der Fehlermeldung;
+- `tests/smoke.lua`: der Ausschlusstest lässt Zeitgeber warten und stellt damit die echte Reihenfolge nach, samt Zusicherung gegen einen zu früh gefeuerten Rückruf;
+- `CHANGELOG.md`, `README.md`, `Installer/README.md`, `Constants.lua`, `GuildCopilot.toc`, `tests/validate.mjs`: Stand 0.9.126.
+
 ## 0.9.125 – Fünf Meldungen aus einer Sitzung
 
 Fünf Punkte in schneller Folge aus dem Spiel, alle aus derselben halben Stunde vor dem Bildschirm. Sie hängen enger zusammen, als sie klingen: Vier davon beschreiben dieselbe überfüllte Zeile, und der fünfte erklärt, warum in dieser Zeile so wenig steht.

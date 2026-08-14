@@ -3674,18 +3674,48 @@ local allowedRemoval = addon.Roster:CanRemoveMember("Heiler-Realm")
 assert(allowedRemoval == true, "Ein zulässiger Ausschluss wurde abgelehnt")
 
 do
+    -- Zeitgeber laufen hier NICHT sofort: Die Nachprüfung wartet im Spiel auf
+    -- den nächsten Gildenroster, und genau diese Reihenfolge muss der Test
+    -- treffen. Mit sofort feuernden Zeitgebern lief die Prüfung vor der
+    -- Rückgabe der Funktion - dadurch blieb der Fehler aus 0.9.125 unsichtbar,
+    -- bei dem die Zwischenmeldung den einen Rückruf verbrauchte und das
+    -- geprüfte Ergebnis nie ankam.
+    local savedThreshold = timerDelayThreshold
+    timerDelayThreshold = 1
+    local timerStart = #pendingTimers
+    local function RunPendingTimers()
+        while #pendingTimers > timerStart do
+            local callback = table.remove(pendingTimers, timerStart + 1)
+            callback()
+        end
+    end
+
     -- Der Server führt den Ausschluss NICHT aus - der Roster nennt ihn weiter.
     -- Genau das ist der gemeldete Fall: GuildUninvite gibt nichts zurück und
     -- wirft nichts, wenn abgelehnt wird. Bis 0.9.124 wurde daraus "wurde aus
     -- der Gilde entfernt" samt Vermerk "erledigt", während der Spieler in der
     -- Gilde blieb.
     local refusedOk, refusedMessage
-    addon.Roster:RemoveMember("Heiler-Realm", function(ok, message)
-        refusedOk, refusedMessage = ok, message
-    end)
+    local startedOk, startedMessage = addon.Roster:RemoveMember("Heiler-Realm",
+        function(ok, message)
+            refusedOk, refusedMessage = ok, message
+        end)
+    assert(startedOk == true and tostring(startedMessage):find("geprüft", 1, true),
+        "Der Aufruf meldet nicht, dass geprüft wird: " .. tostring(startedMessage))
+    assert(refusedOk == nil,
+        "Der Rückruf feuerte schon vor der Prüfung – das geprüfte Ergebnis geht "
+            .. "damit verloren: " .. tostring(refusedMessage))
+    RunPendingTimers()
     assert(refusedOk == false and tostring(refusedMessage):find("weiterhin", 1, true),
         "Ein nicht ausgeführter Ausschluss wurde als Erfolg gemeldet: "
             .. tostring(refusedMessage))
+    -- Bleibt der Spieler stehen, wird die zweite Namensform versucht - und die
+    -- Meldung nennt beide, sonst lässt sich ein Namensproblem nicht erkennen.
+    assert(tostring(refusedMessage):find("versucht als", 1, true),
+        "Die Fehlermeldung nennt die versuchten Namensformen nicht: "
+            .. tostring(refusedMessage))
+    assert(#uninvitedPlayers > 1,
+        "Es wurde nur eine Namensform versucht: " .. table.concat(uninvitedPlayers, ", "))
     assert(addon.Roster:GetMemberCareDecision("Heiler") == nil
         or addon.Roster:GetMemberCareDecision("Heiler").status ~= "DONE",
         "Ein nicht ausgeführter Ausschluss wurde als erledigt vermerkt")
@@ -3704,6 +3734,7 @@ do
     addon.Roster:RemoveMember("Heiler-Realm", function(ok, message)
         removedOk, removedMessage = ok, message
     end)
+    RunPendingTimers()
     assert(removedOk == true and tostring(removedMessage):find("entfernt", 1, true),
         "Der ausgeführte Ausschluss wurde nicht als Erfolg gemeldet: "
             .. tostring(removedMessage))
@@ -3715,6 +3746,8 @@ do
     addon.Roster:Scan()
     assert(addon.Roster:GetMember("Heiler-Realm") ~= nil,
         "Testaufbau: Heiler-Realm fehlt nach dem Ausschlusstest im Roster")
+    RunPendingTimers()
+    timerDelayThreshold = savedThreshold
 end
 
 -- Ein Rang ohne Mitgliederpflege darf gar nichts davon.
