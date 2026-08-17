@@ -7,6 +7,48 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.135 – Addon
+
+**Behoben**
+
+- **Eine einzelne Spec anzuklicken lässt nicht mehr die ganze Klasse
+  verschwinden.** Hattest du im Werbeeditor „Ganze Klasse“ gewählt und danach
+  eine einzelne Spec angeklickt, fielen die übrigen Specs unbemerkt weg (ganze
+  Magier → Klick auf Frost → Feuer und Arkan waren still weg). Jetzt leuchten
+  bei „Ganze Klasse“ alle Spec-Knöpfe, und ein Klick schaltet **nur diese eine**
+  ab. Nichts verschwindet mehr ungefragt.
+- **Einstellungsfelder überschreiben deine Eingabe nicht mehr mitten im
+  Tippen.** „Anzeigedauer der Meldung“ und die Auftrags-Flüstervorlage wurden
+  während eines laufenden Gildenabgleichs auf den gespeicherten Wert
+  zurückgesetzt. Beide bleiben jetzt stehen, solange du im Feld bist – wie die
+  übrigen Eingabefelder ohnehin.
+- **Werbe- und Antworttexte mit Platzhaltern sind wieder verlässlich.** Stand in
+  einem eingesetzten Wert selbst eine Platzhalterschreibweise (etwa `{raidzeiten}`
+  in der Gildenbeschreibung), konnte sie ein zweites Mal ersetzt werden – und das
+  Ergebnis fiel von Aufruf zu Aufruf anders aus. Jeder Platzhalter wird jetzt
+  genau einmal gefüllt.
+- **Ein langer Trashabend lässt den Speicher nicht mehr unbegrenzt wachsen.** Die
+  Bosserkennung merkte sich jeden je gesehenen Gegnernamen dauerhaft; über einen
+  Abend mit zehntausenden Trashmobs summierte sich das bis zum nächsten
+  `/reload`. Die Fehltreffer werden jetzt gedeckelt – genau wie beim
+  Teilnehmerspeicher schon länger.
+
+**Technisch**
+
+- `GC.LFormat` ersetzt in einem Durchlauf über eine `gsub`-Funktion statt
+  zeilenweise je Schlüssel; eingesetzter Text wird nicht erneut durchsucht, das
+  händische `%%`-Escaping entfällt, unbekannte Platzhalter bleiben stehen.
+- `RaidMonitor` deckelt `bossLookupCache` über `MAX_BOSS_LOOKUP_MISSES` und
+  leert beim Überlauf nur die Fehltreffer; `AnswerSummaryRequest` prüft `C_Timer`
+  wie jede andere Stelle und sendet ohne Timer ungestaffelt statt zu scheitern.
+- `Recruitment:IsSpecSelected` meldet im CLASS-Modus alle Specs als gewählt,
+  `SetSpec` zählt beim Wechsel auf Einzelauswahl zuerst alle Specs auf.
+- UI: der Assistenten-Berufsschritt greift auf `profile.professions` mit
+  Nil-Schutz zu; die beiden Auftrags-Einstellungsfelder respektieren `HasFocus`.
+- `Inventory` verwirft Gildenbank-Manifesteinträge mit `tabIndex < 1`, statt für
+  Tab „0“ eine sinnlose Anfrage zu senden.
+- Regressionstests bleiben grün (`npm test`).
+
 ## 0.9.134 – Addon
 
 **Geändert**

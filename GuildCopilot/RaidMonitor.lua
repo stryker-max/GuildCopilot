@@ -1721,7 +1721,17 @@ end
 -- Erkannte und ausgeschlossene Gegnernamen. Der Combat Log nennt im Raid
 -- dieselben Namen tausendfach; ohne diesen Zwischenspeicher liefe fuer jedes
 -- Schadensereignis die ganze Bossliste durch.
+--
+-- Gedeckelt wie der Teilnehmer-Memo oben (MAX_NAME_LOOKUP_MISSES): Die
+-- FEHLTREFFER - jeder Trashmob, jedes Totem, jeder fremde Begleiter - sind
+-- unbegrenzt und wachsen ueber einen Trashabend in die Zehntausende, waehrend
+-- die TREFFER auf die Handvoll Bosse der Bossliste beschraenkt bleiben. Beim
+-- Ueberlauf werden deshalb nur die Fehltreffer geleert; die erkannten Bosse
+-- bleiben stehen. Der Speicher ist eine Beschleunigung, kein Zustand - ihn zu
+-- leeren kostet nur eine erneute Namenssuche.
 local bossLookupCache = {}
+local bossLookupMisses = 0
+local MAX_BOSS_LOOKUP_MISSES = 2000
 
 -- Erkannt wird ueber den Eigennamen als Teilzeichenkette: "Prinz Malchezaar"
 -- und "Prince Malchezaar" enthalten beide "Malchezaar". Damit braucht es
@@ -1743,6 +1753,15 @@ function GC.RaidMonitor:ResolveBoss(name)
                 return boss
             end
         end
+    end
+    bossLookupMisses = bossLookupMisses + 1
+    if bossLookupMisses > MAX_BOSS_LOOKUP_MISSES then
+        for key, cached in pairs(bossLookupCache) do
+            if cached == false then
+                bossLookupCache[key] = nil
+            end
+        end
+        bossLookupMisses = 1
     end
     bossLookupCache[name] = false
     return nil
@@ -2699,13 +2718,20 @@ function GC.RaidMonitor:AnswerSummaryRequest(requester, sessionID)
     -- wird gekappt, weil bei ihr die Platzzahl hoch ist - siehe
     -- MAX_BARE_ANSWER_SUMMARIES.
     local limit = sessionID and #candidates or MAX_BARE_ANSWER_SUMMARIES
+    local canStagger = C_Timer and type(C_Timer.After) == "function"
     for index = 1, math.min(limit, #candidates) do
         local summary = candidates[index]
-        -- Gestaffelt, damit sich die Antworten mehrerer Mitglieder nicht
-        -- gegenseitig in den Kanal drängen.
-        C_Timer.After(index + math.random() * 4, function()
+        if canStagger then
+            -- Gestaffelt, damit sich die Antworten mehrerer Mitglieder nicht
+            -- gegenseitig in den Kanal drängen.
+            C_Timer.After(index + math.random() * 4, function()
+                GC.Sync:DistributeSummary(summary, "WHISPER", requester)
+            end)
+        else
+            -- Ohne C_Timer (aeltere Clients, Testumgebung) ungestaffelt, aber
+            -- ueberhaupt: eine Antwort ohne Timer ist besser als keine.
             GC.Sync:DistributeSummary(summary, "WHISPER", requester)
-        end)
+        end
     end
     return true
 end

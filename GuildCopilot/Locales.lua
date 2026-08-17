@@ -801,12 +801,28 @@ end
 
 -- Uebersetzt und fuellt {platzhalter}. Fuer Meldungen mit Namen und Zahlen:
 -- Der Schluessel bleibt ein fester Satz, die Werte kommen zur Laufzeit.
--- Ersetzt wird wortwoertlich - ein Prozentzeichen im eingesetzten Wert
--- bleibt ein Prozentzeichen statt zur gsub-Rueckreferenz zu werden.
+--
+-- EIN Durchlauf ueber die Vorlage, jeder Platzhalter genau einmal ersetzt.
+-- Der frueher zeilenweise Weg (ein gsub je Schluessel) hatte zwei Fehler, die
+-- beide daran hingen, dass ein bereits eingesetzter Wert erneut durchsucht
+-- wurde: Enthielt ein Wert selbst {einanderer} - etwa eine Gildenbeschreibung
+-- mit der Zeichenfolge "{raidzeiten}" -, ersetzte ihn ein spaeterer Durchlauf,
+-- und WELCHER zuerst kam, entschied die zufaellige pairs-Reihenfolge. Dasselbe
+-- Ergebnis fiel damit von Aufruf zu Aufruf anders aus.
+--
+-- Der Callback-Weg setzt jeden Platzhalter an seiner Fundstelle ein und liest
+-- den eingesetzten Text nicht erneut. Ein Prozentzeichen im Wert bleibt dabei
+-- ohnehin ein Prozentzeichen - die Rueckgabe einer gsub-Funktion wird nicht als
+-- Ersetzungsmuster ausgewertet -, das haendische %%-Escaping entfaellt.
+-- Unbekannte Platzhalter bleiben unangetastet stehen, wie bisher.
 function GC.LFormat(text, values)
     text = GC.L(text)
-    for key, value in pairs(values or {}) do
-        text = text:gsub("{" .. key .. "}", (tostring(value):gsub("%%", "%%%%")))
-    end
-    return text
+    values = values or {}
+    return (text:gsub("{([%w_]+)}", function(key)
+        local value = values[key]
+        if value == nil then
+            return nil
+        end
+        return tostring(value)
+    end))
 end

@@ -298,6 +298,27 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.135 – Ein Durchlauf durch den ganzen Code
+
+Anlass war keine einzelne Beschwerde, sondern die Frage, ob das Addon mit 250 gleichzeitig online Spielern trägt und ob der Code hält, was er verspricht. Also einmal quer durch alle Module, mit einem klaren Auftrag: echte Fehler, keine Geschmacksfragen. Der Netzwerkteil (`Sync.lua`) wurde dabei ausdrücklich gegen das 250-Spieler-Szenario geprüft und trägt — die Antwortwahl (nur wenige Gewählte antworten je Anfrage), das Verstummen bei fremder Antwort, ChatThrottleLib, Kampfpause und Backoff greifen wie vorgesehen. Sieben Stellen wurden geändert.
+
+### Was tatsächlich falsch war
+
+- **Die Spec-Auswahl im Werbeeditor verlor still Daten.** „Ganze Klasse" legt intern alle Specs als gewählt ab, und der Werbetext zählt sie auch alle — nur `IsSpecSelected` meldete im CLASS-Modus `false`, weshalb die Spec-Knöpfe inaktiv aussahen. Ein Klick auf eine einzelne Spec begann damit bei einer leeren Liste und zog die ganze Klasse auf die eine geklickte Spec zusammen, ohne Hinweis. `IsSpecSelected` sagt im CLASS-Modus jetzt die Wahrheit (alle gewählt), und `SetSpec` zählt beim Wechsel auf Einzelauswahl zuerst alle Specs auf, bevor der Klick greift. Ein Klick schaltet damit genau eine Spec ab.
+- **`GC.LFormat` konnte Platzhalter doppelt ersetzen.** Der frühere Weg lief zeilenweise, ein `gsub` je Schlüssel, und durchsuchte dabei bereits eingesetzten Text erneut. Enthielt ein Wert selbst `{einanderer}`, ersetzte ihn ein späterer Durchlauf — und welcher zuerst kam, entschied die zufällige `pairs`-Reihenfolge, also fiel dasselbe Ergebnis mal so, mal anders aus. Der Callback-Weg setzt jeden Platzhalter an seiner Fundstelle genau einmal ein.
+- **`bossLookupCache` wuchs unbegrenzt.** Der Speicher der Bosserkennung merkte sich jeden je gesehenen Gegnernamen dauerhaft, Fehltreffer als `false`. Über einen Trashabend mit zehntausenden verschiedenen Namen summierte sich das bis zum `/reload`. Es ist derselbe Fall, den der Teilnehmerspeicher über `MAX_NAME_LOOKUP_MISSES` schon gedeckelt hatte — die Deckelung fehlte hier bloß und wurde nachgezogen (`MAX_BOSS_LOOKUP_MISSES`, beim Überlauf werden nur die Fehltreffer geleert, die erkannten Bosse bleiben).
+- **Zwei Einstellungsfelder überschrieben laufende Eingaben.** „Anzeigedauer der Meldung" und die Auftrags-Flüstervorlage bekamen bei jedem `SETTINGS_UPDATED` ein `SetText` ohne `HasFocus`-Prüfung — ein Gildenabgleich malt die Seite neu, und mitten im Tippen sprang das Feld auf den gespeicherten Wert zurück. Beide prüfen jetzt `HasFocus`, wie jedes andere Eingabefeld der Datei (der Verlust-Fall war an den Abmeldefeldern schon dokumentiert).
+
+### Kleinere, ebenfalls echte Stellen
+
+- Der Berufsschritt des Einrichtungsassistenten (`RefreshWizardProfessions`) griff als einzige Stelle ohne Nil-Schutz auf `profile.professions` zu; bei einem alt-strukturierten Profil hätte das die Assistentenseite beim Zeichnen abbrechen können. Jetzt mit demselben `(profile.professions or {})`-Schutz wie überall sonst.
+- `AnswerSummaryRequest` rief `C_Timer.After` ungeprüft auf, während jede andere Stelle der Datei `C_Timer` absichert; ohne Timer wird die Auswertung jetzt ungestaffelt, aber überhaupt gesendet.
+- Das Gildenbank-Manifest akzeptierte `tabIndex 0` und stieß dafür eine Anfrage nach Tab „0" an, den es nicht gibt (die Empfangsseite verlangt ohnehin `≥ 1`). Solche Einträge werden jetzt vorne verworfen — ein gespartes Paket, keine Korruptur.
+
+### Was bewusst NICHT geändert wurde
+
+Zwei Perf-Stellen skalieren mit einer großen Gilde schlechter, sind aber kein Fehler und kein risikoarmer Ein-Zeilen-Fix: `Inventory:GetReagentStatus` scannt je Reagenz alle Account-Charaktere und alle Gildenbank-Tabs, und `Orders:GetBoard` ruft je offenem Fremdauftrag die Herstellerliste neu auf. Beide sind Kandidaten für einen invalidierten Zwischenspeicher wie ihn der Werkstattkatalog schon hat — aber ein falsch invalidierter Cache zeigt veraltete Bestände, und das wäre schlimmer als der jetzige Aufwand. Bewusst als Folgearbeit notiert statt übereilt eingebaut. Ebenso stehen gelassen: der dokumentierte Trade-off, dass ein geleerter Gildenbank-Tab nicht als leer verteilt wird (eine leere Abfrage ist von „lädt noch" nicht zu unterscheiden), und die vernachlässigbare Token-Kollision im Ausrüstungstransfer (~1/9000, selbstheilend).
+
 ## 0.9.134 – Wessen Zahlen stehen da eigentlich?
 
 Ausgelöst von einer Frage zum Abend des 16.08.: Warum zeigt die Raidauswertung neben der eigenen Fassung („Live, 28 Teilnehmer") eine zweite von Druidgard („27") mit durchweg kleineren Zahlen — und welche stimmt?

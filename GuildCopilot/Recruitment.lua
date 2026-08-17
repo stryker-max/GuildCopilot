@@ -133,7 +133,24 @@ function GC.Recruitment:SetSpec(specKey, enabled)
     end
 
     local selections = self:GetSelections()
-    local selection = selections[spec.classFile] or { mode = "SPECS", specs = {} }
+    local selection = selections[spec.classFile]
+    -- "Ganze Klasse" bedeutet: alle Specs sind gewaehlt (so zaehlt es der
+    -- Werbetext, so leuchten die Knoepfe). Klickt jemand dann eine einzelne
+    -- Spec an, wird daraus eine ausdrueckliche Liste, die zuerst ALLE Specs
+    -- enthaelt - erst danach greift der Klick. Ohne dieses Aufzaehlen begaenne
+    -- die Liste leer, und die ganze Klasse fiele unbemerkt auf die eine
+    -- geklickte Spec zusammen.
+    if selection and selection.mode == "CLASS" then
+        local specs = {}
+        local classInfo = GC.Classes[spec.classFile]
+        if classInfo then
+            for _, classSpec in ipairs(classInfo.specs) do
+                specs[classSpec.key] = true
+            end
+        end
+        selection = { mode = "SPECS", specs = specs }
+    end
+    selection = selection or { mode = "SPECS", specs = {} }
     selection.mode = "SPECS"
     selection.specs = selection.specs or {}
     selection.specs[specKey] = enabled == true or nil
@@ -156,7 +173,16 @@ end
 function GC.Recruitment:IsSpecSelected(specKey)
     local spec = GC.SpecByKey[specKey]
     local selection = spec and self:GetSelections()[spec.classFile]
-    return selection and selection.mode == "SPECS" and selection.specs and selection.specs[specKey] == true or false
+    if not selection then
+        return false
+    end
+    -- "Ganze Klasse" heisst: jede Spec ist gewaehlt. Damit leuchten alle
+    -- Spec-Knoepfe, und ein Klick schaltet gezielt einen ab (siehe SetSpec),
+    -- statt die ganze Klasse auf die eine geklickte Spec zusammenzuziehen.
+    if selection.mode == "CLASS" then
+        return true
+    end
+    return selection.specs and selection.specs[specKey] == true or false
 end
 
 function GC.Recruitment:Clear()

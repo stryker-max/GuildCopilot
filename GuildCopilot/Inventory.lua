@@ -634,7 +634,8 @@ function GC.Inventory:ReceiveSync(fields, sender)
             local indexText, updatedText, fingerprint = record:match("^(%d+),(%d+),(%d*)$")
             local tabIndex = tonumber(indexText)
             local updatedAt = tonumber(updatedText)
-            if tabIndex and updatedAt and tabIndex <= MAX_GUILD_BANK_TABS
+            if tabIndex and updatedAt and tabIndex >= 1
+                and tabIndex <= MAX_GUILD_BANK_TABS
                 and #fingerprint <= 20 then
                 local known = tabs[tabIndex]
                 local knownAt = tonumber(known and known.updatedAt) or 0

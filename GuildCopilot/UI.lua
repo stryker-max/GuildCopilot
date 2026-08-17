@@ -2945,8 +2945,15 @@ function GC.UI:RefreshSettings()
     page.orderSoundProgress:SetValue(OrderSoundName("progress", "MAP_PING"))
     page.orderSoundDone:SetValue(OrderSoundName("done", "IG_QUEST_LIST_COMPLETE"))
     SetToggle(page.orderBannerToggle, settings.orderBanner.enabled ~= false)
-    page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
-    page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
+    -- Nicht ueberschreiben, was gerade getippt wird: Ein SETTINGS_UPDATED aus
+    -- dem laufenden Gildenabgleich malt diese Seite neu, auch waehrend hier
+    -- jemand die Anzeigedauer oder die Auftrags-Fluestervorlage bearbeitet.
+    if not page.orderBannerHold:HasFocus() then
+        page.orderBannerHold:SetText(tostring(tonumber(settings.orderBanner.holdSeconds) or 3))
+    end
+    if not page.orderWhisperEdit:HasFocus() then
+        page.orderWhisperEdit:SetText(settings.orderWhisperText or "")
+    end
     SetToggle(page.workshopWhisperToggle, settings.workshopWhisperReply == true)
     SetToggle(page.cooldownReminderToggle, settings.cooldownReminder ~= false)
     local language = settings.language or "AUTO"
@@ -3653,7 +3660,7 @@ function GC.UI:RefreshWizardProfessions()
 
     local count = 0
     for slot = 1, 2 do
-        local name = GC.Util.Trim((profile.professions[slot] or {}).name or "")
+        local name = GC.Util.Trim(((profile.professions or {})[slot] or {}).name or "")
         if name ~= "" and count < #page.rows then
             count = count + 1
             local row = page.rows[count]
