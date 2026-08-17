@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.132",
+    VERSION = "0.9.134",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -302,6 +302,48 @@ GC.DefaultWhisperTriggers = {
 -- eigene Realm. Eine mitgelieferte Liste wuerde Eintraege verhindern, die
 -- jemand anders ausdruecklich haben will.
 GC.MaxRecruitmentFilterWords = 40
+
+-- === Klasse und Stufe aus der Nachricht lesen =============================
+--
+-- Ein Bewerber schreibt fast immer selbst hin, was er spielt: "ENH sucht
+-- Anschluss an Gilde", "70er Schurke sucht nette Gilde", "ich spiele ein
+-- Hexenmeister". Das ist die einzige Quelle, die ohne Serveranfrage
+-- auskommt - die Spieler-GUID liefert die Klasse nur, wenn der Client den
+-- Namen kennt, und die STUFE liefert sie ueberhaupt nicht.
+--
+-- Verglichen wird auf ganze Woerter (%f-Grenzmuster). Ohne das findet "ele"
+-- auch "elegant" und "war" jedes "warum" - Kuerzel sind hier unvermeidlich,
+-- weil im Kanal so geschrieben wird.
+--
+-- Nicht aufgenommen sind mehrdeutige Kuerzel: "resto" (Schamane ODER Druide),
+-- "prot" (Krieger ODER Paladin), "heal", "dd", "tank". Lieber keine Angabe als
+-- eine falsche - eine falsche Klasse verbirgt den Bewerber hinter einem Filter,
+-- unter dem niemand ihn sucht.
+GC.LeadClassAliases = {
+    WARRIOR = { "krieger", "warri", "warrior", "fury", "arms" },
+    PALADIN = { "paladin", "pala", "pally", "vergelter", "retri" },
+    HUNTER  = { "jäger", "jaeger", "hunter", "hunt", "hunni" },
+    ROGUE   = { "schurke", "rogue", "assa" },
+    PRIEST  = { "priester", "priest", "disci", "disco", "schatten", "shadow" },
+    SHAMAN  = { "schamane", "schami", "shaman", "sham", "enh", "enha", "enhancer",
+                "elementar", "ele" },
+    MAGE    = { "magier", "mage", "arkan", "arcane" },
+    WARLOCK = { "hexenmeister", "hexer", "warlock", "lock", "wl", "affli", "destro" },
+    DRUID   = { "druide", "dudu", "druid", "eule", "boomkin", "moonkin", "feral" },
+}
+
+-- Die Stufe. Mit Marker ("Stufe 70", "lvl 70", "70er") ist sie eindeutig; eine
+-- nackte Zahl wird nur zwischen 58 und 70 als Stufe gelesen. Sonst wuerde
+-- "Suche 2 DDs" eine Stufe 2 ergeben und "5g das Stueck" eine Stufe 5.
+GC.LeadLevelPatterns = {
+    "stufe%s*(%d%d?)",
+    "level%s*(%d%d?)",
+    "lvl%.?%s*(%d%d?)",
+    "lv%.?%s*(%d%d?)",
+    "(%d%d?)%s*er%f[%W]",
+}
+GC.LeadLevelMax = 70
+GC.LeadLevelBareMin = 58
 
 -- === Freie Formulierungen erkennen ========================================
 --

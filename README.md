@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.132
+# Guild Copilot 0.9.134
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -42,7 +42,11 @@ Der Ablauf geht von oben nach unten: Gildenprofil ausfüllen, Vorschläge ansehe
 
 ## Postfach
 
-Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten landen automatisch als Interessent im Postfach — mit Klassenfarbe, Level und Empfangszeit. Mitgelesen wird in **jedem** Kanal, dem du beigetreten bist: SucheNachGruppe, Allgemein, Handel, Gildenrekrutierung.
+Eingehende Flüsternachrichten und erkannte „Suche Gilde“-Chatnachrichten landen automatisch als Interessent im Postfach — mit Klassenfarbe, Stufe und Empfangszeit. Mitgelesen wird in **jedem** Kanal, dem du beigetreten bist: SucheNachGruppe, Allgemein, Handel, Gildenrekrutierung.
+
+**Klasse und Stufe werden aus der Nachricht gelesen.** Ein Bewerber schreibt fast immer selbst hin, was er spielt: „**ENH** sucht Anschluss an Gilde“, „**70er Schurke** sucht nette Gilde“, „ich spiele ein **Hexenmeister**“. Guild Copilot liest das mit — deutsche und englische Namen, dazu die üblichen Kürzel. Verglichen wird auf ganze Wörter, damit „elegant“ nicht als Elementarschamane durchgeht; eine Stufe ohne Marker gilt nur zwischen 58 und 70, damit aus „suche noch **2** DDs“ keine Stufe 2 wird. Was nicht dasteht, wird nicht geraten.
+
+**Filter über der Liste.** Zwei Aufklappfelder schränken die Ansicht ein: nach **Klasse** und nach **Stufe** (ab 50/60/70). Gefiltert wird die Ansicht, nicht der Bestand — ausgeblendete Einträge bleiben gespeichert und weiterhin gildenweit geteilt, und unter der Liste steht, wie viele der Filter gerade verbirgt. Wer keine Klasse oder Stufe hingeschrieben hat, bleibt **sichtbar**: „unbekannt“ ist keine Aussage, und wer filtert, soll keine Bewerber verlieren.
 
 **Freie Formulierungen werden erkannt.** Eine feste Wendungsliste kennt „suche Gilde“, aber nicht „ENH sucht Anschluss an Gilde zum Raiden“ — und so schreibt der halbe Kanal. Guild Copilot geht deshalb nicht nach Wendungen allein, sondern nach der **Wortreihenfolge**:
 
@@ -185,7 +189,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.132.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.134.
 
 ### Warum Windows beim Herunterladen warnt
 

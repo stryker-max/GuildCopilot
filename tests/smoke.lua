@@ -2941,6 +2941,79 @@ do
     addon.DB:GetGuild().raidSessions = {}
 end
 
+-- === Fremdfassungen werden ausgeblendet, bleiben aber Reparaturmaterial =====
+do
+    addon.DB:GetGuild().raidSessions = {}
+
+    -- Eigener Livemitschnitt (drei Teilnehmer) ...
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-hide", startedAt = 1785000000, endedAt = 1785010000,
+        zone = "Höhle des Schlangenschreins", pulls = 26, kills = 17, wipes = 3,
+        source = "LIVE",
+        participants = {
+            { name = "Attilus", seconds = 9000, consumables = {} },
+            { name = "Baschdi", seconds = 9000, consumables = {} },
+            { name = "Bonane", seconds = 9000, consumables = {} },
+        },
+    })
+    -- ... und die abgeschnittene Fassung eines Gildenkollegen, absichtlich mit
+    -- MEHR Teilnehmern: Sie darf den Abend trotzdem nicht anführen.
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-hide", startedAt = 1785000000, endedAt = 1785006000,
+        zone = "Höhle des Schlangenschreins", pulls = 21, kills = 15, wipes = 2,
+        source = "SYNC:Druidgard",
+        participants = {
+            { name = "Attilus", seconds = 5000, consumables = {} },
+            { name = "Baschdi", seconds = 5000, consumables = {} },
+            { name = "Bonane", seconds = 5000, consumables = {} },
+            { name = "Nexarius", seconds = 5000, consumables = {} },
+        },
+    })
+
+    assert(#addon.RaidMonitor:GetSummaries() == 2,
+        "Die Fremdfassung muss gespeichert bleiben - die Reparatur braucht sie")
+
+    local evenings = addon.RaidMonitor:GetEvenings()
+    assert(#evenings == 1, "Derselbe Abend steht doppelt in der Liste")
+    assert(#evenings[1].sources == 2, "Beide Quellen müssen unter dem Abend hängen")
+    assert(#evenings[1].visibleSources == 1,
+        "Die Fremdfassung wird trotz eigener Fassung noch angezeigt")
+    assert(evenings[1].visibleSources[1].source == "LIVE",
+        "Ausgeblendet wurde die falsche Quelle")
+    assert(evenings[1].summary.source == "LIVE",
+        "Eine Fremdfassung mit mehr Teilnehmern führt den Abend an")
+
+    -- Ein veralteter Auswahlschlüssel auf die Fremdfassung fällt auf die
+    -- eigene zurück; die eigene bleibt unverändert wählbar.
+    local liveKey = addon.RaidMonitor:SummaryKey(
+        addon.RaidMonitor:GetSummary("abend-hide", "LIVE"))
+    local syncKey = addon.RaidMonitor:SummaryKey(
+        addon.RaidMonitor:GetSummary("abend-hide", "SYNC:Druidgard"))
+    assert(addon.RaidMonitor:VisibleSummaryKey(evenings, syncKey) == liveKey,
+        "Eine ausgeblendete Fremdfassung wird nicht auf die eigene zurückgeführt")
+    assert(addon.RaidMonitor:VisibleSummaryKey(evenings, liveKey) == liveKey,
+        "Die eigene Fassung wird fälschlich umgelenkt")
+
+    -- War man nicht dabei (nur Fremdfassungen), bleibt der Abend sichtbar -
+    -- sonst wäre er gar nicht lesbar.
+    addon.DB:GetGuild().raidSessions = {}
+    addon.RaidMonitor:StoreSummary({
+        id = "abend-fremd", startedAt = 1785100000, endedAt = 1785106000,
+        zone = "Karazhan", pulls = 5, kills = 5, wipes = 0,
+        source = "SYNC:Ilarin",
+        participants = {
+            { name = "Fremdli", seconds = 5000, consumables = {} },
+            { name = "Andrian", seconds = 5000, consumables = {} },
+        },
+    })
+    local fremd = addon.RaidMonitor:GetEvenings()
+    assert(#fremd == 1 and #fremd[1].visibleSources == 1
+        and fremd[1].visibleSources[1].source == "SYNC:Ilarin",
+        "Ohne eigene Fassung muss die Fremdfassung sichtbar bleiben")
+
+    addon.DB:GetGuild().raidSessions = {}
+end
+
 -- === Mitgliederpflege: Entscheidungen und Ausschluss ========================
 addon.DB:GetGuild().memberCare.decisions = {}
 addon.DB:GetGuild().memberCare.accessRanksConfigured = true
@@ -6716,17 +6789,34 @@ do
     assert(inb_page.replyEdit:GetText() == "Hallo Bewerber1, schön dass du schreibst!",
         "Der gemerkte Entwurf kommt beim Zurückwechseln nicht wieder")
 
-    -- Blaettern: Auf Seite 2 zeigen die Knoepfe die Interessenten 10 bis 12.
-    assert(inb_page.leadNext.shown == true, "Bei mehr als neun Interessenten fehlt die Blätterung")
+    -- Blaettern. Die Seitengroesse wird ABGELESEN, nicht eingetippt: Sie hat
+    -- sich mit der Filterzeile schon einmal geaendert, und ein Test, der die
+    -- Zahl doppelt fuehrt, faellt dann aus einem Grund um, der nichts mit dem
+    -- Geprueften zu tun hat.
+    addon.UI:RefreshInbox()
+    local inb_perPage = 0
+    for _, inb_button in ipairs(inb_page.leadButtons) do
+        if inb_button.shown then
+            inb_perPage = inb_perPage + 1
+        end
+    end
+    assert(inb_perPage > 0 and inb_perPage < 12,
+        "Testaufbau: die Seitengröße ließ sich nicht ablesen (" .. inb_perPage .. ")")
+
+    assert(inb_page.leadNext.shown == true, "Bei mehr Interessenten als einer Seite fehlt die Blätterung")
     assert(addon.UI:GetLeadIndexForSlot(1) == 1, "Seite 1 beginnt nicht beim ersten Interessenten")
     inb_page.leadNext.scripts.OnClick()
     assert(inb_page.leadPage == 2, "Der Weiter-Knopf blättert nicht")
-    assert(addon.UI:GetLeadIndexForSlot(1) == 10, "Seite 2 beginnt nicht beim zehnten Interessenten")
-    assert(inb_page.leadButtons[3].shown == true and inb_page.leadButtons[4].shown == false,
+    assert(addon.UI:GetLeadIndexForSlot(1) == inb_perPage + 1,
+        "Seite 2 beginnt nicht beim " .. (inb_perPage + 1) .. ". Interessenten")
+    local inb_rest = 12 - inb_perPage
+    assert(inb_page.leadButtons[inb_rest].shown == true
+        and (inb_page.leadButtons[inb_rest + 1] == nil
+            or inb_page.leadButtons[inb_rest + 1].shown == false),
         "Auf der zweiten Seite stehen die falschen Interessenten")
-    addon.UI:SelectLead(addon.UI:GetLeadIndexForSlot(3))
+    addon.UI:SelectLead(addon.UI:GetLeadIndexForSlot(inb_rest))
     assert(addon.UI:GetSelectedLead().name == "Bewerber12-Realm",
-        "Ein Interessent jenseits der neunten Zeile lässt sich nicht wählen")
+        "Ein Interessent jenseits der ersten Seite lässt sich nicht wählen")
 
     -- Der eigentliche Falschempfaenger-Fall: Waehrend man schreibt, trifft eine
     -- neue Fluesternachricht ein. Der neue Eintrag wird VORNE eingefuegt, alle
@@ -10203,6 +10293,178 @@ do
     end
 
     box_guild.inbox = box_savedInbox
+end
+
+-- === Klasse und Stufe aus der Nachricht lesen ==============================
+--
+-- Damit sich ueberhaupt nach Klasse und Stufe filtern laesst, muessen beide
+-- am Eintrag stehen. Die GUID liefert die Klasse nur bei bekanntem Namen und
+-- die Stufe nie - im Text steht aber fast immer beides: "ENH sucht Anschluss
+-- an Gilde", "70er Schurke sucht nette Gilde".
+--
+-- Die Fallstricke stehen ausdruecklich mit drin: "elegant" darf nicht als
+-- "ele" (Elementarschamane) durchgehen, "2 DDs" nicht als Stufe 2, "ab 18 Uhr"
+-- nicht als Stufe 18. Lieber keine Angabe als eine falsche - eine falsche
+-- Klasse verbirgt den Bewerber hinter einem Filter, unter dem ihn niemand sucht.
+do
+    local read_cases = {
+        { "ENH sucht Anschluss an Gilde zum Raiden, hc inis und alles was so dazu gehört^^", "SHAMAN" },
+        { "70er Schurke sucht nette Gilde zum Raiden", "ROGUE", 70 },
+        { "Suche eine Gilde ich spiele ein Hexenmeister hatte eine länger pause", "WARLOCK" },
+        { "Priester sucht Gilde zum Raiden", "PRIEST" },
+        { "Stufe 70 Tauren Schamane sucht Gilde", "SHAMAN", 70 },
+        { "lvl 68 Magier sucht Anschluss", "MAGE", 68 },
+        { "Krieger 70 sucht raidende Gilde", "WARRIOR", 70 },
+        { "Suche Gilde, spiele Dudu feral", "DRUID" },
+        { "Jäger lvl. 65 sucht Gilde", "HUNTER", 65 },
+        { "Pala sucht Gilde für Kara", "PALADIN" },
+        -- Keine Angabe darf nichts erfinden.
+        { "Suche eine Gilde" },
+        { "Sucht Gilde zum gemeinsamen Spielen" },
+        -- Und die Fallstricke.
+        { "Suche Gilde, bin elegant unterwegs" },
+        { "Suche noch 2 DDs für HdW hc" },
+        { "WTS Adamantiterz 5g das Stück" },
+        { "Suche Gilde ab 18 Uhr online" },
+    }
+    for _, case in ipairs(read_cases) do
+        local gotClass = addon.Chat:ReadClassFromText(case[1])
+        local gotLevel = addon.Chat:ReadLevelFromText(case[1])
+        assert(gotClass == case[2], "Klasse falsch gelesen (" .. tostring(gotClass)
+            .. " statt " .. tostring(case[2]) .. "): " .. case[1])
+        assert(gotLevel == case[3], "Stufe falsch gelesen (" .. tostring(gotLevel)
+            .. " statt " .. tostring(case[3]) .. "): " .. case[1])
+    end
+
+    -- Am echten Weg: Ein erfasster Bewerber traegt beides danach am Eintrag.
+    local read_guild = addon.DB:GetGuild()
+    local read_saved = read_guild.inbox
+    read_guild.inbox = {}
+    addon.Chat:CaptureLead("70er Schurke sucht nette Gilde zum Raiden",
+        "Schurke-Realm", nil, "SucheNachGruppe")
+    local read_lead = read_guild.inbox[1]
+    assert(read_lead ~= nil and read_lead.classFile == "ROGUE",
+        "Die Klasse aus dem Text steht nicht am Eintrag: " .. tostring(read_lead and read_lead.classFile))
+    assert(read_lead.level == 70,
+        "Die Stufe aus dem Text steht nicht am Eintrag: " .. tostring(read_lead.level))
+
+    -- Eine ueber die GUID aufgeloeste Klasse wird NICHT durch eine geratene
+    -- ersetzt: Die GUID ist Tatsache, der Text eine Vermutung.
+    read_guild.inbox = {}
+    addon.Chat:CaptureLead("Ich bin Krieger und suche Gilde", "Falsch-Realm", nil, "SucheNachGruppe")
+    read_guild.inbox[1].classFile = "PRIEST"
+    addon.Chat:CaptureLead("Ich bin Krieger und suche Gilde", "Falsch-Realm", nil, "SucheNachGruppe")
+    assert(read_guild.inbox[1].classFile == "PRIEST",
+        "Eine sichere Klasse wurde durch die Textvermutung überschrieben")
+
+    read_guild.inbox = read_saved
+end
+
+-- === Filter im Postfach ====================================================
+--
+-- Gefiltert wird die ANSICHT. Der gefaehrliche Teil ist nicht das Ausblenden,
+-- sondern was danach passiert: Loeschen, Auswaehlen und Blaettern rechnen mit
+-- Listenplaetzen. Zeigt ein Platz bei gesetztem Filter auf den falschen
+-- Eintrag, loescht der Klick den Falschen - lautlos.
+do
+    addon.UI:ShowPage("INBOX")
+    local flt_page = addon.UI.pages.INBOX
+    local flt_guild = addon.DB:GetGuild()
+    local flt_saved = flt_guild.inbox
+    local flt_savedFilters = addon.DB:GetSettings().inboxFilters
+    addon.DB:GetSettings().inboxFilters = {}
+
+    flt_guild.inbox = {
+        { name = "Krieger-Realm", classFile = "WARRIOR", source = "SucheNachGruppe",
+          messages = { { text = "Krieger sucht Gilde", receivedAt = 1 } } },
+        { name = "Magier-Realm", classFile = "MAGE", source = "WHISPER", unread = true,
+          messages = { { text = "Magier sucht Gilde", receivedAt = 2 } } },
+        { name = "Priester-Realm", classFile = "PRIEST", source = "SucheNachGruppe",
+          messages = { { text = "Priester sucht Gilde", receivedAt = 3 } } },
+        { name = "Unbekannt-Realm", source = "WHISPER",
+          messages = { { text = "Sucht Gilde", receivedAt = 4 } } },
+    }
+    addon.UI.selectedLeadKey = nil
+    addon.UI:RefreshInbox()
+    assert(#flt_page.visibleLeads == 4, "Ohne Filter fehlen Einträge")
+
+    -- Klasse
+    addon.UI:GetInboxFilters().classFile = "MAGE"
+    addon.UI:RefreshInbox()
+    local flt_names = {}
+    for _, index in ipairs(flt_page.visibleLeads) do
+        flt_names[#flt_names + 1] = flt_guild.inbox[index].name
+    end
+    -- Der Magier - und der Eintrag OHNE bekannte Klasse. "Unbekannt" ist keine
+    -- Aussage über die Klasse; wer filtert, soll keine Bewerber verlieren.
+    assert(#flt_names == 2, "Der Klassenfilter zeigt " .. #flt_names .. " statt 2 Einträgen")
+    assert(flt_names[1] == "Magier-Realm" and flt_names[2] == "Unbekannt-Realm",
+        "Der Klassenfilter zeigt die falschen: " .. table.concat(flt_names, ", "))
+
+    -- Stufe. Sie kommt aus dem Text des Bewerbers, deshalb sind die Stufen
+    -- Schwellen: Wer "68" schreibt, taucht bei "ab 60" auf.
+    addon.UI:GetInboxFilters().classFile = ""
+    flt_guild.inbox[1].level = 70
+    flt_guild.inbox[2].level = 62
+    flt_guild.inbox[3].level = 45
+    -- Eintrag 4 bleibt ohne Stufenangabe.
+    addon.UI:GetInboxFilters().minLevel = 60
+    addon.UI:RefreshInbox()
+    local flt_levels = {}
+    for _, index in ipairs(flt_page.visibleLeads) do
+        flt_levels[#flt_levels + 1] = flt_guild.inbox[index].name
+    end
+    -- 70, 62 und der ohne Angabe. Die 45 fällt raus.
+    assert(#flt_levels == 3,
+        "Der Stufenfilter zeigt " .. #flt_levels .. " statt 3: " .. table.concat(flt_levels, ", "))
+    assert(flt_levels[3] == "Unbekannt-Realm",
+        "Wer keine Stufe angegeben hat, wurde vom Stufenfilter verborgen")
+
+    addon.UI:GetInboxFilters().minLevel = 70
+    addon.UI:RefreshInbox()
+    assert(#flt_page.visibleLeads == 2, "„Ab Stufe 70“ zählt falsch")
+    addon.UI:GetInboxFilters().minLevel = 0
+    for index = 1, 3 do
+        flt_guild.inbox[index].level = nil
+    end
+
+    -- === Der eigentliche Fall: Löschen bei gesetztem Filter ===============
+    addon.DB:GetSettings().inboxFilters = { classFile = "PRIEST" }
+    addon.UI:RefreshInbox()
+    -- Sichtbar: Priester (Platz 3) und Unbekannt (Platz 4).
+    assert(#flt_page.visibleLeads == 2, "Testaufbau: falsche Anzahl für die Löschprobe")
+    assert(addon.UI:GetLeadIndexForSlot(1) == 3,
+        "Der erste sichtbare Platz zeigt auf den echten Index "
+            .. tostring(addon.UI:GetLeadIndexForSlot(1)) .. " statt 3")
+    flt_page.leadDeleteButtons[1].scripts.OnClick()
+    assert(#flt_guild.inbox == 3, "Es wurde nicht genau ein Eintrag gelöscht")
+    for _, lead in ipairs(flt_guild.inbox) do
+        assert(lead.name ~= "Priester-Realm", "Der Priester steht noch im Postfach")
+    end
+    assert(flt_guild.inbox[1].name == "Krieger-Realm",
+        "Der Filter hat den falschen Eintrag gelöscht: " .. flt_guild.inbox[1].name)
+
+    -- Ein Filter blendet aus, er löscht nicht: Zurückgesetzt ist alles wieder da.
+    addon.DB:GetSettings().inboxFilters = {}
+    addon.UI:RefreshInbox()
+    assert(#flt_page.visibleLeads == 3,
+        "Nach dem Zurücksetzen fehlen Einträge - der Filter hat gelöscht statt ausgeblendet")
+
+    -- Und die Oberflaeche sagt, dass sie etwas verbirgt.
+    addon.DB:GetSettings().inboxFilters = { classFile = "MAGE" }
+    addon.UI:RefreshInbox()
+    assert(tostring(flt_page.leadFilterNotice.value or ""):find("ausgeblendet", 1, true) ~= nil,
+        "Ein gesetzter Filter sagt nicht, wie viel er verbirgt: "
+            .. tostring(flt_page.leadFilterNotice.value))
+    addon.DB:GetSettings().inboxFilters = {}
+    addon.UI:RefreshInbox()
+    assert(tostring(flt_page.leadFilterNotice.value or "") == "",
+        "Ohne Filter steht trotzdem ein Hinweis da")
+
+    flt_guild.inbox = flt_saved
+    addon.DB:GetSettings().inboxFilters = flt_savedFilters
+    addon.UI.selectedLeadKey = nil
+    addon.UI:RefreshInbox()
 end
 
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den

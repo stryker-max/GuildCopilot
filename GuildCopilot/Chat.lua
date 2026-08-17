@@ -571,6 +571,69 @@ end
 -- des Clients aber noch kalt, deshalb ist der Aufruf idempotent und wird beim
 -- Anzeigen des Postfachs so lange wiederholt, bis er etwas liefert. Das
 -- ergaenzt auch Interessenten, die vor dieser Version gespeichert wurden.
+-- === Was der Bewerber selbst hinschreibt ==================================
+--
+-- "ENH sucht Anschluss an Gilde", "70er Schurke sucht nette Gilde". Klasse und
+-- Stufe stehen fast immer im Text - und das ist die einzige Quelle, die ohne
+-- Serveranfrage auskommt: Die GUID liefert die Klasse nur bei bekanntem Namen
+-- und die Stufe nie.
+--
+-- Gelesen wird nur, was dasteht. Nichts wird geraten, und eine gefundene
+-- Angabe ueberschreibt nie eine sicherere (die Klasse aus der GUID).
+function GC.Chat:ReadClassFromText(text)
+    local lowered = tostring(text or ""):lower()
+    if lowered == "" then
+        return nil
+    end
+    local best, bestAt
+    for classFile, aliases in pairs(GC.LeadClassAliases) do
+        for _, alias in ipairs(aliases) do
+            -- Ganze Woerter: "ele" darf nicht in "elegant" treffen.
+            local at = lowered:find("%f[%w]" .. alias .. "%f[%W]")
+            if at and (not bestAt or at < bestAt) then
+                best, bestAt = classFile, at
+            end
+        end
+    end
+    return best
+end
+
+function GC.Chat:ReadLevelFromText(text)
+    local lowered = tostring(text or ""):lower()
+    if lowered == "" then
+        return nil
+    end
+    for _, pattern in ipairs(GC.LeadLevelPatterns) do
+        local found = tonumber(lowered:match(pattern))
+        if found and found >= 1 and found <= GC.LeadLevelMax then
+            return found
+        end
+    end
+    -- Ohne Marker nur im plausiblen Bereich. Eine nackte "2" ist in einer
+    -- Kanalnachricht so gut wie nie eine Stufe.
+    for number in lowered:gmatch("%f[%w](%d%d?)%f[%W]") do
+        local found = tonumber(number)
+        if found and found >= GC.LeadLevelBareMin and found <= GC.LeadLevelMax then
+            return found
+        end
+    end
+    return nil
+end
+
+-- Traegt nach, was am Eintrag noch fehlt. Sicherere Quellen gewinnen: eine
+-- ueber die GUID aufgeloeste Klasse wird nie durch eine geratene ersetzt.
+function GC.Chat:ReadLeadDetails(lead, text)
+    if type(lead) ~= "table" then
+        return
+    end
+    if GC.Util.Trim(lead.classFile) == "" then
+        lead.classFile = self:ReadClassFromText(text)
+    end
+    if not tonumber(lead.level) then
+        lead.level = self:ReadLevelFromText(text)
+    end
+end
+
 function GC.Chat:ResolveLeadClass(lead)
     if type(lead) ~= "table" or GC.Util.Trim(lead.classFile) ~= "" then
         return lead and lead.classFile or nil
@@ -655,6 +718,8 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
     lead.source = source or lead.source
     lead.guid = lead.guid or guid
     self:ResolveLeadClass(lead)
+    -- Was die GUID nicht hergibt, steht oft im Text selbst.
+    self:ReadLeadDetails(lead, message)
     table.insert(lead.messages, {
         receivedAt = GC.Util.Now(),
         text = message,
@@ -1046,6 +1111,10 @@ function GC.Chat:MergeRemoteLead(record)
         }
     end
     self:ResolveLeadClass(lead)
+    -- Klasse und Stufe werden NICHT uebertragen, sondern beim Empfaenger aus
+    -- demselben Text gelesen. Das spart Protokollfelder und haelt beide Seiten
+    -- automatisch gleich, sobald die Erkennung besser wird.
+    self:ReadLeadDetails(lead, record.text)
     return true
 end
 

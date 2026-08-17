@@ -298,6 +298,76 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.134 – Wessen Zahlen stehen da eigentlich?
+
+Ausgelöst von einer Frage zum Abend des 16.08.: Warum zeigt die Raidauswertung neben der eigenen Fassung („Live, 28 Teilnehmer") eine zweite von Druidgard („27") mit durchweg kleineren Zahlen — und welche stimmt?
+
+### Erst der Abgleich, dann die Änderung
+
+Bevor irgendetwas angefasst wurde, drei Quellen desselben Abends nebeneinandergelegt: die eigene Live-Fassung, Druidgards Sync-Fassung und das rohe Kampflog (`WoWCombatLog-081626`, dieselbe Datei, die auch Warcraft Logs einliest). Mit denselben Spell-IDs geparst, die auch das Addon benutzt.
+
+- Die eigene Fassung deckt sich **spielergenau** mit dem Kampflog: Tode, Unterbrechungen, Zauberbanne, Tränke, Trommeln — 28 von 28 Teilnehmern ohne eine einzige Abweichung.
+- Getragene Güter (Fläschchen, Elixiere, Essen) liegen leicht höher als das Log, und zwar immer in diese Richtung. Das ist kein Fehler: Das Addon liest zusätzlich ab, was vor Log-Beginn schon auf dem Charakter lag — genau der Zweck des Eintritts-Scans.
+- Druidgards Fassung ist keine andere Wahrheit, sondern eine **abgeschnittene**: Sie endet 21:55 statt 23:49. Gegen das Kampflog bis 21:55 gerechnet, stimmt sie 26 von 27 Spielern — sie hört nur zwei Stunden früher auf. Dabei fehlt ihm auch er selbst, daher 27 statt 28.
+
+### Warum die Fremdfassung überhaupt dastand
+
+Fremde Mitschnitte sind Reparaturmaterial: Hat der eigene Mitschnitt Lücken, füllt das Addon sie aus den Fassungen der Kollegen (je Spieler und Spalte der höchste Wert). Die eigene Fassung dieses Abends ist intern als lückenhaft markiert (`gaps=3`) — deshalb hielt das Addon Druidgards Kopie als Reparaturkandidaten. Nur ist sie abgeschnitten, jeder ihrer Werte also ≤ dem eigenen und als Reparaturquelle wertlos. Angeboten wurde sie trotzdem als gleichwertiger Reiter, weil die Oberfläche bis dahin bewusst jede gespeicherte Quelle zeigte.
+
+### Die Änderung
+
+`GetEvenings` liefert je Abend jetzt zusätzlich `visibleSources` — die anzeigbaren Quellen. Liegt eine eigene Fassung vor (Live, ergänzt, Warcraft Logs, Logdatei), fallen fremde `SYNC:<Name>` aus der Anzeige: aus den Quellenreitern, aus der Kopfzeile, aus dem Vergleich. Die vollständigste **sichtbare** Fassung führt den Abend an; eine fremde mit mehr Teilnehmern übernimmt die Kopfzeile nicht mehr. Fehlt jede eigene Quelle (man war nicht dabei), bleiben die fremden sichtbar — sonst wäre der Abend gar nicht lesbar.
+
+Entscheidend ist, was **nicht** geändert wurde: Die Reparatur liest weiter `GetSummaries`, den vollen Bestand, nicht die gefilterte Liste. Fremde Fassungen bleiben gespeichert und ergänzen still weiter. Ein veralteter Auswahlschlüssel auf eine nun ausgeblendete Fremdfassung fällt über `VisibleSummaryKey` auf die eigene zurück, damit nicht nach einem `/reload` doch wieder Druidgards Zahlen im Detail stehen. Der Regressionstest deckt beide Seiten ab: Ausblenden, sobald eine eigene Fassung existiert, und Sichtbarbleiben, wenn nicht.
+
+Das kehrt eine frühere Festlegung um („verborgen bleiben darf nichts") — bewusst, weil sie den Fall einer abgeschnittenen Fremdfassung neben einer vollständigen eigenen nicht bedacht hatte.
+
+## 0.9.133 – Filter im Postfach, und was dabei auffiel
+
+Gewünscht: „Kannst du noch Filters einbauen aber direkt ins Postfach zB Level, Klasse zum auswählen?"
+
+Geliefert: **Klasse** und **Stufe**. Die Stufe brauchte einen Umweg — dazu unten.
+
+### Der gefährliche Teil ist nicht das Ausblenden
+
+Die Liste arbeitete durchgehend mit rohen Listenplätzen: `GetLeadIndexForSlot(slot)` rechnete `((seite - 1) * proSeite) + slot` und griff damit direkt in `GetGuild().inbox`. Löschen, Auswählen und Blättern hängen alle daran.
+
+Sobald die Liste gefiltert ist, stimmt diese Rechnung nicht mehr — und der Fehler ist lautlos: Ein Klick auf das × der ersten sichtbaren Zeile löscht den ersten Eintrag des **Gesamtbestands**, nicht den, auf den man gezeigt hat.
+
+Deshalb liegt jetzt eine Abbildung dazwischen. `RefreshInbox` baut `page.visibleLeads` — die echten Indizes in ihrer Reihenfolge — und `GetLeadIndexForSlot` geht darüber. Gezählt und geblättert wird ebenfalls über die sichtbaren Einträge; sonst zeigt die Seitenzahl den Gesamtbestand an, während die letzten Seiten leer sind.
+
+Der Test dazu ist der eigentliche Zweck des Ganzen: Bei gesetztem Klassenfilter (Priester, echter Platz 3) muss `GetLeadIndexForSlot(1)` die 3 liefern, und der Löschknopf muss den Priester treffen — nicht den Krieger auf Platz 1. Gegenprobe mit der alten Rechnung: schlägt fehl, mit genau dieser Meldung.
+
+### Zwei Entscheidungen an der Filterlogik
+
+- **Unbekannte Klasse bleibt sichtbar.** Die Klasse steht nur an Einträgen, deren GUID der Client auflösen konnte. Ein Klassenfilter, der alles Unbekannte verbirgt, verliert Bewerber — und zwar unbemerkt, weil man ja gerade filtert. „Unbekannt" ist keine Aussage über die Klasse.
+- **Dasselbe gilt für die Stufe.** Wer sie nicht dazugeschrieben hat, verschwindet nicht hinter „ab Stufe 70". Die Stufenauswahl sind deshalb Schwellen und keine Einzelwerte: Wer „68" schreibt, taucht bei „ab 60" auf.
+- **Der Filter sagt, was er verbirgt.** Unter der Liste steht „*n* durch Filter ausgeblendet". Ein vergessener Filter sieht sonst aus wie ein leeres Postfach; das ist die häufigste Verwechslung bei Filtern überhaupt.
+
+Gefiltert wird ausdrücklich die **Ansicht**. Ein ausgeblendeter Eintrag bleibt gespeichert und wird weiterhin gildenweit geteilt — sonst wäre ein Filter ein Löschknopf mit freundlichem Namen. Auch das prüft der Test: Filter zurücksetzen, alles wieder da.
+
+Die Filterzeile kostet eine Listenzeile (acht statt neun je Seite). Die Karte ist 224 Pixel breit und sitzt bündig neben der Unterhaltung, beide zusammen füllen die 752 des Inhalts — breiter geht sie nicht.
+
+### Die Stufe stand die ganze Zeit in der Nachricht
+
+`lead.level` wurde **an keiner Stelle gesetzt** — es kam im Addon zweimal vor: kopiert in `MergeDuplicateLeads`, gelesen in der Postfachzeile. Geschrieben hat es nie jemand. Die README behauptete trotzdem „mit Klassenfarbe, Level und Empfangszeit".
+
+Der erste Gedanke war eine `/who`-Abfrage: Sie liefert die Stufe, ist aber gedrosselt, braucht eine Warteschlange über alle Bewerber und lenkt mit `SetWhoToUI(true)` auch die **eigenen** manuellen `/who`-Ergebnisse ins Wer-Fenster. Ein spürbarer Nebeneffekt für eine Nebensache.
+
+Der zweite Gedanke war der richtige, und er stand die ganze Zeit im Screenshot des Owners:
+
+> **ENH** sucht Anschluss an Gilde zum Raiden
+
+Bewerber schreiben selbst hin, was sie spielen. „70er Schurke sucht nette Gilde", „ich spiele ein Hexenmeister", „Stufe 70 Tauren Schamane". Keine Serveranfrage, keine Drosselung, keine Nebenwirkung — und es ist ohnehin genau der Text, der schon übertragen wird.
+
+**Gelesen wird auf ganze Wörter** (`%f`-Grenzmuster). Ohne das findet „ele" auch „elegant" und „war" jedes „warum" — und Kürzel sind unvermeidlich, weil im Kanal so geschrieben wird. Eine Stufe **ohne Marker** gilt nur zwischen 58 und 70; sonst wird „suche noch **2** DDs" zu Stufe 2 und „ab **18** Uhr" zu Stufe 18. Mehrdeutige Kürzel sind bewusst nicht in der Tabelle: `resto` (Schamane oder Druide), `prot` (Krieger oder Paladin), `heal`, `dd`, `tank`. **Lieber keine Angabe als eine falsche** — eine falsche Klasse verbirgt den Bewerber hinter einem Filter, unter dem ihn niemand sucht.
+
+Eine über die GUID aufgelöste Klasse wird nie durch die Textvermutung ersetzt: Die GUID ist Tatsache, der Text eine Vermutung. Auch das prüft der Test.
+
+**Übertragen wird nichts davon.** Klasse und Stufe werden beim Empfänger aus demselben Text gelesen, der ohnehin ankommt. Das spart zwei Protokollfelder und hält beide Seiten automatisch gleich, sobald die Erkennung besser wird.
+
+Gemessen an 16 Kanalzeilen, Fallstricke eingeschlossen: 16 von 16 richtig.
+
 ## 0.9.132 – Das Postfach gehört der Gilde
 
 Aus dem Spiel: „Das Gildenpostfach wird aber nicht zwischen den Membern synchronisiert oder? Das sollte aber bitte so sein!"

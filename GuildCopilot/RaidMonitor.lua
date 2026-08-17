@@ -1603,9 +1603,40 @@ function GC.RaidMonitor:IsSameEvening(left, right)
     return shared >= math.ceil(math.min(leftCount, rightCount) * SAME_EVENING_COVERAGE)
 end
 
--- Je Abend ein Eintrag. Angezeigt wird die vollständigste Auswertung; die
--- übrigen Quellen bleiben gespeichert und werden mitgeliefert, damit die
--- Oberfläche sie anbieten kann.
+-- Die Quellen eines Abends, die die Oberfläche als eigene Fassung ANBIETET.
+-- Fremde Mitschnitte ("SYNC:<Name>") sind reines Reparaturmaterial: Sobald der
+-- Abend aus einer eigenen Quelle vorliegt - dem eigenen Livemitschnitt, seiner
+-- ergänzten Fassung oder einem selbst geholten Report (Warcraft Logs,
+-- Logdatei) -, werden die fremden ausgeblendet. Gespeichert bleiben sie, und
+-- die Reparatur (GetSummaries) rechnet sie unverändert ein; sie sollen nur
+-- nicht als zweiter, oft unvollständiger Zahlensatz neben der eigenen Fassung
+-- stehen und Verwirrung stiften - eine abgeschnittene Fremdfassung sah aus wie
+-- eine konkurrierende Wahrheit. Fehlt jede eigene Quelle (man war nicht dabei),
+-- bleiben die fremden sichtbar, sonst wäre der Abend gar nicht lesbar.
+function GC.RaidMonitor:VisibleSources(evening)
+    local sources = (evening and evening.sources) or {}
+    local hasOwn = false
+    for _, candidate in ipairs(sources) do
+        if self:SourceKind(candidate.source) ~= "SYNC" then
+            hasOwn = true
+            break
+        end
+    end
+    if not hasOwn then
+        return sources
+    end
+    local visible = {}
+    for _, candidate in ipairs(sources) do
+        if self:SourceKind(candidate.source) ~= "SYNC" then
+            visible[#visible + 1] = candidate
+        end
+    end
+    return visible
+end
+
+-- Je Abend ein Eintrag. Angezeigt wird die vollständigste EIGENE Auswertung;
+-- die übrigen Quellen bleiben gespeichert und werden mitgeliefert, damit die
+-- Oberfläche sie (soweit eigen) anbieten und die Reparatur sie einrechnen kann.
 function GC.RaidMonitor:GetEvenings()
     local evenings = {}
     -- Die laufende Sitzung steht als erster Eintrag in der Liste. Sie bleibt
@@ -1635,7 +1666,45 @@ function GC.RaidMonitor:GetEvenings()
             evening.summary = summary
         end
     end
+
+    -- Zweiter Durchgang: die anzeigbaren Quellen bestimmen und den Abend von
+    -- der vollständigsten SICHTBAREN Fassung anführen lassen. Eine fremde
+    -- Fassung mit mehr Teilnehmern übernimmt die Kopfzeile nicht mehr - sie ist
+    -- ausgeblendet und dient nur noch der stillen Reparatur.
+    for _, evening in ipairs(evenings) do
+        evening.visibleSources = self:VisibleSources(evening)
+        local primary = evening.visibleSources[1] or evening.summary
+        for _, candidate in ipairs(evening.visibleSources) do
+            if #(candidate.participants or {}) > #(primary.participants or {}) then
+                primary = candidate
+            end
+        end
+        evening.summary = primary
+    end
     return evenings
+end
+
+-- Übersetzt einen (womöglich veralteten) Auswahlschlüssel in einen, den die
+-- Oberfläche zeigen darf: den gewählten, wenn seine Quelle sichtbar ist; sonst
+-- die Primärfassung desselben Abends (eine ausgeblendete Fremdfassung fällt so
+-- auf die eigene zurück); sonst nil, wenn der Abend gar nicht mehr existiert.
+function GC.RaidMonitor:VisibleSummaryKey(evenings, selectedKey)
+    if not selectedKey then
+        return nil
+    end
+    for _, evening in ipairs(evenings) do
+        for _, candidate in ipairs(evening.visibleSources or evening.sources) do
+            if self:SummaryKey(candidate) == selectedKey then
+                return selectedKey
+            end
+        end
+        for _, candidate in ipairs(evening.sources) do
+            if self:SummaryKey(candidate) == selectedKey then
+                return self:SummaryKey(evening.summary)
+            end
+        end
+    end
+    return nil
 end
 
 function GC.RaidMonitor:GetEveningOf(summaryKey)

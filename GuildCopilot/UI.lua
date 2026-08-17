@@ -8279,7 +8279,12 @@ end
 
 -- So viele Interessenten passen auf eine Seite der Liste. Die Zahl steht hier
 -- einmal, damit Aufbau, Blaettern und Auffrischen nie auseinanderlaufen.
-local LEADS_PER_PAGE = 9
+--
+-- Acht statt neun seit den Filtern: Die Filterzeile braucht den Platz einer
+-- Zeile. Die Karte ist 224 Pixel breit und sitzt buendig neben der
+-- Unterhaltung - breiter geht sie nicht, und geblaettert wird ohnehin.
+local LEADS_PER_PAGE = 8
+local LEADS_TOP = -82
 
 -- Passt das Gildenprofil noch durch den Gildenkanal? Jede Stelle, die etwas
 -- gildenweit Synchronisiertes speichert, muss das fragen, BEVOR sie Erfolg
@@ -8314,12 +8319,63 @@ function GC.UI:BuildInboxPage()
     page.leadButtons = {}
     page.leadDeleteButtons = {}
     page.leadPage = 1
+
+    -- === Filterzeile ======================================================
+    --
+    -- Zwei schmale Aufklappfelder nebeneinander. Sie filtern die ANSICHT;
+    -- gespeichert und gildenweit geteilt bleibt alles.
+    local classOptions = { "Alle Klassen" }
+    local classByLabel = {}
+    for _, classFile in ipairs(GC.ClassOrder or {}) do
+        local label = GC.Classes[classFile] and GC.Classes[classFile].name or classFile
+        classOptions[#classOptions + 1] = label
+        classByLabel[label] = classFile
+    end
+    page.leadClassFilter = CreateChoiceDropdown(leadCard, 90, classOptions, function(value)
+        local filters = GC.UI:GetInboxFilters()
+        filters.classFile = classByLabel[value] or ""
+        page.leadPage = 1
+        GC.UI:RefreshInbox()
+    end, true, nil, nil, 24)
+    page.leadClassFilter:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, -48)
+    page.leadClassByLabel = classByLabel
+
+    -- Die Stufe kommt aus dem Text des Bewerbers ("70er Schurke", "Stufe 70").
+    -- Deshalb sind die Stufen hier Schwellen und keine Einzelwerte: Wer "68"
+    -- schreibt, soll bei "ab 60" auftauchen.
+    local LEVEL_OPTIONS = {
+        { label = "Alle Stufen", value = 0 },
+        { label = "Ab Stufe 70", value = 70 },
+        { label = "Ab Stufe 60", value = 60 },
+        { label = "Ab Stufe 50", value = 50 },
+    }
+    local levelLabels, levelByLabel = {}, {}
+    for _, option in ipairs(LEVEL_OPTIONS) do
+        levelLabels[#levelLabels + 1] = option.label
+        levelByLabel[option.label] = option.value
+    end
+    page.leadLevelFilter = CreateChoiceDropdown(leadCard, 90, levelLabels, function(value)
+        local filters = GC.UI:GetInboxFilters()
+        filters.minLevel = levelByLabel[value] or 0
+        page.leadPage = 1
+        GC.UI:RefreshInbox()
+    end, true, nil, nil, 24)
+    page.leadLevelFilter:SetPoint("LEFT", page.leadClassFilter, "RIGHT", 8, 0)
+    page.leadLevelOptions = LEVEL_OPTIONS
+
+    -- Sagt, wie viel gerade nicht zu sehen ist. Ein vergessener Filter sieht
+    -- sonst aus wie ein leeres Postfach.
+    page.leadFilterNotice = CreateLabel(leadCard, "", {
+        muted = true, font = "GameFontNormalSmall", width = 188,
+    })
+    page.leadFilterNotice:SetPoint("BOTTOMLEFT", leadCard, "BOTTOMLEFT", 18, 48)
+
     for index = 1, LEADS_PER_PAGE do
         local slot = index
         local button = CreateButton(leadCard, "", 148, 38, function()
             GC.UI:SelectLead(GC.UI:GetLeadIndexForSlot(slot))
         end)
-        button:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, -48 - ((index - 1) * 43))
+        button:SetPoint("TOPLEFT", leadCard, "TOPLEFT", 18, LEADS_TOP - ((index - 1) * 43))
         button.label:SetJustifyH("LEFT")
         button.label:ClearAllPoints()
         button.label:SetPoint("LEFT", button, "LEFT", 12, 0)
@@ -8643,10 +8699,103 @@ function GC.UI:BuildInboxPage()
 end
 
 -- Welcher Interessent steht auf Listenplatz "slot" der aktuellen Seite?
+-- === Filter im Postfach ====================================================
+--
+-- Gefiltert wird die ANSICHT, nicht der Bestand: Ein ausgeblendeter Eintrag
+-- bleibt gespeichert und wird weiterhin gildenweit geteilt. Sonst waere ein
+-- Filter ein Loeschknopf mit freundlichem Namen.
+--
+-- Die Klasse steht nur an Eintraegen, deren GUID der Client aufloesen konnte
+-- (ResolveLeadClass). Wo sie fehlt, wird der Eintrag von einem Klassenfilter
+-- NICHT verborgen - "unbekannt" ist keine Aussage ueber die Klasse, und wer
+-- filtert, will nicht heimlich Bewerber verlieren.
+function GC.UI:GetInboxFilters()
+    local settings = GC.DB:GetSettings()
+    if type(settings.inboxFilters) ~= "table" then
+        settings.inboxFilters = {}
+    end
+    return settings.inboxFilters
+end
+
+function GC.UI:LeadMatchesInboxFilter(lead)
+    if type(lead) ~= "table" then
+        return false
+    end
+    local filters = self:GetInboxFilters()
+
+    local class = GC.Util.Trim(filters.classFile)
+    if class ~= "" and GC.Util.Trim(lead.classFile) ~= "" and lead.classFile ~= class then
+        return false
+    end
+
+    -- Dieselbe Regel wie bei der Klasse: Wer keine Stufe hingeschrieben hat,
+    -- wird nicht verborgen. Sonst verschwindet hinter "ab Stufe 70" jeder, der
+    -- sein Level einfach nicht dazugesagt hat - und niemand sucht ihn dort.
+    local minLevel = tonumber(filters.minLevel) or 0
+    local level = tonumber(lead.level)
+    if minLevel > 0 and level and level < minLevel then
+        return false
+    end
+    return true
+end
+
+-- Die echten Postfachplaetze, die gerade sichtbar sind - in ihrer Reihenfolge.
+-- Alles Weitere rechnet damit: Bloettern, Auswaehlen und Loeschen brauchen den
+-- ECHTEN Index, sonst loescht ein Klick bei gesetztem Filter den falschen.
+function GC.UI:GetVisibleLeadIndexes()
+    local visible = {}
+    for index, lead in ipairs(GC.DB:GetGuild().inbox) do
+        if self:LeadMatchesInboxFilter(lead) then
+            visible[#visible + 1] = index
+        end
+    end
+    return visible
+end
+
+-- Beschriftung der beiden Aufklappfelder und die Auskunft, wie viel der Filter
+-- gerade verbirgt. Ohne die Zahl wirkt ein vergessener Filter wie ein leeres
+-- Postfach - das ist die haeufigste Verwechslung bei Filtern ueberhaupt.
+function GC.UI:RefreshInboxFilterControls(visibleCount, totalCount)
+    local page = self.pages.INBOX
+    if not page or not page.leadClassFilter then
+        return
+    end
+    local filters = self:GetInboxFilters()
+
+    local classLabel = "Alle Klassen"
+    for label, classFile in pairs(page.leadClassByLabel or {}) do
+        if classFile == filters.classFile then
+            classLabel = label
+        end
+    end
+    page.leadClassFilter:SetValue(classLabel)
+
+    local levelLabel = "Alle Stufen"
+    for _, option in ipairs(page.leadLevelOptions or {}) do
+        if option.value == (tonumber(filters.minLevel) or 0) then
+            levelLabel = option.label
+        end
+    end
+    page.leadLevelFilter:SetValue(levelLabel)
+
+    local hidden = (tonumber(totalCount) or 0) - (tonumber(visibleCount) or 0)
+    if hidden > 0 then
+        page.leadFilterNotice:SetText(GC.LFormat("{n} durch Filter ausgeblendet", { n = hidden }))
+        SetTextColor(page.leadFilterNotice, THEME.warning)
+    else
+        page.leadFilterNotice:SetText("")
+    end
+end
+
 function GC.UI:GetLeadIndexForSlot(slot)
     local page = self.pages.INBOX
     local leadPage = (page and page.leadPage) or 1
-    return ((leadPage - 1) * LEADS_PER_PAGE) + slot
+    local position = ((leadPage - 1) * LEADS_PER_PAGE) + slot
+    local visible = page and page.visibleLeads
+    if not visible then
+        return position
+    end
+    return visible[position]
 end
 
 -- Der gewaehlte Interessent, gesucht ueber seinen Namen statt ueber einen
@@ -8755,21 +8904,28 @@ function GC.UI:RefreshInbox()
     -- hier heraus, wird aber nur zum Markieren benutzt und nie gespeichert.
     local selectedLead, selectedIndex = self:GetSelectedLead()
 
-    local leadPageCount = math.max(1, math.ceil(#inbox / LEADS_PER_PAGE))
+    -- Gezaehlt und geblaettert wird ueber die SICHTBAREN Eintraege. Ohne das
+    -- zeigt die Seitenzahl den Gesamtbestand an, waehrend die Liste gefiltert
+    -- ist - und die letzten Seiten waeren leer.
+    local visible = self:GetVisibleLeadIndexes()
+    page.visibleLeads = visible
+    self:RefreshInboxFilterControls(#visible, #inbox)
+
+    local leadPageCount = math.max(1, math.ceil(#visible / LEADS_PER_PAGE))
     page.leadPage = math.max(1, math.min(page.leadPage or 1, leadPageCount))
     local firstOnPage = (page.leadPage - 1) * LEADS_PER_PAGE
-    local showLeadPaging = #inbox > LEADS_PER_PAGE
+    local showLeadPaging = #visible > LEADS_PER_PAGE
     page.leadPrev:SetShown(showLeadPaging)
     page.leadNext:SetShown(showLeadPaging)
     page.leadPageLabel:SetText(showLeadPaging
-        and ("Seite " .. page.leadPage .. "/" .. leadPageCount .. "  •  " .. #inbox)
+        and ("Seite " .. page.leadPage .. "/" .. leadPageCount .. "  •  " .. #visible)
         or "")
     SetButtonEnabled(page.leadPrev, page.leadPage > 1)
     SetButtonEnabled(page.leadNext, page.leadPage < leadPageCount)
 
     for index, button in ipairs(page.leadButtons) do
-        local leadIndex = firstOnPage + index
-        local lead = inbox[leadIndex]
+        local leadIndex = visible[firstOnPage + index]
+        local lead = leadIndex and inbox[leadIndex]
         button:SetShown(lead ~= nil)
         page.leadDeleteButtons[index]:SetShown(lead ~= nil)
         if lead then
@@ -9298,10 +9454,12 @@ function GC.UI:BuildStatisticsPage()
     page.sessionHeadline = CreateLabel(detailCard, "", { muted = true, width = 486, height = 18 })
     page.sessionHeadline:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -44)
 
-    -- Liegt derselbe Abend aus mehreren Quellen vor, steht er einmal in der
-    -- Liste. Verborgen bleiben darf dabei nichts: Diese Knoepfe wechseln die
-    -- Quelle. Sie stehen in der Kopfzeile der Karte, weil darunter die
-    -- Tabellenkoepfe beginnen und dazwischen kein Platz ist.
+    -- Liegt derselbe Abend aus mehreren ANZEIGBAREN Quellen vor, wechseln diese
+    -- Knoepfe zwischen ihnen. Fremde Mitschnitte (SYNC:<Name>) sind dabei
+    -- ausgeblendet, solange eine eigene Fassung existiert - sie sind reines
+    -- Reparaturmaterial, siehe RaidMonitor:VisibleSources. Die Knoepfe stehen in
+    -- der Kopfzeile der Karte, weil darunter die Tabellenkoepfe beginnen und
+    -- dazwischen kein Platz ist.
     page.sessionSourceButtons = {}
     for index = 1, 3 do
         local button = CreateButton(detailCard, "", 96, 20, function()
@@ -9578,11 +9736,14 @@ function GC.UI:RefreshStatistics()
     page.sessionEmpty:SetShown(#evenings == 0)
     -- Gewaehlt wird ueber Kennung UND Quelle: Live- und Sync-Fassung desselben
     -- Abends teilen sich die Kennung, sind aber zwei Auswertungen.
-    local selectedID = monitor.selectedSessionID
-    if not monitor:GetSummaryByKey(selectedID) then
+    -- Eine ausgeblendete Fremdfassung darf nicht ausgewählt bleiben: Der
+    -- Schlüssel wird auf die sichtbare Primärfassung des Abends zurückgeführt,
+    -- ein ganz verschwundener Abend auf den ersten Eintrag.
+    local selectedID = monitor:VisibleSummaryKey(evenings, monitor.selectedSessionID)
+    if not selectedID then
         selectedID = evenings[1] and monitor:SummaryKey(evenings[1].summary)
-        monitor.selectedSessionID = selectedID
     end
+    monitor.selectedSessionID = selectedID
 
     -- Der scharfgeschaltete Löschknopf entschärft sich, sobald eine andere
     -- Sitzung gewählt wird - sonst löschte der zweite Klick die falsche.
@@ -9608,7 +9769,7 @@ function GC.UI:RefreshStatistics()
             -- und machte die Zeile gerade dadurch zu lang.
             local extras = {}
             local seenMarks = {}
-            for _, candidate in ipairs(evening.sources) do
+            for _, candidate in ipairs(evening.visibleSources) do
                 local source = candidate.source or "LIVE"
                 local mark = SESSION_SOURCE_MARK[monitor:SourceKind(source)] or "?"
                 if source ~= "LIVE" and not seenMarks[mark] then
@@ -9622,7 +9783,7 @@ function GC.UI:RefreshStatistics()
             -- fuer Zeichen wie U+25CF nur einen leeren Kasten.
             row:SetText(FormatSessionDate(summary) .. "  " .. ShortZoneName(zone)
                 .. (evening.live and "  |cff59e695läuft|r" or "")
-                .. (#evening.sources > 1 and #extras > 0
+                .. (#evening.visibleSources > 1 and #extras > 0
                     and ("  |cff4ec9ff+" .. table.concat(extras, "+") .. "|r") or ""))
             local active = false
             for _, candidate in ipairs(evening.sources) do
@@ -9657,7 +9818,7 @@ function GC.UI:RefreshStatistics()
     -- gerade angezeigte Quelle ist als aktiv MARKIERT statt ausgegraut -
     -- ausgegraut las sich wie "nicht verfügbar", nicht wie "gewählt".
     local evening = selected and monitor:GetEveningOf(selectedID)
-    local multiSource = evening ~= nil and #evening.sources > 1
+    local multiSource = evening ~= nil and #evening.visibleSources > 1
     page.sessionCompareButton:SetShown(multiSource)
     local rightOffset = -16
     if multiSource then
@@ -9668,7 +9829,7 @@ function GC.UI:RefreshStatistics()
     end
     for index = #page.sessionSourceButtons, 1, -1 do
         local button = page.sessionSourceButtons[index]
-        local candidate = multiSource and evening.sources[index] or nil
+        local candidate = multiSource and evening.visibleSources[index] or nil
         button.summaryID = candidate and monitor:SummaryKey(candidate) or nil
         button:SetShown(candidate ~= nil)
         if candidate then
@@ -11630,7 +11791,9 @@ function GC.UI:RefreshSessionReview()
         return
     end
 
-    local sources = evening.sources
+    -- Auch hier nur die anzeigbaren Quellen: Fremde Mitschnitte tauchen im
+    -- Vergleich nicht als wählbare Fassung auf, solange eine eigene existiert.
+    local sources = evening.visibleSources or evening.sources
     local selectedValid = false
     for _, candidate in ipairs(sources) do
         if monitor:SummaryKey(candidate) == frame.selectedID then

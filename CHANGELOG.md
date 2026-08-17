@@ -7,6 +7,58 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.134 – Addon
+
+**Geändert**
+
+- **Die Raidauswertung eines anderen steht nicht mehr als eigener Reiter neben
+  deiner.** Bisher tauchte die Fassung jedes Raidteilnehmers („Druidgard (27)")
+  als gleichwertige Quelle neben deiner eigenen auf — oft mit kleineren Zahlen,
+  weil sie früher aufhörte aufzuzeichnen. Das sah aus wie eine konkurrierende
+  Wahrheit und stiftete nur Verwirrung. Solange du selbst mitgeschnitten hast
+  (oder den Abend aus Warcraft Logs bzw. einer Logdatei geladen hast), wird
+  **deine** Fassung angezeigt; die fremden sind ausgeblendet.
+- **Ausgeblendet heißt nicht gelöscht.** Die fremden Fassungen bleiben
+  gespeichert und ergänzen deinen eigenen Mitschnitt weiterhin automatisch,
+  falls er echte Lücken hat — das lief immer schon im Hintergrund und läuft
+  unverändert weiter. Nur der zweite, verwirrende Zahlensatz daneben ist weg.
+- **Warst du nicht dabei, bleibt der Abend lesbar.** Liegt ein Raidabend nur aus
+  fremden Fassungen vor, werden sie weiter angezeigt — sonst gäbe es nichts zu
+  sehen.
+
+**Technisch**
+
+- `RaidMonitor:VisibleSources` trennt anzeigbare (eigene) von fremden Quellen
+  eines Abends; die Reparatur bleibt unberührt, weil sie den vollen Bestand über
+  `GetSummaries` liest, nicht die gefilterte Liste. `VisibleSummaryKey` führt
+  eine veraltete Auswahl auf eine ausgeblendete Fremdfassung auf die eigene
+  zurück. Regressionstest in `smoke.lua`.
+
+## 0.9.133 – Addon
+
+**Neu**
+
+- **Filter im Postfach: Klasse und Stufe.** Über der Interessentenliste stehen
+  zwei Aufklappfelder. Gefiltert wird die Ansicht, nicht der Bestand —
+  ausgeblendete Einträge bleiben gespeichert und werden weiterhin gildenweit
+  geteilt.
+- **Klasse und Stufe werden aus der Nachricht selbst gelesen.** „**ENH** sucht
+  Anschluss an Gilde“, „**70er Schurke** sucht nette Gilde“, „ich spiele ein
+  **Hexenmeister**“ — deutsche und englische Klassennamen plus die üblichen
+  Kürzel. Das ist die einzige Quelle, die ohne Serveranfrage auskommt: Die
+  Spieler-GUID liefert die Klasse nur bei bekanntem Namen und die Stufe nie.
+- **Geraten wird nichts.** Verglichen wird auf ganze Wörter, damit „elegant“
+  nicht als Elementarschamane durchgeht; eine Stufe ohne Marker gilt nur
+  zwischen 58 und 70, damit „suche noch 2 DDs“ keine Stufe 2 ergibt.
+  Mehrdeutige Kürzel wie „resto“ oder „prot“ sind bewusst nicht dabei.
+- **Wer nichts angegeben hat, bleibt sichtbar.** Weder ein Klassen- noch ein
+  Stufenfilter verbirgt einen Eintrag ohne Angabe — sonst verlierst du
+  Bewerber unbemerkt, gerade dann, wenn du filterst.
+- **Unter der Liste steht, wie viel der Filter verbirgt.** Ein vergessener
+  Filter sieht sonst aus wie ein leeres Postfach.
+- Die Liste zeigt acht statt neun Einträge je Seite — die Filterzeile braucht
+  den Platz. Geblättert wird ohnehin.
+
 ## 0.9.132 – Addon
 
 **Neu**
