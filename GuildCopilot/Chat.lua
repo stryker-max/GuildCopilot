@@ -334,21 +334,26 @@ function GC.Chat:GetInboxFilterList()
     return list
 end
 
--- === Gelöschte bleiben eine Weile gelöscht ================================
+-- === Gelöschtes bleibt gelöscht, bis eine neue Nachricht kommt ============
 --
--- Das Postfach ist gildenweit: Löscht du einen Interessenten, hält ein anderer
+-- Das Postfach ist gildenweit: Löschst du einen Interessenten, hält ein anderer
 -- Gildenmitglied seine Kopie womöglich noch und schickt sie beim nächsten
 -- Abgleich zurück - der Eintrag wäre sofort wieder da. Ein Löschen legt deshalb
--- einen kurzen, rein LOKALEN Merker an: Für sieben Tage nimmt der Sync diesen
--- Spieler nicht wieder auf. Danach verfällt der Merker von selbst, und eine
--- echte neue Meldung darf ihn wieder zeigen.
+-- einen rein LOKALEN Merker an. Solange er steht, holt der SYNC diesen Spieler
+-- nicht wieder herein - egal wie oft ein Kollege seine alte Kopie schickt.
 --
--- Bewusst nur der Sync-Weg (MergeRemoteLead): Meldet sich der Spieler in dieser
--- Zeit selbst direkt bei dir, ist das ein frisches Signal und landet wie sonst
--- im Postfach. Der Merker geht nie ins Netz und steht nicht in der
--- Ignorierliste - er ist kein "dauerhaft ignorieren", sondern ein "nicht sofort
--- zurückspülen".
-local INBOX_TOMBSTONE_DAYS = 7
+-- Aufgehoben wird der Merker durch genau EIN Ereignis: Der Spieler meldet sich
+-- SELBST wieder (CaptureLead - eine direkte Flüster- oder Kanalnachricht, die
+-- dieser Client selbst empfängt). Das ist ein echter neuer Kontakt; dann darf
+-- er wieder ins Postfach, und der Merker fällt. Eine bloße Sync-Kopie eines
+-- anderen zählt ausdrücklich NICHT als neue Nachricht - sonst wäre der Merker
+-- wertlos.
+--
+-- Der Merker geht nie ins Netz und steht nicht in der Ignorierliste - er ist
+-- kein "dauerhaft ignorieren", sondern ein "nicht per Sync zurückspülen". Damit
+-- die Liste nicht unbegrenzt wächst, ist ihre Zahl gedeckelt; beim Überlauf
+-- fallen die ältesten Merker weg (die betreffen längst weggeräumte Bewerber).
+local MAX_INBOX_TOMBSTONES = 1000
 
 function GC.Chat:GetInboxTombstones()
     local guildData = GC.DB:GetGuild()
@@ -356,14 +361,26 @@ function GC.Chat:GetInboxTombstones()
     return guildData.inboxTombstones
 end
 
+-- Beim Überlauf die ältesten Merker fallen lassen. Gemessen an ihrem
+-- Zeitstempel; wer am längsten gelöscht ist, wird am ehesten wieder freigegeben.
 function GC.Chat:PruneInboxTombstones()
     local tombstones = self:GetInboxTombstones()
-    local today = GC.Util.TodayISO()
+    local count = 0
+    for _ in pairs(tombstones) do
+        count = count + 1
+    end
+    if count <= MAX_INBOX_TOMBSTONES then
+        return
+    end
+    local ordered = {}
     for key, entry in pairs(tombstones) do
-        local untilDate = type(entry) == "table" and entry.until_ or ""
-        if untilDate == "" or untilDate < today then
-            tombstones[key] = nil
-        end
+        ordered[#ordered + 1] = { key = key, at = tonumber(entry and entry.at) or 0 }
+    end
+    table.sort(ordered, function(left, right)
+        return left.at < right.at
+    end)
+    for index = 1, count - MAX_INBOX_TOMBSTONES do
+        tombstones[ordered[index].key] = nil
     end
 end
 
@@ -372,17 +389,24 @@ function GC.Chat:NoteInboxTombstone(name)
     if key == "" then
         return
     end
-    self:GetInboxTombstones()[key] = {
-        until_ = GC.Util.AddDaysISO(INBOX_TOMBSTONE_DAYS),
-        at = GC.Util.Now(),
-    }
+    self:GetInboxTombstones()[key] = { at = GC.Util.Now() }
+    self:PruneInboxTombstones()
+end
+
+-- Der Spieler ist selbst wieder aufgetaucht: Merker weg, er darf wieder ins
+-- Postfach und wird auch nicht mehr vom Sync ferngehalten.
+function GC.Chat:ClearInboxTombstone(name)
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    if key == "" then
+        return
+    end
+    self:GetInboxTombstones()[key] = nil
 end
 
 function GC.Chat:IsInboxTombstoned(name)
     if GC.Util.Trim(name) == "" then
         return false
     end
-    self:PruneInboxTombstones()
     local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
     return self:GetInboxTombstones()[key] ~= nil
 end
@@ -721,6 +745,10 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
     if self:IsInboxFiltered(sender) then
         return
     end
+    -- Der Spieler meldet sich selbst wieder: Ein früheres Löschen hält ihn ab
+    -- jetzt nicht mehr vom Sync fern. Das ist der EINE Weg, einen Merker
+    -- aufzuheben - eine direkte neue Nachricht, nicht eine fremde Sync-Kopie.
+    self:ClearInboxTombstone(sender)
 
     -- Bis 0.9.96 lief hier zuerst MergeDuplicateLeads - ein Paarvergleich ueber
     -- das ganze Postfach, also O(n^2), und das bei JEDER eingehenden Nachricht:
@@ -955,7 +983,8 @@ function GC.Chat:RemoveLead(index)
     if not index or not inbox[index] then
         return false
     end
-    -- Sieben Tage nicht wieder hereinsyncen (siehe NoteInboxTombstone).
+    -- Merker setzen: Der Sync holt diesen Spieler nicht mehr herein, bis er
+    -- sich selbst wieder meldet (siehe NoteInboxTombstone).
     self:NoteInboxTombstone(inbox[index].name)
     table.remove(inbox, index)
     GC:FireCallback("INBOX_UPDATED")
@@ -1127,9 +1156,9 @@ function GC.Chat:MergeRemoteLead(record)
     if self:IsInboxFiltered(record.name) then
         return false
     end
-    -- Frisch gelöscht: sieben Tage nicht per Sync zurückholen. Gilt bewusst nur
-    -- hier, nicht bei der eigenen Erfassung - meldet der Spieler sich selbst
-    -- direkt, ist das ein neues Signal und darf durch.
+    -- Gelöscht: nicht per Sync zurückholen. Gilt bewusst nur hier, nicht bei der
+    -- eigenen Erfassung - meldet der Spieler sich selbst direkt, hebt CaptureLead
+    -- den Merker auf, und er darf wieder herein.
     if self:IsInboxTombstoned(record.name) then
         return false
     end

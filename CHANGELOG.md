@@ -11,15 +11,17 @@ Installer und Addon werden getrennt gezählt.
 
 **Geändert**
 
-- **Ein gelöschter Bewerber wird nicht mehr sofort zurück-synchronisiert.** Das
+- **Ein gelöschter Bewerber wird nicht mehr zurück-synchronisiert.** Das
   Postfach gilt gildenweit – löschtest du einen Interessenten, schickte ihn ein
   Kollege, der seine Kopie noch hatte, beim nächsten Abgleich zurück, und der
   Eintrag war sofort wieder da. Ein Einzel-Löschen legt jetzt einen stillen,
-  rein lokalen Merker an: **sieben Tage** holt der Sync diesen Spieler nicht
-  wieder herein. Danach verfällt der Merker von selbst. Meldet der Spieler sich
-  in der Zeit **selbst direkt** bei dir, ist das ein neues Signal und landet wie
-  gewohnt im Postfach. „Alles leeren“ setzt bewusst keinen Merker (das ist ein
-  Aufräumen der Ansicht), und der Merker steht nicht in der Ignorierliste.
+  rein lokalen Merker an: Der Sync holt diesen Spieler **nicht** wieder herein,
+  solange der Merker steht – egal wie oft ein Kollege seine alte Kopie schickt.
+  Aufgehoben wird der Merker durch genau ein Ereignis: Der Spieler meldet sich
+  **selbst wieder** (eine direkte Flüster- oder Kanalnachricht, die du selbst
+  empfängst). Das ist ein echter neuer Kontakt – dann darf er wieder ins
+  Postfach. „Alles leeren“ setzt bewusst keinen Merker (das ist ein Aufräumen
+  der Ansicht), und der Merker steht nicht in der Ignorierliste.
 - **Das Postfach erfasst ab Werk nur noch deine eingetragenen Wörter.** Die
   Automatik „Auch freie Formulierungen erkennen“ ist jetzt **standardmäßig aus**.
   Sie riet anhand der Wortreihenfolge, wer ein Bewerber ist – und holte damit

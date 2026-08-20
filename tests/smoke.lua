@@ -949,9 +949,10 @@ assert(#addon.DB:GetGuild().inbox == 1, "Einzellöschung hat nicht genau einen I
 assert(addon.Chat:ClearInbox() == true, "Postfach konnte nicht vollständig geleert werden")
 assert(#addon.DB:GetGuild().inbox == 0, "Postfach enthält nach dem Leeren noch Interessenten")
 
--- Gelöschte bleiben eine Weile gelöscht (0.9.135): Ein einzeln gelöschter
--- Bewerber wird sieben Tage nicht per Sync zurückgeholt - meldet er sich aber
--- selbst direkt, ist das ein neues Signal und kommt durch.
+-- Gelöschtes bleibt gelöscht, bis eine neue Nachricht kommt (0.9.135): Ein
+-- gelöschter Bewerber wird per Sync NICHT wieder hereingeholt - egal wie oft
+-- ein Kollege seine Kopie schickt. Erst wenn der Spieler sich SELBST direkt
+-- meldet, fällt der Merker und er darf wieder ins Postfach (auch per Sync).
 do
     local tomb_guild = addon.DB:GetGuild()
     local tomb_savedInbox = tomb_guild.inbox
@@ -959,25 +960,33 @@ do
     tomb_guild.inbox = {}
     tomb_guild.inboxTombstones = {}
 
+    local function TombSync()
+        return addon.Chat:MergeRemoteLead({
+            name = "Tomb-Realm", guid = "Player-Tomb", text = "Suche Gilde für Kara",
+            firstSeenAt = addon.Util.Now(), lastSeenAt = addon.Util.Now(),
+            source = "SucheNachGruppe",
+        })
+    end
+
     addon.Chat:CaptureLead("Suche Gilde für Kara", "Tomb-Realm", "Player-Tomb", "SucheNachGruppe")
     assert(#tomb_guild.inbox == 1, "Testaufbau: der Bewerber wurde nicht erfasst")
     assert(addon.Chat:RemoveLead(1) == true, "Der Bewerber ließ sich nicht löschen")
     assert(#tomb_guild.inbox == 0, "Nach dem Löschen ist das Postfach nicht leer")
 
-    -- Ein Kollege spült denselben Bewerber per Sync zurück - er darf NICHT
-    -- wieder auftauchen.
-    local merged = addon.Chat:MergeRemoteLead({
-        name = "Tomb-Realm", guid = "Player-Tomb", text = "Suche Gilde für Kara",
-        firstSeenAt = addon.Util.Now(), lastSeenAt = addon.Util.Now(),
-        source = "SucheNachGruppe",
-    })
-    assert(merged == false and #tomb_guild.inbox == 0,
+    -- Ein Kollege spült denselben Bewerber per Sync zurück - mehrfach. Er darf
+    -- NICHT wieder auftauchen, solange der Merker steht.
+    assert(TombSync() == false and #tomb_guild.inbox == 0,
         "Ein gelöschter Bewerber kam per Sync sofort zurück")
+    assert(TombSync() == false and #tomb_guild.inbox == 0,
+        "Ein gelöschter Bewerber kam beim zweiten Sync-Versuch zurück")
 
-    -- Meldet er sich selbst direkt, ist das ein neues Signal und kommt durch.
+    -- Meldet er sich selbst direkt, ist das ein neues Signal: Er kommt herein
+    -- UND der Merker fällt.
     addon.Chat:CaptureLead("Bin wieder da, suche Gilde", "Tomb-Realm", "Player-Tomb", "WHISPER")
     assert(#tomb_guild.inbox == 1,
         "Ein direkter Neukontakt eines gelöschten Bewerbers wurde geblockt")
+    assert(addon.Chat:IsInboxTombstoned("Tomb-Realm") == false,
+        "Der Merker wurde durch den direkten Neukontakt nicht aufgehoben")
 
     tomb_guild.inbox = tomb_savedInbox
     tomb_guild.inboxTombstones = tomb_savedTombstones
