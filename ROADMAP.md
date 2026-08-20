@@ -298,6 +298,119 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.136 – Noch ein Durchlauf, diesmal gegen echte Daten
+
+Auftrag war ein erneuter vollständiger Code- und Feature-Review mit einem
+besonderen Blick auf zwei Bereiche: den Ausrüstungstracker (ob Verzauberungen,
+Sockel und Steine vollständig erfasst werden) und die Raidauswertung (ob ihre
+Zahlen stimmen). Der Review lief adversarisch – jeder Befund wurde von einer
+zweiten, unabhängigen Instanz gegen den echten Code gegengeprüft, bevor er als
+echt galt. Sieben Stellen wurden geändert, eine bewusst NICHT.
+
+### Die Raidauswertung stimmt – gegen das rohe Kampflog gerechnet
+
+Der Abend vom 19.08.2026 (Festung der Stürme + Höhle des Schlangenschreins) lag
+als rohes `WoWCombatLog` vor – dieselbe Datei, die auch Warcraft Logs einliest.
+Die eigene Live-Auswertung (Nexarius, 26 Teilnehmer) wurde Spieler für Spieler
+dagegen gerechnet, mit denselben Spell-IDs aus `Constants.lua` und denselben
+Zählregeln wie im `RaidMonitor`: Tode, Unterbrechungen, Banne, Tränke und
+Trommeln stimmen **exakt** überein – 140 Tode, 41 Unterbrechungen, 226 Banne,
+271 Tränke, 68 Trommeln, keine einzige Abweichung. Die getragenen Güter
+(Fläschchen, Elixiere, Essen) liegen wie erwartet bei LIVE ≥ Log. Die
+Auswertung ist damit nicht „plausibel", sondern gegen die Grundwahrheit belegt.
+
+### Was tatsächlich falsch war
+
+- **Bewerbungen mit „|" wurden im Postfach abgeschnitten.** Der gildenweite
+  Sync maskiert einen Datensatz beim Senden zweimal (jedes Feld, dann der ganze
+  Datensatz). Beim Empfang stand eine Entschlüsselung zu viel: `ReceiveSync`
+  entschlüsselt das Paket, ein zusätzliches `UnescapeField` und die Feldzerlegung
+  in `ParseInboxRecord` machten zusammen drei. Ein im Text maskiertes „|"
+  (Itemlink, Farbcode) wurde dadurch vorzeitig zu einem echten „|", an dem die
+  nächste Zerlegung die Nachricht abschnitt. Empirisch nachgestellt: aus „schaut
+  euch |cff…|Hitem:…|h[Wappenrock]|h|r an" wurde „schaut euch " – bei einem
+  Paket wie bei zehn Teilstücken. Das überflüssige `UnescapeField` fällt weg;
+  ein Regressionsanker in `smoke.lua` schickt eine Zeile mit mehreren „|" durch
+  den ganzen Weg und erwartet sie unverändert zurück.
+- **Der Eintritts-Scan konnte eine Mahlzeit doppelt zählen.** `RaidMonitor`
+  entprellt Essen über 60 Sekunden (`auraCountedAt`), damit das Weiteressen –
+  der Client meldet die Sattgegessen-Aura im Zehnsekundentakt – nur einmal
+  zählt. Der Eintritts-Scan `ScanCarriedConsumables` schrieb ein bereits
+  getragenes Essen aber nur in `scanned`, nicht in `auraCountedAt`. Traf kurz
+  darauf ein `SPELL_AURA_REFRESH` derselben Aura ein, lief er an der Entprellung
+  vorbei und zählte die Mahlzeit ein zweites Mal. Der Scan setzt jetzt für
+  Aura-Kategorien dieselbe Entprellung, die der Kampflog-Pfad prüft.
+- **Ein Boss-Kill ohne `ENCOUNTER_END` konnte als Wipe gebucht werden.** In
+  `CloseSegment` stand die Wipe-Heuristik (Todesquote ≥ 50 %) vor der
+  Kill-Erkennung (`bossDied`). Fehlte das Encounter-Endereignis – der Fall, für
+  den `bossDied` überhaupt aus dem Kampflog gesetzt wird – und starben beim Kill
+  viele Spieler durch die Endmechanik, gewann die Wipe-Heuristik und ein Sieg
+  stand als Wipe da. Der wirkliche Tod des Bosses schlägt jetzt die Heuristik;
+  ein Wipe (Boss stirbt nicht) fällt weiterhin richtig heraus.
+- **„lf" traf als Teilstring mitten in Wörtern.** Die freie Bewerbererkennung
+  vergleicht Suchwörter per reinem Teilstring, damit „sucht" auch „gesucht"
+  findet. Für das Kürzel „lf " ist das falsch: es steckt im Ende von „half",
+  „myself", „wolf", „golf", „shelf". Stand danach irgendwo „guild"/„gilde",
+  machte die Reihenfolgeregel daraus einen Bewerber. Kurze Buchstabenkürzel
+  („lf", „lfg") werden jetzt nur an einer Wortgrenze gewertet; „sucht"→„gesucht"
+  bleibt unberührt. Regressionsanker: „myself and my guild need potions" und
+  Geschwister bleiben draußen, ein echtes „Lf … guild" wird weiter erkannt.
+- **Ein ausgenommener Ausrüstungsplatz hieß je nach Ansicht anders.** Die
+  Slot-Liste kannte in `GEAR_VERDICT_STYLE` keinen Eintrag für `EXEMPT` und
+  fiel auf „Unbekannt" zurück, während die Gruppenübersicht denselben Zustand
+  „Ausnahme" nannte. `EXEMPT` ist jetzt auch in der Slot-Liste „Ausnahme".
+- **Eine rollengebundene Verzauberungsregel griff bei unbekannter Rolle.** In
+  `RuleApplies` ließ `if rule.roles and role and …` die ganze Bedingung
+  durchfallen, sobald `role` nil war – die Regel wurde angewendet, statt
+  übersprungen. Das widerspricht dem Vertrag der Funktion (eine nicht passende
+  fremde Regel darf niemanden schlechter dastehen lassen) und war unsymmetrisch
+  zum Archetyp-Zweig, der eine unbekannte Spec korrekt ausschließt. Jetzt gilt
+  eine Rollen-Regel bei unbekannter Rolle ebenfalls als nicht zutreffend. Der
+  Fall ist derzeit ruhend (keine ausgelieferte Regel nutzt `roles`), aber die
+  Stelle war falsch, sobald eine dazukäme.
+- **Ein beschädigter Warcraft-Logs-Code hätte die Sync-Kodierung verschieben
+  können.** Der Report-Code wird zur Auswertungs-ID (`source:code`) und wanderte
+  roh in die mit „," und „;" getrennte gildenweite Kodierung. Echte WCL-Codes
+  sind URL-sicher alphanumerisch, aber ein von Hand bearbeiteter oder
+  beschädigter Import mit „," oder „;" darin hätte die Felder verschoben. Die
+  Trennzeichen werden jetzt beim Import entfernt, bevor die ID entsteht.
+
+### Der Ausrüstungstracker: geprüft, erfasst vollständig
+
+Die gespeicherten Ausrüstungsdaten (41 Prüfungen aus dem echten Bestand) wurden
+auf Auffälligkeiten durchgesehen: Verzauberungs-IDs, leere Sockel und
+Gegenstands-IDs werden durchgehend erfasst; die Sockelzählung liest die leeren
+Sockel sprachunabhängig aus den globalen `EMPTY_SOCKET_*`-Zeichenketten des
+Clients, die Steine aus dem Itemlink (`item:id:enchant:gem1:gem2:gem3:gem4`).
+Kein struktureller Fehler in der Erfassung. Der einzige gefundene Anzeigefehler
+war die `EXEMPT`-Beschriftung oben; die Bewertungslogik (`RuleApplies`) bekam
+den Rollen-Fix.
+
+### Was bewusst NICHT geändert wurde
+
+Der Review-Durchlauf meldete zusätzlich, dass ein vollständig geleerter
+Gildenbank-Tab nicht als leer verteilt wird (`ScanGuildBankTab` behält bei einem
+leeren Durchlauf den alten Stand). Das ist genau der Trade-off, den 0.9.135
+schon ausdrücklich als bewusste Entscheidung dokumentiert hat: Eine leere
+Abfrage ist von „lädt noch" nicht sicher zu unterscheiden, auch nicht am gerade
+geöffneten Fach (das `GUILDBANKBAGSLOTS_CHANGED`-Ereignis kann feuern, bevor die
+Slots des frisch gewählten Fachs da sind). Ein zunächst probierter Fix über
+`GetCurrentGuildBankTab` wurde deshalb wieder verworfen – eine getroffene
+Entscheidung wird nicht still überschrieben. Bleibt als offene Frage notiert,
+falls sich das Fach-geladen-Signal doch verlässlich fassen lässt.
+
+### Randnotiz zum Postfach-Fehlalarm
+
+Aus dem Betrieb kam erneut, dass etwas im Postfach landet, „was eigentlich nicht
+im Trigger ist" – konkret ein englisches „Lf nice leveling guild :)". Das ist
+kein neuer Fehler: Es ist die freie Erkennung, die seit 0.9.135 zwar ab Werk aus
+ist, deren gespeicherter Schalter beim Besitzer aber noch auf AN steht. Solange
+„Auch freie Formulierungen erkennen" an ist, greift die Reihenfolge-Erkennung
+unabhängig von der eigenen Wortliste. Für „nur meine Triggerliste" genügt es,
+den Schalter in den Einstellungen auszuschalten (die gespeicherte Einstellung
+überschreibt die neue Vorgabe). Der „lf"-Fix oben verhindert unabhängig davon,
+dass die Erkennung – falls jemand sie anlässt – auf half/self/wolf anspringt.
+
 ## 0.9.135 – Ein Durchlauf durch den ganzen Code
 
 Anlass war keine einzelne Beschwerde, sondern die Frage, ob das Addon mit 250 gleichzeitig online Spielern trägt und ob der Code hält, was er verspricht. Also einmal quer durch alle Module, mit einem klaren Auftrag: echte Fehler, keine Geschmacksfragen. Der Netzwerkteil (`Sync.lua`) wurde dabei ausdrücklich gegen das 250-Spieler-Szenario geprüft und trägt — die Antwortwahl (nur wenige Gewählte antworten je Anfrage), das Verstummen bei fremder Antwort, ChatThrottleLib, Kampfpause und Backoff greifen wie vorgesehen. Sieben Stellen wurden geändert.

@@ -335,7 +335,12 @@ end
 
 local function ParseSessionLine(line, source)
     local fields = SplitFields(line)
-    local code = GC.Util.Trim(fields[2] or "")
+    -- Der Report-Code wird zur Summary-ID (source..":"..code) und wandert damit
+    -- roh in die gildenweite Sync-Kodierung, die mit ',' und ';' trennt. Echte
+    -- Warcraft-Logs-Codes sind URL-sicher alphanumerisch, aber ein beschaedigter
+    -- oder von Hand bearbeiteter Import darf die Kodierung nicht verschieben -
+    -- deshalb hier die Trennzeichen entfernen, bevor die ID entsteht.
+    local code = GC.Util.Trim((fields[2] or ""):gsub("[,;|]", ""))
     local startedAt, endedAt, zone, pulls, kills, wipes =
         fields[3], fields[4], fields[5], fields[6], fields[7], fields[8]
     if code == "" then

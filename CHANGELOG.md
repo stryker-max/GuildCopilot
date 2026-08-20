@@ -7,6 +7,44 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.136 – Addon
+
+**Behoben**
+
+- **Postfach: Bewerbungen mit Itemlinks oder Farbcodes werden nicht mehr
+  abgeschnitten.** Enthielt eine übertragene Nachricht ein „|“ (jeder Itemlink
+  und jeder Farbcode tut das), kam beim Kollegen nur der Teil bis zum ersten
+  „|“ an – aus „schaut euch |cff…|Hitem:…|h[Wappenrock]|h|r an“ wurde beim
+  Empfänger „schaut euch “. Die gildenweite Übertragung entschlüsselte den
+  Datensatz einmal zu oft.
+- **Postfach: „lf“ zählt nur noch als eigenes Wort.** Die freie Erkennung
+  prüfte „lf “ als reinen Teilstring und fand es damit im Ende von „ha**lf**“,
+  „my**self**“, „wo**lf**“; stand danach irgendwo „guild“/„gilde“, machte die
+  Reihenfolgeregel daraus fälschlich einen Bewerber („myself and my guild need
+  potions“). Jetzt muss „lf“ als eigenes Wort stehen. Ein echtes „Lf … guild“
+  wird weiterhin erkannt (das erledigt der Schalter „Auch freie Formulierungen
+  erkennen“, seit 0.9.135 ab Werk aus).
+- **Raidauswertung: eine mitgebrachte Mahlzeit wird nicht mehr doppelt
+  gezählt.** Der Eintritts-Scan schrieb ein bereits getragenes „Sattgegessen“
+  gut, ohne die 60-Sekunden-Entprellung des Essens zu setzen; ein unmittelbar
+  folgender Aura-Refresh derselben Mahlzeit zählte deshalb ein zweites Mal.
+- **Raidauswertung: ein Boss-Kill ohne ENCOUNTER_END gilt nicht mehr als
+  Wipe.** Fehlte das Encounter-Endereignis und starben beim Kill viele Spieler
+  (Endmechanik), entschied die Todesquote vor dem erkannten Bosstod – ein Sieg
+  stand als Wipe in der Auswertung. Der wirkliche Tod des Bosses schlägt jetzt
+  die Wipe-Heuristik.
+- **Ausrüstung: ein ausgenommener Slot heißt überall „Ausnahme“.** In der
+  Slot-Liste stand er als „Unbekannt“ (grau), während die Gruppenübersicht
+  denselben Slot „Ausnahme“ nannte – zwei Namen für denselben Zustand.
+- **Ausrüstung: eine rollengebundene Regel gilt bei unbekannter Rolle nicht
+  mehr.** War die Rolle eines Spielers (noch) nicht bekannt, wurde eine
+  ausdrücklich auf eine Rolle beschränkte Regel trotzdem angewendet, statt sie
+  zu überspringen – wie es bei archetypgebundenen Regeln längst der Fall ist.
+- **Warcraft-Logs-Import: ein beschädigter Report-Code kann die Sync-Kodierung
+  nicht mehr verschieben.** Der Code wird zur Auswertungs-ID und wanderte roh in
+  die mit „,“ und „;“ getrennte gildenweite Kodierung; Trennzeichen darin werden
+  jetzt beim Import entfernt (echte Codes sind ohnehin nur alphanumerisch).
+
 ## 0.9.135 – Addon
 
 **Geändert**

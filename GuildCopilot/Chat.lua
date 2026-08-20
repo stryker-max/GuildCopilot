@@ -868,11 +868,26 @@ function GC.Chat:CaptureWhisper(message, sender, guid)
     self:CaptureLead(message, sender, guid, "WHISPER")
 end
 
+-- Kurze Buchstabenkuerzel ("lf", "lfg") nur an einer Wortgrenze werten. Als
+-- reiner Teilstring steckte "lf " sonst im Ende ganz gewoehnlicher Woerter -
+-- "half ", "self ", "wolf ", "elf ", "golf ", "myself " - und machte, sobald
+-- irgendwo spaeter "gilde"/"guild" stand, aus einer harmlosen Zeile einen
+-- vermeintlichen Bewerber. Laengere Suchwoerter bleiben bewusst Teilstringsuche,
+-- damit "sucht" weiterhin in "gesucht" trifft (die passive Form ist Absicht).
+local function SeekWordPosition(normalizedMessage, word)
+    local letters = word:gsub("%s+$", "")
+    if #letters <= 3 and letters:find("^%a+$") then
+        local trailer = word:sub(#letters + 1):gsub("%W", "%%%0")
+        return normalizedMessage:find("%f[%a]" .. letters .. trailer)
+    end
+    return normalizedMessage:find(word, 1, true)
+end
+
 -- Die frueheste Fundstelle irgendeines der Woerter, oder nil.
 local function FirstPosition(normalizedMessage, words)
     local earliest
     for _, word in ipairs(words) do
-        local at = normalizedMessage:find(word, 1, true)
+        local at = SeekWordPosition(normalizedMessage, word)
         if at and (not earliest or at < earliest) then
             earliest = at
         end
@@ -1279,7 +1294,15 @@ function GC.Chat:ReceiveSync(message, sender, distribution)
     end
     self.inboxIncoming[key] = nil
 
-    local record = ParseInboxRecord(GC.Util.UnescapeField(table.concat(pending.chunks)))
+    -- Genau zwei Entschluesselungen, nicht drei: Der Datensatz wird beim Senden
+    -- zweimal maskiert (jedes Feld in BuildInboxRecord, dann der ganze Datensatz
+    -- in BuildInboxMessages). SplitFields am eingehenden Paket macht die aeussere
+    -- Maskierung rueckgaengig, ParseInboxRecords SplitFields die innere. Ein
+    -- zusaetzliches UnescapeField hier war eine Entschluesselung zu viel und
+    -- verwandelte ein maskiertes "%7C" mitten im Text in ein echtes "|" - woran
+    -- die naechste Feldzerlegung die Bewerbernachricht abschnitt (Itemlinks,
+    -- Farbcodes). Deshalb der rohe Datensatz direkt an ParseInboxRecord.
+    local record = ParseInboxRecord(table.concat(pending.chunks))
     if record and self:MergeRemoteLead(record) then
         GC.DB:Prune()
         GC:FireCallback("INBOX_UPDATED")

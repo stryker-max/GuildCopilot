@@ -9130,6 +9130,41 @@ do
     addon.RaidMonitor:HandleCombatLogEvent("SPELL_CAST_SUCCESS",
         "guid", "Esser", "guid", "Esser", 35476, "Trommeln der Schlacht")
     assert(esser.consumables.DRUM == 2, "Trommeln wurden fälschlich entprellt")
+
+    -- Regression 0.9.135: Der Eintritts-Scan darf eine Mahlzeit, die er selbst
+    -- gerade gutgeschrieben hat, nicht ueber einen unmittelbar folgenden
+    -- SPELL_AURA_REFRESH ein zweites Mal zaehlen. Vorher trug der Scan die
+    -- Kennung nur in "scanned" ein, nicht in "auraCountedAt", an dem der
+    -- Kampflog-Pfad die Entprellung festmacht - der naechste Refresh lief daran
+    -- vorbei und schrieb dieselbe Mahlzeit doppelt.
+    do
+        local eater = addon.RaidMonitor:GetParticipant(session, "Scanesser", "PRIEST")
+        local prevBuff, prevExists, prevVisible = UnitBuff, UnitExists, UnitIsVisible
+        function UnitExists() return true end
+        function UnitIsVisible() return true end
+        function UnitBuff(_, index)
+            if index == 1 then
+                return "Sattgegessen", nil, nil, nil, nil, nil, nil, nil, nil, 33257
+            end
+            return nil
+        end
+        addon.RaidMonitor:ScanCarriedConsumables("player", eater)
+        assert(eater.consumables.FOOD == 1,
+            "Der Eintritts-Scan hat das getragene Essen nicht abgelesen: " .. tostring(eater.consumables.FOOD))
+        addon.RaidMonitor:HandleCombatLogEvent("SPELL_AURA_REFRESH",
+            "guid", "Scanesser", "guid", "Scanesser", 33257, "Sattgegessen")
+        assert(eater.consumables.FOOD == 1,
+            "Ein Refresh direkt nach dem Eintritts-Scan zaehlt die Mahlzeit doppelt: "
+                .. tostring(eater.consumables.FOOD))
+        -- Jenseits des Fensters zaehlt ein echtes Nachessen weiterhin.
+        currentTime = currentTime + 120
+        addon.RaidMonitor:HandleCombatLogEvent("SPELL_AURA_REFRESH",
+            "guid", "Scanesser", "guid", "Scanesser", 33257, "Sattgegessen")
+        assert(eater.consumables.FOOD == 2,
+            "Ein echtes Nachessen nach dem Scan zaehlt nicht mehr: " .. tostring(eater.consumables.FOOD))
+        UnitBuff, UnitExists, UnitIsVisible = prevBuff, prevExists, prevVisible
+    end
+
     addon.RaidMonitor.session = nil
     addon.RaidMonitor:SetCombatLogTracking(false)
     addon.DB:GetGuild().raidSessions = {}
@@ -10133,6 +10168,13 @@ do
         "Wer hat noch Mats für Verzauberungen?",
         "suche port nach shattrath",
         "Suche noch 2 DDs für HdW hc",
+        -- Regression 0.9.135: Das Kuerzel "lf " darf nur als eigenes Wort als
+        -- Suchwort zaehlen. Als reiner Teilstring steckte es im Ende von
+        -- "myself", "wolf", "half" - stand danach irgendwo "guild"/"gilde",
+        -- machte die Reihenfolgeregel daraus faelschlich einen Bewerber.
+        "myself and my guild need potions",
+        "selling wolf pelts, guild members get a discount",
+        "half of my guild is afk right now",
     }
 
     for _, text in ipairs(chat_seekers) do
@@ -10298,6 +10340,34 @@ do
         -- Fluestern ausdruecklich eingeschlossen (Owner-Entscheidung).
         assert(box_guild.inbox[1].source == "WHISPER",
             "Eine geflüsterte Bewerbung wurde nicht als solche übertragen")
+    end
+
+    -- === Ein Text mit Trennzeichen ueberlebt ===============================
+    -- Regression 0.9.135: Bewerber schreiben Itemlinks und Farbcodes
+    -- ("|cff..|Hitem:..|h[..]|h|r"). Das rohe "|" ist zugleich Feldtrenner des
+    -- Sync-Protokolls. Wurde der Datensatz beim Empfang eine Entschluesselung zu
+    -- viel behandelt, wurde ein maskiertes "|" im Text vorzeitig echt und die
+    -- naechste Feldzerlegung schnitt die Nachricht am ersten Balken ab.
+    do
+        local box_pipe = "schaut euch |cffa335ee|Hitem:29434|h[Wappenrock]|h|r an, suche gilde"
+        box_guild.inbox = {}
+        sentAddon = {}
+        addon.Chat:CaptureLead(box_pipe, "Linkgeber-Realm", "Player-6409-0DDDDDDD", "WHISPER")
+        local box_pipeChunks = {}
+        for _, entry in ipairs(sentAddon) do
+            if tostring(entry[2]):sub(1, 2) == "I|" then
+                box_pipeChunks[#box_pipeChunks + 1] = entry[2]
+            end
+        end
+        assert(#box_pipeChunks > 0, "Testaufbau: keine Pakete für die Trennzeichenprobe")
+        box_guild.inbox = {}
+        for _, packet in ipairs(box_pipeChunks) do
+            addon.Sync:OnMessage("GuildCopilot", packet, "GUILD", "Synkos-Realm")
+        end
+        assert(#box_guild.inbox == 1, "Der Eintrag mit Trennzeichen kam nicht an")
+        assert(box_guild.inbox[1].messages[1].text == box_pipe,
+            "Ein Text mit '|' wurde am ersten Balken abgeschnitten: "
+                .. tostring(box_guild.inbox[1].messages[1] and box_guild.inbox[1].messages[1].text))
     end
 
     -- Geteilt wird der EINTRAG, nicht die Bearbeitung: Eine Antwort ist eine

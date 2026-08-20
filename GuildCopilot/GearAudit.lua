@@ -694,7 +694,11 @@ function GC.GearAudit:RuleApplies(rule, slot, role, specKey)
     if rule.slots and not ListContains(rule.slots, slot.key) then
         return false
     end
-    if rule.roles and role and not ListContains(rule.roles, role) then
+    -- Ohne bekannte Rolle gilt eine rollengebundene Regel bewusst NICHT - wie
+    -- beim Archetyp weiter unten. Vorher liess das fehlende "role" die ganze
+    -- Bedingung durchfallen, sodass eine fremde Rollen-Regel doch angewendet
+    -- wurde und einen ungeprueften Spieler schlechter dastehen liess.
+    if rule.roles and (not role or not ListContains(rule.roles, role)) then
         return false
     end
     if rule.archetypes then

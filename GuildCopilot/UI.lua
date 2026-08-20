@@ -10002,6 +10002,10 @@ local GEAR_VERDICT_STYLE = {
     MISSING = { label = "Fehlt", color = THEME.danger },
     UNKNOWN = { label = "Unbekannt", color = THEME.muted },
     EMPTY = { label = "Leer", color = THEME.muted },
+    -- Ohne diesen Eintrag fiel ein ausgenommener Slot auf UNKNOWN zurueck und
+    -- stand als "Unbekannt" da, waehrend die Gruppenuebersicht denselben Slot
+    -- "Ausnahme" nannte - zwei Namen fuer denselben Zustand.
+    EXEMPT = { label = "Ausnahme", color = THEME.muted },
 }
 
 local GEAR_SEVERITY_COLOR = {

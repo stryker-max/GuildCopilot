@@ -1833,13 +1833,17 @@ function GC.RaidMonitor:CloseSegment(endedAt)
     -- Mindestens zwei Tote, damit ein einzelner Ausfall in kleinen Gruppen
     -- nicht sofort als Wipe gilt.
     local wipeThreshold = math.max(2, math.ceil(presentCount * WIPE_RATIO))
+    -- Reihenfolge: Der wirkliche Tod des Bosses schlaegt die Wipe-Heuristik.
+    -- Ein Kill, bei dem die halbe Gruppe mitstirbt (Bossmechanik am Ende), ist
+    -- ein Kill - nicht erst, wenn ENCOUNTER_END feuert. Steht die Todesquote
+    -- vor bossDied, wird ohne ENCOUNTER_END genau so ein Kill als Wipe gebucht.
     local result = "RESET"
     if segment.encounterResult then
         result = segment.encounterResult
-    elseif presentCount > 0 and segment.playerDeaths >= wipeThreshold then
-        result = "WIPE"
     elseif segment.bossDied then
         result = "KILL"
+    elseif presentCount > 0 and segment.playerDeaths >= wipeThreshold then
+        result = "WIPE"
     end
 
     -- Der erkannte Boss hat Vorrang vor dem zuletzt gestorbenen Gegner. Genau
@@ -2102,6 +2106,14 @@ function GC.RaidMonitor:ScanCarriedConsumables(unit, participant)
     ForEachBuff(unit, function(spellID, spellName)
         local category, consumable = ResolveConsumable(spellID)
         if category and category.scan and MarkScanned(participant, spellID) then
+            -- Aura-Kategorien (Essen) hier zusaetzlich entprellen. Sonst zaehlte
+            -- ein SPELL_AURA_REFRESH derselben Sattgegessen-Aura, das kurz nach
+            -- dem Eintritts-Scan eintrifft, dieselbe Mahlzeit ein zweites Mal:
+            -- Der Scan trug sie nur in "scanned" ein, nicht in "auraCountedAt",
+            -- an dem der Kampflog-Pfad die Entprellung festmacht.
+            if category.track == "AURA" then
+                MarkAuraCounted(participant, spellID)
+            end
             RecordConsumable(participant, category, consumable, spellID, spellName)
         end
     end)
