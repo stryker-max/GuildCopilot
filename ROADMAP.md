@@ -319,6 +319,18 @@ Anlass war keine einzelne Beschwerde, sondern die Frage, ob das Addon mit 250 gl
 
 Zwei Perf-Stellen skalieren mit einer großen Gilde schlechter, sind aber kein Fehler und kein risikoarmer Ein-Zeilen-Fix: `Inventory:GetReagentStatus` scannt je Reagenz alle Account-Charaktere und alle Gildenbank-Tabs, und `Orders:GetBoard` ruft je offenem Fremdauftrag die Herstellerliste neu auf. Beide sind Kandidaten für einen invalidierten Zwischenspeicher wie ihn der Werkstattkatalog schon hat — aber ein falsch invalidierter Cache zeigt veraltete Bestände, und das wäre schlimmer als der jetzige Aufwand. Bewusst als Folgearbeit notiert statt übereilt eingebaut. Ebenso stehen gelassen: der dokumentierte Trade-off, dass ein geleerter Gildenbank-Tab nicht als leer verteilt wird (eine leere Abfrage ist von „lädt noch" nicht zu unterscheiden), und die vernachlässigbare Token-Kollision im Ausrüstungstransfer (~1/9000, selbstheilend).
 
+### Nachtrag: nur die eingetragenen Wörter zählen
+
+Aus dem Betrieb kam ein Fehlalarm: Eine englische Gildenwerbung stand als Bewerber im Postfach — „Looking for your people? Cereal Killers is a friendly, active guild … All classes/roles welcome!“. Ursache war die freie Erkennung: Sie entscheidet über die Wortreihenfolge (Suchwort vor Gildenwort → Bewerber), und „**Looking for** …“ stellt das Suchwort an den Anfang, obwohl hier eine Gilde sucht, nicht ein Spieler. Die deutsche Merkmalsliste, die das übersteuern würde, kennt diese englischen Wendungen nicht.
+
+Die Frage des Besitzers war grundsätzlicher: Warum zählt überhaupt etwas mit, das nicht eingetragen wurde? Antwort ist der Umbau: **Die freie Erkennung ist ab Werk aus und der Hauptschalter der ganzen eingebauten Schicht.** Steht sie aus, zählt strikt, was in den Trigger-Feldern steht — ein leeres Feld erfasst nichts, es fällt nicht mehr still auf die Vorgabe zurück. Steht sie an, greift wie bisher die mitgelieferte Vorgabe (für ein leeres Feld) samt Reihenfolge-Erkennung.
+
+Bewusst NICHT gewählt: die englischen Werbemerkmale einfach nachzutragen. Das hätte nur die freie Erkennung treffsicherer gemacht — die der Besitzer aber gar nicht will. Der Schalter ist die ehrlichere Antwort als immer neue Wortlisten. `GetRecruitmentWords` liefert die Vorgabe jetzt nur noch bei eingeschalteter Erkennung; die eigene Liste bleibt in jedem Fall maßgeblich. Regressionsanker in `smoke.lua`: genau die englische Zeile bleibt im strikten Modus draußen, ein Bewerber mit passendem eigenem Wort kommt weiter herein.
+
+### Nachtrag: die Abmeldungskarte überlappte die Entscheidungen
+
+Ein Layoutfehler in der Mitgliederpflege: „Aktuelle Abmeldungen“ hing an einer festen Position (`-880`), während die Karten darüber — Pflegevorschläge und Entscheidungen — mit der Zahl der Vorschläge nach unten wuchsen. Ab rund acht Vorschlägen schob sich die Entscheidungskarte über die feste Abmeldungskarte, und deren Leerzeile („Keine Ausnahmen hinterlegt …“) lag über der Überschrift der nächsten. `RefreshMemberCare` führte die Abmeldungskarte bisher gar nicht nach. Jetzt hängt sie unter der Entscheidungskarte und wandert mit ihr; die Inhaltshöhe rechnet bis zu ihr, statt sie zu ignorieren.
+
 ## 0.9.134 – Wessen Zahlen stehen da eigentlich?
 
 Ausgelöst von einer Frage zum Abend des 16.08.: Warum zeigt die Raidauswertung neben der eigenen Fassung („Live, 28 Teilnehmer") eine zweite von Druidgard („27") mit durchweg kleineren Zahlen — und welche stimmt?

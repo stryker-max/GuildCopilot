@@ -16,13 +16,21 @@ local DEFAULTS = {
         -- Constants.lua. Eigener Schalter, weil die Wendungslisten ihre Zusage
         -- behalten sollen: Wer seine Liste bewusst eng haelt, bekommt mit
         -- diesem Schalter aus auch genau das - und nichts darueber hinaus.
-        smartRecruitmentDetection = true,
+        --
+        -- Ab 0.9.135 ab Werk AUS: Das Postfach erfasst standardmaessig nur, was
+        -- die eingetragenen Trigger-Woerter woertlich treffen - keine Automatik,
+        -- die anhand der Wortreihenfolge raet. Wer das Raten will, schaltet es
+        -- hier ein.
+        smartRecruitmentDetection = false,
         -- Trigger- und Ausschlusswoerter fuers Postfach. Bewusst lokal und
         -- nicht gildenweit: Sie aendern nur, was im eigenen Postfach landet,
-        -- genau wie die beiden Schalter darueber. Eine leere Triggerliste
-        -- bedeutet "Vorgabe aus Constants.lua", nicht "nichts" und erst recht
-        -- nicht "alles" - abschalten laesst sich die Erkennung ueber die
-        -- Schalter, nicht durch ein leeres Feld.
+        -- genau wie die beiden Schalter darueber.
+        --
+        -- Ab 0.9.135 ist die freie Erkennung der Hauptschalter fuer die ganze
+        -- eingebaute Schicht: Steht sie auf AUS (Vorgabe), zaehlt strikt, was
+        -- hier steht - ein leeres Feld erfasst dann nichts. Erst mit ihr an
+        -- greift wieder die mitgelieferte Vorgabe (fuer ein leeres Feld) samt
+        -- Reihenfolge-Erkennung.
         recruitmentFilters = {
             chatTriggers = {},
             chatExclusions = {},

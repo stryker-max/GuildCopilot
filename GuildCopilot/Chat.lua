@@ -109,7 +109,11 @@ GC.Chat.CleanRecruitmentWordList = function(_, text)
     return CleanWordList(text)
 end
 
--- Was tatsaechlich verglichen wird: die eigene Liste, sonst die Vorgabe.
+-- Was tatsaechlich verglichen wird: immer zuerst die eigene Liste. Ist sie
+-- leer, greift die mitgelieferte Vorgabe NUR, solange die freie Erkennung an
+-- ist - sie ist ab 0.9.135 der Hauptschalter fuer die ganze eingebaute Schicht.
+-- Steht sie aus, zaehlt strikt, was im Feld steht: ein leeres Feld erfasst
+-- nichts. Ausschlusslisten haben keine Vorgabe und bleiben davon unberuehrt.
 function GC.Chat:GetRecruitmentWords(key)
     local definition = FILTER_LISTS[key]
     if not definition then
@@ -119,7 +123,10 @@ function GC.Chat:GetRecruitmentWords(key)
     if #stored > 0 then
         return stored
     end
-    return definition.default and GC[definition.default] or {}
+    if definition.default and GC.DB:GetSettings().smartRecruitmentDetection then
+        return GC[definition.default]
+    end
+    return {}
 end
 
 -- Was im Eingabefeld steht: nur die eigene Fassung. Ein leeres Feld zeigt
@@ -152,8 +159,8 @@ function GC.Chat:SetRecruitmentWordText(key, text)
 end
 
 -- Vorgabe wiederherstellen heisst: die eigene Liste leeren. Dann greift die
--- Vorgabe wieder, und es bleibt keine Kopie stehen, die bei einer spaeteren
--- Aenderung der Vorgabe veraltet waere.
+-- Vorgabe wieder (sofern die freie Erkennung an ist), und es bleibt keine
+-- Kopie stehen, die bei einer spaeteren Aenderung der Vorgabe veraltet waere.
 function GC.Chat:RestoreRecruitmentDefaults()
     local filters = self:GetRecruitmentFilters()
     for key in pairs(FILTER_LISTS) do

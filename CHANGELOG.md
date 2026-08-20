@@ -9,8 +9,24 @@ Installer und Addon werden getrennt gezählt.
 
 ## 0.9.135 – Addon
 
+**Geändert**
+
+- **Das Postfach erfasst ab Werk nur noch deine eingetragenen Wörter.** Die
+  Automatik „Auch freie Formulierungen erkennen“ ist jetzt **standardmäßig aus**.
+  Sie riet anhand der Wortreihenfolge, wer ein Bewerber ist – und holte damit
+  auch fremde Gildenwerbung herein, etwa eine englische Anzeige, die mit
+  „Looking for your people?“ beginnt. Ohne die Automatik zählt strikt, was in
+  deinen Trigger-Feldern steht; ein leeres Feld erfasst nichts. Wer das Raten
+  weiterhin will, schaltet es in den Einstellungen wieder ein – dann trägt für
+  ein leeres Feld wie bisher die mitgelieferte Vorgabe.
+
 **Behoben**
 
+- **Mitgliederpflege: „Aktuelle Abmeldungen“ überlappt nicht mehr die
+  Entscheidungen darüber.** Die Abmeldungskarte hing an einer festen Position,
+  während die Karten darüber mit der Zahl der Pflegevorschläge wuchsen – ab rund
+  acht Vorschlägen schob sich die Entscheidungskarte darüber. Die Karte wandert
+  jetzt sauber mit.
 - **Eine einzelne Spec anzuklicken lässt nicht mehr die ganze Klasse
   verschwinden.** Hattest du im Werbeeditor „Ganze Klasse“ gewählt und danach
   eine einzelne Spec angeklickt, fielen die übrigen Specs unbemerkt weg (ganze

@@ -2520,8 +2520,9 @@ function GC.UI:BuildSettingsPage()
     triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -694)
     CreateLabel(triggerCard,
         "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
-        .. " Eintrag auch dann, wenn ein Trigger passt. Leere Trigger-Felder bedeuten „Vorgabe“, nicht „nichts“ –"
-        .. " abschalten lässt sich die Erkennung über die Schalter darüber. Diese Listen gelten nur für dich.",
+        .. " Eintrag auch dann, wenn ein Trigger passt. Es zählt nur, was hier steht: Ein leeres Trigger-Feld erfasst"
+        .. " nichts. Nur mit „Auch freie Formulierungen erkennen“ (oben) trägt für ein leeres Feld die Vorgabe."
+        .. " Diese Listen gelten nur für dich.",
         { muted = true, width = 716, height = 44, vertical = "TOP" })
         :SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -44)
 
@@ -2544,7 +2545,7 @@ function GC.UI:BuildSettingsPage()
         for key, edit in pairs(page.recruitmentWordEdits) do
             GC.Chat:SetRecruitmentWordText(key, edit:GetText())
         end
-        page.recruitmentWordStatus:SetText(GC.L("Gespeichert. Leere Trigger-Felder nutzen wieder die Vorgabe."))
+        page.recruitmentWordStatus:SetText(GC.L("Gespeichert. Ein leeres Trigger-Feld erfasst nichts – außer die freie Erkennung ist an."))
         SetTextColor(page.recruitmentWordStatus, THEME.success)
         GC.UI:RefreshSettings()
     end, "PRIMARY")
@@ -2966,8 +2967,10 @@ function GC.UI:RefreshSettings()
             and "Automatisch (English)" or "Automatisch (Deutsch)")
     end
 
-    -- Ein leeres Feld heisst "Vorgabe". Damit niemand raten muss, welche
-    -- Erkennung gerade greift, steht es ausgeschrieben unter den Feldern.
+    -- Was ein leeres Feld bedeutet, haengt am Schalter der freien Erkennung:
+    -- mit ihr an traegt die Vorgabe, mit ihr aus erfasst es nichts. Damit
+    -- niemand raten muss, welche Erkennung gerade greift, steht es
+    -- ausgeschrieben unter den Feldern.
     local defaultLabels = {
         chatTriggers = "öffentlicher Chat",
         whisperTriggers = "Flüstern",
@@ -2985,8 +2988,13 @@ function GC.UI:RefreshSettings()
     end
     if page.recruitmentWordStatus:GetText() == "" then
         if #usingDefaults > 0 then
-            page.recruitmentWordStatus:SetText("Vorgabe greift bei: "
-                .. GC.Util.JoinGerman(usingDefaults) .. ".")
+            if GC.DB:GetSettings().smartRecruitmentDetection then
+                page.recruitmentWordStatus:SetText("Vorgabe greift bei: "
+                    .. GC.Util.JoinGerman(usingDefaults) .. ".")
+            else
+                page.recruitmentWordStatus:SetText("Leeres Feld erfasst nichts bei: "
+                    .. GC.Util.JoinGerman(usingDefaults) .. " (freie Erkennung ist aus).")
+            end
         else
             page.recruitmentWordStatus:SetText(GC.L("Es gelten durchgehend deine eigenen Listen."))
         end
@@ -4774,7 +4782,14 @@ function GC.UI:BuildMemberCarePage()
 
     local absencesCard = CreateCard(content, "Aktuelle Abmeldungen")
     absencesCard:SetSize(752, 210)
+    -- Startposition; RefreshMemberCare haengt die Karte unter die
+    -- Entscheidungskarte, sobald deren Position feststeht. Ohne diese
+    -- Nachfuehrung blieb sie fest bei -880 stehen, waehrend die Karten darueber
+    -- mit der Zahl der Vorschlaege wuchsen - ab rund acht Vorschlaegen schob
+    -- sich die Entscheidungskarte darueber.
     absencesCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -880)
+    page.memberCareAbsencesCard = absencesCard
+    page.memberCareAbsencesHeight = 210
     page.guildAbsencesTitle = absencesCard.title
     page.guildAbsenceRows = {}
     for index = 1, 5 do
@@ -5068,7 +5083,13 @@ function GC.UI:RefreshMemberCare()
         local nextTop = page.memberCareSuggestionTopOffset + cardHeight + 24
         page.memberCareDecisionsCard:SetPoint("TOPLEFT", page.memberCareContent,
             "TOPLEFT", 0, -nextTop)
-        page.memberCareContent:SetHeight(nextTop + page.memberCareDecisionsHeight + 40)
+        -- Die Abmeldungskarte haengt unter der Entscheidungskarte und wandert
+        -- mit ihr. Vorher stand sie fest bei -880 und wurde ueberlappt, sobald
+        -- die Karten darueber ueber diese Marke hinauswuchsen.
+        local absencesTop = nextTop + page.memberCareDecisionsHeight + 24
+        page.memberCareAbsencesCard:SetPoint("TOPLEFT", page.memberCareContent,
+            "TOPLEFT", 0, -absencesTop)
+        page.memberCareContent:SetHeight(absencesTop + page.memberCareAbsencesHeight + 40)
     end
 
     local decisions = GC.Roster:GetMemberCareDecisions()

@@ -12,6 +12,17 @@ assert(addon.WarcraftLogs ~= nil,
 addon:FireCallback("ADDON_LOADED")
 addon:FireCallback("PLAYER_LOGIN")
 
+-- Ab 0.9.135 ist die freie Erkennung ("Auch freie Formulierungen erkennen")
+-- ab Werk AUS: Das Postfach erfasst dann nur, was die eingetragenen Trigger-
+-- Woerter woertlich treffen - ein leeres Feld erfasst nichts. Der Grossteil der
+-- Postfach-Tests misst aber genau die eingebaute Erkennung (Vorgabe fuers leere
+-- Feld plus Reihenfolge-Erkennung) und schaltet sie dafuer ausdruecklich ein.
+-- Der Auslieferungswert wird hier einmal festgehalten; die strikten Faelle
+-- schalten weiter unten wieder aus.
+assert(addon.DB:GetSettings().smartRecruitmentDetection == false,
+    "Die freie Erkennung ist ab Werk nicht mehr aus")
+addon.DB:GetSettings().smartRecruitmentDetection = true
+
 local repairedDefaults = addon.Util.MergeDefaults({
     settings = "beschädigt",
 }, {
@@ -714,12 +725,15 @@ for index, lead in ipairs(addon.DB:GetGuild().inbox) do
 end
 
 -- Trigger- und Ausschlusswoerter fuers Postfach. Eigene Woerter greifen, ein
--- Ausschlusswort verhindert den Eintrag trotz passendem Trigger, und ein
--- geleertes Trigger-Feld faellt auf die Vorgabe zurueck - es erfasst also
--- weder alles noch nichts.
+-- Ausschlusswort verhindert den Eintrag trotz passendem Trigger. Seit 0.9.135
+-- ist die freie Erkennung der Hauptschalter der eingebauten Schicht: Mit ihr AN
+-- traegt fuer ein leeres Feld die mitgelieferte Vorgabe; mit ihr AUS zaehlt
+-- strikt, was im Feld steht - ein leeres Feld erfasst dann nichts.
 do
     addon.Chat:ClearInbox()
     addon.Chat:RestoreRecruitmentDefaults()
+    -- Mit eingeschalteter freier Erkennung traegt die mitgelieferte Vorgabe.
+    addon.DB:GetSettings().smartRecruitmentDetection = true
     assert(addon.Chat:IsRecruitmentSignal("Hallo, ich suche eine Gilde!") == true,
         "Die mitgelieferte Vorgabe erkennt keine Gildensuche mehr")
     assert(addon.Chat:IsRecruitmentSignal("Wer verzaubert meine Waffe?") == false,
@@ -755,8 +769,10 @@ do
     addon.Chat:SetRecruitmentWordText("chatTriggers", "   \n \n")
     assert(#addon.Chat:GetRecruitmentFilters().chatTriggers == 0,
         "Ein leeres Feld wurde als Wort gespeichert")
-    assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == true,
-        "Ein geleertes Trigger-Feld hat die Erkennung abgeschaltet")
+    -- Der Kern des strikten Modus: ein leeres Feld erfasst nichts, es faellt
+    -- NICHT mehr auf die Vorgabe zurueck.
+    assert(addon.Chat:IsRecruitmentSignal("Ich suche eine Gilde") == false,
+        "Ein leeres Trigger-Feld faellt noch auf die Vorgabe zurueck")
     assert(addon.Chat:IsRecruitmentSignal("Wer verzaubert meine Waffe?") == false,
         "Ein geleertes Trigger-Feld erfasst plötzlich jede Nachricht")
 
@@ -765,7 +781,8 @@ do
         "Die Wiederherstellung hat die Ausschlussliste nicht geleert")
     assert(addon.Chat:GetRecruitmentWordText("chatTriggers") == "",
         "Nach der Wiederherstellung steht eine eigene Kopie der Vorgabe im Feld")
-    -- Der Schalter steht ab Werk auf an; der Rest des Laufs erwartet das.
+    -- Fuer die uebrigen Postfach-Tests die eingebaute Erkennung wieder
+    -- einschalten (der Auslieferungswert AUS wurde ganz oben festgehalten).
     addon.DB:GetSettings().smartRecruitmentDetection = true
 end
 
@@ -10020,11 +10037,17 @@ end
 -- deshalb ueber die Wortreihenfolge (Begruendung in Constants.lua).
 --
 -- Dieser Block ist die Messung dazu und haelt sie fest. Er laeuft gegen die
--- VORGABE, nicht gegen eine eigene Liste - sonst pruefte er die Einstellung
--- des Entwicklers statt das ausgelieferte Verhalten.
+-- mitgelieferte Vorgabe im Feld und mit EINGESCHALTETER freier Erkennung - so
+-- erlebt es eine Gilde, die das Raten bewusst aktiviert. Ab 0.9.135 steht die
+-- Erkennung ab Werk auf aus und ein leeres Feld erfaesst nichts; dieser Block
+-- schaltet sie deshalb ausdruecklich ein. Bei leerem Feld traegt dann die
+-- mitgelieferte Vorgabe - genau das ausgelieferte Verhalten mit an-geschalteter
+-- freier Erkennung.
 do
     local chat_saved = addon.Chat:GetRecruitmentWordText("chatTriggers")
+    local smart_saved = addon.DB:GetSettings().smartRecruitmentDetection
     addon.Chat:SetRecruitmentWordText("chatTriggers", "")
+    addon.DB:GetSettings().smartRecruitmentDetection = true
 
     -- Wer eine Gilde sucht. Muss erkannt werden.
     local chat_seekers = {
@@ -10109,6 +10132,28 @@ do
     addon.DB:GetGuild().inbox = {}
 
     addon.Chat:SetRecruitmentWordText("chatTriggers", chat_saved)
+    addon.DB:GetSettings().smartRecruitmentDetection = smart_saved
+end
+
+-- Regressionsanker fuer den strikten Modus (0.9.135): Ohne freie Erkennung und
+-- ohne passendes eigenes Wort bleibt fremde Gildenwerbung draussen - auch die
+-- englische, deren "Looking for ..."-Anfang die Reihenfolge-Erkennung sonst
+-- ueberlistet (das Suchwort steht vor dem Gildenwort). Genau diese Zeile stand
+-- als Fehlalarm im Postfach.
+do
+    local smart_saved = addon.DB:GetSettings().smartRecruitmentDetection
+    local chat_saved = addon.Chat:GetRecruitmentWordText("chatTriggers")
+    addon.DB:GetSettings().smartRecruitmentDetection = false
+    addon.Chat:SetRecruitmentWordText("chatTriggers", "suche gilde\ngilde gesucht")
+    local englishAd = "Looking for your people? Cereal Killers is a friendly, active guild "
+        .. "gearing up to build a roster for dungeons and raids. All classes/roles welcome!"
+    assert(addon.Chat:IsRecruitmentSignal(englishAd) == false,
+        "Fremde englische Gildenwerbung landet im strikten Modus im Postfach")
+    -- Ein echter Bewerber, der ein eingetragenes Wort trifft, kommt weiterhin.
+    assert(addon.Chat:IsRecruitmentSignal("70 Jäger, suche Gilde für Kara") == true,
+        "Ein eigenes Trigger-Wort greift im strikten Modus nicht")
+    addon.Chat:SetRecruitmentWordText("chatTriggers", chat_saved)
+    addon.DB:GetSettings().smartRecruitmentDetection = smart_saved
 end
 
 -- === Das Postfach faehrt durch die Gilde ===================================
