@@ -298,6 +298,47 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.137 – Was vom entfernten Warcraft-Logs-Modul übrig blieb
+
+Aus dem Betrieb kamen drei Beobachtungen am Postfach, alle mit derselben Wurzel:
+Das Warcraft-Logs-Importmodul (`WarcraftLogs.lua`) liegt dem ausgelieferten
+Addon nicht bei – der Import braucht den Windows-Helfer, den CurseForge nicht
+mitschicken kann, deshalb schließt der Paketbau die Datei aus. Zwei nützliche
+Dinge hingen aber daran, ohne den Import wirklich zu brauchen.
+
+### Die Profil-Links im Postfach kamen aus dem entfernten Modul
+
+`SetLeadProfileLinks` baute die Armory- und Warcraft-Logs-Charakterseite über
+`GC.WarcraftLogs:BuildCharacterLinks`. Fehlt das Modul, ist `GC.WarcraftLogs`
+nil, und der Aufruf lieferte nichts – die Felder „Armory" und „Logs" blieben in
+jeder Bewerbung leer. Dabei brauchen die Links das Importmodul gar nicht: Region
+kommt vom Client (`GetCurrentRegion`), der Realm vom Interessenten (am Namen
+angehängt) oder vom eigenen Charakter, der Host aus den Konstanten. Die
+Link-Bildung wandert deshalb als `GC.Chat:BuildLeadProfileLinks` in ein
+ausgeliefertes Modul und steht damit immer bereit. Die Ersetzung der
+URL-Platzhalter läuft bewusst über eine Ersetzungs-**Funktion**, nicht über
+einen Ersetzungs-String: Der URL-kodierte Name enthält „%XX"-Sequenzen, die
+`gsub` in einem String-Ersatz als Muster läse und bei Umlautnamen mit einem
+Fehler abbräche. Der Regressionsanker in `smoke.lua` prüft beide Links über die
+Oberfläche.
+
+### Der Hinweis verwies auf eine Seite, die es nicht mehr gibt
+
+Unter den Linkfeldern stand „Für Links zuerst unter Warcraft Logs die
+Gildenquelle speichern." Diese Seite ist mit dem Modul verschwunden. Da die
+Links jetzt aus Region, Realm und Name entstehen, erscheinen sie fast immer; der
+Hinweis meldet nur noch den echten Ausnahmefall (kein Realm bestimmbar) und ohne
+den falschen Verweis.
+
+### Der Erkennungsschalter saß in der falschen Karte
+
+„Auch freie Formulierungen erkennen" stand unter „Rekrutierung: Meldungen &
+Töne", betrifft aber die Erkennung, nicht Meldungen oder Töne. Er steht jetzt in
+der Karte „Postfach-Erkennung", direkt bei den Trigger-Wörtern, auf die er sich
+bezieht. Rein eine Umstellung der Oberfläche: Der Schalter bleibt derselbe
+(`smartRecruitmentDetection`), sein Zustand und die Abhängigkeit vom
+Kanal-Mitlesen ändern sich nicht.
+
 ## 0.9.136 – Noch ein Durchlauf, diesmal gegen echte Daten
 
 Auftrag war ein erneuter vollständiger Code- und Feature-Review mit einem

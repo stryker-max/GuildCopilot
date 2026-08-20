@@ -962,6 +962,63 @@ function GC.Chat:IsRecruitmentSignal(message)
     return LooksLikeGuildSeeker(normalized)
 end
 
+-- === Kopierbare Profil-Links zu einem Interessenten =======================
+--
+-- Armory und Warcraft-Logs-Charakterseite fuer das Postfach. Frueher baute die
+-- das optionale Import-Modul (WarcraftLogs.lua) - das liegt dem ausgelieferten
+-- Addon aber nicht bei (der Import braucht den Windows-Helfer), weshalb die
+-- Felder leer blieben. Die Links brauchen das Modul gar nicht: Region kommt vom
+-- Client, der Realm vom Interessenten (am Namen) oder vom eigenen Charakter, der
+-- Host aus den Konstanten. WoW-Addons duerfen weder einen Browser oeffnen noch
+-- in die Zwischenablage schreiben - die Felder sind nur zum Markieren da.
+local WCL_REGION_SLUGS = { [1] = "us", [2] = "kr", [3] = "eu", [4] = "tw", [5] = "cn" }
+
+local function EncodeLinkPath(value)
+    value = GC.Util.Trim(value):lower()
+    value = value:gsub("ä", "a"):gsub("ö", "o"):gsub("ü", "u"):gsub("ß", "ss")
+    value = value:gsub("%s+", "-")
+    return (value:gsub("[^%w%-]", function(character)
+        return string.format("%%%02X", string.byte(character))
+    end))
+end
+
+function GC.Chat:BuildLeadProfileLinks(playerName)
+    local characterName = GC.Util.PlayerShortName(GC.Util.Trim(playerName))
+    if characterName == "" then
+        return { armory = "", logs = "" }
+    end
+    local region = WCL_REGION_SLUGS[(GetCurrentRegion and GetCurrentRegion()) or 3] or "eu"
+    -- Realm: am Namen angehaengt (Fremdrealm), sonst der eigene - Interessenten
+    -- schreiben in TBC fast immer vom selben Realm.
+    local realm = tostring(playerName or ""):match("^[^-]+%-(.+)$")
+    if not realm or GC.Util.Trim(realm) == "" then
+        realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+            or (GetRealmName and GetRealmName()) or ""
+    end
+    local serverSlug = EncodeLinkPath(realm)
+    if serverSlug == "" then
+        return { armory = "", logs = "" }
+    end
+    -- Ersetzung ueber eine Funktion, nicht ueber einen Ersetzungs-String: Der
+    -- kodierte Name enthaelt "%XX", was gsub in einem String-Ersatz als Muster
+    -- laese und bei Umlautnamen einen Fehler wuerfe.
+    local map = {
+        host = GC.Constants.WCL_DEFAULT_HOST,
+        region = region,
+        realm = serverSlug,
+        name = EncodeLinkPath(characterName),
+    }
+    local function Fill(template)
+        return (tostring(template or ""):gsub("<(%w+)>", function(tag)
+            return map[tag]
+        end))
+    end
+    return {
+        armory = Fill(GC.Constants.ARMORY_CHARACTER_URL),
+        logs = Fill(GC.Constants.WCL_CHARACTER_URL),
+    }
+end
+
 function GC.Chat:SendReply(playerName, text)
     text = GC.Util.SafeChatText(text)
     if GC.Util.Trim(playerName) == "" or text == "" then

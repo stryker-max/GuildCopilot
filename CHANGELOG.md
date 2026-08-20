@@ -7,6 +7,28 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.137 – Addon
+
+**Behoben**
+
+- **Postfach: Armory- und Logs-Link erscheinen wieder.** Die beiden
+  kopierbaren Profil-Links baute bisher das Warcraft-Logs-Importmodul, das dem
+  ausgelieferten Addon gar nicht beiliegt – seit es weg ist, blieben die Felder
+  leer. Die Links brauchen das Modul nicht: Region, Realm und Name genügen. Sie
+  werden jetzt direkt gebaut und stehen wieder in jeder Bewerbung.
+- **Postfach: der veraltete Warcraft-Logs-Hinweis ist weg.** Unter den
+  Linkfeldern stand „Für Links zuerst unter Warcraft Logs die Gildenquelle
+  speichern." – eine Seite, die es nicht mehr gibt. Der Hinweis erscheint jetzt
+  nur noch, wenn sich wirklich kein Realm bestimmen lässt, und ohne den
+  falschen Verweis.
+
+**Geändert**
+
+- **„Auch freie Formulierungen erkennen" steht jetzt bei der
+  Postfach-Erkennung.** Der Schalter saß unter „Meldungen & Töne", gehört aber
+  zur Erkennung – jetzt steht er direkt bei den Trigger-Wörtern, auf die er sich
+  bezieht.
+
 ## 0.9.136 – Addon
 
 **Behoben**

@@ -929,7 +929,7 @@ assert(addon.UI.pages.INBOX.leadTitle.value:find("|cfff58cba", 1, true) ~= nil,
     "Der Kopf der Unterhaltung zeigt den Namen nicht in Klassenfarbe")
 -- Für den ausgewählten Interessenten stehen beide Profil-Links bereit.
 assert(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue
-    == "https://fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    == "https://de.fresh.warcraftlogs.com/character/eu/realm/namenlos",
     "Der Warcraft-Logs-Link des Interessenten fehlt im Postfach: "
     .. tostring(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue))
 assert(addon.UI.pages.INBOX.leadLinkEdits.armory.linkValue
@@ -941,7 +941,7 @@ addon.UI.pages.INBOX.leadLinkEdits.logs:SetText("kaputt")
 addon.UI.pages.INBOX.leadLinkEdits.logs.scripts.OnTextChanged(
     addon.UI.pages.INBOX.leadLinkEdits.logs, true)
 assert(addon.UI.pages.INBOX.leadLinkEdits.logs.value
-    == "https://fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    == "https://de.fresh.warcraftlogs.com/character/eu/realm/namenlos",
     "Ein überschriebenes Linkfeld wurde nicht wiederhergestellt")
 assert(addon.Chat:RemoveLead(1) == true, "Der Testinteressent ließ sich nicht entfernen")
 assert(addon.Chat:RemoveLead(1) == true, "Einzelner Interessent konnte nicht gelöscht werden")

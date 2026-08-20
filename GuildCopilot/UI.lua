@@ -2395,7 +2395,7 @@ function GC.UI:BuildSettingsPage()
     -- der Karte "Allgemein".
     local notificationCard = CreateCard(content, "Rekrutierung: Meldungen & Töne")
     notificationCard:SetSize(752, 150)
-    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1298)
+    notificationCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1338)
     page.successSoundToggle = CreateToggle(notificationCard, "Erfolgssound aktiv", function(checked)
         GC.DB:GetSettings().successSound = checked
     end)
@@ -2429,15 +2429,10 @@ function GC.UI:BuildSettingsPage()
     end)
     page.watchChannelToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -105)
     page.watchChannelToggle.text:SetWidth(310)
-    -- Zweiter Schalter, nicht in den ersten hineingebaut: Der obere entscheidet
-    -- OB oeffentliche Kanaele mitgelesen werden, dieser WIE genau hingesehen
-    -- wird. Wer seine Wendungsliste bewusst eng haelt, schaltet nur diesen aus.
-    page.smartDetectionToggle = CreateToggle(notificationCard,
-        "Auch freie Formulierungen erkennen („ENH sucht Anschluss an Gilde“)", function(checked)
-        GC.DB:GetSettings().smartRecruitmentDetection = checked
-    end)
-    page.smartDetectionToggle:SetPoint("TOPLEFT", notificationCard, "TOPLEFT", 385, -133)
-    page.smartDetectionToggle.text:SetWidth(310)
+    -- Der Schalter "Auch freie Formulierungen erkennen" stand frueher hier. Er
+    -- gehoert aber zur Erkennung, nicht zu Meldungen & Toenen - deshalb steht er
+    -- jetzt in der Karte "Postfach-Erkennung", direkt bei den Triggerwoertern,
+    -- auf die er sich bezieht.
 
     -- Minimap und Profilton betreffen nicht die Rekrutierung - sie stehen in
     -- ihrer eigenen Karte "Allgemein".
@@ -2485,7 +2480,7 @@ function GC.UI:BuildSettingsPage()
     -- koennte - deshalb haengt er am Gildenrang und nicht an jedem selbst.
     local soundRankCard = CreateCard(content, "Bewerberton hören")
     soundRankCard:SetSize(752, 180)
-    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1106)
+    soundRankCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1146)
     local soundRankHelp = CreateLabel(soundRankCard,
         "Nur diese Ränge hören den Ton, wenn sich jemand im Postfach meldet. Das Postfach füllt sich für alle weiter,"
         .. " nur still. Die Freigabe wird gildenweit synchronisiert.",
@@ -2516,12 +2511,12 @@ function GC.UI:BuildSettingsPage()
     -- Whisper-Trigger nervt nur einen selbst, ein zu weiter Chat-Trigger
     -- erzeugt Muell aus dem ganzen Realm.
     local triggerCard = CreateCard(content, "Postfach-Erkennung: eigene Wörter")
-    triggerCard:SetSize(752, 400)
+    triggerCard:SetSize(752, 440)
     triggerCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -694)
     CreateLabel(triggerCard,
         "Ein Wort oder eine Wendung je Zeile, Groß- und Kleinschreibung ist gleich. Ein Ausschlusswort verhindert den"
         .. " Eintrag auch dann, wenn ein Trigger passt. Es zählt nur, was hier steht: Ein leeres Trigger-Feld erfasst"
-        .. " nichts. Nur mit „Auch freie Formulierungen erkennen“ (oben) trägt für ein leeres Feld die Vorgabe."
+        .. " nichts. Nur mit „Auch freie Formulierungen erkennen“ (der Schalter unten) trägt für ein leeres Feld die Vorgabe."
         .. " Diese Listen gelten nur für dich.",
         { muted = true, width = 716, height = 44, vertical = "TOP" })
         :SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -44)
@@ -2572,9 +2567,18 @@ function GC.UI:BuildSettingsPage()
     page.recruitmentWordStatus = CreateLabel(triggerCard, "", { width = 716, height = 18 })
     page.recruitmentWordStatus:SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -366)
 
+    -- Der Hauptschalter der eingebauten Erkennung: OB das Addon ueber die
+    -- Wortreihenfolge selbst raet, oder strikt nur die Felder oben zaehlen.
+    page.smartDetectionToggle = CreateToggle(triggerCard,
+        "Auch freie Formulierungen erkennen („ENH sucht Anschluss an Gilde“)", function(checked)
+        GC.DB:GetSettings().smartRecruitmentDetection = checked
+    end)
+    page.smartDetectionToggle:SetPoint("TOPLEFT", triggerCard, "TOPLEFT", 18, -398)
+    page.smartDetectionToggle.text:SetWidth(700)
+
     local gearCard = CreateCard(content, "Ausrüstung – Hintergrundabgleich")
     gearCard:SetSize(752, 132)
-    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1460)
+    gearCard:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -1500)
     CreateLabel(gearCard,
         "Die eigene Ausrüstung wird immer automatisch geprüft und kompakt mit Addon-Nutzern der Gilde abgeglichen.", {
         muted = true,
@@ -9046,11 +9050,10 @@ function GC.UI:SetLeadProfileLinks(lead)
     if not page or not page.leadLinkEdits then
         return
     end
-    -- Die Profil-Links kommen aus der Gildenquelle von Warcraft Logs. Fehlt
-    -- das optionale Modul, gibt es keine - die Felder bleiben leer und der
-    -- Hinweis darunter erklaert es. Ein harter Zugriff waere hier ein
-    -- Lua-Fehler bei jedem Klick auf eine Bewerbung.
-    local links = (lead and GC.WarcraftLogs and GC.WarcraftLogs:BuildCharacterLinks(lead.name)) or {}
+    -- Die Profil-Links (Armory, Warcraft-Logs-Charakterseite) werden aus Region,
+    -- Realm und Name gebaut - ohne das optionale Import-Modul, das dem Addon
+    -- nicht beiliegt. Nur wenn kein Realm zu ermitteln ist, bleiben sie leer.
+    local links = (lead and GC.Chat:BuildLeadProfileLinks(lead.name)) or {}
     local missing = false
     for key, edit in pairs(page.leadLinkEdits) do
         local link = links[key] or ""
@@ -9063,7 +9066,7 @@ function GC.UI:SetLeadProfileLinks(lead)
         end
     end
     if missing then
-        page.leadLinkNotice:SetText(GC.L("Für Links zuerst unter Warcraft Logs die Gildenquelle speichern."))
+        page.leadLinkNotice:SetText(GC.L("Ohne erkennbaren Realm des Interessenten lassen sich keine Profil-Links bilden."))
     else
         page.leadLinkNotice:SetText(GC.L(""))
     end
