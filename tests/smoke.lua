@@ -949,6 +949,40 @@ assert(#addon.DB:GetGuild().inbox == 1, "Einzellöschung hat nicht genau einen I
 assert(addon.Chat:ClearInbox() == true, "Postfach konnte nicht vollständig geleert werden")
 assert(#addon.DB:GetGuild().inbox == 0, "Postfach enthält nach dem Leeren noch Interessenten")
 
+-- Gelöschte bleiben eine Weile gelöscht (0.9.135): Ein einzeln gelöschter
+-- Bewerber wird sieben Tage nicht per Sync zurückgeholt - meldet er sich aber
+-- selbst direkt, ist das ein neues Signal und kommt durch.
+do
+    local tomb_guild = addon.DB:GetGuild()
+    local tomb_savedInbox = tomb_guild.inbox
+    local tomb_savedTombstones = tomb_guild.inboxTombstones
+    tomb_guild.inbox = {}
+    tomb_guild.inboxTombstones = {}
+
+    addon.Chat:CaptureLead("Suche Gilde für Kara", "Tomb-Realm", "Player-Tomb", "SucheNachGruppe")
+    assert(#tomb_guild.inbox == 1, "Testaufbau: der Bewerber wurde nicht erfasst")
+    assert(addon.Chat:RemoveLead(1) == true, "Der Bewerber ließ sich nicht löschen")
+    assert(#tomb_guild.inbox == 0, "Nach dem Löschen ist das Postfach nicht leer")
+
+    -- Ein Kollege spült denselben Bewerber per Sync zurück - er darf NICHT
+    -- wieder auftauchen.
+    local merged = addon.Chat:MergeRemoteLead({
+        name = "Tomb-Realm", guid = "Player-Tomb", text = "Suche Gilde für Kara",
+        firstSeenAt = addon.Util.Now(), lastSeenAt = addon.Util.Now(),
+        source = "SucheNachGruppe",
+    })
+    assert(merged == false and #tomb_guild.inbox == 0,
+        "Ein gelöschter Bewerber kam per Sync sofort zurück")
+
+    -- Meldet er sich selbst direkt, ist das ein neues Signal und kommt durch.
+    addon.Chat:CaptureLead("Bin wieder da, suche Gilde", "Tomb-Realm", "Player-Tomb", "WHISPER")
+    assert(#tomb_guild.inbox == 1,
+        "Ein direkter Neukontakt eines gelöschten Bewerbers wurde geblockt")
+
+    tomb_guild.inbox = tomb_savedInbox
+    tomb_guild.inboxTombstones = tomb_savedTombstones
+end
+
 local function LastAddonMessage()
     local entry = sentAddon[#sentAddon]
     return entry and entry[2] or ""

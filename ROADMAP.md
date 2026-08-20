@@ -327,6 +327,14 @@ Die Frage des Besitzers war grundsätzlicher: Warum zählt überhaupt etwas mit,
 
 Bewusst NICHT gewählt: die englischen Werbemerkmale einfach nachzutragen. Das hätte nur die freie Erkennung treffsicherer gemacht — die der Besitzer aber gar nicht will. Der Schalter ist die ehrlichere Antwort als immer neue Wortlisten. `GetRecruitmentWords` liefert die Vorgabe jetzt nur noch bei eingeschalteter Erkennung; die eigene Liste bleibt in jedem Fall maßgeblich. Regressionsanker in `smoke.lua`: genau die englische Zeile bleibt im strikten Modus draußen, ein Bewerber mit passendem eigenem Wort kommt weiter herein.
 
+### Nachtrag: gelöschte Bewerber bleiben eine Weile gelöscht
+
+Frage aus dem Betrieb: Wenn ich einen Interessenten aus dem Postfach lösche — wie wird verhindert, dass ihn ein anderer Client wieder zu mir synchronisiert? Antwort war bis 0.9.134: gar nicht. `RemoveLead` entfernte den Eintrag nur lokal, ohne Merker; `MergeRemoteLead` sperrte nur den eigenen Charakter, Gildenmitglieder und ausdrücklich Ignorierte. Ein gelöschter Bewerber, den ein Kollege noch hielt, kam beim nächsten Abgleich zurück. Das dauerhafte „Ignorieren“ verhinderte das zwar (es schreibt in `inboxFilters`, die auch den Empfang sperrt), aber ein schlichtes Löschen eben nicht.
+
+Gewählt wurde die mittlere Lösung: ein **befristeter, rein lokaler Grabstein**. `RemoveLead` legt für sieben Tage einen Merker an (`inboxTombstones`, per Gilde, nie im Netz, ISO-Datum wie die Ignorierliste, verfällt von selbst). `MergeRemoteLead` prüft ihn zusätzlich — bewusst NUR dort: Der eigene Erfassungsweg (`CaptureLead`) bleibt frei, damit ein Spieler, der sich in der Zeit selbst direkt meldet, als frisches Signal durchkommt. So bounct fremde Sync-Ware nicht zurück, ohne echten Neukontakt zu verschlucken.
+
+Ausdrücklich NICHT mit Merker: „Alles leeren“ (`ClearInbox`). Das ist ein Aufräumen der Ansicht; einen Merker über den ganzen Bestand zu legen, würde das gildenweite Postfach sieben Tage leer halten, obwohl Kollegen aktive Bewerber haben. Der Merker steht auch nicht in der Ignorierliste — er ist kein „dauerhaft ignorieren“, sondern ein „nicht sofort zurückspülen“. Regressionsanker in `smoke.lua`: löschen, Sync desselben Namens bleibt draußen, direkter Neukontakt kommt herein.
+
 ### Nachtrag: die Abmeldungskarte überlappte die Entscheidungen
 
 Ein Layoutfehler in der Mitgliederpflege: „Aktuelle Abmeldungen“ hing an einer festen Position (`-880`), während die Karten darüber — Pflegevorschläge und Entscheidungen — mit der Zahl der Vorschläge nach unten wuchsen. Ab rund acht Vorschlägen schob sich die Entscheidungskarte über die feste Abmeldungskarte, und deren Leerzeile („Keine Ausnahmen hinterlegt …“) lag über der Überschrift der nächsten. `RefreshMemberCare` führte die Abmeldungskarte bisher gar nicht nach. Jetzt hängt sie unter der Entscheidungskarte und wandert mit ihr; die Inhaltshöhe rechnet bis zu ihr, statt sie zu ignorieren.

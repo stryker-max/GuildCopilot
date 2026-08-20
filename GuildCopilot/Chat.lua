@@ -334,6 +334,59 @@ function GC.Chat:GetInboxFilterList()
     return list
 end
 
+-- === Gelöschte bleiben eine Weile gelöscht ================================
+--
+-- Das Postfach ist gildenweit: Löscht du einen Interessenten, hält ein anderer
+-- Gildenmitglied seine Kopie womöglich noch und schickt sie beim nächsten
+-- Abgleich zurück - der Eintrag wäre sofort wieder da. Ein Löschen legt deshalb
+-- einen kurzen, rein LOKALEN Merker an: Für sieben Tage nimmt der Sync diesen
+-- Spieler nicht wieder auf. Danach verfällt der Merker von selbst, und eine
+-- echte neue Meldung darf ihn wieder zeigen.
+--
+-- Bewusst nur der Sync-Weg (MergeRemoteLead): Meldet sich der Spieler in dieser
+-- Zeit selbst direkt bei dir, ist das ein frisches Signal und landet wie sonst
+-- im Postfach. Der Merker geht nie ins Netz und steht nicht in der
+-- Ignorierliste - er ist kein "dauerhaft ignorieren", sondern ein "nicht sofort
+-- zurückspülen".
+local INBOX_TOMBSTONE_DAYS = 7
+
+function GC.Chat:GetInboxTombstones()
+    local guildData = GC.DB:GetGuild()
+    guildData.inboxTombstones = guildData.inboxTombstones or {}
+    return guildData.inboxTombstones
+end
+
+function GC.Chat:PruneInboxTombstones()
+    local tombstones = self:GetInboxTombstones()
+    local today = GC.Util.TodayISO()
+    for key, entry in pairs(tombstones) do
+        local untilDate = type(entry) == "table" and entry.until_ or ""
+        if untilDate == "" or untilDate < today then
+            tombstones[key] = nil
+        end
+    end
+end
+
+function GC.Chat:NoteInboxTombstone(name)
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    if key == "" then
+        return
+    end
+    self:GetInboxTombstones()[key] = {
+        until_ = GC.Util.AddDaysISO(INBOX_TOMBSTONE_DAYS),
+        at = GC.Util.Now(),
+    }
+end
+
+function GC.Chat:IsInboxTombstoned(name)
+    if GC.Util.Trim(name) == "" then
+        return false
+    end
+    self:PruneInboxTombstones()
+    local key = GC.Util.NormalizeName(GC.Util.PlayerShortName(name))
+    return self:GetInboxTombstones()[key] ~= nil
+end
+
 function GC.Chat:MergeDuplicateLeads()
     local inbox = GC.DB:GetGuild().inbox
     local index = 1
@@ -902,6 +955,8 @@ function GC.Chat:RemoveLead(index)
     if not index or not inbox[index] then
         return false
     end
+    -- Sieben Tage nicht wieder hereinsyncen (siehe NoteInboxTombstone).
+    self:NoteInboxTombstone(inbox[index].name)
     table.remove(inbox, index)
     GC:FireCallback("INBOX_UPDATED")
     return true
@@ -912,6 +967,10 @@ function GC.Chat:ClearInbox()
     if #inbox == 0 then
         return false
     end
+    -- Bewusst OHNE Merker: "Alles leeren" ist ein Aufräumen der Ansicht, kein
+    -- Wegwerfen einzelner Bewerber. Sonst bliebe das gildenweite Postfach sieben
+    -- Tage leer, obwohl Kollegen noch aktive Interessenten haben. Wer einen
+    -- bestimmten dauerhaft los sein will, löscht ihn einzeln oder ignoriert ihn.
     for index = #inbox, 1, -1 do
         table.remove(inbox, index)
     end
@@ -1066,6 +1125,12 @@ function GC.Chat:MergeRemoteLead(record)
         return false
     end
     if self:IsInboxFiltered(record.name) then
+        return false
+    end
+    -- Frisch gelöscht: sieben Tage nicht per Sync zurückholen. Gilt bewusst nur
+    -- hier, nicht bei der eigenen Erfassung - meldet der Spieler sich selbst
+    -- direkt, ist das ein neues Signal und darf durch.
+    if self:IsInboxTombstoned(record.name) then
         return false
     end
 
