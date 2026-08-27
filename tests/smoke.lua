@@ -10554,9 +10554,11 @@ do
         flt_names[#flt_names + 1] = flt_guild.inbox[index].name
     end
     -- Der Magier - und der Eintrag OHNE bekannte Klasse. "Unbekannt" ist keine
-    -- Aussage über die Klasse; wer filtert, soll keine Bewerber verlieren.
+    -- Aussage über die Klasse; wer filtert, soll keine Bewerber verlieren. Die
+    -- Ansicht ist nach Datum geordnet: der jüngere „Unbekannt" (receivedAt 4)
+    -- steht vor dem älteren Magier (receivedAt 2).
     assert(#flt_names == 2, "Der Klassenfilter zeigt " .. #flt_names .. " statt 2 Einträgen")
-    assert(flt_names[1] == "Magier-Realm" and flt_names[2] == "Unbekannt-Realm",
+    assert(flt_names[1] == "Unbekannt-Realm" and flt_names[2] == "Magier-Realm",
         "Der Klassenfilter zeigt die falschen: " .. table.concat(flt_names, ", "))
 
     -- Stufe. Sie kommt aus dem Text des Bewerbers, deshalb sind die Stufen
@@ -10575,7 +10577,16 @@ do
     -- 70, 62 und der ohne Angabe. Die 45 fällt raus.
     assert(#flt_levels == 3,
         "Der Stufenfilter zeigt " .. #flt_levels .. " statt 3: " .. table.concat(flt_levels, ", "))
-    assert(flt_levels[3] == "Unbekannt-Realm",
+    -- Wer keine Stufe angegeben hat, bleibt sichtbar - unabhängig davon, an
+    -- welche Datumsposition ihn die Sortierung stellt. Geprüft wird deshalb die
+    -- Anwesenheit, nicht der Platz.
+    local flt_hasUnknown = false
+    for _, flt_name in ipairs(flt_levels) do
+        if flt_name == "Unbekannt-Realm" then
+            flt_hasUnknown = true
+        end
+    end
+    assert(flt_hasUnknown,
         "Wer keine Stufe angegeben hat, wurde vom Stufenfilter verborgen")
 
     addon.UI:GetInboxFilters().minLevel = 70
@@ -10589,12 +10600,20 @@ do
     -- === Der eigentliche Fall: Löschen bei gesetztem Filter ===============
     addon.DB:GetSettings().inboxFilters = { classFile = "PRIEST" }
     addon.UI:RefreshInbox()
-    -- Sichtbar: Priester (Platz 3) und Unbekannt (Platz 4).
+    -- Sichtbar sind Priester (echter Platz 3) und der klassenlose Unbekannt
+    -- (echter Platz 4). Sortiert wird nach Datum: Unbekannt (receivedAt 4) steht
+    -- oben, Priester (receivedAt 3) darunter. Kein sichtbarer Platz zeigt damit
+    -- auf den ersten echten Eintrag - genau hier ging früher der falsche verloren.
     assert(#flt_page.visibleLeads == 2, "Testaufbau: falsche Anzahl für die Löschprobe")
-    assert(addon.UI:GetLeadIndexForSlot(1) == 3,
+    assert(addon.UI:GetLeadIndexForSlot(1) == 4,
         "Der erste sichtbare Platz zeigt auf den echten Index "
-            .. tostring(addon.UI:GetLeadIndexForSlot(1)) .. " statt 3")
-    flt_page.leadDeleteButtons[1].scripts.OnClick()
+            .. tostring(addon.UI:GetLeadIndexForSlot(1)) .. " statt 4")
+    assert(addon.UI:GetLeadIndexForSlot(2) == 3,
+        "Der zweite sichtbare Platz zeigt auf den echten Index "
+            .. tostring(addon.UI:GetLeadIndexForSlot(2)) .. " statt 3")
+    -- Löschen über den zweiten Platz muss genau den Priester treffen (echter
+    -- Index 3), nicht den positionsgleichen echten Eintrag.
+    flt_page.leadDeleteButtons[2].scripts.OnClick()
     assert(#flt_guild.inbox == 3, "Es wurde nicht genau ein Eintrag gelöscht")
     for _, lead in ipairs(flt_guild.inbox) do
         assert(lead.name ~= "Priester-Realm", "Der Priester steht noch im Postfach")
@@ -10621,6 +10640,74 @@ do
 
     flt_guild.inbox = flt_saved
     addon.DB:GetSettings().inboxFilters = flt_savedFilters
+    addon.UI.selectedLeadKey = nil
+    addon.UI:RefreshInbox()
+end
+
+-- === Postfach nach Datum sortieren =========================================
+--
+-- Die Ansicht ist nach Aktivität geordnet: zuletzt Gemeldetes oben, Veraltetes
+-- unten - damit auf einen Blick sichtbar ist, was aktuell ist. Der wunde Punkt
+-- ist der Sync: Eine nachgereichte, ältere Bewerbung wird intern ganz vorn
+-- eingefügt (MergeRemoteLead) und darf trotzdem NICHT oben stehen, sonst sieht
+-- sie aus wie das Neueste.
+do
+    addon.UI:ShowPage("INBOX")
+    local srt_page = addon.UI.pages.INBOX
+    local srt_guild = addon.DB:GetGuild()
+    local srt_saved = srt_guild.inbox
+    local srt_savedFilters = addon.DB:GetSettings().inboxFilters
+    addon.DB:GetSettings().inboxFilters = {}
+    addon.UI.selectedLeadKey = nil
+
+    -- Einfügereihenfolge BEWUSST gegen die Zeit: der älteste Eintrag vorn (so,
+    -- wie MergeRemoteLead eine alte Sync-Kopie einreiht), der neueste hinten.
+    -- Höhere Zeitstempel sind jünger.
+    srt_guild.inbox = {
+        { name = "Sortier-Alt-Realm", lastSeenAt = 100,
+          messages = { { text = "am längsten her", receivedAt = 100 } } },
+        { name = "Sortier-Mittel-Realm", lastSeenAt = 300,
+          messages = { { text = "dazwischen", receivedAt = 300 } } },
+        { name = "Sortier-Neu-Realm", lastSeenAt = 500,
+          messages = { { text = "zuletzt gemeldet", receivedAt = 500 } } },
+    }
+    addon.UI:RefreshInbox()
+    local srt_order = {}
+    for _, srt_index in ipairs(srt_page.visibleLeads) do
+        srt_order[#srt_order + 1] = srt_guild.inbox[srt_index].name
+    end
+    assert(srt_order[1] == "Sortier-Neu-Realm" and srt_order[2] == "Sortier-Mittel-Realm"
+        and srt_order[3] == "Sortier-Alt-Realm",
+        "Das Postfach ist nicht nach Datum sortiert: " .. table.concat(srt_order, ", "))
+    -- Der oberste sichtbare Platz zeigt auf den jüngsten ECHTEN Eintrag (Index
+    -- 3), nicht auf den ersten gespeicherten - Auswählen und Löschen treffen
+    -- damit den Richtigen.
+    assert(addon.UI:GetLeadIndexForSlot(1) == 3,
+        "Der oberste Platz zeigt nicht auf die neueste Bewerbung, sondern auf Index "
+            .. tostring(addon.UI:GetLeadIndexForSlot(1)))
+
+    -- Jetzt kommt eine ältere Bewerbung per Sync herein. MergeRemoteLead fügt sie
+    -- intern vorn ein - in der nach Datum sortierten Ansicht muss sie aber an
+    -- ihren Zeitplatz rücken, zwischen Mittel (300) und Alt (100).
+    assert(addon.Chat:MergeRemoteLead({
+        name = "Sortier-Sync-Realm", guid = nil, classFile = nil, source = "WHISPER",
+        firstSeenAt = 200, lastSeenAt = 200,
+        text = "kam per Sync, ist aber älter",
+    }) == true, "Die Sync-Kopie wurde nicht aufgenommen")
+    assert(srt_guild.inbox[1].name == "Sortier-Sync-Realm",
+        "Testaufbau: die Sync-Kopie steht intern nicht vorn")
+    addon.UI:RefreshInbox()
+    local srt_after = {}
+    for _, srt_index in ipairs(srt_page.visibleLeads) do
+        srt_after[#srt_after + 1] = srt_guild.inbox[srt_index].name
+    end
+    assert(srt_after[1] == "Sortier-Neu-Realm" and srt_after[2] == "Sortier-Mittel-Realm"
+        and srt_after[3] == "Sortier-Sync-Realm" and srt_after[4] == "Sortier-Alt-Realm",
+        "Eine ältere Sync-Bewerbung steht nicht an ihrem Datumsplatz, sondern: "
+            .. table.concat(srt_after, ", "))
+
+    srt_guild.inbox = srt_saved
+    addon.DB:GetSettings().inboxFilters = srt_savedFilters
     addon.UI.selectedLeadKey = nil
     addon.UI:RefreshInbox()
 end

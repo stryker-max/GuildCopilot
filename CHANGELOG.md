@@ -7,6 +7,18 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.138 – Addon
+
+**Geändert**
+
+- **Postfach: Bewerbungen stehen jetzt nach Datum sortiert – die neueste oben.**
+  Bisher lag die Liste in Eingangsreihenfolge da, und ausgerechnet eine per
+  Gildensync nachgereichte, tagealte Bewerbung wurde ganz oben eingefügt, als
+  wäre sie das Neueste. Jetzt richtet sich die Reihenfolge nach der letzten
+  Aktivität: Was gerade aktuell ist, steht oben; Veraltetes sinkt nach unten, wo
+  man es wegräumen kann. Sortiert wird nur die Ansicht – gelöscht oder
+  gildenweit geteilt wird unverändert alles.
+
 ## 0.9.137 – Addon
 
 **Behoben**

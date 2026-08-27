@@ -8771,16 +8771,54 @@ function GC.UI:LeadMatchesInboxFilter(lead)
     return true
 end
 
--- Die echten Postfachplaetze, die gerade sichtbar sind - in ihrer Reihenfolge.
--- Alles Weitere rechnet damit: Bloettern, Auswaehlen und Loeschen brauchen den
--- ECHTEN Index, sonst loescht ein Klick bei gesetztem Filter den falschen.
+-- Wann an einem Eintrag zuletzt etwas passiert ist - der Zeitpunkt, nach dem das
+-- Postfach sortiert wird. lastSeenAt ist der belastbare Wert: Er faehrt im Sync
+-- mit und wird beim Zusammenfuehren als der SPAETERE der beiden Staende
+-- uebernommen (MergeRemoteLead). Er zeigt damit die echte gildenweite Aktivitaet
+-- des Bewerbers, nicht den Zeitpunkt, zu dem eine Sync-Kopie hier eintraf. Fehlt
+-- er (Altbestand), treten die letzte Nachricht und schliesslich die
+-- Ersterfassung an seine Stelle.
+local function LeadActivityTime(lead)
+    if type(lead) ~= "table" then
+        return 0
+    end
+    local newest = tonumber(lead.lastSeenAt) or 0
+    local messages = lead.messages
+    if type(messages) == "table" then
+        local latest = messages[#messages]
+        if type(latest) == "table" then
+            newest = math.max(newest, tonumber(latest.receivedAt) or 0)
+        end
+    end
+    return math.max(newest, tonumber(lead.firstSeenAt) or 0)
+end
+
+-- Die echten Postfachplaetze, die gerade sichtbar sind - nach Datum sortiert.
+-- Die zuletzt aktive Bewerbung steht oben, damit auf einen Blick sichtbar ist,
+-- was aktuell ist; Veraltetes sinkt nach unten, wo es sich wegloeschen laesst.
+-- Frueher stand hier die Einfuegereihenfolge, und ausgerechnet eine per Sync
+-- nachgereichte, TAGE alte Bewerbung wird ganz vorn eingefuegt (MergeRemoteLead)
+-- und sass damit oben, als waere sie das Neueste.
+--
+-- Sortiert werden die INDIZES, aufgeloest wird ueber den echten Eintrag: Alles
+-- Weitere rechnet mit dem ECHTEN Index - Bloettern, Auswaehlen und Loeschen -,
+-- sonst loescht ein Klick den falschen. Bei gleichem Zeitpunkt entscheidet der
+-- kleinere Index, damit die Liste bei jedem Auffrischen ruhig stehen bleibt.
 function GC.UI:GetVisibleLeadIndexes()
+    local inbox = GC.DB:GetGuild().inbox
     local visible = {}
-    for index, lead in ipairs(GC.DB:GetGuild().inbox) do
+    for index, lead in ipairs(inbox) do
         if self:LeadMatchesInboxFilter(lead) then
             visible[#visible + 1] = index
         end
     end
+    table.sort(visible, function(a, b)
+        local ta, tb = LeadActivityTime(inbox[a]), LeadActivityTime(inbox[b])
+        if ta ~= tb then
+            return ta > tb
+        end
+        return a < b
+    end)
     return visible
 end
 

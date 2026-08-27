@@ -298,6 +298,54 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.138 – Das Postfach nach Datum, damit Aktuelles oben steht
+
+Aus der Gilde kam eine schlichte Bitte zum Postfach: nach Datum sortieren, damit
+man auf einen Blick sieht, was aktuell ist. Der Hintergrund war ein konkretes
+Ärgernis – veraltete Bewerbungen werden weggelöscht, und prompt stehen wieder
+neue da, die in Wahrheit schon Tage alt sind.
+
+### Warum „neue" Einträge tagealt sein können
+
+Das liegt am gildenweiten Sync. Seit 0.9.132 teilt jeder Client sein Postfach
+mit der Gilde; kommt eine fremde Kopie herein, fügt `MergeRemoteLead` sie vorn in
+die Liste ein – unabhängig davon, wann der Bewerber sich tatsächlich gemeldet
+hat. Die Liste stand aber in Eingangsreihenfolge, „vorn" hieß also „ganz oben".
+Eine per Sync nachgereichte Bewerbung von vorgestern landete damit an derselben
+Stelle wie eine gerade eben eingegangene und sah aus wie das Neueste. Genau das
+war gemeint mit „es kommen direkt neue, die auch Tage alt sind".
+
+### Sortiert wird nach der letzten Aktivität
+
+Die Ansicht ordnet die Bewerbungen jetzt nach `lastSeenAt` absteigend: die
+zuletzt aktive oben, Veraltetes unten. `lastSeenAt` ist bewusst gewählt, weil es
+den echten Zeitpunkt trägt und nicht den des Sync-Empfangs. Der Wert fährt im
+Sync-Paket mit und wird beim Zusammenführen als der spätere der beiden Stände
+übernommen; eine tagealte Kopie kommt also mit ihrem tagealten Zeitstempel an und
+rückt an ihren Platz weiter unten, statt sich vorzudrängen. Fehlt der Wert
+(Altbestand ohne `lastSeenAt`), treten der Zeitpunkt der letzten Nachricht und
+zuletzt die Ersterfassung an seine Stelle, damit auch alte Einträge eine
+belastbare Position bekommen.
+
+### Sortiert wird die Ansicht, nicht der Bestand
+
+Wie schon beim Klassen- und Stufenfilter ändert die Sortierung nur die
+Reihenfolge der Anzeige. Gespeichert bleibt die Liste, wie sie ist, und
+gildenweit geteilt wird unverändert alles. Technisch heißt das: Sortiert werden
+die sichtbaren Listenplätze über ihren echten Index. Auswählen, Blättern und
+Löschen rechnen weiterhin mit diesem echten Index, sonst träfe ein Klick bei
+sortierter (oder gefilterter) Liste den falschen Eintrag – derselbe Fallstrick,
+den schon der Filter hatte. Bei gleichem Zeitpunkt entscheidet der kleinere
+Index, damit die Liste bei jedem Auffrischen ruhig stehen bleibt und nicht
+flimmert.
+
+Der Regressionsanker in `smoke.lua` prüft beides: dass die Reihenfolge dem Datum
+folgt und dass eine über `MergeRemoteLead` nachgereichte ältere Bewerbung an
+ihren Zeitplatz rückt statt nach oben. Die bestehenden Filtertests wurden auf die
+neue, datumsabsteigende Reihenfolge nachgezogen; ihr eigentlicher Prüfzweck –
+dass Löschen bei gesetztem Filter genau den sichtbaren Eintrag trifft – bleibt
+unangetastet.
+
 ## 0.9.137 – Was vom entfernten Warcraft-Logs-Modul übrig blieb
 
 Aus dem Betrieb kamen drei Beobachtungen am Postfach, alle mit derselben Wurzel:
