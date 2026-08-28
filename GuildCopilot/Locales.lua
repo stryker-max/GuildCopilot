@@ -75,6 +75,14 @@ local english = {
     ["Posten"] = "Post",
     ["Wiederholen"] = "Auto-repeat",
     ["Besetzung"] = "Lineup",
+    ["Klassen & Specs wählen"] = "Pick classes & specs",
+    ["Keine Specs gewählt - über den Knopf ankreuzen."]
+        = "No specs picked - tick them via the button.",
+    ["Gesucht: "] = "Wanted: ",
+    ["Ankreuzen, welche Specs gesucht werden - sie erscheinen im Suchspruch."]
+        = "Tick the specs you want - they show up in the LFM line.",
+    ["Alle abwählen"] = "Clear all",
+    ["Fertig"] = "Done",
     ["Tanks"] = "Tanks",
     ["Heiler"] = "Healers",
     ["dabei {n}"] = "in group {n}",

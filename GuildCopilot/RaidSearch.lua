@@ -265,6 +265,33 @@ function GC.RaidSearch:RemoveSpecWish(specKey)
     TouchPlan(plan)
 end
 
+-- Fuer die Kaestchenliste (wie Klassen & Specs): an/aus statt hoch-/runter.
+-- Angehakt heisst schlicht "einmal gewuenscht"; die Stueckzahl bleibt im
+-- Datenmodell moeglich, wird aber ueber die Liste nicht mehr hochgezaehlt.
+function GC.RaidSearch:SetSpecWish(specKey, enabled)
+    if not GC.SpecByKey[specKey] then
+        return
+    end
+    local plan = self:EnsurePlan()
+    plan.need.specs[specKey] = enabled and math.max(1, tonumber(plan.need.specs[specKey]) or 1) or nil
+    TouchPlan(plan)
+end
+
+function GC.RaidSearch:HasSpecWish(specKey)
+    local plan = self:GetPlan()
+    return plan ~= nil and (tonumber(plan.need.specs[specKey]) or 0) > 0
+end
+
+-- Alle Spec-Wuensche loeschen (Knopf im Auswahlfenster).
+function GC.RaidSearch:ClearSpecWishes()
+    local plan = self:GetPlan()
+    if not plan then
+        return
+    end
+    plan.need.specs = {}
+    TouchPlan(plan)
+end
+
 -- Die Spec-Wünsche in stabiler Reihenfolge (Klassenreihenfolge, dann
 -- Spec-Index), damit Anzeige und Spruch nicht bei jedem Aufruf würfeln.
 function GC.RaidSearch:GetSpecWishes()
@@ -464,6 +491,51 @@ end
 -- Chatnachricht passt. Gekürzt wird der Reihe nach: erst die Notiz, dann die
 -- Spec-Wünsche, dann die HR-Liste (sofern ein SR-Link sie ersetzt), zuletzt
 -- der Instanzname durch seinen Kurznamen.
+-- Termin fuer den Spruch: Wochentag UND Datum (Owner-Wunsch), dazu Uhrzeit -
+-- "Fr 05.09. 19:30". Bewusst kein "heute"/"morgen" wie in der Fensteranzeige:
+-- Im Chat soll das echte Datum stehen, damit niemand rechnen muss.
+function GC.RaidSearch:FormatWhenForSpruch(plan)
+    plan = plan or self:GetPlan()
+    if not plan then
+        return ""
+    end
+    local parts = {}
+    local weekday = WEEKDAY_SHORT[GC.Util.WeekdayOfISO(plan.dateISO or "") or 0]
+    local day, month = tostring(plan.dateISO or ""):match("^%d%d%d%d%-(%d%d)%-(%d%d)$")
+    if weekday and day then
+        parts[#parts + 1] = weekday .. " " .. month .. "." .. day .. "."
+    elseif weekday then
+        parts[#parts + 1] = weekday
+    end
+    local timeText = GC.Util.Trim(plan.timeText)
+    if timeText ~= "" then
+        parts[#parts + 1] = timeText
+    end
+    return table.concat(parts, " ")
+end
+
+-- Der Bedarf als eine Liste: erst die Rollen mit Zahl ("1 Tank"), dann die
+-- ausdruecklich gewuenschten Specs als Kuerzel ("Shadow Priest") - alles in
+-- EINER "noch ..."-Aufzaehlung, ohne den frueheren "(Wuensche: ...)"-Zusatz
+-- (Owner-Wunsch). "withSpecs=false" laesst die Specs weg, wenn es sonst zu
+-- lang wird.
+function GC.RaidSearch:DescribeNeed(open, withSpecs)
+    local parts = {}
+    for _, role in ipairs(ROLE_ORDER) do
+        local count = open.roles[role] or 0
+        if count > 0 then
+            parts[#parts + 1] = count .. " " .. ROLE_LABEL[role]
+        end
+    end
+    if withSpecs then
+        for _, entry in ipairs(open.specs) do
+            parts[#parts + 1] = (entry.count > 1 and (entry.count .. "x ") or "")
+                .. GC.SpecShort(entry.spec.key)
+        end
+    end
+    return table.concat(parts, ", ")
+end
+
 function GC.RaidSearch:BuildAnnouncement()
     local plan = self:GetPlan()
     if not plan then
@@ -471,17 +543,12 @@ function GC.RaidSearch:BuildAnnouncement()
     end
     local rosterState = self:GetRosterState()
     local open = self:GetOpenNeeds(rosterState)
-    local roleText = self:DescribeOpenRoles(open)
-    local wishParts = {}
-    for _, entry in ipairs(open.specs) do
-        wishParts[#wishParts + 1] = (entry.count > 1 and (entry.count .. "x ") or "")
-            .. GC.SpecShort(entry.spec.key)
-    end
-    local wishText = table.concat(wishParts, ", ")
+    local needFull = self:DescribeNeed(open, true)
+    local needRoles = self:DescribeNeed(open, false)
 
     local function Compose(zoneName, needText, includeNote, hrText)
         local parts = { "LFM " .. zoneName }
-        local when = self:FormatWhen(plan)
+        local when = self:FormatWhenForSpruch(plan)
         if when ~= "" then
             parts[1] = parts[1] .. " " .. when
         end
@@ -522,18 +589,14 @@ function GC.RaidSearch:BuildAnnouncement()
     if zoneShort == "" then
         zoneShort = zone
     end
-    local fullNeed = roleText
-    if wishText ~= "" then
-        fullNeed = roleText ~= "" and (roleText .. " (Wünsche: " .. wishText .. ")")
-            or ("Wünsche: " .. wishText)
-    end
 
+    -- Von ausfuehrlich (mit Specs und Notiz) nach knapp (Kurzname, nur Rollen).
     local candidates = {
-        Compose(zone, fullNeed, true, hr),
-        Compose(zone, fullNeed, false, hr),
-        Compose(zone, roleText, false, hr),
-        Compose(zone, roleText, false, hrShort),
-        Compose(zoneShort, roleText, false, hrShort),
+        Compose(zone, needFull, true, hr),
+        Compose(zone, needFull, false, hr),
+        Compose(zone, needRoles, false, hr),
+        Compose(zone, needRoles, false, hrShort),
+        Compose(zoneShort, needRoles, false, hrShort),
     }
     for _, candidate in ipairs(candidates) do
         if #candidate <= GC.Constants.MAX_CHAT_BYTES then

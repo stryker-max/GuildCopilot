@@ -369,11 +369,24 @@ Der Owner schickte die Seite mehrfach im Spiel; daraus wurde ihr Feinschliff:
   das Ergebnis (**Suchspruch groß oben** mit mehrzeiliger Vorschau, Zulauf
   darunter). Damit erledigt sich auch die zusammengeschobene Karte, in der
   Kanäle und Knöpfe überlappten.
+- **Spec-Auswahl als Kästchenliste.** „Die Klassenauswahl sollte wie in
+  Klassen & Specs sein, zum Anklicken eine Liste mit Häkchen – und wenn ich
+  mehr als 3 habe, funktioniert gar nichts." Das alte Aufklappmenü wich einem
+  Knopf „Klassen & Specs wählen", der eine scrollbare Häkchenliste öffnet (je
+  Klasse eine farbige Zeile, darunter die drei Specs als `CreateToggle`).
+  Damit ist auch der Mehr-als-drei-Ärger weg – er hing am Einzelauswahl-Menü,
+  das nach jedem Klick zuklappte.
 - **Kürzere Spec-Namen.** „resto shamy usw. ist kürzer als Wiederherstellungs-
   Namen – eher englische Abkürzungen?" Ja. `GC.SpecShortLabel` liefert die
   LFM-üblichen Kürzel – „Resto Shaman", „Boomkin", „Shadow Priest", „Ret
-  Pala" – fürs Besetzungs- und Zuordnungsmenü und den Spruch. Die
+  Pala" – für die Auswahl, das Zuordnungsmenü und den Spruch. Die
   Rekrutierung bleibt deutsch.
+- **Spruch mit Datum, Specs inline.** „Beim Datum soll nicht nur der
+  Wochentag, sondern auch das Datum gepostet werden" – der Spruch nennt jetzt
+  „Fr 05.09. 19:30". Und „das ‚noch Wünsche‘ mag ich auch nicht": Die
+  gesuchten Specs stehen direkt in der „noch …"-Aufzählung („noch 1 Tank,
+  2 Heiler, Shadow Priest"), der Klammer-Zusatz ist weg. Wird es zu lang,
+  fallen zuerst die Specs, dann die Notiz, zuletzt greift der Instanz-Kurzname.
 - **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die Knöpfe;
   die Vorlagen-Knöpfe sitzen an ihren Karten (Zettel-Vorlagen am Suchzettel,
   Antwortvorlagen am Zulauf).

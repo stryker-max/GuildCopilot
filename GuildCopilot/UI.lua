@@ -11373,34 +11373,13 @@ function GC.UI:BuildRaidSearchPage()
         font = "GameFontNormalSmall" })
     page.wishLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -116)
 
-    -- Kurze LFM-Kuerzel im Menue (GC.SpecShort): "Resto Shaman" statt
-    -- "Wiederherstellungs-Schamanen" (Owner-Wunsch). Der Rueckweg vom Label
-    -- zum Spec-Schluessel laeuft ueber die mitgefuehrte Zuordnung.
-    local wishOptions = {}
-    local wishOptionKey = {}
-    for _, classFile in ipairs(GC.ClassOrder) do
-        for _, spec in ipairs(GC.Classes[classFile].specs) do
-            local label = GC.SpecShort(spec.key)
-            wishOptions[#wishOptions + 1] = label
-            wishOptionKey[label] = spec.key
-        end
-    end
-    -- Ein Klick auf einen bereits gewuenschten Spec nimmt den Wunsch zurueck -
-    -- ein Menue fuer beides, statt Zeilen mit eigenen Entfernen-Knoepfen.
-    page.wishDropdown = CreateChoiceDropdown(need, 230, wishOptions, function(value)
-        local specKey = wishOptionKey[value]
-        if specKey then
-            local plan = GC.RaidSearch:EnsurePlan()
-            if plan.need.specs[specKey] then
-                GC.RaidSearch:RemoveSpecWish(specKey)
-            else
-                GC.RaidSearch:AddSpecWish(specKey)
-            end
-        end
-        page.wishDropdown:SetValue("")
-        GC.UI:RefreshRaidSearch()
-    end, false, "Spec-Wunsch an/aus", nil, 24)
-    page.wishDropdown:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -136)
+    -- Die Spec-Auswahl ist eine Kaestchenliste wie "Klassen & Specs"
+    -- (Owner-Wunsch), geoeffnet ueber diesen Knopf - in der kleinen
+    -- Besetzungskarte ist fuer die ganze Liste kein Platz, im Dialog schon.
+    page.wishButton = CreateButton(need, "Klassen & Specs wählen", 230, 24, function()
+        GC.UI:ToggleRaidSearchSpecs()
+    end)
+    page.wishButton:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -136)
 
     page.unassignedLabel = CreateLabel(need, "", { muted = true, width = 344, height = 14,
         font = "GameFontNormalSmall" })
@@ -11520,6 +11499,9 @@ function GC.UI:BuildRaidSearchPage()
         end
         if page.repliesDialog then
             page.repliesDialog:Hide()
+        end
+        if page.specDialog then
+            page.specDialog:Hide()
         end
     end)
 end
@@ -11730,7 +11712,7 @@ function GC.UI:RefreshRaidSearch()
     end
     local wishes = GC.RaidSearch:GetSpecWishes()
     if #wishes == 0 then
-        page.wishLabel:SetText(GC.L("Keine Spec-Wünsche - das Menü darunter schaltet sie an und aus."))
+        page.wishLabel:SetText(GC.L("Keine Specs gewählt - über den Knopf ankreuzen."))
     else
         local parts = {}
         for _, wish in ipairs(wishes) do
@@ -11738,8 +11720,9 @@ function GC.UI:RefreshRaidSearch()
             parts[#parts + 1] = GC.SpecShort(wish.specKey)
                 .. (haveCount >= wish.count and " (da)" or "")
         end
-        page.wishLabel:SetText(GC.L("Wünsche: ") .. table.concat(parts, ", "))
+        page.wishLabel:SetText(GC.L("Gesucht: ") .. table.concat(parts, ", "))
     end
+    self:RefreshRaidSearchSpecs()
     if rosterState.unassigned > 0 then
         page.unassignedLabel:SetText(GC.LFormat("{n} dabei ohne Spec-Zuordnung - zählt auf keine Rolle.",
             { n = rosterState.unassigned }))
@@ -11828,6 +11811,88 @@ function GC.UI:RefreshRaidSearch()
     self:UpdateRaidSearchBarShown()
 end
 
+-- === Dialog: Klassen & Specs ankreuzen =====================================
+--
+-- Wie die Rekrutierungsseite, nur als Fenster: eine scrollbare Liste, je
+-- Klasse eine farbige Zeile und darunter die drei Specs als Kaestchen zum
+-- Anklicken (Owner-Wunsch). Ersetzt das alte Aufklappmenue, mit dem ab dem
+-- vierten Wunsch das Zurechtklicken misslang.
+function GC.UI:ToggleRaidSearchSpecs()
+    local page = self.pages.RAIDSEARCH
+    if not page then
+        return
+    end
+    if not page.specDialog then
+        local dialog = CreatePanel(self.frame, THEME.window, THEME.accent)
+        dialog:SetSize(300, 520)
+        dialog:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
+        dialog:SetFrameLevel((self.frame:GetFrameLevel() or 1) + 80)
+        dialog:EnableMouse(true)
+        dialog:Hide()
+        local title = CreateLabel(dialog, "Klassen & Specs", { title = true })
+        title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -14)
+        local hint = CreateLabel(dialog, "Ankreuzen, welche Specs gesucht werden - sie erscheinen im Suchspruch.",
+            { muted = true, width = 264, height = 28, vertical = "TOP", font = "GameFontNormalSmall" })
+        hint:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -40)
+
+        local scroll = CreateModernScrollFrame(dialog)
+        scroll:SetPoint("TOPLEFT", dialog, "TOPLEFT", 12, -74)
+        scroll:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -14, 52)
+        local content = CreateFrame("Frame", nil, scroll)
+        content:SetWidth(248)
+        scroll:SetScrollChild(content)
+
+        dialog.specToggles = {}
+        local y = 0
+        for _, classFile in ipairs(GC.ClassOrder) do
+            local classInfo = GC.Classes[classFile]
+            local header = CreateLabel(content, classInfo.plural, { width = 240, height = 20 })
+            header:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -y)
+            local red, green, blue = ClassColor(classFile)
+            header:SetTextColor(red, green, blue)
+            y = y + 24
+            for _, spec in ipairs(classInfo.specs) do
+                local specKey = spec.key
+                local toggle = CreateToggle(content, spec.name, function(enabled)
+                    GC.RaidSearch:SetSpecWish(specKey, enabled)
+                    GC.UI:RefreshRaidSearch()
+                end)
+                toggle:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -y)
+                dialog.specToggles[specKey] = toggle
+                y = y + 26
+            end
+            y = y + 6
+        end
+        content:SetHeight(math.max(1, y))
+
+        dialog.clear = CreateButton(dialog, "Alle abwählen", 130, 26, function()
+            GC.RaidSearch:ClearSpecWishes()
+            GC.UI:RefreshRaidSearch()
+        end)
+        dialog.clear:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 18, 14)
+        dialog.close = CreateButton(dialog, "Fertig", 90, 26, function()
+            dialog:Hide()
+        end)
+        dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -18, 14)
+        page.specDialog = dialog
+    end
+    if page.templatesDialog then page.templatesDialog:Hide() end
+    if page.repliesDialog then page.repliesDialog:Hide() end
+    page.specDialog:SetShown(not page.specDialog:IsShown())
+    self:RefreshRaidSearchSpecs()
+end
+
+function GC.UI:RefreshRaidSearchSpecs()
+    local page = self.pages.RAIDSEARCH
+    local dialog = page and page.specDialog
+    if not dialog or not dialog:IsShown() then
+        return
+    end
+    for specKey, toggle in pairs(dialog.specToggles) do
+        SetToggle(toggle, GC.RaidSearch:HasSpecWish(specKey))
+    end
+end
+
 -- === Dialog: Suchzettel-Vorlagen ===========================================
 
 function GC.UI:ToggleRaidSearchTemplates()
@@ -11883,6 +11948,9 @@ function GC.UI:ToggleRaidSearchTemplates()
     end
     if page.repliesDialog then
         page.repliesDialog:Hide()
+    end
+    if page.specDialog then
+        page.specDialog:Hide()
     end
     page.templatesDialog:SetShown(not page.templatesDialog:IsShown())
     self:RefreshRaidSearchTemplates()
@@ -11971,6 +12039,9 @@ function GC.UI:ToggleRaidSearchReplies()
     end
     if page.templatesDialog then
         page.templatesDialog:Hide()
+    end
+    if page.specDialog then
+        page.specDialog:Hide()
     end
     page.repliesDialog:SetShown(not page.repliesDialog:IsShown())
     self:RefreshRaidSearchReplies()

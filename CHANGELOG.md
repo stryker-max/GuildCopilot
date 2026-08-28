@@ -32,9 +32,17 @@ Installer und Addon werden getrennt gezählt.
   (Suchzettel oben, Besetzung darunter), rechts das Ergebnis (Suchspruch
   oben, Zulauf darunter). Die vorher unten zusammengeschobene Karte hat
   wieder Luft.
+- **Spec-Auswahl als Kästchenliste wie „Klassen & Specs“.** Der Knopf
+  „Klassen & Specs wählen“ öffnet eine scrollbare Liste mit Häkchen zum
+  Ankreuzen – statt des alten Aufklappmenüs, mit dem sich ab dem vierten
+  Wunsch nichts mehr zurechtklicken ließ.
 - **Kurze Spec-Kürzel** wie „Resto Shaman“, „Boomkin“, „Shadow Priest“ statt
-  der langen deutschen Namen – im Besetzungs- und Zuordnungsmenü und im
+  der langen deutschen Namen – in der Auswahl, im Zuordnungsmenü und im
   LFM-Spruch. Die Rekrutierung bleibt deutsch.
+- **Der Suchspruch nennt Wochentag und Datum** („Fr 05.09. 19:30“), nicht
+  mehr nur den Wochentag; gesuchte Specs stehen direkt in der „noch …“-Zeile
+  („noch 1 Tank, 2 Heiler, Shadow Priest“), ohne den früheren
+  „(Wünsche: …)“-Zusatz.
 - **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die
   Knöpfe; die Zettel-Vorlagen öffnen an der Suchzettel-Karte, die
   Antwortvorlagen an der Zulauf-Karte.

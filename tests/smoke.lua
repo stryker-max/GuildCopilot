@@ -10749,14 +10749,22 @@ do
     rsx:SetHardReserve("Urne")
     rsx:SetSrLink("softres.it/r/abc")
     rsx:AdjustRoleNeed("HEALER", 2)
+    -- Wochentag UND Datum im Spruch (Owner-Wunsch). Die Testuhr steht fest auf
+    -- dem 27.07.2026 (ein Montag), also "Mo 27.07.".
+    rsx:SetSpecWish("PRIEST:3", true)
     local rsx_line = rsx:BuildAnnouncement()
     assert(rsx_line:find("LFM Karazhan", 1, true), "Der Spruch nennt die Instanz nicht: " .. rsx_line)
-    assert(rsx_line:find("heute 19:30", 1, true), "Der Spruch nennt den Termin nicht: " .. rsx_line)
+    assert(rsx_line:find("Mo 27.07.", 1, true), "Der Spruch nennt Wochentag und Datum nicht: " .. rsx_line)
+    assert(rsx_line:find("19:30", 1, true), "Der Spruch nennt die Uhrzeit nicht: " .. rsx_line)
     assert(rsx_line:find("2SR > MS > OS", 1, true), "Der Spruch nennt die Lootregel nicht")
     assert(rsx_line:find("HR: Urne", 1, true), "Der Spruch nennt die Hard Reserve nicht")
     assert(rsx_line:find("noch 2 Heiler", 1, true), "Der Spruch nennt den offenen Bedarf nicht")
+    -- Der Spec-Wunsch steht INLINE im Bedarf, ohne "(Wünsche: ...)".
+    assert(rsx_line:find("Shadow Priest", 1, true), "Der Spec-Wunsch fehlt im Spruch: " .. rsx_line)
+    assert(not rsx_line:find("Wünsche", 1, true), "Der alte (Wünsche: ...)-Zusatz steht noch im Spruch")
     assert(rsx_line:find("/w me", 1, true), "Der Spruch endet nicht mit /w me")
     assert(#rsx_line <= addon.Constants.MAX_CHAT_BYTES, "Der Spruch ist laenger als 255 Bytes")
+    rsx:SetSpecWish("PRIEST:3", false)
 
     -- Byte-Grenze unter Druck: lange Hard Reserve ohne SR-Link, dazu Notiz -
     -- die Stufen muessen greifen, notfalls das UTF-8-sichere Kuerzen.
