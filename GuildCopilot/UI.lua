@@ -785,6 +785,27 @@ local function ConfigureEdit(edit, maxLetters)
             GC.UI.frame:Hide()
         end
     end)
+    -- Ein verstecktes Eingabefeld darf die Tastatur nicht behalten.
+    --
+    -- WoW gibt den Tastaturfokus NICHT von selbst frei, wenn der Elternrahmen
+    -- versteckt wird: Wer in ein Feld geklickt hatte und dann minimierte, die
+    -- Seite wechselte oder das Fenster schloss, tippte weiter unsichtbar in
+    -- dieses Feld - kein Chat, keine Steuerung. Bei einem MEHRZEILIGEN Feld
+    -- (der Spruchvorschau der Raidsuche) verschluckt Enter dabei sogar den
+    -- Zeilenumbruch, statt das Chatfenster zu oeffnen - genau die
+    -- Gildenmeldung "kann kein Chatfenster oeffnen, wenn minimiert".
+    --
+    -- OnHide feuert auf einem Feld, sobald es unsichtbar wird - auch wenn nur
+    -- ein Vorfahre versteckt wurde (Seite, Hauptfenster). Das Feld raeumt
+    -- seinen Fokus deshalb hier selbst weg. Das braucht keine
+    -- GetCurrentKeyBoardFocus-API (die es im Anniversary-Client nicht
+    -- zuverlaessig gibt) und trifft fremde Felder wie die Chat-Eingabe nie -
+    -- jedes Feld raeumt nur sich selbst auf.
+    edit:HookScript("OnHide", function(self)
+        if self.ClearFocus then
+            self:ClearFocus()
+        end
+    end)
 end
 
 local function CreateEdit(parent, width, height)
@@ -11205,10 +11226,13 @@ function GC.UI:BuildRaidSearchPage()
     page.srEdit = SheetEdit("SR-Link", -248, GC.RaidSearch.SetSrLink)
     page.noteEdit = SheetEdit("Notiz", -282, GC.RaidSearch.SetNote)
 
-    -- === Der Spruch ========================================================
+    -- === RECHTE SPALTE: das Wichtigste zuerst ==============================
+    -- Der Suchspruch steht rechts oben, gross und prominent (Owner-Wunsch:
+    -- "das wichtigste Fenster"). Er ist, was tatsaechlich in den Chat geht.
+
     local announce = CreateCard(page, "Suchspruch")
-    announce:SetSize(380, 198)
-    announce:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -388)
+    announce:SetSize(390, 256)
+    announce:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -66)
     page.announce = announce
 
     page.raidSearchMarkers = {}
@@ -11218,11 +11242,12 @@ function GC.UI:BuildRaidSearchPage()
             GC.RaidSearch:SetMarker(selectedMarker)
             GC.UI:RefreshRaidSearch()
         end)
-        markerButton:SetPoint("TOPLEFT", announce, "TOPLEFT", 152 + ((markerIndex - 1) * 26), -12)
+        markerButton:SetPoint("TOPLEFT", announce, "TOPLEFT", 150 + ((markerIndex - 1) * 26), -12)
         page.raidSearchMarkers[markerIndex] = markerButton
     end
 
-    page.announceEdit = CreateTextArea(announce, 344, 48, 400)
+    -- Grosse Vorschau: Der ganze LFM-Spruch steht sichtbar da, mehrzeilig.
+    page.announceEdit = CreateTextArea(announce, 354, 84, 400)
     page.announceEdit.container:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -46)
     page.announceEdit:SetScript("OnTextChanged", function()
         GC.UI:RefreshRaidSearchPost()
@@ -11230,16 +11255,14 @@ function GC.UI:BuildRaidSearchPage()
 
     page.announceBytes = CreateLabel(announce, "", { muted = true, width = 120, height = 14,
         font = "GameFontNormalSmall" })
-    page.announceBytes:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -98)
-    -- "Neu generieren" wie auf der Werbeseite - dasselbe Wort fuer dieselbe
-    -- Handlung: die Vorschau frisch aus dem Zettel bauen und Handarbeit am
-    -- Text verwerfen. ("Neu ableiten" kam aus der Gilde als unverstaendlich
-    -- zurueck.)
+    page.announceBytes:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -138)
+    -- "Neu generieren" wie auf der Werbeseite - dieselbe Handlung, dasselbe
+    -- Wort: die Vorschau frisch aus dem Zettel bauen und Handarbeit verwerfen.
     page.announceRegenerate = CreateButton(announce, "Neu generieren", 112, 20, function()
         page.announceEdit:SetText(GC.RaidSearch:BuildAnnouncement())
         GC.UI:RefreshRaidSearchPost()
     end)
-    page.announceRegenerate:SetPoint("TOPRIGHT", announce, "TOPRIGHT", -18, -95)
+    page.announceRegenerate:SetPoint("TOPRIGHT", announce, "TOPRIGHT", -18, -136)
 
     -- Kanalkaestchen als feste Plaetze, beim Auffrischen befuellt: Die Liste
     -- haengt von den selbst beigetretenen Kanaelen ab und aendert sich mit
@@ -11255,19 +11278,19 @@ function GC.UI:BuildRaidSearchPage()
         end)
         local column = (slot - 1) % 4
         local row = math.floor((slot - 1) / 4)
-        toggle:SetPoint("TOPLEFT", announce, "TOPLEFT", 18 + (column * 90), -120 - (row * 24))
+        toggle:SetPoint("TOPLEFT", announce, "TOPLEFT", 18 + (column * 90), -160 - (row * 24))
         toggle:Hide()
         page.channelToggles[slot] = toggle
     end
 
-    page.confirmButton = CreateButton(announce, "Text bestätigen", 116, 26, function()
+    page.confirmButton = CreateButton(announce, "Text bestätigen", 104, 28, function()
         local success, message = GC.RaidSearch:ConfirmText(page.announceEdit:GetText())
         page.zulaufStatus:SetText(message or "")
         SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
         GC.UI:RefreshRaidSearch()
     end)
     page.confirmButton:SetPoint("BOTTOMLEFT", announce, "BOTTOMLEFT", 18, 10)
-    page.postButton = CreateButton(announce, "Suche starten", 116, 26, function()
+    page.postButton = CreateButton(announce, "Suche starten", 120, 28, function()
         local success, message = GC.RaidSearch:Post()
         page.zulaufStatus:SetText(message or "")
         SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
@@ -11277,13 +11300,13 @@ function GC.UI:BuildRaidSearchPage()
     page.autoToggle = CreateToggle(announce, "Wiederholen", function(enabled)
         GC.UI:SetRaidSearchAutoRepeat(enabled)
     end)
-    page.autoToggle:SetPoint("BOTTOMLEFT", announce, "BOTTOMLEFT", 262, 12)
+    page.autoToggle:SetPoint("LEFT", page.postButton, "RIGHT", 8, 0)
     AttachAutoRepeatTooltip(page.autoToggle)
 
-    -- === Besetzung: Soll und Ist ===========================================
+    -- === Besetzung: Soll und Ist (linke Spalte, unter dem Zettel) ==========
     local need = CreateCard(page, "Besetzung")
-    need:SetSize(390, 230)
-    need:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -66)
+    need:SetSize(380, 198)
+    need:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -388)
     page.needCard = need
     page.needCount = CreateLabel(need, "", { align = "RIGHT", width = 90, height = 20 })
     page.needCount:SetPoint("TOPRIGHT", need, "TOPRIGHT", -18, -16)
@@ -11291,69 +11314,73 @@ function GC.UI:BuildRaidSearchPage()
     page.roleRows = {}
     for index, definition in ipairs(RAIDSEARCH_ROLE_ROWS) do
         local role = definition.role
-        local y = -42 - ((index - 1) * 28)
+        local y = -44 - ((index - 1) * 24)
         local row = {}
-        row.label = CreateLabel(need, definition.label, { width = 58, height = 24 })
+        row.label = CreateLabel(need, definition.label, { width = 56, height = 22 })
         row.label:SetPoint("TOPLEFT", need, "TOPLEFT", 18, y)
         row.minus = CreateButton(need, "–", 22, 22, function()
             GC.RaidSearch:AdjustRoleNeed(role, -1)
             GC.UI:RefreshRaidSearch()
         end)
-        row.minus:SetPoint("TOPLEFT", need, "TOPLEFT", 80, y)
-        row.count = CreateLabel(need, "0", { align = "CENTER", width = 28, height = 22 })
-        row.count:SetPoint("TOPLEFT", need, "TOPLEFT", 102, y)
+        row.minus:SetPoint("TOPLEFT", need, "TOPLEFT", 76, y)
+        row.count = CreateLabel(need, "0", { align = "CENTER", width = 26, height = 22 })
+        row.count:SetPoint("TOPLEFT", need, "TOPLEFT", 100, y)
         row.plus = CreateButton(need, "+", 22, 22, function()
             GC.RaidSearch:AdjustRoleNeed(role, 1)
             GC.UI:RefreshRaidSearch()
         end)
-        row.plus:SetPoint("TOPLEFT", need, "TOPLEFT", 130, y)
-        row.have = CreateLabel(need, "", { muted = true, width = 110, height = 22 })
-        row.have:SetPoint("TOPLEFT", need, "TOPLEFT", 168, y)
-        row.delta = CreateLabel(need, "", { align = "RIGHT", width = 80, height = 22 })
-        row.delta:SetPoint("TOPLEFT", need, "TOPLEFT", 286, y)
+        row.plus:SetPoint("TOPLEFT", need, "TOPLEFT", 128, y)
+        row.have = CreateLabel(need, "", { muted = true, width = 100, height = 22 })
+        row.have:SetPoint("TOPLEFT", need, "TOPLEFT", 158, y)
+        row.delta = CreateLabel(need, "", { align = "RIGHT", width = 96, height = 22 })
+        row.delta:SetPoint("TOPLEFT", need, "TOPLEFT", 262, y)
         page.roleRows[role] = row
     end
 
-    page.wishLabel = CreateLabel(need, "", { muted = true, width = 354, height = 30,
-        vertical = "TOP", font = "GameFontNormalSmall" })
-    page.wishLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -126)
+    page.wishLabel = CreateLabel(need, "", { muted = true, width = 344, height = 16,
+        font = "GameFontNormalSmall" })
+    page.wishLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -116)
 
+    -- Kurze LFM-Kuerzel im Menue (GC.SpecShort): "Resto Shaman" statt
+    -- "Wiederherstellungs-Schamanen" (Owner-Wunsch). Der Rueckweg vom Label
+    -- zum Spec-Schluessel laeuft ueber die mitgefuehrte Zuordnung.
     local wishOptions = {}
+    local wishOptionKey = {}
     for _, classFile in ipairs(GC.ClassOrder) do
         for _, spec in ipairs(GC.Classes[classFile].specs) do
-            wishOptions[#wishOptions + 1] = spec.recruitLabel
+            local label = GC.SpecShort(spec.key)
+            wishOptions[#wishOptions + 1] = label
+            wishOptionKey[label] = spec.key
         end
     end
     -- Ein Klick auf einen bereits gewuenschten Spec nimmt den Wunsch zurueck -
     -- ein Menue fuer beides, statt Zeilen mit eigenen Entfernen-Knoepfen.
     page.wishDropdown = CreateChoiceDropdown(need, 230, wishOptions, function(value)
-        for specKey, spec in pairs(GC.SpecByKey) do
-            if spec.recruitLabel == value then
-                local plan = GC.RaidSearch:EnsurePlan()
-                if plan.need.specs[specKey] then
-                    GC.RaidSearch:RemoveSpecWish(specKey)
-                else
-                    GC.RaidSearch:AddSpecWish(specKey)
-                end
-                break
+        local specKey = wishOptionKey[value]
+        if specKey then
+            local plan = GC.RaidSearch:EnsurePlan()
+            if plan.need.specs[specKey] then
+                GC.RaidSearch:RemoveSpecWish(specKey)
+            else
+                GC.RaidSearch:AddSpecWish(specKey)
             end
         end
         page.wishDropdown:SetValue("")
         GC.UI:RefreshRaidSearch()
     end, false, "Spec-Wunsch an/aus", nil, 24)
-    page.wishDropdown:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -160)
+    page.wishDropdown:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -136)
 
-    page.unassignedLabel = CreateLabel(need, "", { muted = true, width = 354, height = 14,
+    page.unassignedLabel = CreateLabel(need, "", { muted = true, width = 344, height = 14,
         font = "GameFontNormalSmall" })
-    page.unassignedLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -190)
-    page.absentLabel = CreateLabel(need, "", { width = 354, height = 14,
+    page.unassignedLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -164)
+    page.absentLabel = CreateLabel(need, "", { width = 344, height = 14,
         font = "GameFontNormalSmall", color = THEME.warning })
-    page.absentLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -206)
+    page.absentLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -180)
 
-    -- === Zulauf ============================================================
+    -- === Zulauf (rechte Spalte, unter dem Suchspruch) ======================
     local zulauf = CreateCard(page, "Zulauf")
-    zulauf:SetSize(390, 284)
-    zulauf:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -302)
+    zulauf:SetSize(390, 258)
+    zulauf:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -328)
     page.zulauf = zulauf
 
     -- Auch die Antwortvorlagen wohnen an ihrer Karte: Bearbeitet wird, was
@@ -11378,8 +11405,8 @@ function GC.UI:BuildRaidSearchPage()
 
     page.responseRows = {}
     for slot = 1, RAIDSEARCH_RESPONSE_ROWS do
-        local y = -40 - ((slot - 1) * 44)
-        local row = CreateButton(zulauf, "", 354, 42, function()
+        local y = -42 - ((slot - 1) * 42)
+        local row = CreateButton(zulauf, "", 354, 40, function()
             local name = page.responseRows[slot].responseName
             if name then
                 page.selectedResponseName = name
@@ -11388,42 +11415,39 @@ function GC.UI:BuildRaidSearchPage()
         end)
         row:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, y)
         row.label:ClearAllPoints()
-        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -4)
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -3)
         row.label:SetPoint("RIGHT", row, "RIGHT", -96, 0)
         row.label:SetHeight(16)
         row.label:SetJustifyH("LEFT")
         row.state = CreateLabel(row, "", { align = "RIGHT", width = 88, height = 16,
             font = "GameFontNormalSmall" })
-        row.state:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -4)
+        row.state:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -3)
         row.message = CreateLabel(row, "", { muted = true, width = 338, height = 14,
             font = "GameFontNormalSmall" })
-        row.message:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -23)
+        row.message:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -22)
         page.responseRows[slot] = row
     end
 
     -- Aktionen fuer die GEWAEHLTE Antwort - eine Zeile statt Knoepfen an jeder,
     -- damit die Namen nicht abgeschnitten werden (Lektion der Auftragszeilen).
+    -- Kurze LFM-Kuerzel wie im Wunschmenue (GC.SpecShort).
     local specOptions = { "Keine Spec-Zuordnung" }
+    local specOptionKey = {}
     for _, classFile in ipairs(GC.ClassOrder) do
         for _, spec in ipairs(GC.Classes[classFile].specs) do
-            specOptions[#specOptions + 1] = spec.recruitLabel
+            local label = GC.SpecShort(spec.key)
+            specOptions[#specOptions + 1] = label
+            specOptionKey[label] = spec.key
         end
     end
     page.responseSpec = CreateChoiceDropdown(zulauf, 150, specOptions, function(value)
         if not page.selectedResponseName then
             return
         end
-        local chosen
-        for specKey, spec in pairs(GC.SpecByKey) do
-            if spec.recruitLabel == value then
-                chosen = specKey
-                break
-            end
-        end
-        GC.RaidSearch:SetResponseSpec(page.selectedResponseName, chosen)
+        GC.RaidSearch:SetResponseSpec(page.selectedResponseName, specOptionKey[value])
         GC.UI:RefreshRaidSearch()
     end, false, "Spec zuordnen", nil, 26)
-    page.responseSpec:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -220)
+    page.responseSpec:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -214)
     page.inviteButton = CreateButton(zulauf, "Einladen", 70, 26, function()
         if page.selectedResponseName then
             local success, message = GC.RaidSearch:Invite(page.selectedResponseName)
@@ -11432,10 +11456,10 @@ function GC.UI:BuildRaidSearchPage()
             GC.UI:RefreshRaidSearch()
         end
     end, "PRIMARY")
-    page.inviteButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 174, -220)
+    page.inviteButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 174, -214)
     page.replyDropdown = CreateChoiceDropdown(zulauf, 96, {}, function() end,
         false, "Antworten", nil, 26)
-    page.replyDropdown:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 250, -220)
+    page.replyDropdown:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 250, -214)
     page.removeButton = CreateButton(zulauf, "×", 22, 26, function()
         if page.selectedResponseName then
             GC.RaidSearch:RemoveResponse(page.selectedResponseName)
@@ -11443,11 +11467,11 @@ function GC.UI:BuildRaidSearchPage()
             GC.UI:RefreshRaidSearch()
         end
     end)
-    page.removeButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 352, -220)
+    page.removeButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 352, -214)
 
     page.zulaufStatus = CreateLabel(zulauf, "", { width = 354, height = 14,
         font = "GameFontNormalSmall" })
-    page.zulaufStatus:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -256)
+    page.zulaufStatus:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -242)
 
     -- Cooldown-Countdown am Posten-Knopf und Kanalzustaende leben im
     -- Halbsekundentakt, wie auf der Postseite.
@@ -11677,7 +11701,7 @@ function GC.UI:RefreshRaidSearch()
         local parts = {}
         for _, wish in ipairs(wishes) do
             local haveCount = rosterState.specCounts[wish.specKey] or 0
-            parts[#parts + 1] = wish.spec.recruitLabel
+            parts[#parts + 1] = GC.SpecShort(wish.specKey)
                 .. (haveCount >= wish.count and " (da)" or "")
         end
         page.wishLabel:SetText(GC.L("Wünsche: ") .. table.concat(parts, ", "))
@@ -11755,7 +11779,7 @@ function GC.UI:RefreshRaidSearch()
     if hasSelection then
         local response = GC.RaidSearch:FindResponse(page.selectedResponseName)
         local spec = response and GC.SpecByKey[response.specKey or ""]
-        page.responseSpec:SetValue(spec and spec.recruitLabel or "")
+        page.responseSpec:SetValue(spec and GC.SpecShort(response.specKey) or "")
     else
         page.responseSpec:SetValue("")
     end

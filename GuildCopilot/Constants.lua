@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.141",
+    VERSION = "0.9.142",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -1240,6 +1240,30 @@ for classFile, classInfo in pairs(GC.Classes) do
         spec.index = index
         GC.SpecByKey[spec.key] = spec
     end
+end
+
+-- Kurze, in der LFM-Kultur uebliche englische Spec-Kuerzel. Die deutschen
+-- recruitLabel ("Wiederherstellungs-Schamanen") sind fuer die Rekrutierung
+-- richtig, aber im Suchspruch und im knappen Besetzungsmenue der Raidsuche zu
+-- lang - dort spricht ohnehin jeder LFM-Englisch ("Resto Shaman", "Boomkin").
+-- Gilt nur in der Raidsuche; die Rekrutierung bleibt deutsch.
+GC.SpecShortLabel = {
+    ["WARRIOR:1"] = "Arms War",   ["WARRIOR:2"] = "Fury War",   ["WARRIOR:3"] = "Prot War",
+    ["PALADIN:1"] = "Holy Pala",  ["PALADIN:2"] = "Prot Pala",  ["PALADIN:3"] = "Ret Pala",
+    ["HUNTER:1"] = "BM Hunter",   ["HUNTER:2"] = "MM Hunter",    ["HUNTER:3"] = "Surv Hunter",
+    ["ROGUE:1"] = "Assa Rogue",   ["ROGUE:2"] = "Combat Rogue",  ["ROGUE:3"] = "Sub Rogue",
+    ["PRIEST:1"] = "Disc Priest", ["PRIEST:2"] = "Holy Priest",  ["PRIEST:3"] = "Shadow Priest",
+    ["SHAMAN:1"] = "Ele Shaman",  ["SHAMAN:2"] = "Enh Shaman",   ["SHAMAN:3"] = "Resto Shaman",
+    ["MAGE:1"] = "Arcane Mage",   ["MAGE:2"] = "Fire Mage",      ["MAGE:3"] = "Frost Mage",
+    ["WARLOCK:1"] = "Affli Lock", ["WARLOCK:2"] = "Demo Lock",   ["WARLOCK:3"] = "Destro Lock",
+    ["DRUID:1"] = "Boomkin",      ["DRUID:2"] = "Feral Druid",   ["DRUID:3"] = "Resto Druid",
+}
+
+-- Kurzform, sonst der deutsche recruitLabel. Ein Punkt, an dem beide Namen
+-- zusammenlaufen.
+function GC.SpecShort(specKey)
+    local spec = GC.SpecByKey[specKey]
+    return GC.SpecShortLabel[specKey] or (spec and spec.recruitLabel) or tostring(specKey)
 end
 
 GC.CoverageRules = {

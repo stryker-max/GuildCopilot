@@ -475,7 +475,7 @@ function GC.RaidSearch:BuildAnnouncement()
     local wishParts = {}
     for _, entry in ipairs(open.specs) do
         wishParts[#wishParts + 1] = (entry.count > 1 and (entry.count .. "x ") or "")
-            .. entry.spec.recruitLabel
+            .. GC.SpecShort(entry.spec.key)
     end
     local wishText = table.concat(wishParts, ", ")
 

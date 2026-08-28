@@ -116,8 +116,27 @@ Dummy.__index = function(self, key)
             frame.shown = false
         end
     elseif key == "HasFocus" then
-        return function()
-            return false
+        -- Ein einfaches Fokusmodell, damit sich pruefen laesst, ob ein
+        -- verstecktes Feld die Tastatur wieder freigibt (0.9.142).
+        return function(frame)
+            return frame.focused == true
+        end
+    elseif key == "SetFocus" then
+        return function(frame)
+            frame.focused = true
+        end
+    elseif key == "ClearFocus" then
+        return function(frame)
+            frame.focused = false
+        end
+    elseif key == "HookScript" then
+        -- Anders als SetScript ueberschreibt HookScript nichts: Es haengt einen
+        -- weiteren Rueckruf an. Die Tests koennen ihn ueber frame.hooks
+        -- ausloesen (in WoW feuert OnHide, sobald ein Vorfahre versteckt wird).
+        return function(frame, event, callback)
+            frame.hooks = frame.hooks or {}
+            frame.hooks[event] = frame.hooks[event] or {}
+            table.insert(frame.hooks[event], callback)
         end
     elseif key == "Enable" then
         -- Fuer Layouttests: ob ein Knopf bedienbar ist, bleibt ablesbar.

@@ -298,6 +298,62 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.142 – Die Fokusfalle richtig gelöst, und die Raidsuche nach Bild und Bedarf
+
+Drei Gildenmeldungen zur frischen Raidsuche, dazu die hartnäckige aus 0.9.140.
+
+### „Kann kein Chatfenster öffnen, wenn minimiert" – jetzt wirklich
+
+0.9.140 hatte das falsche Werkzeug gewählt. Der Ansatz dort rief beim
+Minimieren `GetCurrentKeyBoardFocus`, um einen hängenden Feldfokus zu lösen –
+nur gibt es diese API im Anniversary-Client nicht zuverlässig, der Aufruf lief
+ins Leere (genau die Lehre aus dem Memory-Eintrag „WoW-API erst nachschlagen").
+Die Meldung blieb.
+
+Die eigentliche Ursache: **Eine EditBox behält in WoW den Tastaturfokus, wenn
+ihr Elternrahmen versteckt wird.** Wer in ein Feld geklickt hatte und dann
+minimierte, tippte weiter unsichtbar hinein – kein Chat, keine Steuerung. Die
+neue, große Spruchvorschau der Raidsuche machte es schlimmer: Sie ist
+mehrzeilig und fängt schon einen Klick auf den Kasten als Fokus; Enter setzt
+darin einen Zeilenumbruch, statt den Chat zu öffnen.
+
+Der richtige Hebel braucht keine fragliche API: **Jedes Feld räumt seinen
+Fokus in seinem eigenen `OnHide` weg.** `OnHide` feuert auf einem Feld, sobald
+es unsichtbar wird – auch wenn nur ein Vorfahre (Seite, Hauptfenster)
+versteckt wurde. Damit deckt eine Stelle in `ConfigureEdit` alle Fälle ab:
+Minimieren, Seitenwechsel, Schließen. Ein fremdes Feld wird nie angefasst –
+jedes räumt nur sich selbst auf. Der Testrahmen bekam ein einfaches
+Fokusmodell (`SetFocus`/`ClearFocus`/`HasFocus`) und `HookScript`, damit
+`tests/smoke.lua` das direkt nachstellt.
+
+### Der Suchspruch gehört nach rechts und groß
+
+Owner-Wunsch nach dem zweiten Screenshot: „Den Suchspruch hätte ich eher rechts
+und in groß und übersichtlich, weil das ist das wichtigste Fenster." Stimmt –
+er ist das, was tatsächlich in den Chat geht. Die Seite ist neu geordnet:
+
+- **Links die Eingaben:** Suchzettel oben, Besetzung darunter.
+- **Rechts das Ergebnis:** der **Suchspruch groß oben** (mit großer, mehr­zeiliger
+  Vorschau des ganzen LFM-Textes), der Zulauf darunter.
+
+Nebenbei erledigt sich die dritte Meldung – die Suchspruch-Karte war unten
+zusammengeschoben, Kanäle und Knöpfe überlappten. In der großen Karte hat
+alles wieder Luft, und die Layoutmaße sind so gewählt, dass sich nichts mehr
+überschneidet.
+
+### Kürzere Spec-Namen
+
+„resto shamy usw. ist kürzer als Wiederherstellungs-Namen – eher englische
+Abkürzungen?" Ja. Ein neuer `GC.SpecShortLabel` liefert die in der LFM-Kultur
+üblichen Kürzel – „Resto Shaman", „Boomkin", „Shadow Priest", „Ret Pala" – für
+das Besetzungs- und das Zuordnungsmenü und für den LFM-Spruch. Die
+Rekrutierung (Vorschläge, Werbung) bleibt bewusst deutsch; dort ist der volle
+Name richtig.
+
+`tests/validate.mjs` hält den OnHide-Fokusschutz, die Kürzel und den
+großen Suchspruch rechts fest; `tests/smoke.lua` prüft, dass ein verstecktes
+Feld den Fokus löst und dass die Kürzel kürzer sind als die recruitLabel.
+
 ## 0.9.141 – Das Postfach verjährt, und die Raidsuche lernt aus dem ersten Screenshot
 
 Zwei Gildenmeldungen vom selben Abend, dazu ein Wort, das keiner verstand.

@@ -7,6 +7,29 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.142 – Addon
+
+**Behoben**
+
+- **Minimiert lässt sich das Chatfenster wieder öffnen.** Ein Eingabefeld
+  behielt beim Minimieren den Tastaturfokus – besonders die (mehrzeilige)
+  Spruchvorschau der Raidsuche: Enter setzte dann einen unsichtbaren
+  Zeilenumbruch, statt den Chat zu öffnen. Jedes Feld gibt seinen Fokus jetzt
+  frei, sobald es versteckt wird (Minimieren, Seitenwechsel, Schließen);
+  fremde Eingabefelder bleiben unberührt.
+- **Raidsuche: die Suchspruch-Karte war unten zusammengeschoben.** Kanäle und
+  Knöpfe überlappten sich.
+
+**Geändert (Raidsuche)**
+
+- **Der Suchspruch steht jetzt groß oben rechts** – das wichtigste Feld, mit
+  großer Vorschau des ganzen LFM-Textes. Links liegen die Eingaben
+  (Suchzettel oben, Besetzung darunter), rechts das Ergebnis (Suchspruch
+  oben, Zulauf darunter).
+- **Kurze Spec-Kürzel** wie „Resto Shaman“, „Boomkin“, „Shadow Priest“ statt
+  der langen deutschen Namen – im Besetzungs- und Zuordnungsmenü und im
+  LFM-Spruch. Die Rekrutierung bleibt deutsch.
+
 ## 0.9.141 – Addon
 
 **Behoben**

@@ -10863,6 +10863,13 @@ do
         "Die angewendete Vorlage liegt auf dem falschen Wochentag")
     assert(rsx_applied.loot.rule == "2SR > MS > OS", "Die Lootregel fehlt in der Vorlage")
 
+    -- Kurze LFM-Kuerzel statt langer deutscher recruitLabel (Owner-Wunsch).
+    assert(addon.SpecShort("SHAMAN:3") == "Resto Shaman",
+        "Das kurze Spec-Kuerzel fehlt: " .. tostring(addon.SpecShort("SHAMAN:3")))
+    assert(addon.SpecShort("DRUID:1") == "Boomkin", "Boomkin-Kuerzel fehlt")
+    assert(#addon.SpecShort("SHAMAN:3") < #addon.SpecByKey["SHAMAN:3"].recruitLabel,
+        "Das Kuerzel ist nicht kuerzer als der recruitLabel")
+
     -- Die Seite selbst laesst sich aufschlagen und zeichnen; der Zulauf ist
     -- danach wieder leer (frischer Entwurf), der Suchbalken folgt dem
     -- Zustand: Entwurf heisst kein Balken.
@@ -10934,36 +10941,37 @@ do
     currentTime = ttl_savedTime
 end
 
--- === Fokusfalle beim Minimieren (0.9.140) ==================================
+-- === Fokusfalle beim Minimieren (0.9.140/0.9.142) ==========================
 --
 -- Eine EditBox, deren Elternteil versteckt wird, behaelt in WoW den
--- Tastaturfokus - wer nach einem Klick ins Feld minimierte, fuetterte ein
--- unsichtbares Feld statt Chat und Steuerung. Minimieren, Seitenwechsel und
--- Schliessen muessen einen EIGENEN Fokus loesen, einen fremden (die
--- Chat-Eingabe) aber in Ruhe lassen.
+-- Tastaturfokus - wer nach einem Klick ins Feld minimierte, die Seite
+-- wechselte oder das Fenster schloss, fuetterte ein unsichtbares Feld statt
+-- Chat und Steuerung. Bei der mehrzeiligen Spruchvorschau der Raidsuche
+-- verschluckt Enter dabei sogar den Zeilenumbruch, statt das Chatfenster zu
+-- oeffnen. Seit 0.9.142 raeumt jedes Feld seinen Fokus in seinem eigenen
+-- OnHide weg (das feuert, sobald ein Vorfahre versteckt wird) - ohne die
+-- GetCurrentKeyBoardFocus-API, die es im Anniversary-Client nicht sicher gibt.
 do
-    local fkt_cleared = 0
-    local fkt_field = {
-        ClearFocus = function() fkt_cleared = fkt_cleared + 1 end,
-        GetParent = function() return addon.UI.frame end,
-    }
-    GetCurrentKeyBoardFocus = function() return fkt_field end
-    addon.UI:SetWindowMinimized(true)
-    assert(fkt_cleared == 1, "Minimieren loest den eigenen Feldfokus nicht")
-    addon.UI:SetWindowMinimized(false)
-    addon.UI:ShowPage("OVERVIEW")
-    assert(fkt_cleared >= 2, "Der Seitenwechsel loest den eigenen Feldfokus nicht")
+    local fkt_edit = addon.UI.pages.RAIDSEARCH.announceEdit
+    assert(fkt_edit ~= nil, "Die Spruchvorschau der Raidsuche fehlt")
+    assert(fkt_edit.hooks and fkt_edit.hooks.OnHide and #fkt_edit.hooks.OnHide > 0,
+        "Die Spruchvorschau raeumt ihren Fokus beim Verstecken nicht weg (OnHide fehlt)")
+    fkt_edit:SetFocus()
+    assert(fkt_edit:HasFocus() == true, "Testaufbau: das Feld hat keinen Fokus bekommen")
+    for _, fkt_hook in ipairs(fkt_edit.hooks.OnHide) do
+        fkt_hook(fkt_edit)
+    end
+    assert(fkt_edit:HasFocus() == false,
+        "Ein verstecktes Feld behaelt den Tastaturfokus - minimiert bliebe der Chat blockiert")
 
-    local fkt_foreign = {
-        ClearFocus = function() fkt_cleared = 100 end,
-        GetParent = function() return nil end,
-    }
-    GetCurrentKeyBoardFocus = function() return fkt_foreign end
-    addon.UI:SetWindowMinimized(true)
-    addon.UI:SetWindowMinimized(false)
-    addon.UI:ShowPage("ROSTER")
-    assert(fkt_cleared < 100, "Ein fremdes Eingabefeld wurde defokussiert")
-    GetCurrentKeyBoardFocus = nil
+    -- Auch ein einzeiliges Feld (CreateEdit) traegt denselben Schutz.
+    local fkt_date = addon.UI.pages.RAIDSEARCH.dateEdit
+    fkt_date:SetFocus()
+    for _, fkt_hook in ipairs((fkt_date.hooks or {}).OnHide or {}) do
+        fkt_hook(fkt_date)
+    end
+    assert(fkt_date:HasFocus() == false,
+        "Auch das Datumsfeld muss den Fokus beim Verstecken loesen")
 end
 
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den
