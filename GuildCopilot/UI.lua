@@ -11526,7 +11526,9 @@ function GC.UI:RebuildRaidSearchReplyDropdown()
         page.replyDropdown:SetValue("")
         GC.UI:RefreshRaidSearch()
     end, false, "Antworten", nil, 26)
-    page.replyDropdown:SetPoint("TOPLEFT", page.zulauf, "TOPLEFT", 250, -220)
+    -- Dieselbe Zeile wie beim Aufbau (-214): sonst rutschte das neu gebaute
+    -- Menue nach dem Bearbeiten von Vorlagen in die Statuszeile.
+    page.replyDropdown:SetPoint("TOPLEFT", page.zulauf, "TOPLEFT", 250, -214)
 end
 
 function GC.UI:SetRaidSearchAutoRepeat(enabled)
