@@ -298,77 +298,50 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
-## 0.9.142 – Die Fokusfalle richtig gelöst, und die Raidsuche nach Bild und Bedarf
+## 0.9.140 – Minimiert kein Chat, altes Postfach, und die Raidsuche nach Bild und Bedarf
 
-Drei Gildenmeldungen zur frischen Raidsuche, dazu die hartnäckige aus 0.9.140.
+Nach dem Raidsuche-Release (0.9.139) kamen mehrere Gildenmeldungen an einem
+Abend. Diese Version sammelt die Antworten darauf.
 
-### „Kann kein Chatfenster öffnen, wenn minimiert" – jetzt wirklich
+### „Kann kein Chatfenster öffnen, wenn minimiert" – der dritte Anlauf hält
 
-0.9.140 hatte das falsche Werkzeug gewählt. Der Ansatz dort rief beim
-Minimieren `GetCurrentKeyBoardFocus`, um einen hängenden Feldfokus zu lösen –
-nur gibt es diese API im Anniversary-Client nicht zuverlässig, der Aufruf lief
-ins Leere (genau die Lehre aus dem Memory-Eintrag „WoW-API erst nachschlagen").
-Die Meldung blieb.
+Diese Meldung hat zwei Fehlschläge gebraucht, und beide gehören ehrlich in
+die Chronik. **Erster Versuch:** ein hängender Feldfokus über
+`GetCurrentKeyBoardFocus` beim Minimieren gelöst – nur gibt es diese API im
+Anniversary-Client nicht zuverlässig, der Aufruf lief ins Leere (genau die
+Lehre aus dem Memory-Eintrag „WoW-API erst nachschlagen"). **Zweiter
+Versuch:** jedes Feld räumt seinen Fokus in seinem `OnHide` weg. Richtig und
+nützlich – aber es war nicht die Wurzel, und die Meldung blieb.
 
-Die eigentliche Ursache: **Eine EditBox behält in WoW den Tastaturfokus, wenn
-ihr Elternrahmen versteckt wird.** Wer in ein Feld geklickt hatte und dann
-minimierte, tippte weiter unsichtbar hinein – kein Chat, keine Steuerung. Die
-neue, große Spruchvorschau der Raidsuche machte es schlimmer: Sie ist
-mehrzeilig und fängt schon einen Klick auf den Kasten als Fokus; Enter setzt
-darin einen Zeilenumbruch, statt den Chat zu öffnen.
+Die eigentliche Ursache liegt **nicht** am Feldfokus, sondern am
+Hauptfenster selbst: Es hat die Tastatur aktiviert (`EnableKeyboard(true)`),
+um Escape zu behandeln, und fängt damit **jede** Taste ab – auch Enter.
+Solange das Fenster offen ist, reicht der Propagate-Schalter die Tasten
+weiter, sodass Enter durchkommt. Der **zugeklappte Balken** aber braucht die
+Tastatur gar nicht – Escape schließt ihn ohnehin über `UISpecialFrames` –,
+und genau dort schluckte er das Enter, mit dem man den Chat öffnet.
 
-Der richtige Hebel braucht keine fragliche API: **Jedes Feld räumt seinen
-Fokus in seinem eigenen `OnHide` weg.** `OnHide` feuert auf einem Feld, sobald
-es unsichtbar wird – auch wenn nur ein Vorfahre (Seite, Hauptfenster)
-versteckt wurde. Damit deckt eine Stelle in `ConfigureEdit` alle Fälle ab:
-Minimieren, Seitenwechsel, Schließen. Ein fremdes Feld wird nie angefasst –
-jedes räumt nur sich selbst auf. Der Testrahmen bekam ein einfaches
-Fokusmodell (`SetFocus`/`ClearFocus`/`HasFocus`) und `HookScript`, damit
-`tests/smoke.lua` das direkt nachstellt.
-
-### Der Suchspruch gehört nach rechts und groß
-
-Owner-Wunsch nach dem zweiten Screenshot: „Den Suchspruch hätte ich eher rechts
-und in groß und übersichtlich, weil das ist das wichtigste Fenster." Stimmt –
-er ist das, was tatsächlich in den Chat geht. Die Seite ist neu geordnet:
-
-- **Links die Eingaben:** Suchzettel oben, Besetzung darunter.
-- **Rechts das Ergebnis:** der **Suchspruch groß oben** (mit großer, mehr­zeiliger
-  Vorschau des ganzen LFM-Textes), der Zulauf darunter.
-
-Nebenbei erledigt sich die dritte Meldung – die Suchspruch-Karte war unten
-zusammengeschoben, Kanäle und Knöpfe überlappten. In der großen Karte hat
-alles wieder Luft, und die Layoutmaße sind so gewählt, dass sich nichts mehr
-überschneidet.
-
-### Kürzere Spec-Namen
-
-„resto shamy usw. ist kürzer als Wiederherstellungs-Namen – eher englische
-Abkürzungen?" Ja. Ein neuer `GC.SpecShortLabel` liefert die in der LFM-Kultur
-üblichen Kürzel – „Resto Shaman", „Boomkin", „Shadow Priest", „Ret Pala" – für
-das Besetzungs- und das Zuordnungsmenü und für den LFM-Spruch. Die
-Rekrutierung (Vorschläge, Werbung) bleibt bewusst deutsch; dort ist der volle
-Name richtig.
-
-`tests/validate.mjs` hält den OnHide-Fokusschutz, die Kürzel und den
-großen Suchspruch rechts fest; `tests/smoke.lua` prüft, dass ein verstecktes
-Feld den Fokus löst und dass die Kürzel kürzer sind als die recruitLabel.
-
-## 0.9.141 – Das Postfach verjährt, und die Raidsuche lernt aus dem ersten Screenshot
-
-Zwei Gildenmeldungen vom selben Abend, dazu ein Wort, das keiner verstand.
+Der Fix ist so einfach wie eindeutig: **Zugeklappt gibt das Fenster die
+Tastatur ganz frei** (`EnableKeyboard(false)`), aufgeklappt nimmt es sie samt
+Weiterreichen wieder. Ein Rahmen ohne Tastatur kann keine Taste abfangen –
+Enter geht direkt an die Standardbelegung und öffnet den Chat. Zusätzlich
+bleibt der Fokusschutz der Felder (der `OnHide`-Weg aus dem zweiten Versuch
+und ein API-freier Sammelweg `ClearOwnEditFocus` über eine Liste der eigenen
+Felder), damit auch ein fokussiertes Feld beim Minimieren, Seitenwechsel und
+Schließen die Tastatur freigibt. Fremde Felder wie die Chat-Eingabe bleiben
+unberührt. Der Testrahmen bekam dafür `EnableKeyboard`-Verfolgung, ein
+Fokusmodell und `HookScript`; `tests/smoke.lua` prüft, dass das zugeklappte
+Fenster die Tastatur freigibt und wieder nimmt.
 
 ### „Es werden immer alte Nachrichten wieder ins Postfach geschoben"
 
-Die Ursache steckt im Schneeballprinzip des gildenweiten Postfachs: Bei jedem
-Login fragt der Client den Bestand der Kollegen an (`RequestInbox`,
-`Sync.lua` beim Anmelde-Abgleich), jeder antwortet gestreut per Flüstern mit
-seinem **ganzen** Postfach (`SendInbox`, bis 100 Einträge) – und
-`MergeRemoteLead` nahm alles an, was nicht gelöscht-gemerkt, ignoriert oder
-Gildenmitglied war. Ein Alter kannte die Kette nicht. Wer aufgeräumt hatte,
-bekam den Altbestand des nächsten Kollegen als „ungelesen" zurück; die
-Löschmerker aus 0.9.135 halfen nur gegen einzeln Gelöschtes, nicht gegen
-das, was nie jemand gelöscht hat.
+Das Schneeballprinzip des gildenweiten Postfachs: Bei jedem Login fragt der
+Client den Bestand der Kollegen an (`RequestInbox`), jeder antwortet mit
+seinem **ganzen** Postfach (`SendInbox`), und `MergeRemoteLead` nahm alles an,
+was nicht gelöscht-gemerkt, ignoriert oder Gildenmitglied war. Wer aufgeräumt
+hatte, bekam den Altbestand des nächsten Kollegen als „ungelesen" zurück; die
+Löschmerker aus 0.9.135 halfen nur gegen einzeln Gelöschtes, nicht gegen das,
+was nie jemand gelöscht hat.
 
 Der Schnitt heißt **Verjährung**: `INBOX_LEAD_TTL` (14 Tage, gemessen an der
 letzten Aktivität – dieselbe Rangfolge wie die Datumssortierung aus 0.9.138)
@@ -376,71 +349,44 @@ wirkt an allen drei Stellen zugleich, sonst stirbt der Kreislauf nicht:
 
 - `MergeRemoteLead` lehnt verjährte Pakete ab – auch solche ganz ohne
   Zeitstempel, denn ohne Datum lässt sich „aktuell" nicht belegen;
-- `SendInbox` schickt Verjährtes gar nicht erst los – die Quelle trocknet
-  aus, auch für Empfänger mit älterer Addon-Version;
+- `SendInbox` schickt Verjährtes gar nicht erst los – die Quelle trocknet aus,
+  auch für Empfänger mit älterer Addon-Version;
 - `GC.DB:Prune()` räumt Verjährtes lokal weg, VOR dem Mengendeckel, damit
   Altes nicht Frisches verdrängt.
 
-Die Löschmerker bleiben unangetastet; ein Bewerber, der sich selbst neu
-meldet, entsteht über `CaptureLead` wie immer frisch. Nachrichtenformat und
-Schema bleiben unverändert – ältere Clients senden weiter alles, aber ein
-0.9.141-Client nimmt es nicht mehr an und reicht es nicht mehr weiter.
+Die Löschmerker bleiben unangetastet; wer sich selbst neu meldet, steht über
+`CaptureLead` wie immer frisch drin. Nachrichtenformat und Schema bleiben
+unverändert.
 
-### Der erste Screenshot der Raidsuche
+### Die Raidsuche nach den ersten Screenshots
 
-Der Owner schickte die Seite im Spiel – drei Funde, alle behoben:
+Der Owner schickte die Seite mehrfach im Spiel; daraus wurde ihr Feinschliff:
 
-1. **Der Untertitel lief hinter die Kopfknöpfe**, und zwischen ihnen klaffte
-   eine Lücke, wo der versteckte „Suche beenden"-Knopf in der Ankerkette
-   hing. Jetzt: Untertitel schmaler (520 px), oben nur noch „Neue Suche"
-   und „Suche beenden", und die beiden Vorlagen-Knöpfe sitzen an ihren
-   Karten – „Vorlagen" am Suchzettel, „Antwortvorlagen" am Zulauf.
-2. **Drei Menüs zeigten „Nicht gesetzt"** und sahen wie vergessene
-   Pflichtfelder aus. `CreateChoiceDropdown` startet jetzt mit der eigenen
-   Leer-Beschriftung (`emptyLabel`) statt mit dem eingebauten Platzhalter –
-   das gilt fabrikweit und macht auch andernorts nur richtiger. Die
-   Lootregel-Zeile führt außerdem das Freitextfeld an (Owner-Wunsch:
-   Freitext ist die Regel); das Vorlagen-Menü steht als Schreibhilfe
-   darunter und springt nach der Wahl auf seine Beschriftung zurück – es
-   ist ein Befehl, kein Zustand.
-3. **„Neu ableiten"** verstand niemand. Der Knopf heißt jetzt **„Neu
-   generieren"** – dasselbe Wort wie auf der Werbeseite für dieselbe
-   Handlung.
+- **Der Suchspruch gehört nach rechts und groß.** Owner: „Den Suchspruch
+  hätte ich eher rechts und in groß und übersichtlich, weil das ist das
+  wichtigste Fenster." Stimmt – er ist das, was in den Chat geht. Neue
+  Ordnung: links die Eingaben (Suchzettel oben, Besetzung darunter), rechts
+  das Ergebnis (**Suchspruch groß oben** mit mehrzeiliger Vorschau, Zulauf
+  darunter). Damit erledigt sich auch die zusammengeschobene Karte, in der
+  Kanäle und Knöpfe überlappten.
+- **Kürzere Spec-Namen.** „resto shamy usw. ist kürzer als Wiederherstellungs-
+  Namen – eher englische Abkürzungen?" Ja. `GC.SpecShortLabel` liefert die
+  LFM-üblichen Kürzel – „Resto Shaman", „Boomkin", „Shadow Priest", „Ret
+  Pala" – fürs Besetzungs- und Zuordnungsmenü und den Spruch. Die
+  Rekrutierung bleibt deutsch.
+- **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die Knöpfe;
+  die Vorlagen-Knöpfe sitzen an ihren Karten (Zettel-Vorlagen am Suchzettel,
+  Antwortvorlagen am Zulauf).
+- **Aufklappmenüs zeigen ihre Beschriftung statt „Nicht gesetzt"** (fabrikweit
+  in `CreateChoiceDropdown`); die Lootregel-Zeile führt das Freitextfeld an,
+  das Vorlagen-Menü steht als Schreibhilfe darunter und springt nach der Wahl
+  auf seine Beschriftung zurück.
+- **„Neu ableiten" heißt jetzt „Neu generieren"** – dasselbe Wort wie auf der
+  Werbeseite.
 
-`tests/smoke.lua` deckt die Verjährung in allen drei Wirkungen ab
-(ablehnen, wegräumen, Frisches unangetastet); `tests/validate.mjs` hält
-Verjährung, Sende-Filter und die Fabrik-Beschriftung fest.
-
-## 0.9.140 – Die Fokusfalle des minimierten Fensters
-
-Aus der Gilde gemeldet, direkt nach 0.9.139: „Wenn GCP minimiert ist, kann
-ich keine Chat-Eingaben oder sonstiges tätigen." Die Ursache ist ein
-WoW-Verhalten, kein Zufall: **Eine EditBox, deren Elternteil versteckt wird,
-behält den Tastaturfokus.** Wer in ein Feld geklickt hatte und dann
-minimierte, fütterte ab da ein unsichtbares Feld – jede Taste landete dort
-statt bei Steuerung oder Chat. Escape hätte den Fokus zwar gelöst, schließt
-über `OnEscapePressed` aber zugleich das ganze Fenster; von außen sah beides
-zusammen wie „Tastatur tot" aus.
-
-Sichtbar wurde das ausgerechnet jetzt, weil die Raidsuche die Falle
-vergrößert: Ihre Spruchvorschau ist eine `CreateTextArea`, und die
-fokussiert sich absichtlich schon bei einem Klick auf den Kasten (damit man
-zum Nachschleifen nicht die Textzeile treffen muss) – dieselbe Mechanik wie
-beim Werbetext, nur liegt sie hier auf der Seite, auf der man vor dem Raid
-arbeitet und dann minimiert. Betroffen war aber grundsätzlich jedes Feld
-auf jeder Seite, seit es das Minimieren gibt.
-
-Der Fix sitzt an den drei Stellen, die Felder verstecken: **Minimieren**,
-**Seitenwechsel** (`ShowPage`) und **Schließen** (`OnHide`-Hook, deckt ×,
-Escape und `/gcp` ab). Jede löst über `GetCurrentKeyBoardFocus` einen Fokus,
-der in einem eigenen Feld hängt – geprüft über die Elternkette bis zum
-Hauptfenster. Ein fremdes Eingabefeld (die Chat-Eingabe, das Feld eines
-anderen Addons) wird ausdrücklich NICHT angefasst; ein blindes `ClearFocus`
-hätte sonst genau das Gegenteil-Ärgernis erzeugt. Fehlt die API in einem
-Client, passiert schlicht nichts – kein neuer Fehlerpfad.
-
-`tests/smoke.lua` stellt beides nach: Minimieren und Seitenwechsel lösen
-den eigenen Fokus, ein fremdes Feld bleibt unberührt.
+`tests/validate.mjs` hält die zugeklappte Tastatur-Freigabe, den
+Fokusschutz, die Verjährung, die Kürzel und den großen Suchspruch rechts
+fest; `tests/smoke.lua` stellt Minimieren, Verjährung und die Kürzel nach.
 
 ## 0.9.139 – Raidsuche: Raids zusammenklicken und auffüllen
 

@@ -10952,6 +10952,18 @@ end
 -- OnHide weg (das feuert, sobald ein Vorfahre versteckt wird) - ohne die
 -- GetCurrentKeyBoardFocus-API, die es im Anniversary-Client nicht sicher gibt.
 do
+    -- Kern des Fixes: Das zugeklappte Fenster gibt die Tastatur frei, sonst
+    -- schluckt der Balken das Enter, mit dem man den Chat oeffnet.
+    addon.UI.frame:Show()
+    addon.UI:SetWindowMinimized(true)
+    assert(addon.UI.frame.keyboardEnabled == false,
+        "Zugeklappt faengt das Fenster weiter die Tastatur ab - Enter oeffnet keinen Chat")
+    addon.UI:SetWindowMinimized(false)
+    assert(addon.UI.frame.keyboardEnabled == true,
+        "Aufgeklappt nimmt das Fenster die Tastatur nicht wieder (ESC-Behandlung)")
+
+    -- Zusaetzlich: ein fokussiertes eigenes Feld gibt den Fokus beim
+    -- Verstecken frei, ueber sein OnHide und ueber den Sammelweg.
     local fkt_edit = addon.UI.pages.RAIDSEARCH.announceEdit
     assert(fkt_edit ~= nil, "Die Spruchvorschau der Raidsuche fehlt")
     assert(fkt_edit.hooks and fkt_edit.hooks.OnHide and #fkt_edit.hooks.OnHide > 0,
@@ -10964,14 +10976,15 @@ do
     assert(fkt_edit:HasFocus() == false,
         "Ein verstecktes Feld behaelt den Tastaturfokus - minimiert bliebe der Chat blockiert")
 
-    -- Auch ein einzeiliges Feld (CreateEdit) traegt denselben Schutz.
+    -- Der API-freie Sammelweg raeumt jedes fokussierte eigene Feld beim
+    -- Minimieren weg, ohne GetCurrentKeyBoardFocus.
     local fkt_date = addon.UI.pages.RAIDSEARCH.dateEdit
     fkt_date:SetFocus()
-    for _, fkt_hook in ipairs((fkt_date.hooks or {}).OnHide or {}) do
-        fkt_hook(fkt_date)
-    end
+    assert(fkt_date:HasFocus() == true, "Testaufbau: das Datumsfeld hat keinen Fokus bekommen")
+    addon.UI:SetWindowMinimized(true)
     assert(fkt_date:HasFocus() == false,
-        "Auch das Datumsfeld muss den Fokus beim Verstecken loesen")
+        "Der Sammelweg loest den Feldfokus beim Minimieren nicht")
+    addon.UI:SetWindowMinimized(false)
 end
 
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den

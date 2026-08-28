@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.142",
+  "## Version: 0.9.140",
 ];
 
 for (const entry of requiredMetadata) {
@@ -564,9 +564,12 @@ const requiredImplementations = [
   // Aufklappmenues starten mit ihrer eigenen Leer-Beschriftung, nicht mit
   // "Nicht gesetzt" (Gilden-Screenshot 0.9.140).
   ["Aufklappmenüs starten mit ihrer Beschriftung", /CreateButton\(parent, emptyLabel or "Nicht gesetzt"/],
-  // Ein verstecktes Eingabefeld gibt die Tastatur frei (0.9.142): sonst
-  // blockiert ein fokussiertes Feld nach dem Minimieren Chat und Steuerung.
+  // Zugeklappt gibt das Hauptfenster die Tastatur frei, sonst schluckt der
+  // Balken das Enter fuers Chatfenster (0.9.140). Der eigentliche Fix.
+  ["zugeklappt gibt die Tastatur frei", /frame:EnableKeyboard\(not minimized\)/],
+  // Ein verstecktes Eingabefeld gibt zusaetzlich seinen Fokus frei.
   ["Feld räumt Fokus beim Verstecken", /edit:HookScript\("OnHide", function\(self\)\s*\n\s*if self\.ClearFocus then/],
+  ["API-freier Sammelweg für den Feldfokus", /local function ClearOwnEditFocus\(\)/],
   // Kurze englische Spec-Kuerzel fuer die Raidsuche (0.9.142).
   ["kurze Spec-Kürzel", /GC\.SpecShortLabel = \{/],
   ["Spec-Kürzel-Helfer", /function GC\.SpecShort\(specKey\)/],

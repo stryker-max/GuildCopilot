@@ -546,6 +546,20 @@ local function ReleaseOwnKeyboardFocus(root)
     end
 end
 
+-- Alle eigenen Eingabefelder, damit sich ihr Fokus notfalls ohne die
+-- GetCurrentKeyBoardFocus-API (im Anniversary-Client unzuverlaessig) freigeben
+-- laesst: ConfigureEdit traegt jedes Feld hier ein, ClearOwnEditFocus raeumt
+-- beim Minimieren, Seitenwechsel und Schliessen auf. Ein fremdes Feld (die
+-- Chat-Eingabe) steht nie in dieser Liste.
+local ownEdits = {}
+local function ClearOwnEditFocus()
+    for _, edit in ipairs(ownEdits) do
+        if edit.ClearFocus and edit.HasFocus and edit:HasFocus() then
+            edit:ClearFocus()
+        end
+    end
+end
+
 -- Minimieren und Wiederherstellen: der waagerechte Strich und das Rechteck,
 -- die jedes Fenster seit dreissig Jahren traegt.
 local function CreateMinimizeMark(parent, size, color)
@@ -806,6 +820,8 @@ local function ConfigureEdit(edit, maxLetters)
             self:ClearFocus()
         end
     end)
+    -- Fuer den API-freien Sammelweg (ClearOwnEditFocus).
+    ownEdits[#ownEdits + 1] = edit
 end
 
 local function CreateEdit(parent, width, height)
@@ -1387,6 +1403,7 @@ function GC.UI:CreateMainFrame()
     -- Felder darf das Fenster nicht ueberleben (siehe ReleaseOwnKeyboardFocus).
     frame:HookScript("OnHide", function(self)
         ReleaseOwnKeyboardFocus(self)
+        ClearOwnEditFocus()
     end)
 
     local header = CreatePanel(frame, THEME.sidebar, THEME.sidebar)
@@ -1814,10 +1831,24 @@ function GC.UI:SetWindowMinimized(minimized)
     -- Erst den Anker festnageln, dann die Höhe ändern: Sonst wandert der
     -- Balken beim Zuklappen in die Mitte des Bildschirms.
     self:FreezeWindowTopLeft()
+    -- Der entscheidende Punkt gegen "kann minimiert kein Chatfenster öffnen":
+    -- Das Hauptfenster hat die Tastatur aktiviert (EnableKeyboard), um ESC zu
+    -- behandeln, und faengt damit JEDE Taste ab - auch Enter. Solange es offen
+    -- ist, reicht der Propagate-Schalter die Tasten weiter; der zugeklappte
+    -- Balken aber braucht die Tastatur gar nicht (ESC schliesst ihn ohnehin
+    -- ueber UISpecialFrames), und genau dort schluckte er das Enter, mit dem
+    -- man den Chat oeffnet. Zugeklappt gibt das Fenster die Tastatur deshalb
+    -- ganz frei; aufgeklappt nimmt es sie samt Weiterreichen wieder.
+    if frame.EnableKeyboard then
+        frame:EnableKeyboard(not minimized)
+    end
     if minimized then
-        -- Die Seiten verschwinden gleich; ein Fokus in einem ihrer Felder
-        -- würde sonst unsichtbar weiter alle Tasten schlucken.
+        -- Zusaetzlich: ein Fokus in einem der eigenen Felder (die Seiten
+        -- verschwinden gleich) darf die Tastatur nicht behalten.
         ReleaseOwnKeyboardFocus(frame)
+        ClearOwnEditFocus()
+    elseif frame.SetPropagateKeyboardInput then
+        frame:SetPropagateKeyboardInput(true)
     end
     frame.sidebar:SetShown(not minimized)
     for key, page in pairs(self.pages) do
@@ -1890,8 +1921,9 @@ function GC.UI:ShowPage(pageKey)
     end
     self.activePage = pageKey
     -- Auch der Seitenwechsel versteckt Felder; ein dort hängender Fokus
-    -- würde unsichtbar weitertippen (siehe ReleaseOwnKeyboardFocus).
+    -- würde unsichtbar weitertippen.
     ReleaseOwnKeyboardFocus(self.frame)
+    ClearOwnEditFocus()
     for key, page in pairs(self.pages) do
         page:SetShown(key == pageKey)
     end

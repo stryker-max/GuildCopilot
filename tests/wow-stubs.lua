@@ -129,6 +129,13 @@ Dummy.__index = function(self, key)
         return function(frame)
             frame.focused = false
         end
+    elseif key == "EnableKeyboard" then
+        -- Ob das Hauptfenster die Tastatur abfaengt, bleibt ablesbar: Zugeklappt
+        -- muss es sie freigeben, sonst schluckt der Balken das Enter fuer den
+        -- Chat (0.9.140).
+        return function(frame, value)
+            frame.keyboardEnabled = value ~= false
+        end
     elseif key == "HookScript" then
         -- Anders als SetScript ueberschreibt HookScript nichts: Es haengt einen
         -- weiteren Rueckruf an. Die Tests koennen ihn ueber frame.hooks

@@ -7,66 +7,42 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
-## 0.9.142 – Addon
-
-**Behoben**
-
-- **Minimiert lässt sich das Chatfenster wieder öffnen.** Ein Eingabefeld
-  behielt beim Minimieren den Tastaturfokus – besonders die (mehrzeilige)
-  Spruchvorschau der Raidsuche: Enter setzte dann einen unsichtbaren
-  Zeilenumbruch, statt den Chat zu öffnen. Jedes Feld gibt seinen Fokus jetzt
-  frei, sobald es versteckt wird (Minimieren, Seitenwechsel, Schließen);
-  fremde Eingabefelder bleiben unberührt.
-- **Raidsuche: die Suchspruch-Karte war unten zusammengeschoben.** Kanäle und
-  Knöpfe überlappten sich.
-
-**Geändert (Raidsuche)**
-
-- **Der Suchspruch steht jetzt groß oben rechts** – das wichtigste Feld, mit
-  großer Vorschau des ganzen LFM-Textes. Links liegen die Eingaben
-  (Suchzettel oben, Besetzung darunter), rechts das Ergebnis (Suchspruch
-  oben, Zulauf darunter).
-- **Kurze Spec-Kürzel** wie „Resto Shaman“, „Boomkin“, „Shadow Priest“ statt
-  der langen deutschen Namen – im Besetzungs- und Zuordnungsmenü und im
-  LFM-Spruch. Die Rekrutierung bleibt deutsch.
-
-## 0.9.141 – Addon
-
-**Behoben**
-
-- **Postfach: alte Bewerbungen kommen nicht mehr zurück.** Bei jedem Login
-  tauschten die Addon-Nutzer ihre Postfächer aus, und der Altbestand eines
-  Kollegen landete wieder als „ungelesen“ bei allen – egal wie alt. Jetzt
-  verjähren Bewerbungen nach **14 Tagen ohne neue Nachricht**: Sie werden
-  lokal weggeräumt, nicht mehr an die Gilde gesendet und aus fremden
-  Paketen nicht mehr angenommen. Wer sich selbst neu meldet, steht wie
-  immer sofort wieder drin.
-
-**Geändert (Raidsuche-Feinschliff nach Gilden-Screenshot)**
-
-- **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die
-  Knöpfe; oben stehen nur noch „Neue Suche“ und „Suche beenden“. Die
-  Zettel-Vorlagen öffnen jetzt an der Suchzettel-Karte, die
-  Antwortvorlagen an der Zulauf-Karte – dort, wo sie hingehören.
-- **Aufklappmenüs zeigen ihre Beschriftung statt „Nicht gesetzt“** –
-  Lootregel-Vorlage, Spec-Wunsch und Antworten-Menü sahen sonst wie leere
-  Pflichtfelder aus. Die Lootregel-Zeile führt jetzt das Freitextfeld an;
-  die Vorlage steht als Schreibhilfe darunter.
-- **„Neu ableiten“ heißt jetzt „Neu generieren“** – dasselbe Wort wie auf
-  der Werbeseite für dieselbe Handlung: die Vorschau frisch aus dem
-  Zettel bauen.
-
 ## 0.9.140 – Addon
 
 **Behoben**
 
-- **Minimiert schluckte das Fenster Tastatureingaben.** Wer in ein
-  Eingabefeld geklickt hatte (bei der Spruchvorschau der Raidsuche genügt
-  ein Klick auf den Kasten) und dann minimierte, die Seite wechselte oder
-  das Fenster schloss, tippte ab da unsichtbar in dieses Feld weiter –
-  kein Chat, keine Steuerung. Jetzt lösen Minimieren, Seitenwechsel und
-  Schließen einen Fokus, der in einem Guild-Copilot-Feld hängt; fremde
-  Eingabefelder wie die Chat-Eingabe bleiben unangetastet.
+- **Minimiert lässt sich das Chatfenster wieder öffnen.** Das zugeklappte
+  Fenster fing weiter die Tastatur ab und schluckte damit das Enter, mit dem
+  man den Chat öffnet. Zugeklappt gibt es die Tastatur jetzt ganz frei (ESC
+  schließt es ohnehin); zusätzlich geben fokussierte Eingabefelder ihren
+  Fokus frei, sobald sie versteckt werden (Minimieren, Seitenwechsel,
+  Schließen). Fremde Eingabefelder wie die Chat-Eingabe bleiben unberührt.
+- **Postfach: alte Bewerbungen kommen nicht mehr zurück.** Bei jedem Login
+  tauschten die Addon-Nutzer ihre Postfächer aus, und der Altbestand eines
+  Kollegen landete wieder als „ungelesen“ bei allen – egal wie alt. Jetzt
+  verjähren Bewerbungen nach **14 Tagen ohne neue Nachricht**: Sie werden
+  lokal weggeräumt, nicht mehr an die Gilde gesendet und aus fremden Paketen
+  nicht mehr angenommen. Wer sich selbst neu meldet, steht wie immer sofort
+  wieder drin.
+
+**Geändert (Raidsuche-Feinschliff)**
+
+- **Der Suchspruch steht jetzt groß oben rechts** – das wichtigste Feld, mit
+  großer Vorschau des ganzen LFM-Textes. Links liegen die Eingaben
+  (Suchzettel oben, Besetzung darunter), rechts das Ergebnis (Suchspruch
+  oben, Zulauf darunter). Die vorher unten zusammengeschobene Karte hat
+  wieder Luft.
+- **Kurze Spec-Kürzel** wie „Resto Shaman“, „Boomkin“, „Shadow Priest“ statt
+  der langen deutschen Namen – im Besetzungs- und Zuordnungsmenü und im
+  LFM-Spruch. Die Rekrutierung bleibt deutsch.
+- **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die
+  Knöpfe; die Zettel-Vorlagen öffnen an der Suchzettel-Karte, die
+  Antwortvorlagen an der Zulauf-Karte.
+- **Aufklappmenüs zeigen ihre Beschriftung statt „Nicht gesetzt“**; die
+  Lootregel-Zeile führt das Freitextfeld an, die Vorlage steht als
+  Schreibhilfe darunter.
+- **„Neu ableiten“ heißt jetzt „Neu generieren“** – dasselbe Wort wie auf
+  der Werbeseite.
 
 ## 0.9.139 – Addon
 
