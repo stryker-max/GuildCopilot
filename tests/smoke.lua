@@ -10873,6 +10873,67 @@ do
     addon.UI:ShowPage("ROSTER")
 end
 
+-- === Das Postfach verjaehrt (0.9.141) ======================================
+--
+-- Ohne Altersgrenze kreisten tagealte Bewerbungen endlos durchs
+-- Schneeballprinzip: Bei jedem Login fragt ein Client die Kollegen an, und
+-- deren Altbestand kam als "ungelesen" zurueck. Verjaehrt (aelter als 14
+-- Tage) heisst jetzt: nicht annehmen, nicht senden, nicht behalten.
+do
+    local ttl_guild = addon.DB:GetGuild()
+    local ttl_day = 24 * 60 * 60
+    -- Die Testuhr steht auf 1000; "vor 15 Tagen" waere damit negativ und
+    -- fiele in den Sonderfall "ohne Datum". Fuer echte Altersvergleiche wird
+    -- die stellbare Uhr angehoben und am Ende zurueckgestellt.
+    local ttl_savedTime = currentTime
+    currentTime = 200 * ttl_day
+    local ttl_now = addon.Util.Now()
+
+    -- Ein verjaehrtes Sync-Paket wird abgelehnt, ein frisches angenommen.
+    assert(addon.Chat:MergeRemoteLead({
+        name = "Oldie-Realm", firstSeenAt = ttl_now - 15 * ttl_day,
+        lastSeenAt = ttl_now - 15 * ttl_day, source = "WHISPER", text = "alte bewerbung",
+    }) == false, "Eine verjaehrte Sync-Bewerbung wurde angenommen")
+    -- Ohne jeden Zeitstempel laesst sich "aktuell" nicht belegen - abgelehnt.
+    assert(addon.Chat:MergeRemoteLead({
+        name = "Zeitlos-Realm", firstSeenAt = 0, lastSeenAt = 0,
+        source = "WHISPER", text = "ohne datum",
+    }) == false, "Eine Sync-Bewerbung ohne Zeitstempel wurde angenommen")
+    assert(addon.Chat:MergeRemoteLead({
+        name = "Freshie-Realm", firstSeenAt = ttl_now - ttl_day,
+        lastSeenAt = ttl_now - ttl_day, source = "WHISPER", text = "suche gilde",
+    }) == true, "Eine frische Sync-Bewerbung wurde abgelehnt")
+
+    -- Der lokale Bestand altert beim Aufraeumen aus; Frisches bleibt.
+    table.insert(ttl_guild.inbox, {
+        name = "Staubig-Realm", firstSeenAt = ttl_now - 20 * ttl_day,
+        lastSeenAt = ttl_now - 20 * ttl_day, messages = {},
+    })
+    addon.DB:Prune()
+    local ttl_hasOld, ttl_hasFresh = false, false
+    for _, ttl_lead in ipairs(ttl_guild.inbox) do
+        if ttl_lead.name == "Staubig-Realm" then ttl_hasOld = true end
+        if ttl_lead.name == "Freshie-Realm" then ttl_hasFresh = true end
+    end
+    assert(ttl_hasOld == false, "Eine verjaehrte Bewerbung ueberlebt das Aufraeumen")
+    assert(ttl_hasFresh == true, "Eine frische Bewerbung wurde faelschlich weggeraeumt")
+
+    -- Verjaehrtes faehrt auch nicht mehr mit hinaus.
+    assert(addon.Chat:IsLeadExpired({ lastSeenAt = ttl_now - 15 * ttl_day }) == true,
+        "Ein 15 Tage alter Eintrag gilt nicht als verjaehrt")
+    assert(addon.Chat:IsLeadExpired({ lastSeenAt = ttl_now - 2 * ttl_day }) == false,
+        "Ein zwei Tage alter Eintrag gilt faelschlich als verjaehrt")
+
+    -- Testbestand wieder entfernen (ohne Loeschmerker) und die Uhr
+    -- zurueckstellen, damit spaetere Bloecke die gewohnte Zeit sehen.
+    for ttl_index = #ttl_guild.inbox, 1, -1 do
+        if ttl_guild.inbox[ttl_index].name == "Freshie-Realm" then
+            table.remove(ttl_guild.inbox, ttl_index)
+        end
+    end
+    currentTime = ttl_savedTime
+end
+
 -- === Fokusfalle beim Minimieren (0.9.140) ==================================
 --
 -- Eine EditBox, deren Elternteil versteckt wird, behaelt in WoW den

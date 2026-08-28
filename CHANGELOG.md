@@ -7,6 +7,32 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.141 – Addon
+
+**Behoben**
+
+- **Postfach: alte Bewerbungen kommen nicht mehr zurück.** Bei jedem Login
+  tauschten die Addon-Nutzer ihre Postfächer aus, und der Altbestand eines
+  Kollegen landete wieder als „ungelesen“ bei allen – egal wie alt. Jetzt
+  verjähren Bewerbungen nach **14 Tagen ohne neue Nachricht**: Sie werden
+  lokal weggeräumt, nicht mehr an die Gilde gesendet und aus fremden
+  Paketen nicht mehr angenommen. Wer sich selbst neu meldet, steht wie
+  immer sofort wieder drin.
+
+**Geändert (Raidsuche-Feinschliff nach Gilden-Screenshot)**
+
+- **Kopfzeile aufgeräumt:** Der Untertitel läuft nicht mehr hinter die
+  Knöpfe; oben stehen nur noch „Neue Suche“ und „Suche beenden“. Die
+  Zettel-Vorlagen öffnen jetzt an der Suchzettel-Karte, die
+  Antwortvorlagen an der Zulauf-Karte – dort, wo sie hingehören.
+- **Aufklappmenüs zeigen ihre Beschriftung statt „Nicht gesetzt“** –
+  Lootregel-Vorlage, Spec-Wunsch und Antworten-Menü sahen sonst wie leere
+  Pflichtfelder aus. Die Lootregel-Zeile führt jetzt das Freitextfeld an;
+  die Vorlage steht als Schreibhilfe darunter.
+- **„Neu ableiten“ heißt jetzt „Neu generieren“** – dasselbe Wort wie auf
+  der Werbeseite für dieselbe Handlung: die Vorschau frisch aus dem
+  Zettel bauen.
+
 ## 0.9.140 – Addon
 
 **Behoben**

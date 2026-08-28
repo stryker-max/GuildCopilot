@@ -1197,7 +1197,11 @@ end
 -- unten heraus. Ohne Angabe bleibt alles wie bisher.
 local function CreateChoiceDropdown(parent, width, options, onSelected, openBelow, emptyLabel, iconResolver, height)
     local dropdown
-    dropdown = CreateButton(parent, "Nicht gesetzt", width, tonumber(height) or 32, function()
+    -- Von Anfang an die eigene Leer-Beschriftung, nicht "Nicht gesetzt":
+    -- Ein Menue, das nie einen Wert bekommt (die reinen Befehlsmenues der
+    -- Raidsuche), stand sonst bis zum ersten SetValue mit einem Text da, der
+    -- wie ein vergessenes Pflichtfeld aussieht (Gilden-Screenshot 0.9.140).
+    dropdown = CreateButton(parent, emptyLabel or "Nicht gesetzt", width, tonumber(height) or 32, function()
         local show = not dropdown.popup:IsShown()
         if show then
             dropdown:PlacePopup()
@@ -11034,10 +11038,16 @@ end
 
 function GC.UI:BuildRaidSearchPage()
     local page = self.pages.RAIDSEARCH
-    CreatePageTitle(page, "Raidsuche", "Raid zusammenstellen, Suchspruch posten und den Zulauf verwalten"
+    -- Der Untertitel bleibt schmaler als die Standardbreite: rechts daneben
+    -- stehen die Kopfknoepfe, und ein Text HINTER Knoepfen liest sich nicht
+    -- (Gilden-Screenshot 0.9.140).
+    local _, pageHelp = CreatePageTitle(page, "Raidsuche",
+        "Raid zusammenstellen, Suchspruch posten und den Zulauf verwalten"
         .. " — Antworten auf die laufende Suche landen rechts, nicht im Bewerber-Postfach.")
+    pageHelp:SetWidth(520)
 
-    -- Kopfzeile: Zettel anlegen/beenden und die beiden Vorlagen-Dialoge.
+    -- Kopfzeile: nur Zettel anlegen und Suche beenden. Die beiden
+    -- Vorlagen-Dialoge oeffnen an den Karten, zu denen sie gehoeren.
     page.newButton = CreateButton(page, "Neue Suche", 104, 26, function()
         local plan = GC.RaidSearch:GetPlan()
         if plan and plan.status == "SUCHT" then
@@ -11059,20 +11069,18 @@ function GC.UI:BuildRaidSearchPage()
         GC.UI:RefreshRaidSearch()
     end)
     page.endButton:SetPoint("RIGHT", page.newButton, "LEFT", -8, 0)
-    page.templatesButton = CreateButton(page, "Zettel-Vorlagen", 122, 26, function()
-        GC.UI:ToggleRaidSearchTemplates()
-    end)
-    page.templatesButton:SetPoint("RIGHT", page.endButton, "LEFT", -8, 0)
-    page.repliesButton = CreateButton(page, "Antwortvorlagen", 128, 26, function()
-        GC.UI:ToggleRaidSearchReplies()
-    end)
-    page.repliesButton:SetPoint("RIGHT", page.templatesButton, "LEFT", -8, 0)
 
     -- === Der Suchzettel ====================================================
     local sheet = CreateCard(page, "Suchzettel")
     sheet:SetSize(380, 316)
     sheet:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
     page.sheet = sheet
+
+    -- Die Zettel-Vorlagen wohnen an ihrer Karte, nicht in der Kopfzeile.
+    page.templatesButton = CreateButton(sheet, "Vorlagen", 82, 22, function()
+        GC.UI:ToggleRaidSearchTemplates()
+    end)
+    page.templatesButton:SetPoint("TOPRIGHT", sheet, "TOPRIGHT", -14, -12)
 
     local function SheetLabel(text, y)
         local label = CreateLabel(sheet, text, { muted = true, width = 86, height = 26 })
@@ -11162,18 +11170,6 @@ function GC.UI:BuildRaidSearchPage()
     page.weekdayLabel = CreateLabel(sheet, "", { muted = true, width = 44, height = 26 })
     page.weekdayLabel:SetPoint("TOPLEFT", sheet, "TOPLEFT", 314, -112)
 
-    SheetLabel("Lootregel", -146)
-    -- Das Aufklappmenue ist nur eine Schreibhilfe: Es fuellt das Freitextfeld
-    -- darunter, danach darf der Text beliebig angepasst werden (Owner-Wunsch:
-    -- Lootregeln als Freitext).
-    page.lootPreset = CreateChoiceDropdown(sheet, 250,
-        { "2SR > MS > OS", "1SR > MS > OS", "MS > OS", "GDKP", "Gildenintern" },
-        function(value)
-            GC.RaidSearch:SetLootRule(value)
-            GC.UI:RefreshRaidSearch()
-        end, true, "Vorlage wählen", nil, 26)
-    page.lootPreset:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -146)
-
     local function SheetEdit(labelText, y, setter)
         SheetLabel(labelText, y)
         local edit = CreateEdit(sheet, 250, 26)
@@ -11188,7 +11184,23 @@ function GC.UI:BuildRaidSearchPage()
         return edit
     end
 
-    page.lootEdit = SheetEdit("", -180, GC.RaidSearch.SetLootRule)
+    -- Das Freitextfeld ist die Lootregel (Owner-Wunsch); das Menue darunter
+    -- nur eine Schreibhilfe, die es fuellt. Bis 0.9.140 stand das Menue OBEN
+    -- und zeigte "Nicht gesetzt" - es sah aus wie ein leeres Pflichtfeld
+    -- ueber einem zweiten Feld (Gilden-Screenshot).
+    page.lootEdit = SheetEdit("Lootregel", -146, GC.RaidSearch.SetLootRule)
+    SheetLabel("Vorlage", -180)
+    page.lootPreset = CreateChoiceDropdown(sheet, 250,
+        { "2SR > MS > OS", "1SR > MS > OS", "MS > OS", "GDKP", "Gildenintern" },
+        function(value)
+            GC.RaidSearch:SetLootRule(value)
+            -- Zurueck auf die Beschriftung: Das Menue ist ein Befehl, kein
+            -- Zustand - der Zustand steht im Freitextfeld darueber.
+            page.lootPreset:SetValue("")
+            GC.UI:RefreshRaidSearch()
+        end, true, "Vorlage wählen", nil, 26)
+    page.lootPreset:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -180)
+
     page.hrEdit = SheetEdit("Hard Res.", -214, GC.RaidSearch.SetHardReserve)
     page.srEdit = SheetEdit("SR-Link", -248, GC.RaidSearch.SetSrLink)
     page.noteEdit = SheetEdit("Notiz", -282, GC.RaidSearch.SetNote)
@@ -11219,7 +11231,11 @@ function GC.UI:BuildRaidSearchPage()
     page.announceBytes = CreateLabel(announce, "", { muted = true, width = 120, height = 14,
         font = "GameFontNormalSmall" })
     page.announceBytes:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -98)
-    page.announceRegenerate = CreateButton(announce, "Neu ableiten", 100, 20, function()
+    -- "Neu generieren" wie auf der Werbeseite - dasselbe Wort fuer dieselbe
+    -- Handlung: die Vorschau frisch aus dem Zettel bauen und Handarbeit am
+    -- Text verwerfen. ("Neu ableiten" kam aus der Gilde als unverstaendlich
+    -- zurueck.)
+    page.announceRegenerate = CreateButton(announce, "Neu generieren", 112, 20, function()
         page.announceEdit:SetText(GC.RaidSearch:BuildAnnouncement())
         GC.UI:RefreshRaidSearchPost()
     end)
@@ -11339,6 +11355,13 @@ function GC.UI:BuildRaidSearchPage()
     zulauf:SetSize(390, 284)
     zulauf:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -302)
     page.zulauf = zulauf
+
+    -- Auch die Antwortvorlagen wohnen an ihrer Karte: Bearbeitet wird, was
+    -- das Antworten-Menue unten sendet.
+    page.repliesButton = CreateButton(zulauf, "Antwortvorlagen", 116, 22, function()
+        GC.UI:ToggleRaidSearchReplies()
+    end)
+    page.repliesButton:SetPoint("TOPRIGHT", zulauf, "TOPRIGHT", -78, -13)
 
     page.zulaufPrev = CreateButton(zulauf, "", 22, 20, function()
         page.zulaufPage = math.max(1, (page.zulaufPage or 1) - 1)

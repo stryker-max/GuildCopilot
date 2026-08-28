@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.140",
+  "## Version: 0.9.141",
 ];
 
 for (const entry of requiredMetadata) {
@@ -555,6 +555,15 @@ const requiredImplementations = [
   ["Suchzettel-Vorlagen mit Wochentag", /function GC\.RaidSearch\.NextDateForWeekday/],
   ["selbstgebaute Antwortvorlagen", /function GC\.RaidSearch:GetReplyTemplates/],
   ["zwei Automatik-Quellen am selben Lauscher", /autoPostArmedSources/],
+  // Das Postfach verjaehrt (0.9.141): Ohne Altersgrenze kreisten tagealte
+  // Bewerbungen endlos durchs Schneeballprinzip - bei jedem Login kam der
+  // Altbestand der Kollegen als "ungelesen" zurueck.
+  ["Bewerbungen verjähren", /INBOX_LEAD_TTL = 14/],
+  ["verjährte Bewerbungen kommen nicht zurück", /function GC\.Chat:IsLeadExpired/],
+  ["verjährte Bewerbungen fahren nicht mit", /not self:IsLeadExpired\(lead\) and self:SendLead/],
+  // Aufklappmenues starten mit ihrer eigenen Leer-Beschriftung, nicht mit
+  // "Nicht gesetzt" (Gilden-Screenshot 0.9.140).
+  ["Aufklappmenüs starten mit ihrer Beschriftung", /CreateButton\(parent, emptyLabel or "Nicht gesetzt"/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

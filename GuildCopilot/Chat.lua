@@ -1154,6 +1154,42 @@ end
 
 local INBOX_SYNC_PREFIX = "I"
 
+-- Die letzte Aktivitaet eines Eintrags - dieselbe Rangfolge wie die
+-- Datumssortierung aus 0.9.138: erst lastSeenAt, dann die letzte Nachricht,
+-- zuletzt die Ersterfassung, damit auch Altbestaende ohne lastSeenAt eine
+-- belastbare Zeit haben.
+function GC.Chat:LeadLastActivity(lead)
+    if type(lead) ~= "table" then
+        return 0
+    end
+    local last = tonumber(lead.lastSeenAt) or 0
+    if last == 0 and type(lead.messages) == "table" and #lead.messages > 0 then
+        local latest = lead.messages[#lead.messages]
+        last = tonumber(type(latest) == "table" and latest.receivedAt) or 0
+    end
+    if last == 0 then
+        last = tonumber(lead.firstSeenAt) or 0
+    end
+    return last
+end
+
+-- Verjaehrt heisst: aelter als INBOX_LEAD_TTL. Eine verjaehrte Bewerbung wird
+-- weder gesendet noch angenommen noch behalten - nur so stirbt ein
+-- Altbestand im Schneeball systemweit aus, statt bei jedem Login aus dem
+-- Bestand irgendeines Kollegen zurueckzukommen. Meldet sich der Spieler
+-- selbst neu, entsteht ueber CaptureLead ein frischer Eintrag wie immer.
+--
+-- Ganz ohne Zeitstempel gilt AUSDRUECKLICH als verjaehrt - nicht erst ueber
+-- den Vergleich: Ohne Datum laesst sich "aktuell" nicht belegen, und der
+-- Vergleich allein kippte, sobald eine Uhr nahe null steht (Testumgebung).
+function GC.Chat:IsLeadExpired(lead)
+    local last = self:LeadLastActivity(lead)
+    if last <= 0 then
+        return true
+    end
+    return last < GC.Util.Now() - GC.Constants.INBOX_LEAD_TTL
+end
+
 -- Ein Eintrag passt selten in ein Chatpaket: Eine Bewerbung darf im Spiel 255
 -- Zeichen lang sein, dazu kommen Name, GUID, Klasse und Zeitstempel. Der
 -- fertige Datensatz wird deshalb gestueckelt uebertragen, genau wie die
@@ -1233,11 +1269,12 @@ end
 
 -- Der ganze Bestand. Geht als Antwort auf eine Anfrage gezielt per Fluestern
 -- raus, damit nicht die halbe Gilde dasselbe gleichzeitig in den Gildenkanal
--- schiebt.
+-- schiebt. Verjaehrtes faehrt nicht mit - der Empfaenger wuerde es ohnehin
+-- ablehnen, und die Quelle des Rueckspuelens trocknet damit aus.
 function GC.Chat:SendInbox(distribution, target)
     local sent = 0
     for _, lead in ipairs(GC.DB:GetGuild().inbox) do
-        if self:SendLead(lead, distribution, target) then
+        if not self:IsLeadExpired(lead) and self:SendLead(lead, distribution, target) then
             sent = sent + 1
         end
     end
@@ -1275,6 +1312,13 @@ function GC.Chat:MergeRemoteLead(record)
     -- eigenen Erfassung - meldet der Spieler sich selbst direkt, hebt CaptureLead
     -- den Merker auf, und er darf wieder herein.
     if self:IsInboxTombstoned(record.name) then
+        return false
+    end
+    -- Verjährt: Eine Bewerbung, deren letzte Aktivität älter als die
+    -- Aufbewahrungszeit ist, kommt gar nicht mehr herein - weder als neuer
+    -- Eintrag noch als Auffrischung. Ein Paket ohne Zeitstempel (beide Felder
+    -- 0) zählt als verjährt: Ohne Datum lässt sich "aktuell" nicht belegen.
+    if self:IsLeadExpired(record) then
         return false
     end
 

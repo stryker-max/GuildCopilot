@@ -478,6 +478,16 @@ function GC.DB:Prune()
         end
     end
 
+    -- Verjaehrte Bewerbungen zuerst wegraeumen (Begruendung an
+    -- GC.Constants.INBOX_LEAD_TTL), dann erst der Mengendeckel - sonst
+    -- verdraengt Altes, das ohnehin verfaellt, womoeglich Frisches.
+    if GC.Chat and GC.Chat.IsLeadExpired then
+        for index = #guildData.inbox, 1, -1 do
+            if GC.Chat:IsLeadExpired(guildData.inbox[index]) then
+                table.remove(guildData.inbox, index)
+            end
+        end
+    end
     while #guildData.inbox > 100 do
         table.remove(guildData.inbox)
     end

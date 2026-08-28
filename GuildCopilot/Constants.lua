@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.140",
+    VERSION = "0.9.141",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -53,6 +53,14 @@ GC.Constants = {
     -- sah kleiner aus als die Gilde ist. 35 laesst zehn Plaetze Puffer.
     ACTIVE_RAIDER_LIMIT = 35,
     ADDON_USER_TTL = 30 * 24 * 60 * 60,
+    -- Wie lange eine Bewerbung im Postfach lebt. Danach ist sie VERJAEHRT:
+    -- Sie wird lokal weggeraeumt, nicht mehr an die Gilde gesendet und aus
+    -- einem fremden Paket auch nicht mehr angenommen. Ohne diese Grenze
+    -- kreisten tagealte Bewerbungen endlos durchs Schneeballprinzip: Bei
+    -- jedem Login fragt ein Client den Bestand der Kollegen an, und deren
+    -- Altbestand kam als "ungelesen" zurueck - genau die Gildenmeldung
+    -- "es werden immer alte Nachrichten wieder ins Postfach geschoben".
+    INBOX_LEAD_TTL = 14 * 24 * 60 * 60,
     DEFAULT_POST_COOLDOWN = 120,
     DEFAULT_LFG_COOLDOWN = 120,
 }

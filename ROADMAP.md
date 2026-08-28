@@ -298,6 +298,63 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.141 – Das Postfach verjährt, und die Raidsuche lernt aus dem ersten Screenshot
+
+Zwei Gildenmeldungen vom selben Abend, dazu ein Wort, das keiner verstand.
+
+### „Es werden immer alte Nachrichten wieder ins Postfach geschoben"
+
+Die Ursache steckt im Schneeballprinzip des gildenweiten Postfachs: Bei jedem
+Login fragt der Client den Bestand der Kollegen an (`RequestInbox`,
+`Sync.lua` beim Anmelde-Abgleich), jeder antwortet gestreut per Flüstern mit
+seinem **ganzen** Postfach (`SendInbox`, bis 100 Einträge) – und
+`MergeRemoteLead` nahm alles an, was nicht gelöscht-gemerkt, ignoriert oder
+Gildenmitglied war. Ein Alter kannte die Kette nicht. Wer aufgeräumt hatte,
+bekam den Altbestand des nächsten Kollegen als „ungelesen" zurück; die
+Löschmerker aus 0.9.135 halfen nur gegen einzeln Gelöschtes, nicht gegen
+das, was nie jemand gelöscht hat.
+
+Der Schnitt heißt **Verjährung**: `INBOX_LEAD_TTL` (14 Tage, gemessen an der
+letzten Aktivität – dieselbe Rangfolge wie die Datumssortierung aus 0.9.138)
+wirkt an allen drei Stellen zugleich, sonst stirbt der Kreislauf nicht:
+
+- `MergeRemoteLead` lehnt verjährte Pakete ab – auch solche ganz ohne
+  Zeitstempel, denn ohne Datum lässt sich „aktuell" nicht belegen;
+- `SendInbox` schickt Verjährtes gar nicht erst los – die Quelle trocknet
+  aus, auch für Empfänger mit älterer Addon-Version;
+- `GC.DB:Prune()` räumt Verjährtes lokal weg, VOR dem Mengendeckel, damit
+  Altes nicht Frisches verdrängt.
+
+Die Löschmerker bleiben unangetastet; ein Bewerber, der sich selbst neu
+meldet, entsteht über `CaptureLead` wie immer frisch. Nachrichtenformat und
+Schema bleiben unverändert – ältere Clients senden weiter alles, aber ein
+0.9.141-Client nimmt es nicht mehr an und reicht es nicht mehr weiter.
+
+### Der erste Screenshot der Raidsuche
+
+Der Owner schickte die Seite im Spiel – drei Funde, alle behoben:
+
+1. **Der Untertitel lief hinter die Kopfknöpfe**, und zwischen ihnen klaffte
+   eine Lücke, wo der versteckte „Suche beenden"-Knopf in der Ankerkette
+   hing. Jetzt: Untertitel schmaler (520 px), oben nur noch „Neue Suche"
+   und „Suche beenden", und die beiden Vorlagen-Knöpfe sitzen an ihren
+   Karten – „Vorlagen" am Suchzettel, „Antwortvorlagen" am Zulauf.
+2. **Drei Menüs zeigten „Nicht gesetzt"** und sahen wie vergessene
+   Pflichtfelder aus. `CreateChoiceDropdown` startet jetzt mit der eigenen
+   Leer-Beschriftung (`emptyLabel`) statt mit dem eingebauten Platzhalter –
+   das gilt fabrikweit und macht auch andernorts nur richtiger. Die
+   Lootregel-Zeile führt außerdem das Freitextfeld an (Owner-Wunsch:
+   Freitext ist die Regel); das Vorlagen-Menü steht als Schreibhilfe
+   darunter und springt nach der Wahl auf seine Beschriftung zurück – es
+   ist ein Befehl, kein Zustand.
+3. **„Neu ableiten"** verstand niemand. Der Knopf heißt jetzt **„Neu
+   generieren"** – dasselbe Wort wie auf der Werbeseite für dieselbe
+   Handlung.
+
+`tests/smoke.lua` deckt die Verjährung in allen drei Wirkungen ab
+(ablehnen, wegräumen, Frisches unangetastet); `tests/validate.mjs` hält
+Verjährung, Sende-Filter und die Fabrik-Beschriftung fest.
+
 ## 0.9.140 – Die Fokusfalle des minimierten Fensters
 
 Aus der Gilde gemeldet, direkt nach 0.9.139: „Wenn GCP minimiert ist, kann
