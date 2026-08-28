@@ -298,6 +298,37 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.140 – Die Fokusfalle des minimierten Fensters
+
+Aus der Gilde gemeldet, direkt nach 0.9.139: „Wenn GCP minimiert ist, kann
+ich keine Chat-Eingaben oder sonstiges tätigen." Die Ursache ist ein
+WoW-Verhalten, kein Zufall: **Eine EditBox, deren Elternteil versteckt wird,
+behält den Tastaturfokus.** Wer in ein Feld geklickt hatte und dann
+minimierte, fütterte ab da ein unsichtbares Feld – jede Taste landete dort
+statt bei Steuerung oder Chat. Escape hätte den Fokus zwar gelöst, schließt
+über `OnEscapePressed` aber zugleich das ganze Fenster; von außen sah beides
+zusammen wie „Tastatur tot" aus.
+
+Sichtbar wurde das ausgerechnet jetzt, weil die Raidsuche die Falle
+vergrößert: Ihre Spruchvorschau ist eine `CreateTextArea`, und die
+fokussiert sich absichtlich schon bei einem Klick auf den Kasten (damit man
+zum Nachschleifen nicht die Textzeile treffen muss) – dieselbe Mechanik wie
+beim Werbetext, nur liegt sie hier auf der Seite, auf der man vor dem Raid
+arbeitet und dann minimiert. Betroffen war aber grundsätzlich jedes Feld
+auf jeder Seite, seit es das Minimieren gibt.
+
+Der Fix sitzt an den drei Stellen, die Felder verstecken: **Minimieren**,
+**Seitenwechsel** (`ShowPage`) und **Schließen** (`OnHide`-Hook, deckt ×,
+Escape und `/gcp` ab). Jede löst über `GetCurrentKeyBoardFocus` einen Fokus,
+der in einem eigenen Feld hängt – geprüft über die Elternkette bis zum
+Hauptfenster. Ein fremdes Eingabefeld (die Chat-Eingabe, das Feld eines
+anderen Addons) wird ausdrücklich NICHT angefasst; ein blindes `ClearFocus`
+hätte sonst genau das Gegenteil-Ärgernis erzeugt. Fehlt die API in einem
+Client, passiert schlicht nichts – kein neuer Fehlerpfad.
+
+`tests/smoke.lua` stellt beides nach: Minimieren und Seitenwechsel lösen
+den eigenen Fokus, ein fremdes Feld bleibt unberührt.
+
 ## 0.9.139 – Raidsuche: Raids zusammenklicken und auffüllen
 
 Der Owner-Auftrag: ein eigenständiges Suchwerkzeug, mit dem sich ein Raid

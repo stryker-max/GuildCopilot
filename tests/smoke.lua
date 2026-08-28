@@ -10873,6 +10873,38 @@ do
     addon.UI:ShowPage("ROSTER")
 end
 
+-- === Fokusfalle beim Minimieren (0.9.140) ==================================
+--
+-- Eine EditBox, deren Elternteil versteckt wird, behaelt in WoW den
+-- Tastaturfokus - wer nach einem Klick ins Feld minimierte, fuetterte ein
+-- unsichtbares Feld statt Chat und Steuerung. Minimieren, Seitenwechsel und
+-- Schliessen muessen einen EIGENEN Fokus loesen, einen fremden (die
+-- Chat-Eingabe) aber in Ruhe lassen.
+do
+    local fkt_cleared = 0
+    local fkt_field = {
+        ClearFocus = function() fkt_cleared = fkt_cleared + 1 end,
+        GetParent = function() return addon.UI.frame end,
+    }
+    GetCurrentKeyBoardFocus = function() return fkt_field end
+    addon.UI:SetWindowMinimized(true)
+    assert(fkt_cleared == 1, "Minimieren loest den eigenen Feldfokus nicht")
+    addon.UI:SetWindowMinimized(false)
+    addon.UI:ShowPage("OVERVIEW")
+    assert(fkt_cleared >= 2, "Der Seitenwechsel loest den eigenen Feldfokus nicht")
+
+    local fkt_foreign = {
+        ClearFocus = function() fkt_cleared = 100 end,
+        GetParent = function() return nil end,
+    }
+    GetCurrentKeyBoardFocus = function() return fkt_foreign end
+    addon.UI:SetWindowMinimized(true)
+    addon.UI:SetWindowMinimized(false)
+    addon.UI:ShowPage("ROSTER")
+    assert(fkt_cleared < 100, "Ein fremdes Eingabefeld wurde defokussiert")
+    GetCurrentKeyBoardFocus = nil
+end
+
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den
 -- geschuetzten Gildenausschluss versucht.
 assert(#uninvitedPlayers == 0,

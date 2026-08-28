@@ -7,6 +7,18 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.140 – Addon
+
+**Behoben**
+
+- **Minimiert schluckte das Fenster Tastatureingaben.** Wer in ein
+  Eingabefeld geklickt hatte (bei der Spruchvorschau der Raidsuche genügt
+  ein Klick auf den Kasten) und dann minimierte, die Seite wechselte oder
+  das Fenster schloss, tippte ab da unsichtbar in dieses Feld weiter –
+  kein Chat, keine Steuerung. Jetzt lösen Minimieren, Seitenwechsel und
+  Schließen einen Fokus, der in einem Guild-Copilot-Feld hängt; fremde
+  Eingabefelder wie die Chat-Eingabe bleiben unangetastet.
+
 ## 0.9.139 – Addon
 
 **Neu**

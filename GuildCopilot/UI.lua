@@ -519,6 +519,33 @@ local function CursorInUISpace()
     return cursorX / scale, cursorY / scale
 end
 
+-- Eine EditBox, deren Elternteil versteckt wird, behaelt in WoW den
+-- Tastaturfokus. Wer also in ein Feld geklickt hatte (bei der Spruchvorschau
+-- der Raidsuche genuegt ein Klick auf den Kasten) und dann minimierte, die
+-- Seite wechselte oder das Fenster schloss, fuetterte ab da ein unsichtbares
+-- Feld: kein Laufen, kein Chat - "keine Eingaben mehr", wie aus der Gilde
+-- gemeldet. Geloest wird deshalb an genau diesen drei Stellen jeder Fokus,
+-- der IM EIGENEN Fenster haengt. Fremde Eingabefelder (die Chat-Eingabe!)
+-- bleiben unangetastet - deshalb die Elternkette statt eines blinden
+-- ClearFocus.
+local function ReleaseOwnKeyboardFocus(root)
+    if type(GetCurrentKeyBoardFocus) ~= "function" or not root then
+        return
+    end
+    local focus = GetCurrentKeyBoardFocus()
+    if not focus or type(focus.ClearFocus) ~= "function" then
+        return
+    end
+    local frame = focus
+    while frame do
+        if frame == root then
+            focus:ClearFocus()
+            return
+        end
+        frame = frame.GetParent and frame:GetParent() or nil
+    end
+end
+
 -- Minimieren und Wiederherstellen: der waagerechte Strich und das Rechteck,
 -- die jedes Fenster seit dreissig Jahren traegt.
 local function CreateMinimizeMark(parent, size, color)
@@ -1331,6 +1358,11 @@ function GC.UI:CreateMainFrame()
     end)
     frame:Hide()
     table.insert(UISpecialFrames, "GuildCopilotFrame")
+    -- Schliessen ueber ×, Escape oder /gcp: Ein Fokus in einem der eigenen
+    -- Felder darf das Fenster nicht ueberleben (siehe ReleaseOwnKeyboardFocus).
+    frame:HookScript("OnHide", function(self)
+        ReleaseOwnKeyboardFocus(self)
+    end)
 
     local header = CreatePanel(frame, THEME.sidebar, THEME.sidebar)
     header:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
@@ -1757,6 +1789,11 @@ function GC.UI:SetWindowMinimized(minimized)
     -- Erst den Anker festnageln, dann die Höhe ändern: Sonst wandert der
     -- Balken beim Zuklappen in die Mitte des Bildschirms.
     self:FreezeWindowTopLeft()
+    if minimized then
+        -- Die Seiten verschwinden gleich; ein Fokus in einem ihrer Felder
+        -- würde sonst unsichtbar weiter alle Tasten schlucken.
+        ReleaseOwnKeyboardFocus(frame)
+    end
     frame.sidebar:SetShown(not minimized)
     for key, page in pairs(self.pages) do
         -- Das Verstecken der Seiten schließt über deren OnHide auch alle
@@ -1827,6 +1864,9 @@ function GC.UI:ShowPage(pageKey)
         pageKey = "ROSTER"
     end
     self.activePage = pageKey
+    -- Auch der Seitenwechsel versteckt Felder; ein dort hängender Fokus
+    -- würde unsichtbar weitertippen (siehe ReleaseOwnKeyboardFocus).
+    ReleaseOwnKeyboardFocus(self.frame)
     for key, page in pairs(self.pages) do
         page:SetShown(key == pageKey)
     end
