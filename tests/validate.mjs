@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.138",
+  "## Version: 0.9.139",
 ];
 
 for (const entry of requiredMetadata) {
@@ -539,6 +539,22 @@ const requiredImplementations = [
   ["Sperre gegen den selbst erzeugten Fähigkeitssturm", /skillHeadersTouchedAt/],
   ["Berufserfassung wird entprellt", /function GC\.Profile:ScheduleRefresh/],
   ["Fähigkeitsereignis als prüfbare Methode", /function GC\.Profile:OnGameEvent/],
+  // Die Raidsuche (0.9.139, docs/KONZEPT-raidsuche-lfm.md): eigener
+  // Navigationspunkt auf dem LETZTEN freien Platz der Seitenleiste
+  // (NAV_TAB_SPACING dafuer 34 -> 32), Suchzettel mit abgeleitetem Spruch,
+  // Whisper-Weiche VOR dem Bewerber-Postfach, Zulauf mit Gruppeneinladung
+  // und der Suchbalken nach dem Muster des Werbebalkens.
+  ["Raidsuche als eigener Navigationspunkt", /\{ key = "RAIDSEARCH", section = "RAID", label = "Raidsuche"/],
+  ["Instanzliste teilt die Namen der Auswertung", /GC\.RaidInstances = \{/],
+  ["Suchspruch mit Längenstufen", /function GC\.RaidSearch:BuildAnnouncement/],
+  ["Suchspruch nur bestätigt", /function GC\.RaidSearch:ConfirmText/],
+  ["Whisper-Weiche vor dem Postfach", /GC\.RaidSearch:ShouldCaptureWhisper\(message, sender\)/],
+  ["Zulauf mit Löschmerker je Suche", /plan\.tombstones\[ResponseKey\(name\)\] = GC\.Util\.Now\(\)/],
+  ["Gruppeneinladung mit ehrlicher Rückmeldung", /keine Gruppeneinladung per Addon/],
+  ["Suchbalken nach Werbebalken-Muster", /function GC\.UI:CreateRaidSearchBar/],
+  ["Suchzettel-Vorlagen mit Wochentag", /function GC\.RaidSearch\.NextDateForWeekday/],
+  ["selbstgebaute Antwortvorlagen", /function GC\.RaidSearch:GetReplyTemplates/],
+  ["zwei Automatik-Quellen am selben Lauscher", /autoPostArmedSources/],
 ];
 
 for (const [name, pattern] of requiredImplementations) {

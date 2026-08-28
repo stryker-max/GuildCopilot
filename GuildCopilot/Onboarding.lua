@@ -342,8 +342,8 @@ GC.Onboarding.TOUR = {
     {
         section = "RAID",
         icon = "Interface\\Icons\\INV_Misc_Book_11",
-        pages = "Raidauswertung · Ausrüstung",
-        text = "Raidabende mitschreiben, Consumables und Tode auswerten,"
+        pages = "Raidsuche · Raidauswertung · Ausrüstung",
+        text = "Spieler für den Raid suchen, Abende mitschreiben und auswerten,"
             .. " Verzauberungen und Sockel der Raider prüfen.",
     },
     {

@@ -298,6 +298,154 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.139 – Raidsuche: Raids zusammenklicken und auffüllen
+
+Der Owner-Auftrag: ein eigenständiges Suchwerkzeug, mit dem sich ein Raid
+„zusammenklicken" lässt – Datum und Uhrzeit, gesuchte Klassen und Specs,
+Lootregeln als Freitext („2SR > MS > OS", „dies und das ist HR"). Das Konzept
+samt aller Owner-Entscheidungen steht in `docs/KONZEPT-raidsuche-lfm.md`;
+diese Fassung setzt dessen Stufe 1 vollständig um. Der Name ist bewusst
+**Raidsuche** und nicht „LFR" – LFR ist Blizzards Begriff für den
+automatischen Schlachtzugsbrowser; was hier passiert, ist klassisches LFM.
+
+### Der letzte Platz in der Seitenleiste
+
+Die Leiste hat keine Bildlaufleiste und war bis auf 24 px voll; ein neuer
+Punkt kostet 34. Entschieden (über den Reiternamen mit): `NAV_TAB_SPACING`
+sinkt von 34 auf 32 – zwei Pixel je Reiter sieht niemand, und der fünfzehnte
+Punkt passt. Es ist ausdrücklich der **letzte**: Der nächste braucht einen
+echten Umbau, keine weitere Pixelrasur. `tests/validate.mjs` rechnet die
+Leiste weiterhin nach. „Raidsuche" steht als erster Punkt der RAID-Sektion –
+die erzählt damit den Bogen eines Raidabends: Suche (vorher), Datenquelle und
+Auswertung (nachher), Ausrüstung als Konsequenz.
+
+### Der Suchzettel und sein Spruch
+
+Links der Zettel: Instanz (die neun Schlachtzüge aus `GC.RaidInstances`,
+deren Namen dieselben sind wie in der Raidauswertung, plus „Frei" mit
+Textfeld), Größe, Termin (Kalenderblatt plus Uhrzeit mit Normalisierung –
+„1930" wird „19:30"), Lootregel als **Freitext** mit Preset-Menü als reiner
+Schreibhilfe, Hard Reserve, SR-Link, Notiz. Liegen für den Termin
+Abmeldungen vor, steht das als Zeile an der Besetzung – die Auskunft, die
+nur der GCP geben kann.
+
+Der Spruch ist eine **Ableitung, kein zweites Formular**: `BuildAnnouncement`
+baut ihn nach dem Muster des Werbetexts in Ausführlichkeitsstufen und nimmt
+die erste unter 255 Bytes – gekürzt wird erst die Notiz, dann die
+Spec-Wünsche, dann die HR-Liste (sofern ein SR-Link sie ersetzt), zuletzt der
+Instanzname durch seinen Kurznamen („Kara"). Gepostet wird nur **bestätigter**
+Text; jede Zettel-Änderung entwertet die Bestätigung (`confirmedText`-Muster
+der Werbung). Roster-Änderungen entwerten bewusst NICHT – sonst stünde die
+Automatik nach jedem Beitritt still, und „noch 2 Heiler" statt „noch 1" ist
+im LFM-Alltag harmlos.
+
+### Kanäle: auch Gilde und „World", Cooldowns gemeinsam
+
+Zur Wahl stehen die vier Kanalarten der Werbung, der **Gildenchat** und die
+**selbst beigetretenen Kanäle** (Owner-Anforderung). Eigene Kanäle werden
+unter ihrem NAMEN gemerkt, nie unter der Nummer – die ändert sich je Login.
+Erkannt werden sie als „beigetreten, aber weder Kanalart noch Systemkanal"
+(LokaleVerteidigung und Weltverteidigung sind ausgenommen). Die
+Kanal-Cooldowns teilen sich Werbung und Raidsuche über dieselben
+`lastPosts`-Schlüssel, mit Absicht: Server-Drosselung und der Ruf als
+Spammer hängen am Spieler und am Kanal, nicht am Werkzeug.
+
+### Die Automatik hat jetzt zwei Absender
+
+Das Hardware-Event-Prinzip bleibt unangetastet: Kanalnachrichten nur im
+Kontext einer echten Eingabe, nie von einem Timer. Der unsichtbare Lauscher
+(`GuildCopilotAutoPostFrame`) bedient jetzt **zwei Quellen** – Werbung und
+Raidsuche schärfen getrennt (`autoPostArmedSources`), der Rahmen lauscht,
+solange mindestens eine scharf ist, und beim selben Tastendruck dürfen beide
+posten (verschiedene Kanäle, getrennte Cooldowns). Geschärft wird wie bisher
+im Auffrisch-Takt des jeweiligen Balkens und nur, wenn ein Klick jetzt auch
+posten würde.
+
+### Zulauf statt Postfach: die Weiche
+
+Läuft eine Suche, fragt `CaptureWhisper` zuerst die Raidsuche – nach dem
+Werkstattbefehl, vor allem anderen. Die Regeln (Konzept):
+**Gildenmitglieder** gehören immer dem Zulauf (das Postfach schließt sie
+ohnehin aus, für die Raidsuche sind sie die liebsten Antworten); Externe mit
+**Bewerber-Triggerwort** bleiben dem Postfach (wer Anschluss sucht, ist
+Bewerber); alle übrigen Whisper Externer landen im Zulauf – LFM-Antworten
+sind formlos, ein Triggerzwang würde sie verlieren. Ohne laufende Suche
+ändert sich nichts. Entfernte Antworten bekommen einen Löschmerker je Suche
+(Tombstone-Muster des Postfachs) und kommen für den Rest dieser Suche nicht
+wieder.
+
+Je Antwort: Klasse **sicher aus der Whisper-GUID** (`ResolveLeadClass`),
+Stufe aus dem Text (`ReadLeadDetails` – beide Leser des Postfachs arbeiten
+auf jeder Tabelle mit den passenden Feldern), dazu ein Spec-**Vorschlag**
+aus dem Text („kann holy"), aber nur bei sicher bekannter Klasse – „holy"
+allein kann Priester wie Paladin meinen, innerhalb einer Klasse ist es
+eindeutig. Der Rest ist Zuordnung per Menü. Zustände: NEU → ANGESCHRIEBEN →
+EINGELADEN; DABEI wird live aus der Gruppe abgeleitet und nie gespeichert.
+
+### Besetzung: ehrliche Zahlen
+
+Soll je Rolle (Tanks/Heiler/DD) plus Spec-Wünsche als Menü-Toggle. Das Ist
+zählt bei jedem Blick frisch: Klassen aus den Gruppendaten (dasselbe
+Leseverfahren wie der Anwesenheitsabgleich der Raidauswertung), Rollen nur
+aus Selbstauskunft – Spec-Zuordnung im Zulauf, sonst das Raidprofil des
+Spielers. Wer keine hat, steht als „ohne Spec-Zuordnung" da und wird
+**keiner** Rolle zugeschlagen; auch Wildheit-Druiden (Rolle FLEX im
+Spec-Katalog) zählen dorthin, statt Tank oder DD zu raten. „Noch gesucht"
+ist Soll minus sicher Zugeordnete und speist den Spruch.
+
+### Einladen, Antworten, Vorlagen
+
+**Einladen** nutzt `C_PartyInfo.InviteUnit` mit Rückfall auf `InviteUnit`,
+wandelt bei vollem Fünfer und Zettelgröße über fünf vorher per
+`ConvertToRaid` um – und meldet ehrlich, wenn dieser Client keine der
+Funktionen anbietet, statt still nichts zu tun (die GuildUninvite-Lektion).
+**Antworten** sind die vom Owner gewünschten **selbstgebauten Vorlagen**:
+eine persönliche, frei bearbeitbare Liste (lokal, Deckel 8, Platzhalter
+`{name} {instanz} {termin} {loot} {srlink}`), zwei editierbare Beispiele ab
+Werk, deren Seeded-Flag Gelöschtes gelöscht hält. Gesendet wird per Klick im
+Antworten-Menü – der Klick ist die bewusste Entscheidung und das
+Hardware-Ereignis, der Text stammt ohnehin aus der Hand des Raidleiters.
+**Suchzettel-Vorlagen** speichern den Zettel mit Wochentag statt Datum;
+Anwenden erzeugt einen frischen Zettel mit dem nächsten passenden Termin
+(heute zählt mit). Owner-Entscheidung „nur ein Raid": genau EIN Zettel,
+mehrere Termine laufen über Vorlagen – das hält auch die Whisper-Weiche
+eindeutig.
+
+### Der Suchbalken
+
+Wie der Werbebalken (Owner: „ja, wie bei der Gildenwerbung mit Cooldown"):
+frei verschiebbar, zeigt Instanz/Termin/Füllstand, offene Rollen und neue
+Antworten, trägt den Posten-Knopf mit Countdown und den Automatik-Haken. Er
+erscheint mit „Suche starten" und verschwindet mit dem Ende der Suche; ein
+Wegklicken gilt bis zum nächsten Start. Nach einem Login mit laufender Suche
+steht er wieder da – die Suche lebt in den SavedVariables.
+
+### Nebenbei: der Werbebalken erklärt seine Automatik
+
+Aus der Besitzerfrage „warum muss ich nach dem Cooldown wieder klicken?"
+wurde eine Statuszeile: Ist ein Klick möglich und die Automatik aus, sagt
+der Werbebalken jetzt, dass der Haken „Automatisch wiederholen" das Klicken
+erspart.
+
+### Datenmodell und Grenzen
+
+Der Zettel liegt gildenbezogen (`guildData.raidSearch.plan`), wird in dieser
+Stufe aber nicht synchronisiert – keine Nachrichtenart registriert, ältere
+Clients sind nicht betroffen, und die spätere gildenweite Stufe 3 braucht
+keinen Datenumzug. Lokal (`settings.raidSearch`) liegen Kanalwahl,
+Automatik, Ton, Balkenposition und die Antwortvorlagen. Deckel überall:
+Zulauf 40, Nachrichten je Antwort 10, Suchzettel-Vorlagen 12,
+Antwortvorlagen 8; `GC.DB:Prune()` räumt einen BEENDETEN Zettel nach sieben
+Tagen ab und sichert die Deckel nach. Schema und Nachrichtenformate bleiben
+unverändert.
+
+Die Funktionstour nennt die Raidsuche in der RAID-Zeile; `tests/validate.mjs`
+hält Navigationspunkt, Spruchbaukasten, Weiche, Löschmerker, ehrliche
+Invite-Meldung, Suchbalken, Wochentags-Vorlagen, eigene Antwortvorlagen und
+die zwei Automatik-Quellen fest. `tests/smoke.lua` prüft Zeitnormalisierung,
+Wochentagsrechnung, Spruchstufen gegen die Byte-Grenze, die Whisper-Weiche
+in allen vier Fällen und die ehrliche Rollenzählung.
+
 ## 0.9.138 – Das Postfach nach Datum, damit Aktuelles oben steht
 
 Aus der Gilde kam eine schlichte Bitte zum Postfach: nach Datum sortieren, damit

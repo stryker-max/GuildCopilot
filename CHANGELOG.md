@@ -7,6 +7,32 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.139 – Addon
+
+**Neu**
+
+- **Raidsuche: Raids zusammenklicken und auffüllen.** Neuer Navigationspunkt
+  in der RAID-Sektion. Instanz, Datum und Uhrzeit, Sollbesetzung
+  (Tanks/Heiler/DD plus Spec-Wünsche) und Lootregeln als Freitext (Regel,
+  Hard Reserve, SR-Link) ergeben automatisch den LFM-Spruch – immer unter
+  255 Bytes, mit Kürzungsstufen. Gepostet wird bestätigt und per Klick in
+  wählbare Kanäle, neben den bekannten auch Gildenchat und selbst
+  beigetretene Kanäle wie „World“. Antworten landen im **Zulauf** statt im
+  Bewerber-Postfach: mit Klasse aus der Whisper-GUID, Spec-Zuordnung,
+  Einladen-Knopf (samt Schlachtzugs-Umwandlung) und **selbstgebauten
+  Antwortvorlagen**. Dazu Suchzettel-Vorlagen mit Wochentag („Kara dienstags
+  19:30“) und ein **Suchbalken** mit Cooldown-Countdown und
+  Tastendruck-Automatik wie beim Werbebalken. Konzept und
+  Owner-Entscheidungen: `docs/KONZEPT-raidsuche-lfm.md`.
+
+**Geändert**
+
+- **Werbebalken: Hinweis auf die Automatik.** Ist ein Post möglich und die
+  Automatik aus, erklärt die Statuszeile jetzt, dass „Automatisch
+  wiederholen“ das erneute Klicken erspart.
+- **Seitenleiste: Reiterabstand von 34 auf 32 px**, damit der fünfzehnte
+  Navigationspunkt Platz hat – es ist der letzte freie.
+
 ## 0.9.138 – Addon
 
 **Geändert**

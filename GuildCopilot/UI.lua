@@ -56,7 +56,12 @@ local NAV_TOP = 10
 local NAV_SECTION_GAP = 3
 local NAV_SECTION_HEIGHT = 22
 local NAV_TAB_HEIGHT = 32
-local NAV_TAB_SPACING = 34
+-- 32 statt 34 seit der Raidsuche: Die Leiste war bis auf 24 px voll, der
+-- fuenfzehnte Punkt brauchte 34. Zwei Pixel weniger Abstand je Reiter sind
+-- nicht zu sehen und schaffen genau einen Platz - es ist der LETZTE. Der
+-- naechste Navigationspunkt braucht einen echten Umbau (schmalere
+-- Sektionskoepfe oder ein hoeheres Fenster), nicht noch eine Pixelrasur.
+local NAV_TAB_SPACING = 32
 
 -- Masse der Profilseite. Ganz oben steht die Checkliste "Erste Schritte", und
 -- sie erscheint nur, solange etwas offen ist. Deshalb stehen die Abstaende der
@@ -111,6 +116,10 @@ local TAB_DEFINITIONS = {
     -- Auftraege sucht, findet sie jetzt dort, wo er alles andere auch findet.
     { key = "ORDERS", page = "WORKSHOP", view = "ORDERS", section = "GILDE",
         label = "Gildenaufträge", icon = "Interface\\Icons\\INV_Scroll_03" },
+    -- Die RAID-Sektion erzaehlt den Bogen eines Raidabends: erst die Suche
+    -- (vorher), dann Datenquelle und Auswertung (nachher), zuletzt die
+    -- Konsequenz daraus.
+    { key = "RAIDSEARCH", section = "RAID", label = "Raidsuche", icon = "Interface\\Icons\\INV_Misc_Horn_01" },
     -- "requires" nennt ein Modul, ohne das dieser Punkt nicht existiert.
     -- Warcraft Logs ist der einzige Fall: Das CurseForge-Paket liefert
     -- WarcraftLogs.lua nicht mit, weil der Import den Windows-Helfer braucht
@@ -769,16 +778,19 @@ end
 -- brächte ungültige Zwischenstände: Wer „125" tippt, erzeugt unterwegs „1"
 -- und „12" - bei einer Fenstergröße, die sofort wirkt, wäre das ein Springen
 -- des halben Bildschirms.
-local function CreateStepper(parent, minimum, maximum, step, onChanged)
+local function CreateStepper(parent, minimum, maximum, step, onChanged, suffix)
     local stepper = CreateFrame("Frame", nil, parent)
     stepper:SetSize(146, 28)
     stepper.value = minimum
+    -- Ohne Angabe bleibt es die Prozentanzeige der Einstellungen; die
+    -- Raidsuche zaehlt mit demselben Regler Plaetze ("25").
+    stepper.suffix = suffix or " %"
 
     function stepper:SetValue(value, announce)
         value = math.floor((tonumber(value) or minimum) / step + 0.5) * step
         value = math.max(minimum, math.min(maximum, value))
         self.value = value
-        self.display:SetText(value .. " %")
+        self.display:SetText(value .. self.suffix)
         SetButtonEnabled(self.down, value > minimum)
         SetButtonEnabled(self.up, value < maximum)
         if announce and onChanged then
@@ -1621,12 +1633,16 @@ function GC.UI:CreateMainFrame()
     self:BuildWarcraftLogsPage()
     self:BuildStatisticsPage()
     self:BuildGearPage()
+    self:BuildRaidSearchPage()
     self:ShowPage(self.activePage)
     self:ApplyWindowLook()
     -- Zugeklappt ausgeloggt heisst zugeklappt eingeloggt.
     if GC.DB:GetSettings().window.minimized then
         self:SetWindowMinimized(true)
     end
+    -- Lief beim Ausloggen eine Raidsuche, steht ihr Balken nach dem Login
+    -- wieder da - die Suche selbst lebt in den SavedVariables weiter.
+    self:UpdateRaidSearchBarShown()
 end
 
 -- Maßstab und Deckkraft des Hauptfensters (Nutzerrückmeldung 08/2026).
@@ -10801,6 +10817,7 @@ local PAGE_REFRESH = {
     WCL = "RefreshWarcraftLogs",
     STATISTICS = "RefreshStatistics",
     GEAR = "RefreshGear",
+    RAIDSEARCH = "RefreshRaidSearch",
 }
 
 function GC.UI:IsVisible()
@@ -10926,6 +10943,1110 @@ end
 -- Automatik, beim naechsten Tastendruck. Ein Countdown loest nie selbst aus,
 -- er schaltet nur frei beziehungsweise schaerft den Tastatur-Lauscher.
 
+-- === Raidsuche =============================================================
+--
+-- Die Seite zum Konzept docs/KONZEPT-raidsuche-lfm.md: links der Suchzettel
+-- und der daraus abgeleitete Spruch, rechts Soll/Ist der Besetzung und der
+-- Zulauf. Die Logik liegt vollstaendig in RaidSearch.lua; hier wird nur
+-- gezeichnet und geklickt.
+
+local RAIDSEARCH_RESPONSE_ROWS = 4
+
+local RAIDSEARCH_ROLE_ROWS = {
+    { role = "TANK", label = "Tanks" },
+    { role = "HEALER", label = "Heiler" },
+    { role = "DAMAGER", label = "DD" },
+}
+
+-- Kurze Kanalbeschriftungen: In die zwei Kaestchenzeilen der Spruchkarte
+-- passen keine Woerter wie "Gildenrekrutierung".
+local RAIDSEARCH_CHANNEL_LABEL = {
+    LFG = "LFG",
+    TRADE = "Handel",
+    GENERAL = "Allg.",
+    RECRUITMENT = "Rekrut.",
+    GUILD = "Gilde",
+}
+
+local function FormatDateGerman(iso)
+    local year, month, day = tostring(iso or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not year then
+        return tostring(iso or "")
+    end
+    return day .. "." .. month .. "." .. year
+end
+
+-- Der Zustand einer Antwort, wie die Zeile ihn zeigt. DABEI wird live aus der
+-- Gruppe abgeleitet und nie gespeichert - wer die Gruppe verlaesst, faellt
+-- von selbst auf seinen letzten gespeicherten Zustand zurueck.
+local function ResponseStateLabel(response)
+    if GC.RaidSearch:IsInCurrentGroup(response.name) then
+        return "DABEI", THEME.success
+    end
+    if response.state == "EINGELADEN" then
+        return "EINGELADEN", THEME.accent
+    end
+    if response.state == "ANGESCHRIEBEN" then
+        return "ANGESCHRIEBEN", THEME.muted
+    end
+    return "NEU", THEME.warning
+end
+
+function GC.UI:BuildRaidSearchPage()
+    local page = self.pages.RAIDSEARCH
+    CreatePageTitle(page, "Raidsuche", "Raid zusammenstellen, Suchspruch posten und den Zulauf verwalten"
+        .. " — Antworten auf die laufende Suche landen rechts, nicht im Bewerber-Postfach.")
+
+    -- Kopfzeile: Zettel anlegen/beenden und die beiden Vorlagen-Dialoge.
+    page.newButton = CreateButton(page, "Neue Suche", 104, 26, function()
+        local plan = GC.RaidSearch:GetPlan()
+        if plan and plan.status == "SUCHT" then
+            -- Ein Klick beendet nichts stillschweigend: Erst scharfschalten,
+            -- der zweite Klick raeumt wirklich ab (Muster "Alle löschen").
+            if not page.newArmed then
+                page.newArmed = true
+                page.newButton:SetText("Wirklich neu?")
+                return
+            end
+        end
+        page.newArmed = nil
+        GC.RaidSearch:NewPlan()
+        GC.UI:RefreshRaidSearch()
+    end)
+    page.newButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, 0)
+    page.endButton = CreateButton(page, "Suche beenden", 116, 26, function()
+        GC.RaidSearch:EndSearch()
+        GC.UI:RefreshRaidSearch()
+    end)
+    page.endButton:SetPoint("RIGHT", page.newButton, "LEFT", -8, 0)
+    page.templatesButton = CreateButton(page, "Zettel-Vorlagen", 122, 26, function()
+        GC.UI:ToggleRaidSearchTemplates()
+    end)
+    page.templatesButton:SetPoint("RIGHT", page.endButton, "LEFT", -8, 0)
+    page.repliesButton = CreateButton(page, "Antwortvorlagen", 128, 26, function()
+        GC.UI:ToggleRaidSearchReplies()
+    end)
+    page.repliesButton:SetPoint("RIGHT", page.templatesButton, "LEFT", -8, 0)
+
+    -- === Der Suchzettel ====================================================
+    local sheet = CreateCard(page, "Suchzettel")
+    sheet:SetSize(380, 316)
+    sheet:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -66)
+    page.sheet = sheet
+
+    local function SheetLabel(text, y)
+        local label = CreateLabel(sheet, text, { muted = true, width = 86, height = 26 })
+        label:SetPoint("TOPLEFT", sheet, "TOPLEFT", 18, y)
+        return label
+    end
+
+    SheetLabel("Instanz", -44)
+    local zoneOptions = {}
+    for _, instance in ipairs(GC.RaidInstances) do
+        zoneOptions[#zoneOptions + 1] = instance.name
+    end
+    zoneOptions[#zoneOptions + 1] = "Frei (eigener Name)"
+    page.zoneDropdown = CreateChoiceDropdown(sheet, 250, zoneOptions, function(value)
+        if value == "Frei (eigener Name)" then
+            -- Freitext: Der Name kommt aus dem Notizfeld des Dialogs unten -
+            -- einfacher Weg: Zone leeren und das Feld zum Tippen freigeben.
+            page.freeZone = true
+            GC.RaidSearch:SetZone("", "", nil)
+        else
+            page.freeZone = nil
+            for _, instance in ipairs(GC.RaidInstances) do
+                if instance.name == value then
+                    GC.RaidSearch:SetZone(instance.name, instance.short, instance.size)
+                    break
+                end
+            end
+        end
+        GC.UI:RefreshRaidSearch()
+    end, true, nil, nil, 26)
+    page.zoneDropdown:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -44)
+
+    -- Das Freitextfeld erscheint nur bei "Frei" - sonst waeren es zwei
+    -- Auswahlwege fuer dieselbe Angabe.
+    page.zoneEdit = CreateEdit(sheet, 250, 26)
+    page.zoneEdit.container:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -44)
+    page.zoneEdit:SetScript("OnEditFocusLost", function(edit)
+        GC.RaidSearch:SetZone(edit:GetText(), edit:GetText(), nil)
+        GC.UI:RefreshRaidSearch()
+    end)
+    page.zoneEdit:SetScript("OnEnterPressed", function(edit)
+        edit:ClearFocus()
+    end)
+    page.zoneEdit.container:Hide()
+
+    SheetLabel("Größe", -78)
+    page.sizeStepper = CreateStepper(sheet, 5, 40, 5, function(value)
+        GC.RaidSearch:SetSize(value)
+        GC.UI:RefreshRaidSearch()
+    end, "")
+    page.sizeStepper:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -78)
+
+    SheetLabel("Termin", -112)
+    page.dateEdit = CreateEdit(sheet, 132, 26)
+    page.dateEdit.container:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -112)
+    page.dateEdit:SetScript("OnEditFocusLost", function(edit)
+        if GC.RaidSearch:SetDate(edit:GetText()) then
+            GC.UI:RefreshRaidSearch()
+        else
+            edit:SetText(FormatDateGerman(GC.RaidSearch:EnsurePlan().dateISO))
+        end
+    end)
+    page.dateEdit:SetScript("OnEnterPressed", function(edit)
+        edit:ClearFocus()
+    end)
+    local pick = CreateButton(page.dateEdit.container, "", 20, 20, function()
+        GC.UI:OpenDatePicker(page.dateEdit, function(iso)
+            GC.RaidSearch:SetDate(iso)
+            GC.UI:RefreshRaidSearch()
+        end)
+    end)
+    SetButtonMark(pick, CreateCalendarMark(pick, 14))
+    AttachEditButton(page.dateEdit, pick, 20)
+
+    page.timeEdit = CreateEdit(sheet, 58, 26)
+    page.timeEdit.container:SetPoint("TOPLEFT", sheet, "TOPLEFT", 248, -112)
+    page.timeEdit:SetScript("OnEditFocusLost", function(edit)
+        if GC.RaidSearch:SetTime(edit:GetText()) then
+            GC.UI:RefreshRaidSearch()
+        else
+            edit:SetText(GC.RaidSearch:EnsurePlan().timeText or "")
+        end
+    end)
+    page.timeEdit:SetScript("OnEnterPressed", function(edit)
+        edit:ClearFocus()
+    end)
+    page.weekdayLabel = CreateLabel(sheet, "", { muted = true, width = 44, height = 26 })
+    page.weekdayLabel:SetPoint("TOPLEFT", sheet, "TOPLEFT", 314, -112)
+
+    SheetLabel("Lootregel", -146)
+    -- Das Aufklappmenue ist nur eine Schreibhilfe: Es fuellt das Freitextfeld
+    -- darunter, danach darf der Text beliebig angepasst werden (Owner-Wunsch:
+    -- Lootregeln als Freitext).
+    page.lootPreset = CreateChoiceDropdown(sheet, 250,
+        { "2SR > MS > OS", "1SR > MS > OS", "MS > OS", "GDKP", "Gildenintern" },
+        function(value)
+            GC.RaidSearch:SetLootRule(value)
+            GC.UI:RefreshRaidSearch()
+        end, true, "Vorlage wählen", nil, 26)
+    page.lootPreset:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, -146)
+
+    local function SheetEdit(labelText, y, setter)
+        SheetLabel(labelText, y)
+        local edit = CreateEdit(sheet, 250, 26)
+        edit.container:SetPoint("TOPLEFT", sheet, "TOPLEFT", 110, y)
+        edit:SetScript("OnEditFocusLost", function(self)
+            setter(GC.RaidSearch, self:GetText())
+            GC.UI:RefreshRaidSearch()
+        end)
+        edit:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+        end)
+        return edit
+    end
+
+    page.lootEdit = SheetEdit("", -180, GC.RaidSearch.SetLootRule)
+    page.hrEdit = SheetEdit("Hard Res.", -214, GC.RaidSearch.SetHardReserve)
+    page.srEdit = SheetEdit("SR-Link", -248, GC.RaidSearch.SetSrLink)
+    page.noteEdit = SheetEdit("Notiz", -282, GC.RaidSearch.SetNote)
+
+    -- === Der Spruch ========================================================
+    local announce = CreateCard(page, "Suchspruch")
+    announce:SetSize(380, 198)
+    announce:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -388)
+    page.announce = announce
+
+    page.raidSearchMarkers = {}
+    for markerIndex = 1, 8 do
+        local selectedMarker = markerIndex
+        local markerButton = CreateRaidMarkerButton(announce, markerIndex, function()
+            GC.RaidSearch:SetMarker(selectedMarker)
+            GC.UI:RefreshRaidSearch()
+        end)
+        markerButton:SetPoint("TOPLEFT", announce, "TOPLEFT", 152 + ((markerIndex - 1) * 26), -12)
+        page.raidSearchMarkers[markerIndex] = markerButton
+    end
+
+    page.announceEdit = CreateTextArea(announce, 344, 48, 400)
+    page.announceEdit.container:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -46)
+    page.announceEdit:SetScript("OnTextChanged", function()
+        GC.UI:RefreshRaidSearchPost()
+    end)
+
+    page.announceBytes = CreateLabel(announce, "", { muted = true, width = 120, height = 14,
+        font = "GameFontNormalSmall" })
+    page.announceBytes:SetPoint("TOPLEFT", announce, "TOPLEFT", 18, -98)
+    page.announceRegenerate = CreateButton(announce, "Neu ableiten", 100, 20, function()
+        page.announceEdit:SetText(GC.RaidSearch:BuildAnnouncement())
+        GC.UI:RefreshRaidSearchPost()
+    end)
+    page.announceRegenerate:SetPoint("TOPRIGHT", announce, "TOPRIGHT", -18, -95)
+
+    -- Kanalkaestchen als feste Plaetze, beim Auffrischen befuellt: Die Liste
+    -- haengt von den selbst beigetretenen Kanaelen ab und aendert sich mit
+    -- jedem Login.
+    page.channelToggles = {}
+    for slot = 1, 8 do
+        local toggle = CreateToggle(announce, "", function(enabled)
+            local target = page.channelToggles[slot].targetKey
+            if target then
+                GC.RaidSearch:SetChannelSelected(target, enabled)
+            end
+            GC.UI:RefreshRaidSearchPost()
+        end)
+        local column = (slot - 1) % 4
+        local row = math.floor((slot - 1) / 4)
+        toggle:SetPoint("TOPLEFT", announce, "TOPLEFT", 18 + (column * 90), -120 - (row * 24))
+        toggle:Hide()
+        page.channelToggles[slot] = toggle
+    end
+
+    page.confirmButton = CreateButton(announce, "Text bestätigen", 116, 26, function()
+        local success, message = GC.RaidSearch:ConfirmText(page.announceEdit:GetText())
+        page.zulaufStatus:SetText(message or "")
+        SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
+        GC.UI:RefreshRaidSearch()
+    end)
+    page.confirmButton:SetPoint("BOTTOMLEFT", announce, "BOTTOMLEFT", 18, 10)
+    page.postButton = CreateButton(announce, "Suche starten", 116, 26, function()
+        local success, message = GC.RaidSearch:Post()
+        page.zulaufStatus:SetText(message or "")
+        SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
+        GC.UI:RefreshRaidSearch()
+    end, "PRIMARY")
+    page.postButton:SetPoint("LEFT", page.confirmButton, "RIGHT", 8, 0)
+    page.autoToggle = CreateToggle(announce, "Wiederholen", function(enabled)
+        GC.UI:SetRaidSearchAutoRepeat(enabled)
+    end)
+    page.autoToggle:SetPoint("BOTTOMLEFT", announce, "BOTTOMLEFT", 262, 12)
+    AttachAutoRepeatTooltip(page.autoToggle)
+
+    -- === Besetzung: Soll und Ist ===========================================
+    local need = CreateCard(page, "Besetzung")
+    need:SetSize(390, 230)
+    need:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -66)
+    page.needCard = need
+    page.needCount = CreateLabel(need, "", { align = "RIGHT", width = 90, height = 20 })
+    page.needCount:SetPoint("TOPRIGHT", need, "TOPRIGHT", -18, -16)
+
+    page.roleRows = {}
+    for index, definition in ipairs(RAIDSEARCH_ROLE_ROWS) do
+        local role = definition.role
+        local y = -42 - ((index - 1) * 28)
+        local row = {}
+        row.label = CreateLabel(need, definition.label, { width = 58, height = 24 })
+        row.label:SetPoint("TOPLEFT", need, "TOPLEFT", 18, y)
+        row.minus = CreateButton(need, "–", 22, 22, function()
+            GC.RaidSearch:AdjustRoleNeed(role, -1)
+            GC.UI:RefreshRaidSearch()
+        end)
+        row.minus:SetPoint("TOPLEFT", need, "TOPLEFT", 80, y)
+        row.count = CreateLabel(need, "0", { align = "CENTER", width = 28, height = 22 })
+        row.count:SetPoint("TOPLEFT", need, "TOPLEFT", 102, y)
+        row.plus = CreateButton(need, "+", 22, 22, function()
+            GC.RaidSearch:AdjustRoleNeed(role, 1)
+            GC.UI:RefreshRaidSearch()
+        end)
+        row.plus:SetPoint("TOPLEFT", need, "TOPLEFT", 130, y)
+        row.have = CreateLabel(need, "", { muted = true, width = 110, height = 22 })
+        row.have:SetPoint("TOPLEFT", need, "TOPLEFT", 168, y)
+        row.delta = CreateLabel(need, "", { align = "RIGHT", width = 80, height = 22 })
+        row.delta:SetPoint("TOPLEFT", need, "TOPLEFT", 286, y)
+        page.roleRows[role] = row
+    end
+
+    page.wishLabel = CreateLabel(need, "", { muted = true, width = 354, height = 30,
+        vertical = "TOP", font = "GameFontNormalSmall" })
+    page.wishLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -126)
+
+    local wishOptions = {}
+    for _, classFile in ipairs(GC.ClassOrder) do
+        for _, spec in ipairs(GC.Classes[classFile].specs) do
+            wishOptions[#wishOptions + 1] = spec.recruitLabel
+        end
+    end
+    -- Ein Klick auf einen bereits gewuenschten Spec nimmt den Wunsch zurueck -
+    -- ein Menue fuer beides, statt Zeilen mit eigenen Entfernen-Knoepfen.
+    page.wishDropdown = CreateChoiceDropdown(need, 230, wishOptions, function(value)
+        for specKey, spec in pairs(GC.SpecByKey) do
+            if spec.recruitLabel == value then
+                local plan = GC.RaidSearch:EnsurePlan()
+                if plan.need.specs[specKey] then
+                    GC.RaidSearch:RemoveSpecWish(specKey)
+                else
+                    GC.RaidSearch:AddSpecWish(specKey)
+                end
+                break
+            end
+        end
+        page.wishDropdown:SetValue("")
+        GC.UI:RefreshRaidSearch()
+    end, false, "Spec-Wunsch an/aus", nil, 24)
+    page.wishDropdown:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -160)
+
+    page.unassignedLabel = CreateLabel(need, "", { muted = true, width = 354, height = 14,
+        font = "GameFontNormalSmall" })
+    page.unassignedLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -190)
+    page.absentLabel = CreateLabel(need, "", { width = 354, height = 14,
+        font = "GameFontNormalSmall", color = THEME.warning })
+    page.absentLabel:SetPoint("TOPLEFT", need, "TOPLEFT", 18, -206)
+
+    -- === Zulauf ============================================================
+    local zulauf = CreateCard(page, "Zulauf")
+    zulauf:SetSize(390, 284)
+    zulauf:SetPoint("TOPLEFT", page, "TOPLEFT", 393, -302)
+    page.zulauf = zulauf
+
+    page.zulaufPrev = CreateButton(zulauf, "", 22, 20, function()
+        page.zulaufPage = math.max(1, (page.zulaufPage or 1) - 1)
+        GC.UI:RefreshRaidSearch()
+    end)
+    SetButtonMark(page.zulaufPrev, CreateArrowMark(page.zulaufPrev, 10, "LEFT"))
+    page.zulaufPrev:SetPoint("TOPRIGHT", zulauf, "TOPRIGHT", -46, -14)
+    page.zulaufNext = CreateButton(zulauf, "", 22, 20, function()
+        page.zulaufPage = (page.zulaufPage or 1) + 1
+        GC.UI:RefreshRaidSearch()
+    end)
+    SetButtonMark(page.zulaufNext, CreateArrowMark(page.zulaufNext, 10, "RIGHT"))
+    page.zulaufNext:SetPoint("TOPRIGHT", zulauf, "TOPRIGHT", -18, -14)
+
+    page.responseRows = {}
+    for slot = 1, RAIDSEARCH_RESPONSE_ROWS do
+        local y = -40 - ((slot - 1) * 44)
+        local row = CreateButton(zulauf, "", 354, 42, function()
+            local name = page.responseRows[slot].responseName
+            if name then
+                page.selectedResponseName = name
+                GC.UI:RefreshRaidSearch()
+            end
+        end)
+        row:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, y)
+        row.label:ClearAllPoints()
+        row.label:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -4)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -96, 0)
+        row.label:SetHeight(16)
+        row.label:SetJustifyH("LEFT")
+        row.state = CreateLabel(row, "", { align = "RIGHT", width = 88, height = 16,
+            font = "GameFontNormalSmall" })
+        row.state:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -4)
+        row.message = CreateLabel(row, "", { muted = true, width = 338, height = 14,
+            font = "GameFontNormalSmall" })
+        row.message:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -23)
+        page.responseRows[slot] = row
+    end
+
+    -- Aktionen fuer die GEWAEHLTE Antwort - eine Zeile statt Knoepfen an jeder,
+    -- damit die Namen nicht abgeschnitten werden (Lektion der Auftragszeilen).
+    local specOptions = { "Keine Spec-Zuordnung" }
+    for _, classFile in ipairs(GC.ClassOrder) do
+        for _, spec in ipairs(GC.Classes[classFile].specs) do
+            specOptions[#specOptions + 1] = spec.recruitLabel
+        end
+    end
+    page.responseSpec = CreateChoiceDropdown(zulauf, 150, specOptions, function(value)
+        if not page.selectedResponseName then
+            return
+        end
+        local chosen
+        for specKey, spec in pairs(GC.SpecByKey) do
+            if spec.recruitLabel == value then
+                chosen = specKey
+                break
+            end
+        end
+        GC.RaidSearch:SetResponseSpec(page.selectedResponseName, chosen)
+        GC.UI:RefreshRaidSearch()
+    end, false, "Spec zuordnen", nil, 26)
+    page.responseSpec:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -220)
+    page.inviteButton = CreateButton(zulauf, "Einladen", 70, 26, function()
+        if page.selectedResponseName then
+            local success, message = GC.RaidSearch:Invite(page.selectedResponseName)
+            page.zulaufStatus:SetText(message or "")
+            SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
+            GC.UI:RefreshRaidSearch()
+        end
+    end, "PRIMARY")
+    page.inviteButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 174, -220)
+    page.replyDropdown = CreateChoiceDropdown(zulauf, 96, {}, function() end,
+        false, "Antworten", nil, 26)
+    page.replyDropdown:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 250, -220)
+    page.removeButton = CreateButton(zulauf, "×", 22, 26, function()
+        if page.selectedResponseName then
+            GC.RaidSearch:RemoveResponse(page.selectedResponseName)
+            page.selectedResponseName = nil
+            GC.UI:RefreshRaidSearch()
+        end
+    end)
+    page.removeButton:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 352, -220)
+
+    page.zulaufStatus = CreateLabel(zulauf, "", { width = 354, height = 14,
+        font = "GameFontNormalSmall" })
+    page.zulaufStatus:SetPoint("TOPLEFT", zulauf, "TOPLEFT", 18, -256)
+
+    -- Cooldown-Countdown am Posten-Knopf und Kanalzustaende leben im
+    -- Halbsekundentakt, wie auf der Postseite.
+    page:SetScript("OnUpdate", function(_, elapsed)
+        page.elapsed = (page.elapsed or 0) + elapsed
+        if page.elapsed >= 0.5 then
+            page.elapsed = 0
+            GC.UI:RefreshRaidSearchPost()
+        end
+    end)
+    page:HookScript("OnHide", function()
+        if page.templatesDialog then
+            page.templatesDialog:Hide()
+        end
+        if page.repliesDialog then
+            page.repliesDialog:Hide()
+        end
+    end)
+end
+
+-- Das Antworten-Menue traegt die selbstgebauten Vorlagen. Ein Dropdown laesst
+-- sich nicht nachtraeglich befuellen; es wird deshalb bei Bedarf neu gebaut -
+-- die Vorlagenliste aendert sich nur durch den Dialog, nie im Takt.
+function GC.UI:RebuildRaidSearchReplyDropdown()
+    local page = self.pages.RAIDSEARCH
+    if not page then
+        return
+    end
+    local labels = {}
+    local templates = GC.RaidSearch:GetReplyTemplates()
+    for index, template in ipairs(templates) do
+        labels[#labels + 1] = template.label or ("Vorlage " .. index)
+    end
+    -- Der alte Knopf bleibt versteckt zurueck - ein Neubau passiert nur, wenn
+    -- jemand im Dialog Vorlagen aendert, nie im Takt.
+    if page.replyDropdown then
+        page.replyDropdown.popup:Hide()
+        page.replyDropdown:Hide()
+    end
+    page.replyDropdown = CreateChoiceDropdown(page.zulauf, 96, labels, function(value)
+        if not page.selectedResponseName then
+            return
+        end
+        for index, template in ipairs(GC.RaidSearch:GetReplyTemplates()) do
+            if (template.label or ("Vorlage " .. index)) == value then
+                local success, message = GC.RaidSearch:SendReply(page.selectedResponseName, index)
+                page.zulaufStatus:SetText(message or "")
+                SetTextColor(page.zulaufStatus, success and THEME.success or THEME.danger)
+                break
+            end
+        end
+        page.replyDropdown:SetValue("")
+        GC.UI:RefreshRaidSearch()
+    end, false, "Antworten", nil, 26)
+    page.replyDropdown:SetPoint("TOPLEFT", page.zulauf, "TOPLEFT", 250, -220)
+end
+
+function GC.UI:SetRaidSearchAutoRepeat(enabled)
+    local settings = GC.RaidSearch:GetSettings()
+    settings.autoRepeat = enabled == true
+    if not enabled then
+        GC.Chat:SetAutoPostArmed("raidsearch", false)
+        GC.RaidSearch.lastAutoPost = nil
+    end
+    self:RefreshRaidSearch()
+    self:RefreshRaidSearchBar()
+end
+
+-- Nur Spruchvorschau, Byte-Zaehler, Kanalzeile und Knoepfe - der schnelle Teil
+-- fuer den Halbsekundentakt. Der volle Aufbau (RefreshRaidSearch) laeuft bei
+-- echten Datenaenderungen.
+function GC.UI:RefreshRaidSearchPost()
+    local page = self.pages.RAIDSEARCH
+    if not page or not page:IsShown() then
+        return
+    end
+    local plan = GC.RaidSearch:GetPlan()
+    local text = page.announceEdit:GetText() or ""
+    local bytes = #text
+    page.announceBytes:SetText(bytes .. "/" .. GC.Constants.MAX_CHAT_BYTES .. " Bytes")
+    SetTextColor(page.announceBytes, bytes > GC.Constants.MAX_CHAT_BYTES and THEME.danger or THEME.muted)
+
+    local targets = GC.RaidSearch:GetChannelTargets()
+    local ready = 0
+    for slot, toggle in ipairs(page.channelToggles) do
+        local target = targets[slot]
+        if target then
+            toggle.targetKey = target.key
+            local label = RAIDSEARCH_CHANNEL_LABEL[target.key]
+                or GC.Util.SafeChatText(target.label, 10)
+            toggle.text:SetText(GC.L(label))
+            SetToggle(toggle, target.selected)
+            toggle:SetShown(true)
+            toggle:SetAlpha(target.joined and 1 or 0.45)
+            if target.selected and target.joined
+                and GC.Chat:GetRemainingCooldown(target.key) <= 0 then
+                ready = ready + 1
+            end
+        else
+            toggle.targetKey = nil
+            toggle:Hide()
+        end
+    end
+
+    local confirmed = plan and plan.confirmedText or nil
+    local isConfirmed = confirmed ~= nil and confirmed == text and GC.Util.Trim(text) ~= ""
+    SetButtonEnabled(page.confirmButton, GC.Util.Trim(text) ~= "")
+    if isConfirmed and ready > 0 then
+        page.postButton:Enable()
+    else
+        page.postButton:Disable()
+    end
+    page.postButton:SetActive(isConfirmed and ready > 0)
+    local searching = plan and plan.status == "SUCHT"
+    page.postButton:SetText(searching and "Posten" or "Suche starten")
+    -- Automatik: genau dann scharf, wenn jetzt auch ein Klick posten wuerde -
+    -- dieselbe Regel wie beim Werbebalken, in jedem Takt neu entschieden.
+    local settings = GC.RaidSearch:GetSettings()
+    GC.Chat:SetAutoPostArmed("raidsearch",
+        settings.autoRepeat == true and GC.Chat:IsAutoPostSupported()
+        and searching and isConfirmed and ready > 0)
+    if page.autoToggle then
+        SetToggle(page.autoToggle, settings.autoRepeat == true)
+    end
+end
+
+function GC.UI:RefreshRaidSearch()
+    local page = self.pages.RAIDSEARCH
+    if not page then
+        return
+    end
+    local plan = GC.RaidSearch:GetPlan()
+
+    -- Ohne Zettel zeigen die Karten den Anlege-Zustand; der erste Klick auf
+    -- irgendein Feld legt ihn ohnehin an (EnsurePlan), der Knopf macht es
+    -- ausdruecklich.
+    if page.newArmed and (not plan or plan.status ~= "SUCHT") then
+        page.newArmed = nil
+    end
+    if not page.newArmed then
+        page.newButton:SetText("Neue Suche")
+    end
+    page.endButton:SetShown(plan ~= nil and plan.status == "SUCHT")
+
+    if not plan then
+        plan = GC.RaidSearch:EnsurePlan()
+    end
+
+    -- Suchzettel.
+    local knownZone = false
+    for _, instance in ipairs(GC.RaidInstances) do
+        if instance.name == plan.zone then
+            knownZone = true
+            break
+        end
+    end
+    if page.freeZone == nil then
+        page.freeZone = (not knownZone and GC.Util.Trim(plan.zone) ~= "") or nil
+    end
+    local freeZone = page.freeZone == true or (not knownZone and GC.Util.Trim(plan.zone) ~= "")
+    page.zoneDropdown:SetShown(not freeZone)
+    page.zoneEdit.container:SetShown(freeZone)
+    if not freeZone then
+        page.zoneDropdown:SetValue(knownZone and plan.zone or "")
+    elseif not page.zoneEdit:HasFocus() then
+        page.zoneEdit:SetText(plan.zone or "")
+    end
+    page.sizeStepper:SetValue(plan.size or 25)
+    if not page.dateEdit:HasFocus() then
+        page.dateEdit:SetText(FormatDateGerman(plan.dateISO))
+    end
+    if not page.timeEdit:HasFocus() then
+        page.timeEdit:SetText(plan.timeText or "")
+    end
+    page.weekdayLabel:SetText(GC.RaidSearch:FormatWhen(plan):match("^(%S+)") or "")
+    if not page.lootEdit:HasFocus() then
+        page.lootEdit:SetText(plan.loot.rule or "")
+    end
+    if not page.hrEdit:HasFocus() then
+        page.hrEdit:SetText(plan.loot.hr or "")
+    end
+    if not page.srEdit:HasFocus() then
+        page.srEdit:SetText(plan.loot.srLink or "")
+    end
+    if not page.noteEdit:HasFocus() then
+        page.noteEdit:SetText(plan.note or "")
+    end
+    for markerIndex, markerButton in ipairs(page.raidSearchMarkers) do
+        markerButton:SetActive(markerIndex == plan.marker)
+    end
+
+    -- Spruchvorschau: solange nichts bestaetigt ist, lebt sie mit dem Zettel;
+    -- ein bestaetigter Text bleibt eingefroren, bis der Zettel sich aendert
+    -- (dann loescht TouchPlan die Bestaetigung) - exakt das Werbetext-Muster.
+    if not page.announceEdit:HasFocus() then
+        local preview = plan.confirmedText or GC.RaidSearch:BuildAnnouncement()
+        if page.announceEdit:GetText() ~= preview then
+            page.announceEdit:SetText(preview)
+        end
+    end
+
+    -- Besetzung.
+    local rosterState = GC.RaidSearch:GetRosterState()
+    local open = GC.RaidSearch:GetOpenNeeds(rosterState)
+    page.needCount:SetText(rosterState.total .. "/" .. (plan.size or 0))
+    for _, definition in ipairs(RAIDSEARCH_ROLE_ROWS) do
+        local row = page.roleRows[definition.role]
+        local want = tonumber(plan.need.roles[definition.role]) or 0
+        local have = rosterState.roles[definition.role] or 0
+        local missing = open.roles[definition.role] or 0
+        row.count:SetText(tostring(want))
+        row.have:SetText(GC.LFormat("dabei {n}", { n = have }))
+        if want == 0 then
+            row.delta:SetText("")
+        elseif missing > 0 then
+            row.delta:SetText("-" .. missing)
+            SetTextColor(row.delta, THEME.warning)
+        else
+            row.delta:SetText(GC.L("voll"))
+            SetTextColor(row.delta, THEME.success)
+        end
+    end
+    local wishes = GC.RaidSearch:GetSpecWishes()
+    if #wishes == 0 then
+        page.wishLabel:SetText(GC.L("Keine Spec-Wünsche - das Menü darunter schaltet sie an und aus."))
+    else
+        local parts = {}
+        for _, wish in ipairs(wishes) do
+            local haveCount = rosterState.specCounts[wish.specKey] or 0
+            parts[#parts + 1] = wish.spec.recruitLabel
+                .. (haveCount >= wish.count and " (da)" or "")
+        end
+        page.wishLabel:SetText(GC.L("Wünsche: ") .. table.concat(parts, ", "))
+    end
+    if rosterState.unassigned > 0 then
+        page.unassignedLabel:SetText(GC.LFormat("{n} dabei ohne Spec-Zuordnung - zählt auf keine Rolle.",
+            { n = rosterState.unassigned }))
+    else
+        page.unassignedLabel:SetText("")
+    end
+    local absent = GC.RaidSearch:GetAbsentAtDate()
+    if #absent > 0 then
+        page.absentLabel:SetText(GC.LFormat("Am Termin abgemeldet: {names}",
+            { names = GC.Util.SafeChatText(table.concat(absent, ", "), 90) }))
+    else
+        page.absentLabel:SetText("")
+    end
+
+    -- Zulauf.
+    local responses = plan.responses or {}
+    local pageCount = math.max(1, math.ceil(#responses / RAIDSEARCH_RESPONSE_ROWS))
+    page.zulaufPage = math.min(page.zulaufPage or 1, pageCount)
+    SetButtonEnabled(page.zulaufPrev, page.zulaufPage > 1)
+    SetButtonEnabled(page.zulaufNext, page.zulaufPage < pageCount)
+    if page.zulauf.title then
+        page.zulauf.title:SetText(GC.L("Zulauf") .. " (" .. #responses .. ")")
+    end
+    local selectedVisible = false
+    for slot = 1, RAIDSEARCH_RESPONSE_ROWS do
+        local row = page.responseRows[slot]
+        local response = responses[((page.zulaufPage - 1) * RAIDSEARCH_RESPONSE_ROWS) + slot]
+        if response then
+            row.responseName = response.name
+            local pieces = { ClassColoredName(GC.Util.PlayerShortName(response.name), response.classFile) }
+            local classInfo = GC.Classes[response.classFile or ""]
+            local detail = {}
+            if classInfo then
+                detail[#detail + 1] = classInfo.name
+            end
+            if tonumber(response.level) then
+                detail[#detail + 1] = tostring(response.level)
+            end
+            local spec = GC.SpecByKey[response.specKey or ""]
+            if spec then
+                detail[#detail + 1] = spec.name
+            end
+            if #detail > 0 then
+                pieces[#pieces + 1] = "|cff8b98a5" .. table.concat(detail, " ") .. "|r"
+            end
+            row.label:SetText(table.concat(pieces, "  "))
+            local stateText, stateColor = ResponseStateLabel(response)
+            row.state:SetText(GC.L(stateText))
+            SetTextColor(row.state, stateColor)
+            local lastMessage = response.messages and response.messages[#response.messages]
+            row.message:SetText(lastMessage and tostring(lastMessage.text or "") or "")
+            local isSelected = page.selectedResponseName ~= nil
+                and GC.Chat:CanonicalLeadName(response.name) == GC.Chat:CanonicalLeadName(page.selectedResponseName)
+            row:SetActive(isSelected)
+            if isSelected then
+                selectedVisible = true
+            end
+            row:Show()
+        else
+            row.responseName = nil
+            row:SetActive(false)
+            row:Hide()
+        end
+    end
+    if not selectedVisible then
+        page.selectedResponseName = nil
+    end
+    local hasSelection = page.selectedResponseName ~= nil
+    SetButtonEnabled(page.inviteButton, hasSelection)
+    SetButtonEnabled(page.removeButton, hasSelection)
+    if hasSelection then
+        local response = GC.RaidSearch:FindResponse(page.selectedResponseName)
+        local spec = response and GC.SpecByKey[response.specKey or ""]
+        page.responseSpec:SetValue(spec and spec.recruitLabel or "")
+    else
+        page.responseSpec:SetValue("")
+    end
+    if not page.replyDropdownBuilt then
+        page.replyDropdownBuilt = true
+        self:RebuildRaidSearchReplyDropdown()
+    end
+
+    self:RefreshRaidSearchPost()
+    self:RefreshRaidSearchTemplates()
+    self:RefreshRaidSearchReplies()
+    self:UpdateRaidSearchBarShown()
+end
+
+-- === Dialog: Suchzettel-Vorlagen ===========================================
+
+function GC.UI:ToggleRaidSearchTemplates()
+    local page = self.pages.RAIDSEARCH
+    if not page then
+        return
+    end
+    if not page.templatesDialog then
+        local dialog = CreatePanel(self.frame, THEME.window, THEME.accent)
+        dialog:SetSize(420, 372)
+        dialog:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
+        dialog:SetFrameLevel((self.frame:GetFrameLevel() or 1) + 80)
+        dialog:EnableMouse(true)
+        dialog:Hide()
+        local title = CreateLabel(dialog, "Suchzettel-Vorlagen", { title = true })
+        title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -14)
+        local hint = CreateLabel(dialog, "Anwenden erzeugt einen frischen Zettel mit dem nächsten passenden Wochentag.",
+            { muted = true, width = 384, height = 28, vertical = "TOP", font = "GameFontNormalSmall" })
+        hint:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -40)
+        dialog.rows = {}
+        for slot = 1, 12 do
+            local y = -72 - ((slot - 1) * 22)
+            local row = {}
+            row.label = CreateLabel(dialog, "", { width = 236, height = 20 })
+            row.label:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, y)
+            row.apply = CreateButton(dialog, "Anwenden", 84, 20, function()
+                local _, message = GC.RaidSearch:ApplyTemplate(slot)
+                page.zulaufStatus:SetText(message or "")
+                SetTextColor(page.zulaufStatus, THEME.success)
+                dialog:Hide()
+                GC.UI:RefreshRaidSearch()
+            end)
+            row.apply:SetPoint("TOPLEFT", dialog, "TOPLEFT", 262, y)
+            row.remove = CreateButton(dialog, "×", 20, 20, function()
+                GC.RaidSearch:RemoveTemplate(slot)
+                GC.UI:RefreshRaidSearchTemplates()
+            end)
+            row.remove:SetPoint("TOPLEFT", dialog, "TOPLEFT", 352, y)
+            dialog.rows[slot] = row
+        end
+        dialog.save = CreateButton(dialog, "Aktuellen Zettel als Vorlage speichern", 260, 26, function()
+            local _, message = GC.RaidSearch:SaveTemplate()
+            page.zulaufStatus:SetText(message or "")
+            SetTextColor(page.zulaufStatus, THEME.success)
+            GC.UI:RefreshRaidSearchTemplates()
+        end, "PRIMARY")
+        dialog.save:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 18, 12)
+        dialog.close = CreateButton(dialog, "Schließen", 90, 26, function()
+            dialog:Hide()
+        end)
+        dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -18, 12)
+        page.templatesDialog = dialog
+    end
+    if page.repliesDialog then
+        page.repliesDialog:Hide()
+    end
+    page.templatesDialog:SetShown(not page.templatesDialog:IsShown())
+    self:RefreshRaidSearchTemplates()
+end
+
+function GC.UI:RefreshRaidSearchTemplates()
+    local page = self.pages.RAIDSEARCH
+    local dialog = page and page.templatesDialog
+    if not dialog or not dialog:IsShown() then
+        return
+    end
+    local templates = GC.RaidSearch:GetData().templates
+    for slot, row in ipairs(dialog.rows) do
+        local template = templates[slot]
+        if template then
+            row.label:SetText(tostring(template.label or ""))
+            row.apply:Show()
+            row.remove:Show()
+            row.label:Show()
+        else
+            row.label:SetText(slot == 1 and GC.L("Noch keine Vorlagen gespeichert.") or "")
+            row.label:SetShown(slot == 1 or template ~= nil)
+            row.apply:Hide()
+            row.remove:Hide()
+        end
+    end
+end
+
+-- === Dialog: Antwortvorlagen ===============================================
+
+function GC.UI:ToggleRaidSearchReplies()
+    local page = self.pages.RAIDSEARCH
+    if not page then
+        return
+    end
+    if not page.repliesDialog then
+        local dialog = CreatePanel(self.frame, THEME.window, THEME.accent)
+        dialog:SetSize(560, 392)
+        dialog:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
+        dialog:SetFrameLevel((self.frame:GetFrameLevel() or 1) + 80)
+        dialog:EnableMouse(true)
+        dialog:Hide()
+        local title = CreateLabel(dialog, "Antwortvorlagen", { title = true })
+        title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -14)
+        local hint = CreateLabel(dialog, "Eigene Schnellantworten für den Zulauf. Platzhalter: "
+            .. "{name} {instanz} {termin} {loot} {srlink} - gesendet wird per Klick im Antworten-Menü.",
+            { muted = true, width = 524, height = 30, vertical = "TOP", font = "GameFontNormalSmall" })
+        hint:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -40)
+        dialog.rows = {}
+        for slot = 1, 8 do
+            local y = -78 - ((slot - 1) * 34)
+            local row = {}
+            row.labelEdit = CreateEdit(dialog, 120, 26)
+            row.labelEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, y)
+            row.textEdit = CreateEdit(dialog, 360, 26)
+            row.textEdit.container:SetPoint("TOPLEFT", dialog, "TOPLEFT", 146, y)
+            local function Save()
+                GC.RaidSearch:SetReplyTemplate(slot, row.labelEdit:GetText(), row.textEdit:GetText())
+                GC.UI:RebuildRaidSearchReplyDropdown()
+            end
+            row.labelEdit:SetScript("OnEditFocusLost", Save)
+            row.textEdit:SetScript("OnEditFocusLost", Save)
+            row.labelEdit:SetScript("OnEnterPressed", function(edit) edit:ClearFocus() end)
+            row.textEdit:SetScript("OnEnterPressed", function(edit) edit:ClearFocus() end)
+            row.remove = CreateButton(dialog, "×", 20, 26, function()
+                GC.RaidSearch:RemoveReplyTemplate(slot)
+                GC.UI:RebuildRaidSearchReplyDropdown()
+                GC.UI:RefreshRaidSearchReplies()
+            end)
+            row.remove:SetPoint("TOPLEFT", dialog, "TOPLEFT", 514, y)
+            dialog.rows[slot] = row
+        end
+        dialog.add = CreateButton(dialog, "Neue Vorlage", 120, 26, function()
+            local templates = GC.RaidSearch:GetReplyTemplates()
+            if #templates < 8 then
+                GC.RaidSearch:SetReplyTemplate(#templates + 1, "Vorlage " .. (#templates + 1), "")
+                GC.UI:RefreshRaidSearchReplies()
+            end
+        end)
+        dialog.add:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 18, 12)
+        dialog.close = CreateButton(dialog, "Schließen", 90, 26, function()
+            dialog:Hide()
+        end)
+        dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -18, 12)
+        page.repliesDialog = dialog
+    end
+    if page.templatesDialog then
+        page.templatesDialog:Hide()
+    end
+    page.repliesDialog:SetShown(not page.repliesDialog:IsShown())
+    self:RefreshRaidSearchReplies()
+end
+
+function GC.UI:RefreshRaidSearchReplies()
+    local page = self.pages.RAIDSEARCH
+    local dialog = page and page.repliesDialog
+    if not dialog or not dialog:IsShown() then
+        return
+    end
+    local templates = GC.RaidSearch:GetReplyTemplates()
+    for slot, row in ipairs(dialog.rows) do
+        local template = templates[slot]
+        local shown = template ~= nil
+        row.labelEdit.container:SetShown(shown)
+        row.textEdit.container:SetShown(shown)
+        row.remove:SetShown(shown)
+        if template then
+            if not row.labelEdit:HasFocus() then
+                row.labelEdit:SetText(template.label or "")
+            end
+            if not row.textEdit:HasFocus() then
+                row.textEdit:SetText(template.text or "")
+            end
+        end
+    end
+    SetButtonEnabled(dialog.add, #templates < 8)
+end
+
+-- === Suchbalken ============================================================
+--
+-- Das kleine Fenster fuer den laufenden Betrieb, nach dem Muster des
+-- Werbebalkens (Owner-Entscheidung: Stufe 1, mit Cooldown-Countdown am
+-- Posten-Knopf). Er zeigt sich nur waehrend einer laufenden Suche; das
+-- Wegklicken gilt bis zum naechsten "Suche starten".
+
+function GC.UI:CreateRaidSearchBar()
+    if self.raidSearchBar then
+        return self.raidSearchBar
+    end
+    local bar = CreatePanel(UIParent, THEME.window, THEME.accent, "GuildCopilotRaidSearchBar")
+    bar:SetSize(330, 150)
+    local settings = GC.RaidSearch:GetSettings()
+    settings.bar = type(settings.bar) == "table" and settings.bar or {}
+    bar:SetPoint("CENTER", UIParent, "CENTER",
+        tonumber(settings.bar.x) or 0, tonumber(settings.bar.y) or -140)
+    bar:SetClampedToScreen(true)
+    bar:SetMovable(true)
+    bar:EnableMouse(true)
+    bar:RegisterForDrag("LeftButton")
+    bar:SetScript("OnDragStart", bar.StartMoving)
+    bar:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, _, x, y = self:GetPoint()
+        if point then
+            local barSettings = GC.RaidSearch:GetSettings().bar
+            barSettings.x = math.floor(tonumber(x) or 0)
+            barSettings.y = math.floor(tonumber(y) or 0)
+        end
+    end)
+    bar:SetFrameStrata("MEDIUM")
+    bar:Hide()
+
+    local title = CreateLabel(bar, "Raidsuche", { font = "GameFontNormalSmall" })
+    title:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -9)
+    local close = CreateButton(bar, "×", 20, 20, function()
+        GC.RaidSearch:GetSettings().bar.hidden = true
+        GC.Chat:SetAutoPostArmed("raidsearch", false)
+        GC.UI:UpdateRaidSearchBarShown()
+    end)
+    close:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -8, -7)
+
+    bar.headline = CreateLabel(bar, "", { width = 306, height = 16 })
+    bar.headline:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -28)
+    bar.needLine = CreateLabel(bar, "", { muted = true, width = 306, height = 14,
+        font = "GameFontNormalSmall" })
+    bar.needLine:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -46)
+    bar.status = CreateLabel(bar, "", { font = "GameFontNormalSmall", width = 306, height = 14 })
+    bar.status:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -64)
+    bar.autoToggle = CreateToggle(bar, "Automatisch wiederholen", function(enabled)
+        GC.UI:SetRaidSearchAutoRepeat(enabled)
+    end)
+    bar.autoToggle:SetPoint("TOPLEFT", bar, "TOPLEFT", 12, -82)
+    AttachAutoRepeatTooltip(bar.autoToggle)
+    bar.sendButton = CreateButton(bar, "Posten", 306, 26, function()
+        local success, message = GC.RaidSearch:Post()
+        bar.status:SetText(message or "")
+        SetTextColor(bar.status, success and THEME.success or THEME.danger)
+        GC.UI:RefreshRaidSearchBar()
+        GC.UI:Invalidate("RAIDSEARCH")
+    end, "PRIMARY")
+    bar.sendButton:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 12, 10)
+
+    bar:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 0.5 then
+            self.elapsed = 0
+            GC.UI:RefreshRaidSearchBar()
+        end
+    end)
+    self.raidSearchBar = bar
+    return bar
+end
+
+function GC.UI:UpdateRaidSearchBarShown()
+    local settings = GC.RaidSearch:GetSettings()
+    settings.bar = type(settings.bar) == "table" and settings.bar or {}
+    local shouldShow = GC.RaidSearch:IsSearching() and settings.bar.hidden ~= true
+    if not shouldShow then
+        if self.raidSearchBar then
+            self.raidSearchBar:Hide()
+            GC.Chat:SetAutoPostArmed("raidsearch", false)
+        end
+        return
+    end
+    self:CreateRaidSearchBar()
+    self.raidSearchBar:Show()
+    self:RefreshRaidSearchBar()
+end
+
+function GC.UI:RefreshRaidSearchBar()
+    local bar = self.raidSearchBar
+    if not bar or not bar:IsShown() then
+        return
+    end
+    local plan = GC.RaidSearch:GetPlan()
+    if not plan then
+        bar:Hide()
+        return
+    end
+    local rosterState = GC.RaidSearch:GetRosterState()
+    local open = GC.RaidSearch:GetOpenNeeds(rosterState)
+    local zone = GC.Util.Trim(plan.zoneShort) ~= "" and plan.zoneShort or plan.zone
+    bar.headline:SetText(zone .. " " .. GC.RaidSearch:FormatWhen(plan)
+        .. "  ·  " .. rosterState.total .. "/" .. (plan.size or 0))
+    local roleText = GC.RaidSearch:DescribeOpenRoles(open)
+    if roleText ~= "" then
+        bar.needLine:SetText(GC.L("offen: ") .. roleText)
+    elseif rosterState.total < (tonumber(plan.size) or 0) then
+        bar.needLine:SetText(GC.LFormat("offen: {n} Plätze",
+            { n = (tonumber(plan.size) or 0) - rosterState.total }))
+    else
+        bar.needLine:SetText(GC.L("voll besetzt"))
+    end
+
+    -- Bereit-Zaehlung wie auf der Seite; der laengste Cooldown steht im Knopf.
+    local ready = 0
+    local longest = 0
+    for _, target in ipairs(GC.RaidSearch:GetChannelTargets()) do
+        if target.selected then
+            local remaining = GC.Chat:GetRemainingCooldown(target.key)
+            if remaining > 0 then
+                longest = math.max(longest, remaining)
+            elseif target.joined then
+                ready = ready + 1
+            end
+        end
+    end
+    local confirmed = GC.Util.Trim(plan.confirmedText or "") ~= ""
+    local canSend = confirmed and ready > 0
+    SetButtonEnabled(bar.sendButton, canSend)
+    if longest > 0 and ready == 0 then
+        bar.sendButton:SetText(math.ceil(longest) .. "s Cooldown")
+    else
+        bar.sendButton:SetText(GC.L("Posten"))
+    end
+
+    local settings = GC.RaidSearch:GetSettings()
+    local automatik = settings.autoRepeat == true and GC.Chat:IsAutoPostSupported()
+    GC.Chat:SetAutoPostArmed("raidsearch", automatik and canSend and plan.status == "SUCHT")
+    if bar.autoToggle then
+        SetToggle(bar.autoToggle, settings.autoRepeat == true)
+    end
+
+    local newCount = GC.RaidSearch:CountNewResponses()
+    local recent = GC.RaidSearch.lastAutoPost
+    if automatik and recent and (GC.Util.Now() - (recent.at or 0)) < 6 then
+        bar.status:SetText("Automatik: " .. recent.message)
+        SetTextColor(bar.status, recent.success and THEME.success or THEME.warning)
+    elseif newCount > 0 then
+        bar.status:SetText(GC.LFormat("{n} neue Antworten im Zulauf", { n = newCount }))
+        SetTextColor(bar.status, THEME.warning)
+    elseif automatik and canSend then
+        bar.status:SetText(GC.L("Automatik: der nächste Tastendruck postet."))
+        SetTextColor(bar.status, THEME.success)
+    elseif automatik and not confirmed then
+        bar.status:SetText(GC.L("Automatik wartet auf einen bestätigten Text."))
+        SetTextColor(bar.status, THEME.warning)
+    elseif automatik and longest > 0 then
+        bar.status:SetText("Automatik: nächster Post in " .. math.ceil(longest) .. "s.")
+        SetTextColor(bar.status, THEME.muted)
+    else
+        bar.status:SetText("")
+    end
+end
+
 function GC.UI:CreatePostBar()
     if self.postBar then
         return self.postBar
@@ -11008,7 +12129,7 @@ function GC.UI:SetPostBarShown(shown)
         -- greift wieder, sobald der Balken das naechste Mal offen ist - der
         -- Balken ist die sichtbare Anzeige, ohne ihn laeuft nichts unsichtbar
         -- im Hintergrund weiter.
-        GC.Chat:SetAutoPostArmed(false)
+        GC.Chat:SetAutoPostArmed("recruitment", false)
     end
     self:RefreshPost()
 end
@@ -11029,7 +12150,7 @@ function GC.UI:SetAutoRepeat(enabled)
             self:SetPostBarShown(true)
         end
     else
-        GC.Chat:SetAutoPostArmed(false)
+        GC.Chat:SetAutoPostArmed("recruitment", false)
         GC.Chat.lastAutoPost = nil
     end
     self:RefreshPostBar()
@@ -11083,7 +12204,7 @@ function GC.UI:RefreshPostBar()
     -- noch einmal.
     local automatik = GC.DB:GetSettings().postBar.autoRepeat == true
         and GC.Chat:IsAutoPostSupported()
-    GC.Chat:SetAutoPostArmed(automatik and canSend)
+    GC.Chat:SetAutoPostArmed("recruitment", automatik and canSend)
     if bar.autoToggle then
         SetToggle(bar.autoToggle, GC.DB:GetSettings().postBar.autoRepeat == true)
     end
@@ -11107,6 +12228,13 @@ function GC.UI:RefreshPostBar()
     elseif automatik then
         bar.status:SetText(GC.L("Automatik: kein ausgewählter Kanal beigetreten."))
         SetTextColor(bar.status, THEME.warning)
+    elseif canSend and GC.Chat:IsAutoPostSupported() then
+        -- Die haeufigste Rueckfrage zum Balken war "warum muss ich nach dem
+        -- Cooldown wieder klicken?" - der Haken direkt darueber nimmt einem
+        -- genau das ab. Der Satz steht nur, wenn ein Klick jetzt auch posten
+        -- wuerde; sonst zaehlt die Kanalzeile wie bisher.
+        bar.status:SetText(GC.L("Tipp: „Automatisch wiederholen“ erspart das erneute Klicken."))
+        SetTextColor(bar.status, THEME.muted)
     elseif bar.status:GetText() == "" or waiting > 0 or ready > 0 then
         bar.status:SetText(ready .. " Kanäle bereit"
             .. (waiting > 0 and ("  •  " .. waiting .. " im Cooldown") or ""))
@@ -13031,6 +14159,13 @@ end)
 
 GC:RegisterCallback("INBOX_UPDATED", GC.UI, function(self)
     self:Invalidate("INBOX")
+end)
+
+GC:RegisterCallback("RAIDSEARCH_UPDATED", GC.UI, function(self)
+    self:Invalidate("RAIDSEARCH")
+    -- Der Suchbalken haengt nicht an der Seite: Er erscheint und verschwindet
+    -- mit dem Zustand der Suche, auch bei geschlossenem Hauptfenster.
+    self:UpdateRaidSearchBarShown()
 end)
 
 GC:RegisterCallback("WCL_UPDATED", GC.UI, function(self)

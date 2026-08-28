@@ -187,6 +187,13 @@ local function NormalizeChannelName(name)
     return name
 end
 
+-- Auch die Raidsuche vergleicht Kanalnamen (eigene Kanäle wie "World" werden
+-- unter ihrem Namen gemerkt, nie unter ihrer Nummer) - derselbe Export-Weg
+-- wie bei CanonicalLeadName.
+GC.Chat.NormalizeChannelName = function(_, name)
+    return NormalizeChannelName(name)
+end
+
 -- Der eigene Realm aendert sich innerhalb einer Sitzung nicht, wurde aber bis
 -- 0.9.96 bei JEDEM Namensvergleich neu ueber ":match" aus dem eigenen Namen
 -- geschnitten - und verglichen wird bei jeder eingehenden Nachricht gegen
@@ -612,42 +619,70 @@ function GC.Chat:IsAutoPostSupported()
     return autoPostSupported
 end
 
-function GC.Chat:IsAutoPostArmed()
+-- Seit der Raidsuche gibt es ZWEI Absender, die denselben Lauscher nutzen:
+-- die Gildenwerbung und der Suchspruch. Jeder schaerft fuer sich; der Rahmen
+-- lauscht, solange mindestens eine Quelle scharf ist. Beide koennen beim
+-- selben Tastendruck posten - verschiedene Kanaele, getrennte Cooldowns, und
+-- ihre jeweilige Balken-Auffrischung schaerft nur nach, was wirklich bereit
+-- ist.
+local autoPostArmedSources = {}
+
+function GC.Chat:IsAutoPostArmed(source)
+    if source ~= nil then
+        return autoPostArmedSources[source] == true
+    end
     return autoPostFrame:IsShown() == true
 end
 
 -- Scharf heisst: Der naechste Tastendruck postet. Entschaerft wird beim
--- Treffer sofort; neu geschaerft wird ueber den Auffrisch-Takt des
--- Werbebalkens, sobald Text, Kanal und Cooldown wieder bereit sind. Der
--- Zustand lebt nur im Rahmen selbst und ueberlebt kein /reload - nach dem
--- Laden ist die Automatik immer erst einmal entschaerft.
-function GC.Chat:SetAutoPostArmed(armed)
+-- Treffer sofort; neu geschaerft wird ueber den Auffrisch-Takt des jeweiligen
+-- Balkens, sobald Text, Kanal und Cooldown wieder bereit sind. Der Zustand
+-- lebt nur hier und ueberlebt kein /reload - nach dem Laden ist die Automatik
+-- immer erst einmal entschaerft.
+function GC.Chat:SetAutoPostArmed(source, armed)
     if not autoPostSupported then
         return
     end
-    autoPostFrame:SetShown(armed == true)
+    autoPostArmedSources[source or "recruitment"] = armed == true or nil
+    autoPostFrame:SetShown(next(autoPostArmedSources) ~= nil)
 end
 
 -- Laeuft im Kontext des Tastendrucks - nur hier darf in Kanaele gesendet
--- werden. StartSearch prueft alles erneut (bestaetigter Text, Cooldowns,
--- beigetretene Kanaele) und setzt lastPosts erst beim echten Versand; die
--- Automatik kann dadurch nie einen veralteten Zustand posten, und der
--- Cooldown zaehlt ab dem Moment, in dem die Nachricht wirklich rausging.
+-- werden. StartSearch bzw. RaidSearch:Post pruefen alles erneut (bestaetigter
+-- Text, Cooldowns, beigetretene Kanaele) und setzen lastPosts erst beim
+-- echten Versand; die Automatik kann dadurch nie einen veralteten Zustand
+-- posten, und der Cooldown zaehlt ab dem Moment, in dem die Nachricht
+-- wirklich rausging.
 function GC.Chat:RunAutoPost()
-    if not self:IsAutoPostArmed() then
+    if not autoPostFrame:IsShown() then
         return
     end
-    self:SetAutoPostArmed(false)
-    if GC.DB:GetSettings().postBar.autoRepeat ~= true then
-        return
+    if autoPostArmedSources.recruitment then
+        autoPostArmedSources.recruitment = nil
+        if GC.DB:GetSettings().postBar.autoRepeat == true then
+            local recruitment = GC.DB:GetGuild().recruitment
+            local success, message = self:StartSearch(recruitment.confirmedText or "")
+            self.lastAutoPost = {
+                at = GC.Util.Now(),
+                success = success == true,
+                message = tostring(message or ""),
+            }
+        end
     end
-    local recruitment = GC.DB:GetGuild().recruitment
-    local success, message = self:StartSearch(recruitment.confirmedText or "")
-    self.lastAutoPost = {
-        at = GC.Util.Now(),
-        success = success == true,
-        message = tostring(message or ""),
-    }
+    if autoPostArmedSources.raidsearch then
+        autoPostArmedSources.raidsearch = nil
+        local raidSearchSettings = GC.DB:GetSettings().raidSearch
+        if GC.RaidSearch and type(raidSearchSettings) == "table"
+            and raidSearchSettings.autoRepeat == true then
+            local success, message = GC.RaidSearch:Post()
+            GC.RaidSearch.lastAutoPost = {
+                at = GC.Util.Now(),
+                success = success == true,
+                message = tostring(message or ""),
+            }
+        end
+    end
+    autoPostFrame:SetShown(next(autoPostArmedSources) ~= nil)
 end
 
 -- Die Klasse steckt in der bereits erfassten GUID des Absenders; es braucht
@@ -842,6 +877,14 @@ function GC.Chat:CaptureWhisper(message, sender, guid)
     -- Bewerber-Postfach - sonst laege jeder Rezeptfrager als Interessent da.
     if GC.Workshop and GC.Workshop.AnswerRecipeWhisper
         and GC.Workshop:AnswerRecipeWhisper(message, sender) then
+        return
+    end
+    -- Laeuft eine Raidsuche, gehoeren Antworten darauf in deren Zulauf, nicht
+    -- ins Bewerber-Postfach. Die Weiche fragt die Raidsuche, weil nur sie die
+    -- Regeln kennt (Gildenmitglieder immer, Externe ohne Bewerber-Trigger);
+    -- ohne laufende Suche aendert sich am bisherigen Verhalten nichts.
+    if GC.RaidSearch and GC.RaidSearch:ShouldCaptureWhisper(message, sender) then
+        GC.RaidSearch:CaptureResponse(message, sender, guid)
         return
     end
     local settings = GC.DB:GetSettings()

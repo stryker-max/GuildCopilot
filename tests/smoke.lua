@@ -10712,6 +10712,167 @@ do
     addon.UI:RefreshInbox()
 end
 
+-- === Raidsuche (0.9.139) ===================================================
+--
+-- Logik, keine Pixel: Zeitnormalisierung, Wochentagsrechnung, Spruchstufen
+-- gegen die Byte-Grenze, die Whisper-Weiche in ihren vier Faellen, ehrliche
+-- Rollenzaehlung, Vorlagen und der Loeschmerker je Suche.
+do
+    local rsx = addon.RaidSearch
+    assert(rsx ~= nil, "GC.RaidSearch wurde nicht geladen")
+
+    -- Zeiteingaben: getippt wird, was die Hand hergibt.
+    assert(rsx.NormalizeTimeInput("1930") == "19:30", "1930 wurde nicht zu 19:30")
+    assert(rsx.NormalizeTimeInput("19") == "19:00", "19 wurde nicht zu 19:00")
+    assert(rsx.NormalizeTimeInput("9.5") == "09:05", "9.5 wurde nicht zu 09:05")
+    assert(rsx.NormalizeTimeInput("25:00") == nil, "25:00 gilt faelschlich als Uhrzeit")
+    assert(rsx.NormalizeTimeInput("abc") == nil, "abc gilt faelschlich als Uhrzeit")
+
+    -- Wochentagsrechnung: heute zaehlt mit.
+    local rsx_today = addon.Util.TodayISO()
+    local rsx_todayWeekday = addon.Util.WeekdayOfISO(rsx_today)
+    assert(rsx.NextDateForWeekday(rsx_todayWeekday) == rsx_today,
+        "Der heutige Wochentag liefert nicht das heutige Datum")
+    local rsx_nextDay = rsx.NextDateForWeekday((rsx_todayWeekday % 7) + 1)
+    assert(addon.Util.WeekdayOfISO(rsx_nextDay) == (rsx_todayWeekday % 7) + 1,
+        "Das naechste Datum traegt den falschen Wochentag")
+    assert(addon.Util.DaysBetweenISO(rsx_today, rsx_nextDay) == 1,
+        "Der morgige Wochentag liegt nicht einen Tag entfernt")
+
+    -- Suchzettel fuellen und den Spruch ableiten.
+    local rsx_plan = rsx:NewPlan()
+    assert(rsx_plan.zone == "Karazhan", "Der neue Zettel beginnt nicht bei Karazhan")
+    assert(rsx_plan.status == "ENTWURF", "Der neue Zettel beginnt nicht als Entwurf")
+    rsx:SetDate(rsx_today)
+    assert(rsx:SetTime("1930") == true, "Die Uhrzeit 1930 wurde nicht angenommen")
+    rsx:SetLootRule("2SR > MS > OS")
+    rsx:SetHardReserve("Urne")
+    rsx:SetSrLink("softres.it/r/abc")
+    rsx:AdjustRoleNeed("HEALER", 2)
+    local rsx_line = rsx:BuildAnnouncement()
+    assert(rsx_line:find("LFM Karazhan", 1, true), "Der Spruch nennt die Instanz nicht: " .. rsx_line)
+    assert(rsx_line:find("heute 19:30", 1, true), "Der Spruch nennt den Termin nicht: " .. rsx_line)
+    assert(rsx_line:find("2SR > MS > OS", 1, true), "Der Spruch nennt die Lootregel nicht")
+    assert(rsx_line:find("HR: Urne", 1, true), "Der Spruch nennt die Hard Reserve nicht")
+    assert(rsx_line:find("noch 2 Heiler", 1, true), "Der Spruch nennt den offenen Bedarf nicht")
+    assert(rsx_line:find("/w me", 1, true), "Der Spruch endet nicht mit /w me")
+    assert(#rsx_line <= addon.Constants.MAX_CHAT_BYTES, "Der Spruch ist laenger als 255 Bytes")
+
+    -- Byte-Grenze unter Druck: lange Hard Reserve ohne SR-Link, dazu Notiz -
+    -- die Stufen muessen greifen, notfalls das UTF-8-sichere Kuerzen.
+    rsx:SetSrLink("")
+    rsx:SetHardReserve(string.rep("Sehr langes Hard-Reserve-Item, ", 12))
+    rsx:SetNote("Voice ist Pflicht, ID bitte vorher lesen und puenktlich da sein")
+    assert(#rsx:BuildAnnouncement() <= addon.Constants.MAX_CHAT_BYTES,
+        "Die Kuerzungsstufen halten die Byte-Grenze nicht")
+    rsx:SetHardReserve("Urne")
+    rsx:SetSrLink("softres.it/r/abc")
+    rsx:SetNote("")
+
+    -- Ehrliche Zaehlung, beide Zweige: Ohne Selbstauskunft zaehlt der eigene
+    -- Charakter auf KEINE Rolle; mit Raidprofil zaehlt genau dessen Rolle.
+    local rsx_profile = addon.Profile:Get()
+    local rsx_savedSpec = rsx_profile.raidSpecKey
+    rsx_profile.raidSpecKey = nil
+    local rsx_state = rsx:GetRosterState()
+    assert(rsx_state.total >= 1, "Der eigene Charakter fehlt in der Ist-Zaehlung")
+    assert(rsx_state.unassigned >= 1, "Ohne Spec-Zuordnung wurde eine Rolle geraten")
+    assert((rsx_state.roles.HEALER or 0) == 0, "Ein Heiler wurde herbeigeraten")
+    rsx_profile.raidSpecKey = "SHAMAN:3"
+    rsx_state = rsx:GetRosterState()
+    assert((rsx_state.roles.HEALER or 0) == 1,
+        "Das Raidprofil (Wiederherstellung) zaehlt nicht als Heiler")
+    rsx_profile.raidSpecKey = rsx_savedSpec
+
+    -- Ohne laufende Suche greift die Weiche nie.
+    assert(rsx:ShouldCaptureWhisper("kann mein mage mit?", "Randomdude") == false,
+        "Die Weiche greift ohne laufende Suche")
+
+    -- Suche starten: ohne Bestaetigung verweigert, mit Bestaetigung wird in
+    -- den Gildenkanal gepostet (die Kanalarten sind im Test nicht beigetreten)
+    -- und der Zettel steht auf SUCHT.
+    local rsx_ok, rsx_message = rsx:Post()
+    assert(rsx_ok == false and tostring(rsx_message):find("bestätigen", 1, true),
+        "Posten ohne Bestaetigung wurde nicht verweigert: " .. tostring(rsx_message))
+    assert(rsx:ConfirmText(rsx:BuildAnnouncement()) == true, "Der Spruch liess sich nicht bestaetigen")
+    rsx_ok, rsx_message = rsx:Post()
+    assert(rsx_ok == true, "Posten mit Bestaetigung schlug fehl: " .. tostring(rsx_message))
+    assert(rsx:GetPlan().status == "SUCHT", "Der Zettel steht nach dem Posten nicht auf SUCHT")
+    assert(addon.Chat:GetRemainingCooldown("GUILD") > 0,
+        "Der Gildenkanal hat nach dem Posten keinen Cooldown")
+    rsx_ok, rsx_message = rsx:Post()
+    assert(rsx_ok == false and tostring(rsx_message):find("Cooldown", 1, true),
+        "Der zweite Post lief am Kanal-Cooldown vorbei: " .. tostring(rsx_message))
+
+    -- Die Weiche, Fall 1: Ein Gildenmitglied gehoert IMMER dem Zulauf, auch
+    -- wenn seine Nachricht ein Bewerber-Triggerwort traegt.
+    assert(rsx:ShouldCaptureWhisper("suche gilde fuer heute", "Heiler-Realm") == true,
+        "Ein Gildenmitglied wurde nicht dem Zulauf zugeordnet")
+    -- Fall 2: Ein Externer mit Triggerwort bleibt dem Postfach.
+    local rsx_trigger = addon.DefaultWhisperTriggers and addon.DefaultWhisperTriggers[1] or "gilde"
+    assert(rsx:ShouldCaptureWhisper("hallo, " .. rsx_trigger .. " bitte", "Randomdude") == false,
+        "Ein Bewerber wurde faelschlich in den Zulauf geholt")
+    -- Fall 3: Ein Externer ohne Triggerwort ist eine Raid-Antwort.
+    assert(rsx:ShouldCaptureWhisper("kann mein mage mit?", "Randomdude") == true,
+        "Eine formlose Raid-Antwort wurde nicht erfasst")
+
+    -- Ueber den echten Whisper-Weg: Die Antwort landet im Zulauf, nicht im
+    -- Bewerber-Postfach, mit Klasse aus dem Text und Spec-Vorschlag nur bei
+    -- bekannter Klasse.
+    local rsx_inboxBefore = #addon.DB:GetGuild().inbox
+    addon.Chat:CaptureWhisper("bin holy priester, nehmt mich mit", "Randomdude", nil)
+    assert(#addon.DB:GetGuild().inbox == rsx_inboxBefore,
+        "Eine Raid-Antwort ist im Bewerber-Postfach gelandet")
+    local rsx_response = rsx:FindResponse("Randomdude")
+    assert(rsx_response ~= nil, "Die Raid-Antwort fehlt im Zulauf")
+    assert(rsx_response.classFile == "PRIEST", "Die Klasse wurde nicht aus dem Text gelesen")
+    assert(rsx_response.specKey == "PRIEST:2",
+        "Der Spec-Vorschlag (holy bei bekannter Klasse Priester) fehlt")
+    assert(rsx:CountNewResponses() >= 1, "Die neue Antwort zaehlt nicht als NEU")
+
+    -- Antwortvorlagen: zwei Beispiele ab Werk, Platzhalter werden gefuellt.
+    local rsx_templates = rsx:GetReplyTemplates()
+    assert(#rsx_templates == 2, "Die zwei Beispiel-Antwortvorlagen fehlen")
+    local rsx_reply = rsx:BuildReply({ text = "Hi {name}, {instanz} {termin}, Loot {loot}" },
+        "Randomdude-Realm")
+    assert(rsx_reply:find("Randomdude", 1, true) and rsx_reply:find("Karazhan", 1, true)
+        and rsx_reply:find("2SR > MS > OS", 1, true),
+        "Die Platzhalter der Antwortvorlage wurden nicht gefuellt: " .. rsx_reply)
+    -- Geloeschte Beispiele bleiben geloescht (Seeded-Flag).
+    rsx:RemoveReplyTemplate(2)
+    rsx:RemoveReplyTemplate(1)
+    assert(#rsx:GetReplyTemplates() == 0, "Geloeschte Antwortvorlagen sind wiederauferstanden")
+    rsx:SetReplyTemplate(1, "Invite kommt", "Passt, Invite kommt {name}!")
+
+    -- Der Loeschmerker je Suche: Wer entfernt wurde, kommt fuer den Rest
+    -- DIESER Suche nicht wieder herein.
+    rsx:RemoveResponse("Randomdude")
+    assert(rsx:FindResponse("Randomdude") == nil, "Die entfernte Antwort steht noch im Zulauf")
+    assert(rsx:ShouldCaptureWhisper("bin wieder da", "Randomdude") == false,
+        "Der Loeschmerker haelt den Entfernten nicht draussen")
+
+    -- Suchzettel-Vorlagen: speichern, anwenden, Wochentag bleibt.
+    assert(rsx:SaveTemplate() == true, "Der Zettel liess sich nicht als Vorlage speichern")
+    local rsx_template = rsx:GetData().templates[1]
+    assert(rsx_template ~= nil and rsx_template.weekday == rsx_todayWeekday,
+        "Die Vorlage traegt nicht den Wochentag des Zettels")
+    assert(rsx:ApplyTemplate(1) == true, "Die Vorlage liess sich nicht anwenden")
+    local rsx_applied = rsx:GetPlan()
+    assert(rsx_applied.status == "ENTWURF", "Die angewendete Vorlage startet nicht als Entwurf")
+    assert(addon.Util.WeekdayOfISO(rsx_applied.dateISO) == rsx_template.weekday,
+        "Die angewendete Vorlage liegt auf dem falschen Wochentag")
+    assert(rsx_applied.loot.rule == "2SR > MS > OS", "Die Lootregel fehlt in der Vorlage")
+
+    -- Die Seite selbst laesst sich aufschlagen und zeichnen; der Zulauf ist
+    -- danach wieder leer (frischer Entwurf), der Suchbalken folgt dem
+    -- Zustand: Entwurf heisst kein Balken.
+    addon.UI:ShowPage("RAIDSEARCH")
+    assert(addon.UI.activePage == "RAIDSEARCH", "Die Raidsuche-Seite liess sich nicht aufschlagen")
+    rsx:EndSearch()
+    assert(rsx:GetPlan().status == "BEENDET", "Die Suche liess sich nicht beenden")
+    addon.UI:ShowPage("ROSTER")
+end
+
 -- Letzte Gegenprobe ueber den gesamten Lauf: Kein einziger Pfad hat den
 -- geschuetzten Gildenausschluss versucht.
 assert(#uninvitedPlayers == 0,

@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.138",
+    VERSION = "0.9.139",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -692,6 +692,23 @@ GC.RaidBosses = {
     { instance = "Sonnenbrunnen", names = { "Felmyst" } },
     { instance = "Sonnenbrunnen", names = { "Muru", "Entropius" } },
     { instance = "Sonnenbrunnen", names = { "Kil'jaeden" } },
+}
+
+-- Die Schlachtzüge des Anniversary-Clients für die Raidsuche. "name" entspricht
+-- der Zone, die die Raidauswertung aus GC.RaidBosses ableitet - Suche und
+-- Auswertung sprechen damit dieselben Namen. "short" ist der Kurzname für die
+-- knappen Längenstufen des Suchspruchs, "size" die übliche Gruppengröße als
+-- Vorbelegung (per Regler überschreibbar, damit auch 5er-Gruppen gehen).
+GC.RaidInstances = {
+    { name = "Karazhan", short = "Kara", size = 10 },
+    { name = "Gruuls Unterschlupf", short = "Gruul", size = 25 },
+    { name = "Magtheridons Kammer", short = "Maggi", size = 25 },
+    { name = "Serpentinhöhle", short = "SSC", size = 25 },
+    { name = "Auge", short = "TK", size = 25 },
+    { name = "Zul'Aman", short = "ZA", size = 10 },
+    { name = "Hyjal", short = "MH", size = 25 },
+    { name = "Schwarzer Tempel", short = "BT", size = 25 },
+    { name = "Sonnenbrunnen", short = "SWP", size = 25 },
 }
 
 -- Ausrüstungsslots für den Gear Audit. "enchantRequired" markiert nur Slots,

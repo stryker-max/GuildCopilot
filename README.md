@@ -1,4 +1,4 @@
-# Guild Copilot 0.9.138
+# Guild Copilot 0.9.139
 
 <p align="center">
   <img src="Brand/GuildCopilotLogo.png" width="240" alt="Guild Copilot Logo">
@@ -17,6 +17,7 @@ Guild Copilot nimmt einer Gildenleitung die Buchhaltung ab: Wer spielt was, wer 
 | **Gilde** | Roster mit Raidprofilen, Abmeldungen, Inaktivitätsvorschläge |
 | **Werkstatt** | Wer kann welches Rezept, was kostet es an Material, wer hat es auf Lager |
 | **Gildenaufträge** | Bestellungen an Handwerker mit Status, Übergabe und Kostenabrechnung |
+| **Raidsuche** | Raid zusammenklicken, LFM-Spruch posten, Antworten sammeln und einladen |
 | **Raidauswertung** | Anwesenheit, Versuche, Tode, Interrupts, Verbrauchsgegenstände je Abend |
 | **Ausrüstung** | Fehlende Verzauberungen und leere Sockel der ganzen Gruppe |
 
@@ -106,6 +107,12 @@ Der zweite Reiter der Werkstatt macht aus „kann das jemand craften?“ einen n
 - **Vorlagen** je Rezept — der Wochenauftrag „15 Sphären“ ist ein Klick.
 - **Kompakt-Tracker:** ein kleines Fenster, das nur erscheint, wenn du an der Reihe bist.
 
+## Raidsuche
+
+Der Raid wird **zusammengeklickt**: Instanz, Datum und Uhrzeit, Sollbesetzung (Tanks/Heiler/DD plus optionale Spec-Wünsche) und die Lootregeln — Lootregel und Hard Reserve sind bewusst **Freitext** („2SR > MS > OS“, „HR: Urne“), dazu ein SR-Link-Feld. Aus dem Zettel entsteht der **LFM-Spruch** automatisch, immer unter 255 Bytes, mit Kürzungsstufen von ausführlich bis knapp. Gepostet wird nur bestätigter Text, wahlweise in SucheNachGruppe, Handel, Allgemein, Gildenrekrutierung, den **Gildenchat** und **selbst beigetretene Kanäle** wie „World“ — jeder Kanal mit eigenem Cooldown.
+
+Wer auf den Spruch antwortet, landet im **Zulauf** statt im Bewerber-Postfach: mit Klasse (sicher aus der Whisper-GUID), Stufe, Spec-Zuordnung, Einladen-Knopf samt Schlachtzugs-Umwandlung und **selbstgebauten Antwortvorlagen** („Invite kommt“, „Leider voll“ — frei editierbar, mit Platzhaltern). Die Besetzung zählt live mit: Wer der Gruppe beitritt, verschwindet aus „noch gesucht“. Ein **Suchbalken** nach dem Muster des Werbebalkens begleitet die laufende Suche, inklusive „Automatisch wiederholen“ per Tastendruck. **Suchzettel-Vorlagen** merken sich wiederkehrende Raids mit Wochentag — „Kara dienstags 19:30“ ist zwei Klicks. Konzept und Entscheidungen: `docs/KONZEPT-raidsuche-lfm.md`.
+
 ## Raidauswertung
 
 **Sitzung starten** vor dem Raid, **Sitzung beenden** danach — dazwischen laufen Anwesenheitszeit, Versuche, Siege, Wipes, Tode, Wiederbelebungen, Interrupts, Dispels und Verbrauchsgegenstände je Teilnehmer mit. Bosskämpfe erkennt das Addon über die Encounter-Ereignisse des Clients; Trashkämpfe zählen nicht als Versuch. Starten und beenden dürfen die für die Mitgliederpflege freigegebenen Ränge — in den Einstellungen wählbar, Vorgabe sind Gildenmeister und Offiziere.
@@ -189,7 +196,7 @@ Neben Installieren, Aktualisieren und Entfernen erledigt sie zwei Dinge, die ein
 
 **Raidabend aus dem Combat Log.** Der netzfreie Weg: Der Installer liest eine `WoWCombatLog.txt` aus `<Spielversion>\Logs\` und erzeugt denselben Importcode — ohne Upload, ohne Zugangsdaten, ohne Warcraft-Logs-Konto. Der Nutzen ist die Rückwirkung: Die Datei hat den ganzen Abend, auch wenn niemand „Sitzung starten“ gedrückt hat. Zwei Grenzen: Die Klasse steht im Combat Log nicht (Teilnehmer erscheinen ohne Klassenfarbe statt mit einer geratenen), und gezählt wird nur, wer in einem Bosskampf auftaucht.
 
-Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.138.
+Installer und Addon werden **getrennt gezählt**. Aktuell stehen der Installer bei 1.0.7 und das Addon bei 0.9.139.
 
 ### Warum Windows beim Herunterladen warnt
 

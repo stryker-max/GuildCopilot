@@ -112,6 +112,39 @@ local DEFAULTS = {
         },
         postCooldown = GC.Constants.DEFAULT_POST_COOLDOWN,
         lfgCooldown = GC.Constants.DEFAULT_LFG_COOLDOWN,
+        -- Die Raidsuche (docs/KONZEPT-raidsuche-lfm.md). Alles hier ist
+        -- Ansichts- und Arbeitsstil des Raidleiters und bleibt deshalb lokal;
+        -- der Suchzettel selbst liegt gildenbezogen (GUILD_DEFAULTS).
+        raidSearch = {
+            -- Automatisches Wiederholen des Suchspruchs - dasselbe Modell wie
+            -- der Werbebalken: nur ausdruecklich eingeschaltet, gepostet wird
+            -- ausschliesslich im Kontext eines echten Tastendrucks, den Takt
+            -- geben die Kanal-Cooldowns vor.
+            autoRepeat = false,
+            -- Ton bei neuen Antworten im Zulauf, Vorgabe aus (Konzept).
+            sound = false,
+            bar = {
+                hidden = false,
+                x = 0,
+                y = -140,
+            },
+            -- Kanalwahl je Suche (Owner-Entscheidung): die vier Kanalarten,
+            -- der Gildenchat und selbst beigetretene Kanaele - Letztere unter
+            -- ihrem NAMEN, weil sich die Kanalnummer je Login aendern kann.
+            channels = {
+                RECRUITMENT = false,
+                LFG = true,
+                TRADE = true,
+                GENERAL = false,
+                GUILD = true,
+                custom = {},
+            },
+            -- Selbstgebaute Antwortvorlagen (Owner-Entscheidung). Zwei
+            -- Beispiele setzt GC.RaidSearch:GetReplyTemplates beim ersten
+            -- Zugriff; das Seeded-Flag haelt Geloeschtes geloescht.
+            replyTemplates = {},
+            replyTemplatesSeeded = false,
+        },
         -- Lokale Automatik des Gear Audits. Bewusst nicht gildenweit: Beides
         -- aendert nur, wann geprueft und wie eine unbewertete Verzauberung
         -- angezeigt wird, nie was tatsaechlich in der Ausruestung steckt.
@@ -226,6 +259,16 @@ local GUILD_DEFAULTS = {
     roster = {
         rankFilterConfigured = false,
         activeRaiderRanks = {},
+    },
+    -- Die Raidsuche: genau EIN Suchzettel (Owner-Entscheidung "nur ein Raid",
+    -- docs/KONZEPT-raidsuche-lfm.md) plus Vorlagen. "plan" hat bewusst keinen
+    -- Vorgabewert - kein Zettel heisst nil, angelegt wird er erst ueber
+    -- GC.RaidSearch:NewPlan. Gildenbezogen abgelegt, in dieser Stufe aber
+    -- nicht synchronisiert (keine Sync-Nachrichtenart registriert); liegt es
+    -- von Anfang an hier, braucht eine spaetere gildenweite Stufe keinen
+    -- Datenumzug.
+    raidSearch = {
+        templates = {},
     },
 }
 
@@ -440,6 +483,30 @@ function GC.DB:Prune()
     end
     while #guildData.postHistory > 50 do
         table.remove(guildData.postHistory)
+    end
+
+    -- Die Raidsuche: Ein BEENDETER Zettel bleibt sieben Tage zum Nachschauen
+    -- liegen, dann faellt er weg. Die Deckel (Zulauf 40, Nachrichten je
+    -- Antwort 10, Vorlagen 12) halten die Schreibstellen; hier werden sie nur
+    -- nachgesichert, fuer von Hand bearbeitete SavedVariables.
+    local raidSearch = guildData.raidSearch
+    if type(raidSearch) == "table" then
+        local plan = raidSearch.plan
+        if type(plan) == "table" then
+            if plan.status == "BEENDET"
+                and (tonumber(plan.endedAt) or 0) < GC.Util.Now() - (7 * 24 * 60 * 60) then
+                raidSearch.plan = nil
+            elseif type(plan.responses) == "table" then
+                while #plan.responses > 40 do
+                    table.remove(plan.responses)
+                end
+            end
+        end
+        if type(raidSearch.templates) == "table" then
+            while #raidSearch.templates > 12 do
+                table.remove(raidSearch.templates)
+            end
+        end
     end
 end
 
