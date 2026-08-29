@@ -51,6 +51,13 @@ Installer und Addon werden getrennt gezählt.
   Schreibhilfe darunter.
 - **„Neu ableiten“ heißt jetzt „Neu generieren“** – dasselbe Wort wie auf
   der Werbeseite.
+- **Suchbalken ein- und ausblenden per Knopf.** Unter „Suche beenden / Neue
+  Suche“ liegt jetzt ein Knopf, der den Suchbalken ausdrücklich ein- und
+  ausblendet. Ein mit seinem × weggeklickter Balken kam bei laufender Suche
+  vorher erst beim nächsten „Suche starten“ zurück – der Knopf holt ihn ohne
+  Umweg zurück. Er zeigt sich nur während einer laufenden Suche. (Der Balken
+  bleibt wie gehabt hinter dem geöffneten Hauptfenster; sichtbar wird er beim
+  Minimieren – oder wenn man ihn einmal aus der Bildschirmmitte zieht.)
 
 ## 0.9.139 – Addon
 

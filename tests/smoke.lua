@@ -10812,6 +10812,38 @@ do
     assert(rsx_ok == false and tostring(rsx_message):find("Cooldown", 1, true),
         "Der zweite Post lief am Kanal-Cooldown vorbei: " .. tostring(rsx_message))
 
+    -- === Suchbalken-Knopf: ein- und ausblenden ohne Neustart (0.9.140) ======
+    -- Ein mit seinem × weggeklickter Balken kam bei laufender Suche frueher erst
+    -- beim naechsten "Suche starten" zurueck. Der Knopf in der Kopfzeile blendet
+    -- ihn ausdruecklich ein und aus; sichtbar ist er nur, solange gesucht wird.
+    do
+        addon.UI:ShowPage("RAIDSEARCH")
+        addon.UI:RefreshRaidSearch()
+        local bar_page = addon.UI.pages.RAIDSEARCH
+        assert(bar_page.barToggle ~= nil, "Der Suchbalken-Knopf fehlt in der Kopfzeile")
+        assert(bar_page.barToggle.shown == true,
+            "Der Suchbalken-Knopf ist bei laufender Suche verborgen")
+        assert(bar_page.barToggle.label:GetText() == "Suchbalken ausblenden",
+            "Der Knopf zeigt den offenen Balken nicht als 'ausblenden': "
+            .. tostring(bar_page.barToggle.label:GetText()))
+        assert(addon.UI.raidSearchBar ~= nil and addon.UI.raidSearchBar.shown == true,
+            "Der Suchbalken ist bei laufender Suche nicht sichtbar")
+        -- Ausblenden per Knopf: hidden gesetzt, Balken weg, Beschriftung dreht.
+        bar_page.barToggle.scripts.OnClick(bar_page.barToggle)
+        assert(rsx:GetSettings().bar.hidden == true,
+            "Der Knopf hat den Balken nicht ausgeblendet")
+        assert(addon.UI.raidSearchBar.shown == false,
+            "Der ausgeblendete Suchbalken ist noch sichtbar")
+        assert(bar_page.barToggle.label:GetText() == "Suchbalken einblenden",
+            "Der Knopf zeigt den versteckten Balken nicht als 'einblenden'")
+        -- Wieder einblenden ohne Neustart - genau die Luecke, die der Knopf schliesst.
+        bar_page.barToggle.scripts.OnClick(bar_page.barToggle)
+        assert(rsx:GetSettings().bar.hidden == false,
+            "Der Knopf hat den Balken nicht wieder eingeblendet")
+        assert(addon.UI.raidSearchBar.shown == true,
+            "Der wieder eingeblendete Suchbalken bleibt verborgen")
+    end
+
     -- Die Weiche, Fall 1: Ein Gildenmitglied gehoert IMMER dem Zulauf, auch
     -- wenn seine Nachricht ein Bewerber-Triggerwort traegt.
     assert(rsx:ShouldCaptureWhisper("suche gilde fuer heute", "Heiler-Realm") == true,

@@ -11123,6 +11123,19 @@ function GC.UI:BuildRaidSearchPage()
     end)
     page.endButton:SetPoint("RIGHT", page.newButton, "LEFT", -8, 0)
 
+    -- Ein Knopf blendet den Suchbalken ausdruecklich ein und aus. Ohne ihn kam
+    -- ein mit seinem × weggeklickter Balken bei laufender Suche erst beim
+    -- naechsten "Suche starten" zurueck. Er sitzt UNTER dem Knopfpaar: rechts
+    -- neben dem 520 breiten Hilfetext ist fuer keine dritte Beschriftung in der
+    -- Kopfzeile Platz. Er zeigt sich nur waehrend einer Suche - sonst gibt es
+    -- keinen Balken. (Der Balken selbst bleibt MEDIUM-Strata: bei offenem
+    -- Hauptfenster steckt er dahinter, sichtbar wird er beim Minimieren.)
+    page.barToggle = CreateButton(page, "Suchbalken einblenden", 228, 22, function()
+        GC.UI:ToggleRaidSearchBar()
+        GC.UI:RefreshRaidSearch()
+    end)
+    page.barToggle:SetPoint("TOPRIGHT", page.newButton, "BOTTOMRIGHT", 0, -6)
+
     -- === Der Suchzettel ====================================================
     local sheet = CreateCard(page, "Suchzettel")
     sheet:SetSize(380, 316)
@@ -11630,7 +11643,19 @@ function GC.UI:RefreshRaidSearch()
     if not page.newArmed then
         page.newButton:SetText("Neue Suche")
     end
-    page.endButton:SetShown(plan ~= nil and plan.status == "SUCHT")
+    local searching = plan ~= nil and plan.status == "SUCHT"
+    page.endButton:SetShown(searching)
+    -- Der Balkenknopf teilt die Lebensdauer des "Suche beenden"-Knopfs: nur
+    -- solange gesucht wird, gibt es einen Balken zum Ein- oder Ausblenden. Die
+    -- Beschriftung spiegelt den aktuellen Zustand, der aktive Rahmen zeigt
+    -- "Balken ist offen" - dasselbe Muster wie der Werbebalken-Knopf.
+    if page.barToggle then
+        page.barToggle:SetShown(searching)
+        local barSettings = GC.RaidSearch:GetSettings().bar
+        local barShown = type(barSettings) == "table" and barSettings.hidden ~= true
+        page.barToggle:SetActive(barShown)
+        page.barToggle:SetText(barShown and "Suchbalken ausblenden" or "Suchbalken einblenden")
+    end
 
     if not plan then
         plan = GC.RaidSearch:EnsurePlan()
@@ -12145,6 +12170,17 @@ function GC.UI:CreateRaidSearchBar()
     end)
     self.raidSearchBar = bar
     return bar
+end
+
+-- Ein Ort, ein Wert: derselbe hidden-Schalter, den das × im Balken setzt und
+-- den ein "Suche starten" beim ECHTEN Start wieder loest. Der Knopf kippt ihn
+-- ausdruecklich, danach entscheidet UpdateRaidSearchBarShown wie sonst auch -
+-- ohne laufende Suche bleibt der Balken trotzdem weg.
+function GC.UI:ToggleRaidSearchBar()
+    local settings = GC.RaidSearch:GetSettings()
+    settings.bar = type(settings.bar) == "table" and settings.bar or {}
+    settings.bar.hidden = not (settings.bar.hidden == true)
+    self:UpdateRaidSearchBarShown()
 end
 
 function GC.UI:UpdateRaidSearchBarShown()

@@ -396,10 +396,22 @@ Der Owner schickte die Seite mehrfach im Spiel; daraus wurde ihr Feinschliff:
   auf seine Beschriftung zurück.
 - **„Neu ableiten" heißt jetzt „Neu generieren"** – dasselbe Wort wie auf der
   Werbeseite.
+- **Suchbalken ein- und ausblenden per Knopf.** Der Owner vermisste einen Weg,
+  den Suchbalken selbst einzublenden: Einmal mit seinem × weggeklickt, kam er
+  bei laufender Suche erst beim nächsten „Suche starten" zurück (`bar.hidden`
+  wird nur beim echten Start gelöst). Jetzt sitzt unter dem Knopfpaar „Suche
+  beenden / Neue Suche" ein dritter Knopf, der `bar.hidden` ausdrücklich kippt
+  (`GC.UI:ToggleRaidSearchBar`) – rechts neben dem 520 breiten Untertitel ist
+  für keine dritte Beschriftung Platz, darum die zweite Reihe. Er zeigt sich
+  nur während einer laufenden Suche. Der Balken bleibt bewusst MEDIUM-Strata
+  (das HUD fürs geschlossene Fenster): Bei offenem Hauptfenster (DIALOG) steckt
+  er dahinter und wird beim Minimieren sichtbar – oder wenn man ihn einmal aus
+  der Bildschirmmitte zieht.
 
 `tests/validate.mjs` hält die zugeklappte Tastatur-Freigabe, den
 Fokusschutz, die Verjährung, die Kürzel und den großen Suchspruch rechts
-fest; `tests/smoke.lua` stellt Minimieren, Verjährung und die Kürzel nach.
+fest; `tests/smoke.lua` stellt Minimieren, Verjährung, die Kürzel und den
+Suchbalken-Knopf (ausblenden, ohne Neustart wieder einblenden) nach.
 
 ## 0.9.139 – Raidsuche: Raids zusammenklicken und auffüllen
 
