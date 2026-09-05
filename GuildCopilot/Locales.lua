@@ -412,6 +412,10 @@ local english = {
     ["Fenstergröße ziehen"] = "Drag to resize",
     ["Minimieren"] = "Minimize",
     ["Wieder aufklappen"] = "Restore",
+    ["Keine passenden Interessenten"] = "No matching applicants",
+    ["Einladung konnte nicht ausgelöst werden."] = "Could not send the invitation.",
+    ["Keine Treffer für diese Filter. Wähle Alle Klassen und Alle Stufen, um alle Interessenten zu sehen."]
+        = "No matches for these filters. Select All classes and All levels to see every applicant.",
 
     -- === Teilschritt 3: statische Meldungen und Zustände ===================
     ["Abgleich mit der Gilde"] = "Guild sync",

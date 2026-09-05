@@ -52,7 +52,17 @@ assert(optionsCategory == addon.UI.optionsPanel, "Guild Copilot wurde nicht in d
 assert(optionsCategory.scripts.OnShow == nil, "Addon-Option darf das Hauptfenster nicht automatisch öffnen")
 optionsCategory.openButton.scripts.OnClick()
 assert(addon.UI.frame.shown == true, "Options-Button öffnet das Guild-Copilot-Fenster nicht")
-addon.UI.frame.scripts.OnKeyDown(addon.UI.frame, "ESCAPE")
+assert(addon.UI.frame.scripts.OnKeyDown == nil and addon.UI.frame.scripts.OnKeyUp == nil,
+    "Das Hauptfenster faengt Tastendruecke ab, statt Escape WoW zu ueberlassen")
+-- WoWs Escape-Pfad schliesst die registrierten UISpecialFrames.
+local function CloseSpecialFramesForTest()
+    for _, name in ipairs(UISpecialFrames) do
+        if _G[name] and _G[name]:IsShown() then
+            _G[name]:Hide()
+        end
+    end
+end
+CloseSpecialFramesForTest()
 assert(addon.UI.frame.shown == false, "Escape schließt das Guild-Copilot-Fenster nicht")
 addon.UI.frame:Show()
 assert(addon.UI.minimapButton ~= nil, "Minimap-Symbol wurde nicht erstellt")
@@ -366,17 +376,17 @@ assert(addon.DB:GetGuild().warcraftLogs.url
 -- Charakter-Links entstehen aus der gespeicherten Quelle; ohne Realm gibt es
 -- bewusst keine halben Links.
 wclLinks = addon.WarcraftLogs:BuildCharacterLinks("Dotlordd")
-assert(wclLinks.logs == "https://de.fresh.warcraftlogs.com/character/eu/thunderstrike/dotlordd",
+assert(wclLinks.logs == "https://de.fresh.warcraftlogs.com/character/eu/thunderstrike/Dotlordd",
     "Der Warcraft-Logs-Charakterlink ist falsch: " .. tostring(wclLinks.logs))
-assert(wclLinks.armory == "https://classic-armory.org/character/eu/tbc-anniversary/thunderstrike/dotlordd",
+assert(wclLinks.armory == "https://classic-armory.org/character/eu/tbc-anniversary/thunderstrike/Dotlordd",
     "Der Armory-Charakterlink ist falsch: " .. tostring(wclLinks.armory))
 -- Ein Realm am Namen gewinnt gegen den Realm der Gildenquelle.
 assert(addon.WarcraftLogs:BuildCharacterLinks("Dotlordd-Pyrewood Village").logs
-    == "https://de.fresh.warcraftlogs.com/character/eu/pyrewood-village/dotlordd",
+    == "https://de.fresh.warcraftlogs.com/character/eu/pyrewood-village/Dotlordd",
     "Der Realm aus dem Spielernamen wurde nicht verwendet")
--- Umlaute werden wie bei der Gildenquelle vereinfacht.
-assert(addon.WarcraftLogs:BuildCharacterLinks("Frostäxte").logs:find("frostaxte", 1, true) ~= nil,
-    "Ein Name mit Umlaut wurde nicht für die URL vereinfacht")
+-- Ein Umlaut ist Teil des Charakternamens, keine austauschbare Schreibweise.
+assert(addon.WarcraftLogs:BuildCharacterLinks("Frostäxte").logs:find("Frost%C3%A4xte", 1, true) ~= nil,
+    "Ein Name mit Umlaut wurde fuer die URL veraendert")
 assert(addon.WarcraftLogs:BuildCharacterLinks("").logs == "",
     "Ohne Spielernamen wurde ein Link erzeugt")
 
@@ -929,11 +939,11 @@ assert(addon.UI.pages.INBOX.leadTitle.value:find("|cfff58cba", 1, true) ~= nil,
     "Der Kopf der Unterhaltung zeigt den Namen nicht in Klassenfarbe")
 -- Für den ausgewählten Interessenten stehen beide Profil-Links bereit.
 assert(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue
-    == "https://de.fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    == "https://de.fresh.warcraftlogs.com/character/eu/realm/Namenlos",
     "Der Warcraft-Logs-Link des Interessenten fehlt im Postfach: "
     .. tostring(addon.UI.pages.INBOX.leadLinkEdits.logs.linkValue))
 assert(addon.UI.pages.INBOX.leadLinkEdits.armory.linkValue
-    == "https://classic-armory.org/character/eu/tbc-anniversary/realm/namenlos",
+    == "https://classic-armory.org/character/eu/tbc-anniversary/realm/Namenlos",
     "Der Armory-Link des Interessenten fehlt im Postfach")
 -- Tippen in ein Linkfeld stellt den vollständigen Link wieder her, damit
 -- niemand einen halben Link kopiert.
@@ -941,7 +951,7 @@ addon.UI.pages.INBOX.leadLinkEdits.logs:SetText("kaputt")
 addon.UI.pages.INBOX.leadLinkEdits.logs.scripts.OnTextChanged(
     addon.UI.pages.INBOX.leadLinkEdits.logs, true)
 assert(addon.UI.pages.INBOX.leadLinkEdits.logs.value
-    == "https://de.fresh.warcraftlogs.com/character/eu/realm/namenlos",
+    == "https://de.fresh.warcraftlogs.com/character/eu/realm/Namenlos",
     "Ein überschriebenes Linkfeld wurde nicht wiederhergestellt")
 assert(addon.Chat:RemoveLead(1) == true, "Der Testinteressent ließ sich nicht entfernen")
 assert(addon.Chat:RemoveLead(1) == true, "Einzelner Interessent konnte nicht gelöscht werden")
@@ -10511,6 +10521,7 @@ do
     read_guild.inbox = {}
     addon.Chat:CaptureLead("Ich bin Krieger und suche Gilde", "Falsch-Realm", nil, "SucheNachGruppe")
     read_guild.inbox[1].classFile = "PRIEST"
+    read_guild.inbox[1].classSource = "GUID"
     addon.Chat:CaptureLead("Ich bin Krieger und suche Gilde", "Falsch-Realm", nil, "SucheNachGruppe")
     assert(read_guild.inbox[1].classFile == "PRIEST",
         "Eine sichere Klasse wurde durch die Textvermutung überschrieben")
@@ -10553,12 +10564,9 @@ do
     for _, index in ipairs(flt_page.visibleLeads) do
         flt_names[#flt_names + 1] = flt_guild.inbox[index].name
     end
-    -- Der Magier - und der Eintrag OHNE bekannte Klasse. "Unbekannt" ist keine
-    -- Aussage über die Klasse; wer filtert, soll keine Bewerber verlieren. Die
-    -- Ansicht ist nach Datum geordnet: der jüngere „Unbekannt" (receivedAt 4)
-    -- steht vor dem älteren Magier (receivedAt 2).
-    assert(#flt_names == 2, "Der Klassenfilter zeigt " .. #flt_names .. " statt 2 Einträgen")
-    assert(flt_names[1] == "Unbekannt-Realm" and flt_names[2] == "Magier-Realm",
+    -- Ein aktiver Klassenfilter zeigt ausschliesslich diese Klasse.
+    assert(#flt_names == 1, "Der Klassenfilter zeigt " .. #flt_names .. " statt 1 Eintrag")
+    assert(flt_names[1] == "Magier-Realm",
         "Der Klassenfilter zeigt die falschen: " .. table.concat(flt_names, ", "))
 
     -- Stufe. Sie kommt aus dem Text des Bewerbers, deshalb sind die Stufen
@@ -10574,24 +10582,21 @@ do
     for _, index in ipairs(flt_page.visibleLeads) do
         flt_levels[#flt_levels + 1] = flt_guild.inbox[index].name
     end
-    -- 70, 62 und der ohne Angabe. Die 45 fällt raus.
-    assert(#flt_levels == 3,
-        "Der Stufenfilter zeigt " .. #flt_levels .. " statt 3: " .. table.concat(flt_levels, ", "))
-    -- Wer keine Stufe angegeben hat, bleibt sichtbar - unabhängig davon, an
-    -- welche Datumsposition ihn die Sortierung stellt. Geprüft wird deshalb die
-    -- Anwesenheit, nicht der Platz.
+    -- Nur 70 und 62: unbekannt erfuellt keine Mindeststufe.
+    assert(#flt_levels == 2,
+        "Der Stufenfilter zeigt " .. #flt_levels .. " statt 2: " .. table.concat(flt_levels, ", "))
     local flt_hasUnknown = false
     for _, flt_name in ipairs(flt_levels) do
         if flt_name == "Unbekannt-Realm" then
             flt_hasUnknown = true
         end
     end
-    assert(flt_hasUnknown,
-        "Wer keine Stufe angegeben hat, wurde vom Stufenfilter verborgen")
+    assert(not flt_hasUnknown,
+        "Ein unbekanntes Level erfuellt faelschlich die Mindeststufe")
 
     addon.UI:GetInboxFilters().minLevel = 70
     addon.UI:RefreshInbox()
-    assert(#flt_page.visibleLeads == 2, "„Ab Stufe 70“ zählt falsch")
+    assert(#flt_page.visibleLeads == 1, "„Ab Stufe 70“ zählt falsch")
     addon.UI:GetInboxFilters().minLevel = 0
     for index = 1, 3 do
         flt_guild.inbox[index].level = nil
@@ -10600,20 +10605,12 @@ do
     -- === Der eigentliche Fall: Löschen bei gesetztem Filter ===============
     addon.DB:GetSettings().inboxFilters = { classFile = "PRIEST" }
     addon.UI:RefreshInbox()
-    -- Sichtbar sind Priester (echter Platz 3) und der klassenlose Unbekannt
-    -- (echter Platz 4). Sortiert wird nach Datum: Unbekannt (receivedAt 4) steht
-    -- oben, Priester (receivedAt 3) darunter. Kein sichtbarer Platz zeigt damit
-    -- auf den ersten echten Eintrag - genau hier ging früher der falsche verloren.
-    assert(#flt_page.visibleLeads == 2, "Testaufbau: falsche Anzahl für die Löschprobe")
-    assert(addon.UI:GetLeadIndexForSlot(1) == 4,
+    -- Sichtbarer Platz 1 ist echter Platz 3, nicht der erste gespeicherte.
+    assert(#flt_page.visibleLeads == 1, "Testaufbau: falsche Anzahl für die Löschprobe")
+    assert(addon.UI:GetLeadIndexForSlot(1) == 3,
         "Der erste sichtbare Platz zeigt auf den echten Index "
-            .. tostring(addon.UI:GetLeadIndexForSlot(1)) .. " statt 4")
-    assert(addon.UI:GetLeadIndexForSlot(2) == 3,
-        "Der zweite sichtbare Platz zeigt auf den echten Index "
-            .. tostring(addon.UI:GetLeadIndexForSlot(2)) .. " statt 3")
-    -- Löschen über den zweiten Platz muss genau den Priester treffen (echter
-    -- Index 3), nicht den positionsgleichen echten Eintrag.
-    flt_page.leadDeleteButtons[2].scripts.OnClick()
+            .. tostring(addon.UI:GetLeadIndexForSlot(1)) .. " statt 3")
+    flt_page.leadDeleteButtons[1].scripts.OnClick()
     assert(#flt_guild.inbox == 3, "Es wurde nicht genau ein Eintrag gelöscht")
     for _, lead in ipairs(flt_guild.inbox) do
         assert(lead.name ~= "Priester-Realm", "Der Priester steht noch im Postfach")
@@ -10999,8 +10996,33 @@ do
     assert(addon.UI.frame.keyboardEnabled == false,
         "Zugeklappt faengt das Fenster weiter die Tastatur ab - Enter oeffnet keinen Chat")
     addon.UI:SetWindowMinimized(false)
-    assert(addon.UI.frame.keyboardEnabled == true,
-        "Aufgeklappt nimmt das Fenster die Tastatur nicht wieder (ESC-Behandlung)")
+    assert(addon.UI.frame.keyboardEnabled == false,
+        "Wiederherstellen aktiviert den Tastaturfang erneut")
+
+    -- Der Fensterwechsel braucht keine im Kampf gesperrte Propagate-API.
+    -- Ein fremdes Chatfeld muss seinen Fokus bei jedem Wechsel behalten.
+    local oldPropagate = addon.UI.frame.SetPropagateKeyboardInput
+    local oldFocusAPI = GetCurrentKeyBoardFocus
+    local chatEdit = CreateFrame("EditBox", nil, UIParent)
+    chatEdit:SetFocus()
+    GetCurrentKeyBoardFocus = function() return chatEdit end
+    addon.UI.frame.SetPropagateKeyboardInput = function()
+        error("Fensterwechsel ruft die im Kampf gesperrte Propagate-API auf")
+    end
+    for cycle = 1, 3 do
+        for _, minimized in ipairs({ true, false }) do
+            addon.UI.frame:Show()
+            addon.UI:SetWindowMinimized(minimized)
+            assert(addon.UI.frame.keyboardEnabled == false,
+                "Fensterwechsel aktiviert Tastaturfang fuer Enter/WASD")
+            assert(chatEdit:HasFocus(), "Fensterwechsel nimmt dem Chat den Fokus")
+            CloseSpecialFramesForTest()
+            assert(not addon.UI.frame:IsShown(), "Escape schliesst das Fenster nach Wechsel nicht")
+        end
+    end
+    addon.UI.frame.SetPropagateKeyboardInput = oldPropagate
+    GetCurrentKeyBoardFocus = oldFocusAPI
+    addon.UI.frame:Show()
 
     -- Zusaetzlich: ein fokussiertes eigenes Feld gibt den Fokus beim
     -- Verstecken frei, ueber sein OnHide und ueber den Sammelweg.
@@ -11032,4 +11054,5 @@ end
 assert(#uninvitedPlayers == 0,
     "Das Addon hat GuildUninvite aufgerufen: " .. table.concat(uninvitedPlayers, ", "))
 
+dofile("tests/inbox-cases.lua")(addon)
 print("OK: simulierter Addonstart und Kernablauf erfolgreich.")

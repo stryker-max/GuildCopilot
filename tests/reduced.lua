@@ -145,4 +145,5 @@ do
         "Der Materialbestand wird nicht mehr gezaehlt")
 end
 
+dofile("tests/inbox-cases.lua")(addon)
 print("OK: reduzierte CurseForge-Fassung startet und zeigt kein Warcraft Logs.")

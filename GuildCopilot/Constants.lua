@@ -2,7 +2,7 @@ local _, GC = ...
 
 GC.Constants = {
     ADDON_NAME = "Guild Copilot",
-    VERSION = "0.9.140",
+    VERSION = "0.9.141",
     SCHEMA_VERSION = 7,
     -- Wie eine Zahl der Raidauswertung ZU LESEN ist. Nicht zu verwechseln mit
     -- SCHEMA_VERSION: Die beschreibt das Nachrichtenformat, also ob zwei
@@ -340,18 +340,16 @@ GC.LeadClassAliases = {
     DRUID   = { "druide", "dudu", "druid", "eule", "boomkin", "moonkin", "feral" },
 }
 
--- Die Stufe. Mit Marker ("Stufe 70", "lvl 70", "70er") ist sie eindeutig; eine
--- nackte Zahl wird nur zwischen 58 und 70 als Stufe gelesen. Sonst wuerde
--- "Suche 2 DDs" eine Stufe 2 ergeben und "5g das Stueck" eine Stufe 5.
+-- Ganze Zahlen und Wortgrenzen: weder "Itemlevel 70" noch "Level 700" sind
+-- Stufe 70. Ohne Marker muss die Zahl direkt an einer Klassenangabe stehen.
 GC.LeadLevelPatterns = {
-    "stufe%s*(%d%d?)",
-    "level%s*(%d%d?)",
-    "lvl%.?%s*(%d%d?)",
-    "lv%.?%s*(%d%d?)",
-    "(%d%d?)%s*er%f[%W]",
+    "%f[%a]stufe%s*[:%-]?%s*(%d+)%f[%W]",
+    "%f[%a]level%s*[:%-]?%s*(%d+)%f[%W]",
+    "%f[%a]lvl%.?%s*[:%-]?%s*(%d+)%f[%W]",
+    "%f[%a]lv%.?%s*[:%-]?%s*(%d+)%f[%W]",
+    "%f[%w](%d+)%s*er%f[%W]",
 }
 GC.LeadLevelMax = 70
-GC.LeadLevelBareMin = 58
 
 -- === Freie Formulierungen erkennen ========================================
 --

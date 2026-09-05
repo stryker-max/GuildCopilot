@@ -191,8 +191,10 @@ function GC.WarcraftLogs:GetCharacterScope(playerName)
         serverSlug = GC.Util.Trim(data.serverSlug)
     end
     if serverSlug == "" then
-        local realm = GetNormalizedRealmName and GetNormalizedRealmName()
-            or GetRealmName and GetRealmName() or ""
+        local realm = GetRealmName and GetRealmName() or ""
+        if GC.Util.Trim(realm) == "" then
+            realm = GetNormalizedRealmName and GetNormalizedRealmName() or ""
+        end
         serverSlug = EncodePath(realm)
     end
     return region, serverSlug
@@ -212,14 +214,12 @@ function GC.WarcraftLogs:BuildCharacterLinks(playerName)
         return { armory = "", logs = "" }
     end
 
-    local encodedName = EncodePath(characterName)
+    local encodedName = GC.Util.EncodeURLPath(characterName)
+    local replacements = { host = self:GetHost(), region = region, realm = serverSlug, name = encodedName }
     local function Fill(template)
-        local link = tostring(template or "")
-        link = link:gsub("<host>", self:GetHost())
-        link = link:gsub("<region>", region)
-        link = link:gsub("<realm>", serverSlug)
-        link = link:gsub("<name>", encodedName)
-        return link
+        return (tostring(template or ""):gsub("<(%w+)>", function(tag)
+            return replacements[tag]
+        end))
     end
     return {
         armory = Fill(GC.Constants.ARMORY_CHARACTER_URL),

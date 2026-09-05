@@ -156,6 +156,14 @@ function GC.Util.PlayerShortName(name)
     return name:match("^([^-]+)") or name
 end
 
+-- Pfadsegment, kein Realm-Slug: Namen behalten ihre UTF-8-Zeichen und ihre
+-- Schreibweise. Jedes Nicht-ASCII-Byte wird einzeln percent-kodiert.
+function GC.Util.EncodeURLPath(value)
+    return (GC.Util.Trim(value):gsub("[^A-Za-z0-9%-%._~]", function(byte)
+        return string.format("%%%02X", string.byte(byte))
+    end))
+end
+
 -- Der Schluessel, unter dem ein Charakter in allen Tabellen steht.
 --
 -- Derselbe Charakter erreicht das Addon je nach Quelle mit und ohne

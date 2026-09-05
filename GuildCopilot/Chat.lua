@@ -699,18 +699,27 @@ end
 --
 -- Gelesen wird nur, was dasteht. Nichts wird geraten, und eine gefundene
 -- Angabe ueberschreibt nie eine sicherere (die Klasse aus der GUID).
+local function LeadText(text)
+    return (tostring(text or ""):lower():gsub("Ä", "ä"):gsub("Ö", "ö"):gsub("Ü", "ü")
+        :gsub("|h.-|h.-|h", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        :gsub("https?://%S+", ""))
+end
+
 function GC.Chat:ReadClassFromText(text)
-    local lowered = tostring(text or ""):lower()
+    local lowered = LeadText(text)
     if lowered == "" then
         return nil
     end
-    local best, bestAt
+    local best
     for classFile, aliases in pairs(GC.LeadClassAliases) do
         for _, alias in ipairs(aliases) do
             -- Ganze Woerter: "ele" darf nicht in "elegant" treffen.
-            local at = lowered:find("%f[%w]" .. alias .. "%f[%W]")
-            if at and (not bestAt or at < bestAt) then
-                best, bestAt = classFile, at
+            local at = lowered:find("%f[%w\128-\255]" .. alias .. "%f[^%w\128-\255]")
+            if at then
+                if best and best ~= classFile then
+                    return nil -- Mehrere Klassen: keine davon dem Absender unterstellen.
+                end
+                best = classFile
             end
         end
     end
@@ -718,54 +727,98 @@ function GC.Chat:ReadClassFromText(text)
 end
 
 function GC.Chat:ReadLevelFromText(text)
-    local lowered = tostring(text or ""):lower()
+    local lowered = LeadText(text)
     if lowered == "" then
         return nil
     end
+    local level, marked
     for _, pattern in ipairs(GC.LeadLevelPatterns) do
-        local found = tonumber(lowered:match(pattern))
-        if found and found >= 1 and found <= GC.LeadLevelMax then
-            return found
+        for number in lowered:gmatch(pattern) do
+            marked = true
+            local found = tonumber(number)
+            if not found or found < 1 or found > GC.LeadLevelMax
+                or (level and level ~= found) then
+                return nil
+            end
+            level = found
         end
     end
-    -- Ohne Marker nur im plausiblen Bereich. Eine nackte "2" ist in einer
-    -- Kanalnachricht so gut wie nie eine Stufe.
-    for number in lowered:gmatch("%f[%w](%d%d?)%f[%W]") do
-        local found = tonumber(number)
-        if found and found >= GC.LeadLevelBareMin and found <= GC.LeadLevelMax then
-            return found
+    if marked then return level end
+    -- Ohne Marker nur direkt an einer eindeutigen Klassenangabe, auch unter
+    -- Stufe 58. Raidziele, Parse-Werte, Alter und Itemzahlen sind keine Stufe.
+    local class = self:ReadClassFromText(lowered)
+    for _, alias in ipairs(GC.LeadClassAliases[class] or {}) do
+        for _, pattern in ipairs({
+            "%f[%w](%d+)%s+" .. alias .. "%f[^%w\128-\255]",
+            "%f[%w\128-\255]" .. alias .. "%s+(%d+)%f[%W]",
+        }) do
+            for number in lowered:gmatch(pattern) do
+                local found = tonumber(number)
+                if not found or found < 1 or found > GC.LeadLevelMax
+                    or (level and level ~= found) then return nil end
+                level = found
+            end
         end
     end
-    return nil
+    return level
 end
 
--- Traegt nach, was am Eintrag noch fehlt. Sicherere Quellen gewinnen: eine
--- ueber die GUID aufgeloeste Klasse wird nie durch eine geratene ersetzt.
+-- Neue Textangaben aktualisieren den Eintrag. Die ueber die GUID aufgeloeste
+-- Klasse wird dabei nie durch eine Textvermutung ersetzt.
 function GC.Chat:ReadLeadDetails(lead, text)
     if type(lead) ~= "table" then
         return
     end
-    if GC.Util.Trim(lead.classFile) == "" then
-        lead.classFile = self:ReadClassFromText(text)
+    local class = self:ReadClassFromText(text)
+    if class and lead.classSource ~= "GUID" then
+        lead.classFile = class
+        lead.classSource = "TEXT"
     end
-    if not tonumber(lead.level) then
-        lead.level = self:ReadLevelFromText(text)
+    local level = self:ReadLevelFromText(text)
+    if level then
+        lead.level = level
     end
 end
 
 function GC.Chat:ResolveLeadClass(lead)
-    if type(lead) ~= "table" or GC.Util.Trim(lead.classFile) ~= "" then
-        return lead and lead.classFile or nil
+    if type(lead) ~= "table" then return nil end
+    if not GC.Classes[lead.classFile or ""] then lead.classFile = nil end
+    if lead.classSource == "GUID" and lead.classFile then
+        return lead.classFile
     end
     if GC.Util.Trim(lead.guid) == "" or type(GetPlayerInfoByGUID) ~= "function" then
-        return nil
+        return lead.classFile
     end
     local ok, _, classFile = pcall(GetPlayerInfoByGUID, lead.guid)
     if ok and classFile and GC.Classes[classFile] then
         lead.classFile = classFile
+        lead.classSource = "GUID"
         return classFile
     end
-    return nil
+    return lead.classFile
+end
+
+-- Alte Eintraege vor dem Filtern einmal aus ihrem Verlauf nachtragen. Neue
+-- Nachrichten laufen ueber CaptureLead; GUID-Antworten koennen spaeter kommen.
+function GC.Chat:RefreshLeadDetails(lead)
+    if type(lead) ~= "table" then return end
+    if lead.detailsVersion ~= 1 then
+        -- Alte Zahlen wurden auch aus beliebigen 58..70 im Text geraten.
+        if type(lead.messages) == "table" and #lead.messages > 0 then
+            lead.level = nil
+            if lead.classSource == "TEXT" then lead.classFile = nil end
+            for _, message in ipairs(lead.messages) do
+                if type(message) == "table" then
+                    self:ReadLeadDetails(lead, message.text)
+                    if self:ReadLevelFromText(message.text) then
+                        lead.detailsUpdatedAt = tonumber(message.receivedAt) or tonumber(lead.lastSeenAt) or 0
+                    end
+                end
+            end
+        end
+        lead.detailsVersion = 1
+    end
+    self:ResolveLeadClass(lead)
 end
 
 function GC.Chat:CaptureLead(message, sender, guid, source)
@@ -839,10 +892,12 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
     lead.lastSeenAt = GC.Util.Now()
     lead.unread = true
     lead.source = source or lead.source
-    lead.guid = lead.guid or guid
-    self:ResolveLeadClass(lead)
+    if GC.Util.Trim(lead.guid) == "" then lead.guid = guid end
+    local previousClass, previousLevel = lead.classFile, lead.level
+    self:RefreshLeadDetails(lead)
     -- Was die GUID nicht hergibt, steht oft im Text selbst.
     self:ReadLeadDetails(lead, message)
+    lead.detailsUpdatedAt = GC.Util.Now()
     table.insert(lead.messages, {
         receivedAt = GC.Util.Now(),
         text = message,
@@ -861,11 +916,9 @@ function GC.Chat:CaptureLead(message, sender, guid, source)
         self.heardSenders[normalizedSender] = true
         self:PlaySuccessSound()
     end
-    -- Und ab damit in die Gilde. Nur beim ERSTEN Mal: Die Ursprungsnachricht
-    -- ist das, was uebertragen wird, und die aendert sich nie. Ein Bewerber,
-    -- der seinen Werbetext zum zehnten Mal in den Kanal schreibt, kostet
-    -- deshalb kein zehntes Paket.
-    if #lead.messages == 1 then
+    -- Ersterfassung und geaenderte Charakterdaten teilen. Wiederholungen ohne
+    -- neue Klasse/Stufe brauchen weiterhin kein weiteres Paket.
+    if #lead.messages == 1 or lead.classFile ~= previousClass or lead.level ~= previousLevel then
         self:SendLead(lead)
     end
     GC:FireCallback("INBOX_UPDATED", lead)
@@ -1035,8 +1088,10 @@ function GC.Chat:BuildLeadProfileLinks(playerName)
     -- schreiben in TBC fast immer vom selben Realm.
     local realm = tostring(playerName or ""):match("^[^-]+%-(.+)$")
     if not realm or GC.Util.Trim(realm) == "" then
-        realm = (GetNormalizedRealmName and GetNormalizedRealmName())
-            or (GetRealmName and GetRealmName()) or ""
+        realm = (GetRealmName and GetRealmName()) or ""
+        if GC.Util.Trim(realm) == "" then
+            realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
+        end
     end
     local serverSlug = EncodeLinkPath(realm)
     if serverSlug == "" then
@@ -1049,7 +1104,7 @@ function GC.Chat:BuildLeadProfileLinks(playerName)
         host = GC.Constants.WCL_DEFAULT_HOST,
         region = region,
         realm = serverSlug,
-        name = EncodeLinkPath(characterName),
+        name = GC.Util.EncodeURLPath(characterName),
     }
     local function Fill(template)
         return (tostring(template or ""):gsub("<(%w+)>", function(tag)
@@ -1149,8 +1204,9 @@ end
 --     darum, die Bearbeitung im Addon zu verwalten;
 --   * die Ignorierliste - sie bleibt lokal und WIRKT auch gegen Fremdeintraege.
 --
--- Die Ursprungsnachricht aendert sich nie. Ein Eintrag geht deshalb genau
--- einmal raus und danach nie wieder.
+-- Die Ursprungsnachricht aendert sich nie. Erneut gesendet wird nur, wenn sich
+-- erkannte Klasse oder Stufe aendern; optionale Metadaten stehen ab 0.9.141
+-- hinter den bisherigen sieben Feldern und werden von Altclients ignoriert.
 
 local INBOX_SYNC_PREFIX = "I"
 
@@ -1196,6 +1252,7 @@ end
 -- Gildenbank ihre Faecher stueckelt, und beim Empfaenger ueber den Token
 -- wieder zusammengesetzt.
 local function BuildInboxRecord(lead)
+    GC.Chat:RefreshLeadDetails(lead)
     local first = type(lead.messages) == "table" and lead.messages[1] or nil
     return table.concat({
         GC.Util.EscapeField(lead.name or ""),
@@ -1205,6 +1262,9 @@ local function BuildInboxRecord(lead)
         GC.Util.EscapeField(tostring(tonumber(lead.lastSeenAt) or 0)),
         GC.Util.EscapeField(lead.source or ""),
         GC.Util.EscapeField(first and first.text or ""),
+        -- Optionale Anhaenge: Altclients lesen weiter die ersten sieben Felder.
+        GC.Util.EscapeField(tostring(tonumber(lead.level) or "")),
+        GC.Util.EscapeField(tostring(tonumber(lead.detailsUpdatedAt) or 0)),
     }, "|")
 end
 
@@ -1221,6 +1281,8 @@ local function ParseInboxRecord(payload)
         lastSeenAt = tonumber(fields[5]) or 0,
         source = fields[6] or "",
         text = fields[7] or "",
+        level = tonumber(fields[8]),
+        detailsUpdatedAt = tonumber(fields[9]) or 0,
     }
 end
 
@@ -1348,8 +1410,10 @@ function GC.Chat:MergeRemoteLead(record)
         table.insert(inbox, 1, lead)
     end
 
-    lead.guid = lead.guid or record.guid
-    lead.classFile = lead.classFile or record.classFile
+    if GC.Util.Trim(lead.guid) == "" then lead.guid = record.guid end
+    if not GC.Classes[lead.classFile or ""] and GC.Classes[record.classFile or ""] then
+        lead.classFile = record.classFile
+    end
     lead.source = lead.source or record.source
     if record.firstSeenAt > 0 and (not tonumber(lead.firstSeenAt) or record.firstSeenAt < lead.firstSeenAt) then
         lead.firstSeenAt = record.firstSeenAt
@@ -1370,11 +1434,28 @@ function GC.Chat:MergeRemoteLead(record)
             remote = true,
         }
     end
-    self:ResolveLeadClass(lead)
-    -- Klasse und Stufe werden NICHT uebertragen, sondern beim Empfaenger aus
-    -- demselben Text gelesen. Das spart Protokollfelder und haelt beide Seiten
-    -- automatisch gleich, sobald die Erkennung besser wird.
+    self:RefreshLeadDetails(lead)
+    -- Der Ursprungswortlaut bleibt unveraendert. Die spaeter erkannte Stufe
+    -- faehrt separat mit, damit "jetzt Level 70" auch bei Kollegen ankommt.
+    -- Eine alte Sync-Kopie darf neuere eigene Angaben nicht zuruecksetzen.
+    local previousLevel = lead.level
+    local previousClass, previousClassSource = lead.classFile, lead.classSource
     self:ReadLeadDetails(lead, record.text)
+    lead.level = previousLevel or lead.level
+    if previousClass then lead.classFile, lead.classSource = previousClass, previousClassSource end
+    local remoteLevel = tonumber(record.level)
+    local remoteAt = tonumber(record.detailsUpdatedAt) or 0
+    if remoteAt > 0 and remoteAt >= (tonumber(lead.detailsUpdatedAt) or 0) then
+        if remoteLevel and remoteLevel >= 1 and remoteLevel <= GC.LeadLevelMax
+            and remoteLevel == math.floor(remoteLevel) then
+            lead.level = remoteLevel
+        end
+        if GC.Classes[record.classFile or ""] and lead.classSource ~= "GUID" then
+            lead.classFile = record.classFile
+            lead.classSource = "SYNC"
+        end
+        lead.detailsUpdatedAt = remoteAt
+    end
     return true
 end
 

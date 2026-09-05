@@ -14,7 +14,7 @@ const requiredMetadata = [
   "## Interface: 20506",
   "## Title: Guild Copilot",
   "## SavedVariables: GuildCopilotDB",
-  "## Version: 0.9.140",
+  "## Version: 0.9.141",
 ];
 
 for (const entry of requiredMetadata) {
@@ -267,7 +267,7 @@ const requiredImplementations = [
   ["deutsch getipptes Datum wird angenommen", /function GC\.Util\.NormalizeDateInput/],
   ["Inaktivitätsvorschläge", /GetMemberCareCandidates/],
   ["geschützte Ränge", /SetMemberCareRankProtected/],
-  ["explizite Escape-Behandlung", /key == "ESCAPE"/],
+  ["Escape über WoWs Fensterschließmechanismus", /table\.insert\(UISpecialFrames, "GuildCopilotFrame"\)/],
   ["echtes Favoritensymbol", /SetRaidMarkerIcon\(page\.workshopFavorites\.favoriteIcon, 1\)/],
   ["Profil als erster Tab", /local TAB_DEFINITIONS = \{\s+\{ key = "ROSTER", section = "COPILOT", label = "Profil"/],
   ["Abmeldung im persönlichen Profil", /BuildRosterPage[\s\S]*Deine Abmeldung/],
@@ -564,9 +564,8 @@ const requiredImplementations = [
   // Aufklappmenues starten mit ihrer eigenen Leer-Beschriftung, nicht mit
   // "Nicht gesetzt" (Gilden-Screenshot 0.9.140).
   ["Aufklappmenüs starten mit ihrer Beschriftung", /CreateButton\(parent, emptyLabel or "Nicht gesetzt"/],
-  // Zugeklappt gibt das Hauptfenster die Tastatur frei, sonst schluckt der
-  // Balken das Enter fuers Chatfenster (0.9.140). Der eigentliche Fix.
-  ["zugeklappt gibt die Tastatur frei", /frame:EnableKeyboard\(not minimized\)/],
+  // Das Hauptfenster braucht auch aufgeklappt keinen Tastaturfang (0.9.141).
+  ["Hauptfenster lässt die Tastatur frei", /frame:EnableKeyboard\(false\)/],
   // Ein verstecktes Eingabefeld gibt zusaetzlich seinen Fokus frei.
   ["Feld räumt Fokus beim Verstecken", /edit:HookScript\("OnHide", function\(self\)\s*\n\s*if self\.ClearFocus then/],
   ["API-freier Sammelweg für den Feldfokus", /local function ClearOwnEditFocus\(\)/],

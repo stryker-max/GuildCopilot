@@ -298,6 +298,116 @@ Installer 1.0.3 ergänzt einen geordneten Neustart-Handoff und eine Einzelinstan
 - `UNIT_INVENTORY_CHANGED` ergänzt `PLAYER_EQUIPMENT_CHANGED`, damit auch Änderungen am Item selbst zuverlässig einen neuen Eigendaten-Snapshot auslösen;
 - ein Regressionstest bildet ausdrücklich einen selbst übertragenen, unverzauberten Rücken und mehr als zwölf gespeicherte Spieler ab.
 
+## 0.9.141 – Tastatur freigeben und Postfach prüfen
+
+Erneute Meldung aus dem Spiel: Nach dem Minimieren lassen sich Enter und
+Bewegungstasten wie WASD weiterhin nicht zuverlässig benutzen. Der Ansatz aus
+0.9.140 reicht damit in der Praxis nicht aus. Im Code blieben eigene
+`OnKeyDown`-/`OnKeyUp`-Handler bestehen, und jedes Wiederherstellen aktivierte
+den Tastaturfang erneut. Die Weitergabe hing an `SetPropagateKeyboardInput`;
+insbesondere im Kampf ist dieser Aufruf für Addons gesperrt. Der genaue Ablauf
+der gemeldeten Spielsitzung lässt sich außerhalb des Clients nicht nachstellen.
+
+Das Hauptfenster benötigt keinen eigenen Tastatur-Handler: Sein Name ist bereits
+in `UISpecialFrames` registriert. Deshalb entfallen beide Handler und sämtliche
+Propagate-Aufrufe des Hauptfensters. `EnableKeyboard(false)` gilt ab der
+Erstellung dauerhaft; Minimieren und Wiederherstellen ändern daran nichts mehr.
+Escape nutzt die vorhandene WoW-Fensterverwaltung. Der Fokusschutz der eigenen
+Eingabefelder bleibt erhalten, damit ein verstecktes Feld keine Eingaben bindet.
+
+**Prüfung:** Die Lua-Regression verlangt ein Hauptfenster ohne Tastatur-Handler
+und prüft wiederholtes Minimieren, Wiederherstellen und Schließen über die
+registrierten Spezialfenster. Eine absichtlich fehlschlagende Propagate-Methode
+sichert ab, dass Fensterwechsel diese API nicht benötigen. Ein fremdes Chatfeld
+behält seinen Fokus; die bestehenden Prüfungen kontrollieren weiterhin die
+Freigabe eigener Felder. Die neue Regression schlägt am Stand 0.9.140 fehl.
+Der vollständige Testlauf prüft außerdem das reduzierte CurseForge-Paket.
+Eine Gegenprobe mit echten Enter-/WASD-Eingaben im WoW-Client bleibt erforderlich.
+
+### Postfach: Filter, Charakterdaten, Bedienung und Profil-Links
+
+Der erneute Auftrag betrifft das gesamte Postfach; auf Wunsch bleibt alles in
+0.9.141 gebündelt. Die Prüfung umfasst Erfassung, Textauswertung, GUID-Auflösung,
+Ansichtsfilter, Sortierung, Auswahl, Blättern, Löschen/Ausblenden, Antwortentwürfe,
+Einladen, kopierbare Links und den Gildenabgleich. Bestehende Prüfungen für
+Trigger/Ausschlusswörter, Whisper-Weichen, Ignorieren, Löschmerker, Verjährung und
+Antwortversand laufen weiterhin mit.
+
+**Gefundene Fehler und Korrekturen:**
+
+- Mindeststufe und Klassenwahl ließen bisher jeden Eintrag ohne passende
+  Daten durch. Jetzt erfüllt „unbekannt“ keinen aktiven Filter. Unter „Alle
+  Klassen / Alle Stufen“ bleibt der vollständige Bestand erreichbar; Filtern
+  löscht nichts. Ungültige gespeicherte Filterwerte fallen auf diese Auswahl
+  zurück, statt hinter einer unpassenden Beschriftung weiter zu filtern.
+- Die Auswahl suchte im gesamten Postfach, selbst wenn die Liste gefiltert
+  war. Deshalb stand rechts weiterhin der ausgefilterte Lowlevel-Charakter.
+  Auswahl und Nachrücken verwenden jetzt dieselbe nach Aktivität sortierte
+  Treffermenge. Bei null Treffern sind Profil-Links und Aktionen leer bzw.
+  deaktiviert; ein Hinweis erklärt das Zurücksetzen der Filter.
+  Listenaktionen merken sich zusätzlich den tatsächlich gezeichneten Eintrag,
+  damit eine neue Bewerbung zwischen Anzeige und Klick keine Löschposition
+  verschiebt. Antwort-/Einladeaktionen werden bei einer inzwischen geänderten
+  Auswahl verworfen, statt auf den automatisch nachgerückten Bewerber zu wirken.
+- Ein automatischer Auswahlwechsel konnte einen fremden Antwortentwurf stehen
+  lassen. Das Eingabefeld hat nun einen eigenen Entwurfsschlüssel; Änderungen
+  werden ausschließlich diesem Charakter zugeordnet. Auch beim Filtern auf null
+  Treffer und zurück bleiben die Entwürfe erhalten.
+- Der Stufenscanner erkannte markerlose Lowlevel-Angaben nicht, las dafür jede
+  beliebige Zahl von 58 bis 70 als Stufe und schnitt „Level 700“ auf 70 ab.
+  Er prüft jetzt ganze Zahlen von 1 bis 70. Ohne Stufenmarker ist eine direkt
+  benachbarte eindeutige Klassenangabe erforderlich; Links werden vor der
+  Auswertung entfernt. Widersprüchliche Stufenangaben ergeben keinen Befund.
+  Alte gespeicherte Stufen werden einmal aus dem vorhandenen Verlauf neu
+  gelesen, bevor der Filter greift. Die Stufe bleibt eine Textangabe des
+  Bewerbers, keine Abfrage des tatsächlichen Charakters beim Spielserver.
+- Eine aus Text erkannte Klasse verhinderte bislang jede spätere GUID-Abfrage.
+  Nun darf eine später verfügbare GUID-Auskunft die Vermutung korrigieren, und
+  zwar vor dem Filtern. Danach gewinnt die GUID gegen den Text. Deutsche
+  Großbuchstaben mit Umlaut werden erkannt; bei mehreren verschiedenen Klassen
+  wird keine einzelne aus der Wortreihenfolge geraten.
+- Eine neue Stufenangabe ersetzte die alte weder lokal noch bei Kollegen.
+  Neue Angaben werden jetzt übernommen. Die unveränderte Ursprungsnachricht
+  bleibt im bisherigen Sync-Feld; optional angehängte Stufe und Zeitstempel
+  ergänzen sie. Altclients verstehen weiterhin die ersten sieben Felder.
+  Ersterfassung und Änderungen an Klasse/Stufe lösen einen Versand aus;
+  unveränderte Wiederholungen nicht. Ältere Sync-Kopien setzen neuere lokale
+  Stufen nicht zurück. Eine vollständige Nutzung dieser Ergänzung setzt bei den
+  beteiligten Clients den neuen Stand voraus.
+- Der URL-Bauer entfernte Umlaute aus Charakternamen. Namen werden nun als
+  unveränderte UTF-8-Pfadsegmente percent-kodiert, getrennt von Realm-Slugs.
+  Dasselbe gilt für das optionale Warcraft-Logs-Modul; dessen Ersetzungen
+  verwenden Funktionen, damit `%XX` im Namen keinen Lua-Ersetzungsfehler
+  auslöst. Der lokale Realm verwendet bevorzugt den Namen mit Leerzeichen,
+  damit etwa „Pyrewood Village“ zu `pyrewood-village` wird. Ein fokussiertes
+  Linkfeld wechselt bei neuer Auswahl sofort auf den zugehörigen Link.
+- Der Einladeknopf zeigte auch bei fehlender Einlade-API Erfolg an. Er wertet
+  jetzt den Rückgabewert aus. Ein erfolgreich ausgelöster Aufruf bestätigt
+  weiterhin nur das Auslösen, nicht die Annahme der Einladung im Spiel.
+
+**Abgleich mit den Websites am 05.09.2026:** Das öffentliche
+[ClassicArmory-Suchskript](https://classic-armory.org/static/js/client_home.js)
+verwendet `encodeURIComponent` für den originalen Charakternamen; die auf der
+[Startseite](https://classic-armory.org/) eingebettete Konfiguration bestätigt
+`tbc-anniversary` und den Warcraft-Logs-Host `fresh`. Eine bestehende
+[Warcraft-Logs-Seite für Ümbrä](https://fresh.warcraftlogs.com/character/eu/thunderstrike/%C3%9Cmbr%C3%A4?zone=1047)
+belegt den erhaltenen Umlaut im Pfad. Eine korrekt erzeugte URL garantiert
+nicht, dass die externe Website bereits Daten für jeden Bewerber besitzt.
+
+**Prüfung:** `tests/inbox-cases.lua` läuft in der vollständigen und der gebauten
+CurseForge-Fassung. Abgedeckt sind die Grenzen 50/60/70, niedrige und unbekannte
+Stufen, Filterkombinationen, ungültige Filterwerte, GUID-Nachauflösung, neuer
+Stufenstand einschließlich sofortigem Sync und veralteter Gegenkopie, Auswahl
+und Entwürfe bei null Treffern, unveränderte Bestandszahl, fehlgeschlagene
+Einlade-API sowie der bytegleiche Rückweg aus URL-Pfaden für Umlaute, Akzente,
+kyrillische Zeichen und Prozentzeichen. Die bisherigen Tests decken weiterhin
+Sortieren, Blättern, gefiltertes Löschen und die übrigen Postfachwege ab.
+Sieben Gegenproben am Git-Ausgangsstand bestätigen die ursprünglichen Fehler
+bei Filtern, Stufenlesen, GUID-Auflösung, Detailauswahl und Umlautnamen.
+Der vollständige `npm test`-Lauf prüft auch das Paket und die übrigen Module.
+Echte Tastatureingaben, ein angenommener Guild-Invite und externe Charakterdaten
+sind außerhalb des WoW-Clients damit nicht simuliert oder garantiert.
+
 ## 0.9.140 – Minimiert kein Chat, altes Postfach, und die Raidsuche nach Bild und Bedarf
 
 Nach dem Raidsuche-Release (0.9.139) kamen mehrere Gildenmeldungen an einem

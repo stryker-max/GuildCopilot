@@ -7,6 +7,31 @@ dort nachzulesen.
 
 Installer und Addon werden getrennt gezählt.
 
+## 0.9.141 – Addon
+
+**Behoben**
+
+- **Tastatur nach dem Minimieren:** Das Hauptfenster verzichtet jetzt dauerhaft
+  auf eigene Tastatur-Handler, damit Enter, WASD und andere Spieltasten frei
+  bleiben – auch nach erneutem Aufklappen. Escape schließt das Fenster weiterhin
+  über WoWs Fensterverwaltung. Eigene versteckte Eingabefelder geben ihren Fokus
+  wie bisher frei; die Chat-Eingabe behält ihren Fokus.
+- **Postfachfilter greifen konsequent:** Bei „Ab Stufe 70“ erscheinen nur
+  Bewerber mit erkannter Stufe 70; unbekannte Stufen und Klassen passieren
+  aktive Filter nicht mehr. Auswahl, Detailbereich und Aktionen folgen den
+  sichtbaren Treffern. Antwortentwürfe bleiben beim richtigen Charakter.
+- **Stufen und Klassen zuverlässiger:** Niedrige Angaben wie „20 Magier“
+  werden erkannt; beliebige Zahlen im Text und abgeschnittene Werte wie
+  „Level 700“ gelten nicht mehr als 70. Neu erkannte Stufen werden aktualisiert
+  und mit der Gilde geteilt. Die Klasse aus der GUID ersetzt Textvermutungen;
+  mehrere unterschiedliche Klassen im Text ergeben keine willkürliche Auswahl.
+- **Profil-Links behalten Sonderzeichen:** Armory und Warcraft Logs verwenden
+  den echten Charakternamen mit korrekter UTF-8-Kodierung. Ein angewähltes
+  Linkfeld zeigt nach einem Charakterwechsel sofort den neuen Link.
+- **Postfach-Rückmeldungen:** Eine leere Filteransicht erklärt, wie alle
+  Bewerber wieder sichtbar werden. Eine nicht ausgelöste Gildeneinladung wird
+  nicht mehr als Erfolg gemeldet.
+
 ## 0.9.140 – Addon
 
 **Behoben**

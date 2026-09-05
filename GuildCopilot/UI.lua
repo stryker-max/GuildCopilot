@@ -1378,25 +1378,11 @@ function GC.UI:CreateMainFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:SetFrameStrata("DIALOG")
     frame:SetToplevel(true)
-    frame:EnableKeyboard(true)
-    if frame.SetPropagateKeyboardInput then
-        frame:SetPropagateKeyboardInput(true)
-    end
-    frame:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" then
-            if self.SetPropagateKeyboardInput then
-                self:SetPropagateKeyboardInput(false)
-            end
-            self:Hide()
-        elseif self.SetPropagateKeyboardInput then
-            self:SetPropagateKeyboardInput(true)
-        end
-    end)
-    frame:SetScript("OnKeyUp", function(self)
-        if self.SetPropagateKeyboardInput then
-            self:SetPropagateKeyboardInput(true)
-        end
-    end)
+    -- Escape schliesst das Fenster bereits ueber UISpecialFrames. Eigene
+    -- OnKeyDown/OnKeyUp-Handler fangen auch Enter und Bewegungstasten ab und
+    -- brauchen SetPropagateKeyboardInput, das im Kampf gesperrt ist. Deshalb
+    -- bleibt der Rahmen dauerhaft ohne Tastaturfang, auch nach Wiederherstellen.
+    frame:EnableKeyboard(false)
     frame:Hide()
     table.insert(UISpecialFrames, "GuildCopilotFrame")
     -- Schliessen ueber ×, Escape oder /gcp: Ein Fokus in einem der eigenen
@@ -1831,24 +1817,12 @@ function GC.UI:SetWindowMinimized(minimized)
     -- Erst den Anker festnageln, dann die Höhe ändern: Sonst wandert der
     -- Balken beim Zuklappen in die Mitte des Bildschirms.
     self:FreezeWindowTopLeft()
-    -- Der entscheidende Punkt gegen "kann minimiert kein Chatfenster öffnen":
-    -- Das Hauptfenster hat die Tastatur aktiviert (EnableKeyboard), um ESC zu
-    -- behandeln, und faengt damit JEDE Taste ab - auch Enter. Solange es offen
-    -- ist, reicht der Propagate-Schalter die Tasten weiter; der zugeklappte
-    -- Balken aber braucht die Tastatur gar nicht (ESC schliesst ihn ohnehin
-    -- ueber UISpecialFrames), und genau dort schluckte er das Enter, mit dem
-    -- man den Chat oeffnet. Zugeklappt gibt das Fenster die Tastatur deshalb
-    -- ganz frei; aufgeklappt nimmt es sie samt Weiterreichen wieder.
-    if frame.EnableKeyboard then
-        frame:EnableKeyboard(not minimized)
-    end
     if minimized then
-        -- Zusaetzlich: ein Fokus in einem der eigenen Felder (die Seiten
-        -- verschwinden gleich) darf die Tastatur nicht behalten.
+        -- Die Seiten verschwinden gleich: eigene Eingabefelder geben ihren
+        -- Fokus frei. Der Rahmen selbst bleibt in beiden Zustaenden ohne
+        -- Tastaturfang; beim Aufklappen gibt es nichts wieder zu aktivieren.
         ReleaseOwnKeyboardFocus(frame)
         ClearOwnEditFocus()
-    elseif frame.SetPropagateKeyboardInput then
-        frame:SetPropagateKeyboardInput(true)
     end
     frame.sidebar:SetShown(not minimized)
     for key, page in pairs(self.pages) do
@@ -8668,28 +8642,38 @@ function GC.UI:BuildInboxPage()
         local bytes = #text
         page.replyByteCounter:SetText(bytes .. "/" .. GC.Constants.MAX_CHAT_BYTES .. " Bytes")
         SetTextColor(page.replyByteCounter, bytes > GC.Constants.MAX_CHAT_BYTES and THEME.danger or THEME.muted)
-        local key = GC.UI:GetSelectedLeadKey()
+        local key = page.replyDraftKey
         if key then
             page.replyDrafts[key] = text
         end
     end)
 
+    -- Ein Sync oder eine spaete GUID-Antwort kann die Auswahl zwischen zwei
+    -- Zeichenvorgaengen aendern. Eine Aktion gilt nur dem angezeigten Empfaenger.
+    local function SelectedLeadForAction()
+        local lead, _, key = GC.UI:GetSelectedLead()
+        if key ~= page.replyDraftKey then
+            GC.UI:RefreshInbox()
+            return nil
+        end
+        return lead
+    end
     local thanks = CreateButton(detailCard, "Danke", 105, 30, function()
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("THANKS", lead.name))
         end
     end)
     thanks:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -386)
     local info = CreateButton(detailCard, "Gildeninfos", 115, 30, function()
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("INFO", lead.name))
         end
     end)
     info:SetPoint("LEFT", thanks, "RIGHT", 8, 0)
     local discord = CreateButton(detailCard, "Discord", 105, 30, function()
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if lead then
             page.replyEdit:SetText(GC.Recruitment:GenerateReply("DISCORD", lead.name))
         end
@@ -8697,7 +8681,7 @@ function GC.UI:BuildInboxPage()
     discord:SetPoint("LEFT", info, "RIGHT", 8, 0)
 
     page.replyButton = CreateButton(detailCard, "Antworten", 248, 38, function()
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if lead and GC.Chat:SendReply(lead.name, page.replyEdit:GetText()) then
             -- Verschickt ist verschickt: Der Entwurf hat seinen Zweck erfuellt
             -- und darf nicht beim naechsten Aufruf wieder dastehen.
@@ -8714,10 +8698,12 @@ function GC.UI:BuildInboxPage()
     page.replyButton:SetPoint("TOPLEFT", detailCard, "TOPLEFT", 18, -430)
 
     page.inviteButton = CreateButton(detailCard, "In Gilde einladen", 248, 38, function()
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if lead then
-            GC.Chat:Invite(lead.name)
-            page.replyResult:SetText("Einladung an " .. lead.name .. " ausgelöst.")
+            local invited = GC.Chat:Invite(lead.name)
+            page.replyResult:SetText(invited and ("Einladung an " .. lead.name .. " ausgelöst.")
+                or GC.L("Einladung konnte nicht ausgelöst werden."))
+            SetTextColor(page.replyResult, invited and THEME.success or THEME.danger)
         end
     end)
     page.inviteButton:SetPoint("LEFT", page.replyButton, "RIGHT", 8, 0)
@@ -8728,7 +8714,7 @@ function GC.UI:BuildInboxPage()
     -- ausblenden. Befristet oder dauerhaft; zuruecknehmen geht in der Liste
     -- unter den Vorlagen.
     local function FilterSelectedLead(days)
-        local lead = GC.UI:GetSelectedLead()
+        local lead = SelectedLeadForAction()
         if not lead then
             page.replyResult:SetText(GC.L("Kein Interessent ausgewählt."))
             SetTextColor(page.replyResult, THEME.danger)
@@ -8859,6 +8845,10 @@ function GC.UI:GetInboxFilters()
     if type(settings.inboxFilters) ~= "table" then
         settings.inboxFilters = {}
     end
+    local filters = settings.inboxFilters
+    if not GC.Classes[filters.classFile or ""] then filters.classFile = "" end
+    local level = tonumber(filters.minLevel) or 0
+    filters.minLevel = (level == 50 or level == 60 or level == 70) and level or 0
     return settings.inboxFilters
 end
 
@@ -8869,16 +8859,15 @@ function GC.UI:LeadMatchesInboxFilter(lead)
     local filters = self:GetInboxFilters()
 
     local class = GC.Util.Trim(filters.classFile)
-    if class ~= "" and GC.Util.Trim(lead.classFile) ~= "" and lead.classFile ~= class then
+    if class ~= "" and lead.classFile ~= class then
         return false
     end
 
-    -- Dieselbe Regel wie bei der Klasse: Wer keine Stufe hingeschrieben hat,
-    -- wird nicht verborgen. Sonst verschwindet hinter "ab Stufe 70" jeder, der
-    -- sein Level einfach nicht dazugesagt hat - und niemand sucht ihn dort.
+    -- Eine unbekannte Stufe erfuellt keine Mindeststufe. Ohne Filter bleiben
+    -- diese Bewerber sichtbar; die Daten selbst werden nie geloescht.
     local minLevel = tonumber(filters.minLevel) or 0
     local level = tonumber(lead.level)
-    if minLevel > 0 and level and level < minLevel then
+    if minLevel > 0 and (not level or level < minLevel or level > GC.LeadLevelMax) then
         return false
     end
     return true
@@ -8921,6 +8910,7 @@ function GC.UI:GetVisibleLeadIndexes()
     local inbox = GC.DB:GetGuild().inbox
     local visible = {}
     for index, lead in ipairs(inbox) do
+        GC.Chat:RefreshLeadDetails(lead)
         if self:LeadMatchesInboxFilter(lead) then
             visible[#visible + 1] = index
         end
@@ -8974,6 +8964,14 @@ function GC.UI:GetLeadIndexForSlot(slot)
     local page = self.pages.INBOX
     local leadPage = (page and page.leadPage) or 1
     local position = ((leadPage - 1) * LEADS_PER_PAGE) + slot
+    local references = page and page.visibleLeadRefs
+    if references then
+        local displayed = references[position]
+        for index, lead in ipairs(GC.DB:GetGuild().inbox) do
+            if lead == displayed then return index end
+        end
+        return nil
+    end
     local visible = page and page.visibleLeads
     if not visible then
         return position
@@ -8988,22 +8986,25 @@ end
 --
 -- Zurueckgegeben werden Eintrag, Listenplatz und Schluessel; der Listenplatz
 -- wird nur zum Zeichnen gebraucht und nie gespeichert.
-function GC.UI:GetSelectedLead()
+function GC.UI:GetSelectedLead(visible)
     local inbox = GC.DB:GetGuild().inbox
+    visible = visible or self:GetVisibleLeadIndexes()
     if self.selectedLeadKey then
-        for index, lead in ipairs(inbox) do
+        for _, index in ipairs(visible) do
+            local lead = inbox[index]
             if GC.Util.NormalizeName(lead.name) == self.selectedLeadKey then
                 return lead, index, self.selectedLeadKey
             end
         end
     end
-    local first = inbox[1]
+    local firstIndex = visible[1]
+    local first = firstIndex and inbox[firstIndex]
     if not first then
         self.selectedLeadKey = nil
         return nil, nil, nil
     end
     self.selectedLeadKey = GC.Util.NormalizeName(first.name)
-    return first, 1, self.selectedLeadKey
+    return first, firstIndex, self.selectedLeadKey
 end
 
 -- Der Schluessel, unter dem der Entwurf des gewaehlten Interessenten liegt.
@@ -9021,6 +9022,7 @@ function GC.UI:LoadLeadDraft()
     end
     page.replyEdit:ClearFocus()
     local key = self:GetSelectedLeadKey()
+    page.replyDraftKey = key
     -- SetText loest OnTextChanged aus und schriebe den Text sofort wieder in
     -- den Speicher. Das ist hier derselbe Schluessel und damit folgenlos - bei
     -- einem Wechsel waere es das nicht, deshalb laeuft jeder Wechsel ueber
@@ -9033,7 +9035,7 @@ end
 function GC.UI:SelectLead(leadIndex)
     local page = self.pages.INBOX
     if page and page.replyDrafts then
-        local previous = self:GetSelectedLeadKey()
+        local previous = page.replyDraftKey
         if previous then
             page.replyDrafts[previous] = page.replyEdit:GetText() or ""
         end
@@ -9085,13 +9087,18 @@ function GC.UI:RefreshInbox()
     end
     -- Loest die Auswahl auf und rueckt bei Bedarf nach. Der Listenplatz kommt
     -- hier heraus, wird aber nur zum Markieren benutzt und nie gespeichert.
-    local selectedLead, selectedIndex = self:GetSelectedLead()
-
     -- Gezaehlt und geblaettert wird ueber die SICHTBAREN Eintraege. Ohne das
     -- zeigt die Seitenzahl den Gesamtbestand an, waehrend die Liste gefiltert
     -- ist - und die letzten Seiten waeren leer.
     local visible = self:GetVisibleLeadIndexes()
+    local selectedLead, selectedIndex, selectedKey = self:GetSelectedLead(visible)
+    if page.replyDraftKey ~= selectedKey then
+        self:LoadLeadDraft()
+        page.replyResult:SetText("")
+    end
     page.visibleLeads = visible
+    page.visibleLeadRefs = {}
+    for position, index in ipairs(visible) do page.visibleLeadRefs[position] = inbox[index] end
     self:RefreshInboxFilterControls(#visible, #inbox)
 
     local leadPageCount = math.max(1, math.ceil(#visible / LEADS_PER_PAGE))
@@ -9161,8 +9168,10 @@ function GC.UI:RefreshInbox()
 
     local lead = selectedLead
     if not lead then
-        page.leadTitle:SetText(GC.L("Noch keine Interessenten"))
-        page.lastMessage:SetText(GC.L("Starte eine Suche. Eingehende Flüsternachrichten erscheinen automatisch hier."))
+        page.leadTitle:SetText(GC.L(#inbox > 0 and "Keine passenden Interessenten" or "Noch keine Interessenten"))
+        page.lastMessage:SetText(GC.L(#inbox > 0
+            and "Keine Treffer für diese Filter. Wähle Alle Klassen und Alle Stufen, um alle Interessenten zu sehen."
+            or "Starte eine Suche. Eingehende Flüsternachrichten erscheinen automatisch hier."))
         if not page.replyEdit:HasFocus() then
             page.replyEdit:SetText(GC.L(""))
         end
@@ -9208,7 +9217,12 @@ function GC.UI:SetLeadProfileLinks(lead)
     local missing = false
     for key, edit in pairs(page.leadLinkEdits) do
         local link = links[key] or ""
+        local changed = edit.linkValue ~= link
         edit.linkValue = link
+        if changed then
+            edit:ClearFocus()
+            edit:SetText(link)
+        end
         if not edit:HasFocus() then
             edit:SetText(link)
         end
